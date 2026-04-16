@@ -2,12 +2,15 @@
 import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue';
 import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
-import { api } from '@/api';
+import { api, type Category } from '@/api';
 
 const toggleMobileSidebar = inject<() => void>('toggleMobileSidebar');
 
 const route = useRoute();
 const store = useNotesStore();
+const categories = ref<Category[]>([]);
+const showBatchMove = ref(false);
+const confirmBatchDelete = ref(false);
 const searchInput = ref<HTMLInputElement>();
 const searchText = ref('');
 const showFilters = ref(false);
@@ -26,6 +29,7 @@ watch(() => route.path, () => {
   filterDateTo.value = new Date().toISOString().slice(0, 10);
   showFilters.value = false;
   showMobileSearch.value = false;
+  if (store.selectMode) store.toggleSelectMode();
 });
 
 const title = computed(() => (route.meta.title as string) || '');
@@ -61,6 +65,10 @@ async function toggleFilters() {
   }
 }
 
+async function loadCategories() {
+  try { const res = await api.getCategories(); categories.value = res.data; } catch {}
+}
+
 const spinning = ref(false);
 async function refresh() {
   if (spinning.value) return;
@@ -91,6 +99,11 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
         </button>
         <h1 class="text-sm md:text-base font-semibold text-gray-800 whitespace-nowrap">{{ title }}</h1>
+        <button v-if="!hideSearch" @click="store.toggleSelectMode(); if (store.selectMode) loadCategories()"
+          class="px-2 py-0.5 rounded-md text-[11px] transition-colors hidden md:block"
+          :class="store.selectMode ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-400 hover:bg-gray-100'">
+          {{ store.selectMode ? `已选 ${store.selectedIds.size}` : '选择' }}
+        </button>
         <button @click="refresh" class="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors hidden md:block" title="刷新">
           <svg class="w-3.5 h-3.5 transition-transform duration-500" :style="spinning ? 'transform: rotate(360deg)' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -157,5 +170,33 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <button v-if="hasFilters" @click="clearFilters" class="text-xs text-gray-400 hover:text-gray-600">清除筛选</button>
       </div>
     </Transition>
+
+    <!-- Batch action bar -->
+    <div v-if="store.selectMode && store.selectedIds.size > 0"
+      class="px-4 md:px-6 py-2 flex items-center gap-3 border-t border-gray-100 bg-gray-50/80">
+      <span class="text-xs text-gray-500">已选 {{ store.selectedIds.size }} 项</span>
+      <button @click="store.selectAll()" class="text-xs text-primary hover:underline">全选</button>
+      <button @click="store.clearSelection()" class="text-xs text-gray-400 hover:underline">取消</button>
+      <div class="ml-auto flex items-center gap-2">
+        <div class="relative">
+          <button @click="showBatchMove = !showBatchMove" class="px-3 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100">
+            移动分类
+          </button>
+          <div v-if="showBatchMove" class="absolute right-0 bottom-full mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-40 z-50">
+            <button v-for="cat in categories" :key="cat.id"
+              @click="store.batchMove(cat.name); showBatchMove = false"
+              class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50">
+              📂 {{ cat.name }}
+            </button>
+            <div v-if="categories.length === 0" class="px-3 py-2 text-xs text-gray-400">无分类</div>
+          </div>
+        </div>
+        <button @click="confirmBatchDelete ? (store.batchDelete(), confirmBatchDelete = false) : (confirmBatchDelete = true, setTimeout(() => confirmBatchDelete = false, 3000))"
+          class="px-3 py-1 text-xs rounded-lg transition-colors"
+          :class="confirmBatchDelete ? 'bg-red-500 text-white' : 'border border-gray-200 text-red-500 hover:bg-red-50'">
+          {{ confirmBatchDelete ? '确认删除' : '删除' }}
+        </button>
+      </div>
+    </div>
   </header>
 </template>

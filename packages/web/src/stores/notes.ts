@@ -97,6 +97,44 @@ export const useNotesStore = defineStore('notes', () => {
     });
   }
 
+  // ── 批量操作 ──
+  const selectMode = ref(false);
+  const selectedIds = ref<Set<string>>(new Set());
+
+  function toggleSelectMode() {
+    selectMode.value = !selectMode.value;
+    if (!selectMode.value) selectedIds.value.clear();
+  }
+
+  function toggleSelect(id: string) {
+    if (selectedIds.value.has(id)) selectedIds.value.delete(id);
+    else selectedIds.value.add(id);
+  }
+
+  function selectAll() {
+    for (const n of notes.value) selectedIds.value.add(n.id);
+  }
+
+  function clearSelection() {
+    selectedIds.value.clear();
+  }
+
+  async function batchDelete() {
+    for (const id of selectedIds.value) {
+      await api.deleteNote(id);
+    }
+    selectedIds.value.clear();
+    await fetchNotes();
+  }
+
+  async function batchMove(category: string) {
+    for (const id of selectedIds.value) {
+      await api.updateNote(id, { category } as any);
+    }
+    selectedIds.value.clear();
+    await fetchNotes();
+  }
+
   return {
     notes,
     loading,
@@ -114,5 +152,13 @@ export const useNotesStore = defineStore('notes', () => {
     deleteNote,
     togglePin,
     toggleTodo,
+    selectMode,
+    selectedIds,
+    toggleSelectMode,
+    toggleSelect,
+    selectAll,
+    clearSelection,
+    batchDelete,
+    batchMove,
   };
 });
