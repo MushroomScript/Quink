@@ -29,7 +29,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="px-4 md:px-8 py-4 md:py-8">
+  <div class="px-4 md:px-8 py-4 md:py-6">
     <div class="mb-4 md:mb-6">
       <MobileInput v-if="isMobile" />
       <NoteInput v-else />

@@ -17,6 +17,21 @@ const openEditModal = inject<(note: Note) => void>('openEditModal');
 
 function goDetail() { router.push(`/note/${props.note.id}`); }
 
+function handleClick(e: MouseEvent) {
+  // Ctrl+Click 进入选择模式并切换选中
+  if (e.ctrlKey || e.metaKey) {
+    if (!store.selectMode) store.toggleSelectMode();
+    store.toggleSelect(props.note.id);
+    return;
+  }
+  // 选择模式下点击切换选中
+  if (store.selectMode) {
+    store.toggleSelect(props.note.id);
+    return;
+  }
+  goDetail();
+}
+
 const confirmDelete = ref(false);
 
 const renderedContent = ref('');
@@ -63,16 +78,14 @@ async function handleDelete() {
 
 <template>
   <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group"
-    :class="{ 'ring-2 ring-primary/50': note.pinned, 'ring-2 ring-primary': store.selectMode && store.selectedIds.has(note.id) }">
-    <div class="px-3 py-3 md:px-5 md:py-4 cursor-pointer"
-      @click="store.selectMode ? store.toggleSelect(note.id) : goDetail()"
-      @dblclick.prevent="store.selectMode ? null : openEditModal?.(note)">
+    :class="{ 'ring-2 ring-primary/50': note.pinned, 'ring-2 ring-primary': store.selectedIds.has(note.id) }">
+    <div class="px-3 py-3 md:px-5 md:py-4 cursor-pointer" @click="handleClick" @dblclick.prevent="openEditModal?.(note)">
       <div class="flex items-center gap-2 mb-2.5">
-        <!-- Batch select checkbox -->
-        <div v-if="store.selectMode" class="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors cursor-pointer"
-          :class="store.selectedIds.has(note.id) ? 'bg-primary border-primary' : 'border-gray-300'"
-          @click.stop="store.toggleSelect(note.id)">
-          <svg v-if="store.selectedIds.has(note.id)" class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
+        <!-- Checkbox (visible in select mode or when selected) -->
+        <div v-if="store.selectMode"
+          class="w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors"
+          :class="store.selectedIds.has(note.id) ? 'bg-primary border-primary' : 'border-gray-300'">
+          <svg v-if="store.selectedIds.has(note.id)" class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
         </div>
         <span class="text-[11px] px-2 py-0.5 rounded-full font-medium" :class="typeColor[note.type]">
           {{ typeLabels[note.type] }}

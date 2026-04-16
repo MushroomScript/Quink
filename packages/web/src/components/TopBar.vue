@@ -69,6 +69,8 @@ async function loadCategories() {
   try { const res = await api.getCategories(); categories.value = res.data; } catch {}
 }
 
+watch(() => store.selectMode, (v) => { if (v) loadCategories(); });
+
 const spinning = ref(false);
 async function refresh() {
   if (spinning.value) return;
@@ -99,11 +101,6 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
         </button>
         <h1 class="text-sm md:text-base font-semibold text-gray-800 whitespace-nowrap">{{ title }}</h1>
-        <button v-if="!hideSearch" @click="store.toggleSelectMode(); if (store.selectMode) loadCategories()"
-          class="px-2 py-0.5 rounded-md text-[11px] transition-colors hidden md:block"
-          :class="store.selectMode ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-400 hover:bg-gray-100'">
-          {{ store.selectMode ? `已选 ${store.selectedIds.size}` : '选择' }}
-        </button>
         <button @click="refresh" class="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors hidden md:block" title="刷新">
           <svg class="w-3.5 h-3.5 transition-transform duration-500" :style="spinning ? 'transform: rotate(360deg)' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -172,11 +169,11 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
     </Transition>
 
     <!-- Batch action bar -->
-    <div v-if="store.selectMode && store.selectedIds.size > 0"
+    <div v-if="store.selectMode"
       class="px-4 md:px-6 py-2 flex items-center gap-3 border-t border-gray-100 bg-gray-50/80">
       <span class="text-xs text-gray-500">已选 {{ store.selectedIds.size }} 项</span>
       <button @click="store.selectAll()" class="text-xs text-primary hover:underline">全选</button>
-      <button @click="store.clearSelection()" class="text-xs text-gray-400 hover:underline">取消</button>
+      <button @click="store.toggleSelectMode()" class="text-xs text-gray-400 hover:underline">退出选择</button>
       <div class="ml-auto flex items-center gap-2">
         <div class="relative">
           <button @click="showBatchMove = !showBatchMove" class="px-3 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100">

@@ -55,16 +55,22 @@ function filterByCategory(name: string) {
   router.push('/');
 }
 
-const navItems = [
+const mainNav = [
   { path: '/', label: '灵感', icon: '💡' },
   { path: '/notes', label: '笔记', icon: '📝' },
   { path: '/todos', label: '待办', icon: '✅' },
   { path: '/ai', label: 'AI', icon: '🤖' },
+];
+
+const moreNav = [
   { path: '/stats', label: '统计', icon: '📊' },
   { path: '/resources', label: '资源', icon: '📁' },
   { path: '/tags', label: '标签', icon: '🏷️' },
   { path: '/trash', label: '回收站', icon: '🗑️' },
 ];
+
+const morePaths = moreNav.map(n => n.path);
+const showMore = ref(morePaths.includes(route.path));
 
 function isActive(path: string) { return route.path === path; }
 function toggleUserMenu() { showUserMenu.value = !showUserMenu.value; }
@@ -111,9 +117,10 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
     </div>
 
     <!-- Nav -->
-    <nav class="flex-1 px-3 py-4 space-y-1">
-      <router-link v-for="item in navItems" :key="item.path" :to="item.path"
-        class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 nav-item"
+    <nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+      <!-- Main nav -->
+      <router-link v-for="item in mainNav" :key="item.path" :to="item.path"
+        class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-150 nav-item"
         :style="isActive(item.path)
           ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)', fontWeight: 500 }
           : { color: 'var(--sb-dim)' }">
@@ -124,6 +131,24 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
           {{ stats.pendingTodos }}
         </span>
       </router-link>
+
+      <!-- More (collapsed) -->
+      <button @click="showMore = !showMore"
+        class="flex items-center gap-3 px-3 py-1.5 rounded-xl text-xs w-full transition-colors nav-item"
+        style="color: var(--sb-dim)">
+        <span class="text-base">{{ showMore ? '▾' : '▸' }}</span>
+        <span>更多</span>
+      </button>
+      <template v-if="showMore">
+        <router-link v-for="item in moreNav" :key="item.path" :to="item.path"
+          class="flex items-center gap-3 px-3 py-1.5 rounded-xl text-xs transition-all duration-150 nav-item"
+          :style="isActive(item.path)
+            ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)', fontWeight: 500 }
+            : { color: 'var(--sb-dim)' }">
+          <span class="text-sm">{{ item.icon }}</span>
+          <span>{{ item.label }}</span>
+        </router-link>
+      </template>
     </nav>
 
     <!-- Categories -->
@@ -169,10 +194,6 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
       </div>
     </div>
 
-    <!-- Bottom -->
-    <div class="px-5 py-3" style="border-top: 1px solid var(--sb-border)">
-      <p class="text-xs" style="color: var(--sb-dim); opacity: 0.5">Quink v0.1.0</p>
-    </div>
   </aside>
 
   <Teleport to="body">
