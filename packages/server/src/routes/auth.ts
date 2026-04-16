@@ -1,0 +1,146 @@
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { db, schema } from '../db/index.js';
+import { eq } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
+import dayjs from 'dayjs';
+import { hashPassword, verifyPassword, signToken, authMiddleware } from '../auth.js';
+
+const app = new Hono();
+
+const registerSchema = z.object({
+  username: z.string().min(2).max(32),
+  password: z.string().min(6).max(128),
+  nickname: z.string().min(1).max(32),
+});
+
+const loginSchema = z.object({
+  username: z.string(),
+  password: z.string(),
+});
+
+const updateProfileSchema = z.object({
+  nickname: z.string().min(1).max(32).optional(),
+  avatar: z.string().optional(),
+  preferences: z.record(z.any()).optional(),
+});
+
+// POST /api/auth/register
+app.post('/register', async (c) => {
+  const body = await c.req.json();
+  const parsed = registerSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten() }, 400);
+  }
+
+  const { password, nickname } = parsed.data;
+  const username = parsed.data.username.toLowerCase();
+
+  // Check if username already exists
+  const existing = await db.select().from(schema.users).where(eq(schema.users.username, username)).get();
+  if (existing) {
+    return c.json({ error: '用户名已存在' }, 409);
+  }
+
+  const user = {
+    id: nanoid(12),
+    username,
+    passwordHash: hashPassword(password),
+    nickname,
+    avatar: null,
+    preferences: {},
+    createdAt: dayjs().toISOString(),
+  };
+
+  await db.insert(schema.users).values(user);
+  const token = signToken(user.id);
+
+  return c.json({
+    data: {
+      token,
+      user: { id: user.id, username: user.username, nickname: user.nickname, avatar: user.avatar, preferences: user.preferences },
+    },
+  }, 201);
+});
+
+// POST /api/auth/login
+app.post('/login', async (c) => {
+  const body = await c.req.json();
+  const parsed = loginSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten() }, 400);
+  }
+
+  const username = parsed.data.username.toLowerCase();
+  const password = parsed.data.password;
+  const user = await db.select().from(schema.users).where(eq(schema.users.username, username)).get();
+
+  if (!user || !verifyPassword(password, user.passwordHash)) {
+    return c.json({ error: '用户名或密码错误' }, 401);
+  }
+
+  const token = signToken(user.id);
+  return c.json({
+    data: {
+      token,
+      user: { id: user.id, username: user.username, nickname: user.nickname, avatar: user.avatar, preferences: user.preferences },
+    },
+  });
+});
+
+// GET /api/auth/me — 获取当前用户信息（需登录）
+app.get('/me', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+
+  if (!user) {
+    return c.json({ error: '用户不存在' }, 404);
+  }
+
+  return c.json({
+    data: { id: user.id, username: user.username, nickname: user.nickname, avatar: user.avatar, preferences: user.preferences },
+  });
+});
+
+// PATCH /api/auth/me — 更新个人信息（需登录）
+app.patch('/me', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json();
+  const parsed = updateProfileSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten() }, 400);
+  }
+
+  const updates: Record<string, any> = {};
+  if (parsed.data.nickname !== undefined) updates.nickname = parsed.data.nickname;
+  if (parsed.data.avatar !== undefined) updates.avatar = parsed.data.avatar;
+  if (parsed.data.preferences !== undefined) updates.preferences = parsed.data.preferences;
+
+  if (Object.keys(updates).length > 0) {
+    await db.update(schema.users).set(updates).where(eq(schema.users.id, userId));
+  }
+
+  const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+  return c.json({
+    data: { id: user!.id, username: user!.username, nickname: user!.nickname, avatar: user!.avatar, preferences: user!.preferences },
+  });
+});
+
+// POST /api/auth/password — 修改密码
+app.post('/password', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const { oldPassword, newPassword } = await c.req.json();
+
+  if (!oldPassword || !newPassword) return c.json({ error: '请输入旧密码和新密码' }, 400);
+  if (newPassword.length < 6) return c.json({ error: '新密码至少6位' }, 400);
+
+  const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+  if (!user || !verifyPassword(oldPassword, user.passwordHash)) {
+    return c.json({ error: '旧密码不正确' }, 401);
+  }
+
+  await db.update(schema.users).set({ passwordHash: hashPassword(newPassword) }).where(eq(schema.users.id, userId));
+  return c.json({ message: '密码已修改' });
+});
+
+export default app;

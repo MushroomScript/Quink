@@ -1,0 +1,83 @@
+<script setup lang="ts">
+import { RouterView, useRoute, useRouter } from 'vue-router';
+import { computed, onMounted, provide, ref, watch } from 'vue';
+import { useAuthStore } from '@/stores/auth';
+import Sidebar from '@/components/Sidebar.vue';
+import TopBar from '@/components/TopBar.vue';
+import NoteEditModal from '@/components/NoteEditModal.vue';
+import type { Note } from '@/api';
+
+const route = useRoute();
+const router = useRouter();
+const auth = useAuthStore();
+
+const showChrome = computed(() => route.name !== 'login' && route.name !== 'capture');
+const showMobileSidebar = ref(false);
+const appReady = ref(false);
+
+const editingNote = ref<Note | null>(null);
+function openEditModal(note: Note) { editingNote.value = note; }
+function closeEditModal() { editingNote.value = null; }
+provide('openEditModal', openEditModal);
+provide('toggleMobileSidebar', () => { showMobileSidebar.value = !showMobileSidebar.value; });
+
+// 路由变化时自动关闭手机端抽屉
+watch(() => route.path, () => { showMobileSidebar.value = false; });
+
+onMounted(async () => {
+  const user = await auth.fetchMe();
+  appReady.value = true;
+  if (!user) return;
+  const prefs = user.preferences || {};
+
+  const theme = prefs.theme || 'blueberry';
+  document.documentElement.setAttribute('data-theme', theme);
+
+  const fontSize = prefs.fontSize || 16;
+  document.documentElement.style.fontSize = fontSize + 'px';
+
+  const refId = route.query.ref as string;
+  if (refId) { router.replace(`/note/${refId}`); return; }
+
+  const defaultPage = prefs.defaultPage;
+  if (defaultPage && defaultPage !== '/' && route.path === '/') {
+    router.replace(defaultPage);
+  }
+});
+</script>
+
+<template>
+  <!-- Loading -->
+  <div v-if="!appReady" class="h-full flex items-center justify-center" style="background: var(--c-body, #f5f5f7)">
+    <div class="text-center">
+      <h1 class="text-2xl font-bold" style="color: rgb(var(--c-accent, 116 143 252))">Quink</h1>
+      <p class="text-xs text-gray-400 mt-1">加载中...</p>
+    </div>
+  </div>
+
+  <!-- App -->
+  <template v-else>
+    <div class="flex h-full overflow-hidden">
+      <div v-if="showChrome" class="hidden md:block">
+        <Sidebar />
+      </div>
+
+      <!-- Mobile sidebar drawer -->
+      <div v-if="showMobileSidebar && showChrome" class="fixed inset-0 z-50 md:hidden">
+        <div class="absolute inset-0 bg-black/40" @click="showMobileSidebar = false" />
+        <div class="absolute left-0 -top-[200px] -bottom-[200px] w-60 shadow-2xl overflow-y-auto bg-sidebar pt-[200px] pb-[200px]" @click.stop>
+          <Sidebar />
+        </div>
+      </div>
+
+      <div class="flex-1 flex flex-col overflow-hidden">
+        <TopBar v-if="showChrome" />
+        <main class="flex-1 overflow-y-auto">
+          <RouterView />
+        </main>
+      </div>
+    </div>
+
+    <NoteEditModal v-if="editingNote" :note="editingNote" @close="closeEditModal" />
+  </template>
+</template>

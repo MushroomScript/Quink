@@ -1,0 +1,24 @@
+{
+  "name": "quink",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Quick Think - Capture your fleeting thoughts instantly",
+  "scripts": {
+    "dev:server": "pnpm --filter @quink/server dev",
+    "dev:web": "pnpm --filter @quink/web dev",
+    "dev": "pnpm run dev:server & pnpm run dev:web",
+    "build:server": "pnpm --filter @quink/server build",
+    "build:web": "pnpm --filter @quink/web build"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "electron",
+      "uiohook-napi"
+    ]
+  }
+}

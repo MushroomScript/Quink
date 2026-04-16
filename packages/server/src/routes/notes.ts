@@ -1,0 +1,260 @@
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { db, schema } from '../db/index.js';
+import { eq, desc, like, or, and, sql } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
+import dayjs from 'dayjs';
+import { authMiddleware } from '../auth.js';
+import { autoTag, autoClassify, autoSummary } from '../ai/client.js';
+
+const app = new Hono();
+
+// 所有笔记路由都需要登录
+app.use('*', authMiddleware);
+
+const createNoteSchema = z.object({
+  content: z.string().min(1),
+  type: z.enum(['note', 'todo', 'snippet', 'link']).default('note'),
+  category: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  todoDue: z.string().optional(),
+});
+
+const updateNoteSchema = z.object({
+  content: z.string().min(1).optional(),
+  summary: z.string().optional(),
+  category: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  type: z.enum(['note', 'todo', 'snippet', 'link']).optional(),
+  todoStatus: z.enum(['pending', 'done']).optional(),
+  todoDue: z.string().nullable().optional(),
+  pinned: z.boolean().optional(),
+});
+
+// GET /api/notes
+app.get('/', async (c) => {
+  const userId = c.get('userId');
+  const { search, category, type, tag, dateFrom, dateTo, page = '1', limit = '50' } = c.req.query();
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  const conditions: any[] = [
+    eq(schema.notes.userId, userId),
+    sql`${schema.notes.deletedAt} IS NULL`, // 排除回收站
+  ];
+
+  if (search) {
+    // 搜索内容、摘要和标签
+    conditions.push(
+      or(
+        like(schema.notes.content, `%${search}%`),
+        like(schema.notes.summary, `%${search}%`),
+        like(schema.notes.category, `%${search}%`),
+        sql`${schema.notes.tags} LIKE ${'%' + search + '%'}`
+      )
+    );
+  }
+  if (category) {
+    conditions.push(like(schema.notes.category, `${category}%`));
+  }
+  if (type) {
+    conditions.push(eq(schema.notes.type, type as any));
+  }
+  if (tag) {
+    // 标签搜索放到 SQL 层面
+    conditions.push(sql`${schema.notes.tags} LIKE ${'%"' + tag + '"%'}`);
+  }
+  if (dateFrom) {
+    conditions.push(sql`${schema.notes.createdAt} >= ${dateFrom}`);
+  }
+  if (dateTo) {
+    conditions.push(sql`${schema.notes.createdAt} <= ${dateTo + 'T23:59:59.999Z'}`);
+  }
+
+  const results = await db.select().from(schema.notes)
+    .where(and(...conditions))
+    .orderBy(desc(schema.notes.pinned), desc(schema.notes.createdAt))
+    .limit(parseInt(limit))
+    .offset(offset);
+
+  // 总数也带条件
+  const countResult = db.select({ count: sql<number>`count(*)` })
+    .from(schema.notes)
+    .where(and(...conditions))
+    .get();
+
+  return c.json({
+    data: results,
+    pagination: {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total: countResult?.count ?? 0,
+    },
+  });
+});
+
+// GET /api/notes/:id
+app.get('/:id', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const note = await db.select().from(schema.notes)
+    .where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId)))
+    .get();
+
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  return c.json({ data: note });
+});
+
+// POST /api/notes
+app.post('/', async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json();
+  const parsed = createNoteSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+
+  const now = dayjs().toISOString();
+  const note = {
+    id: nanoid(12),
+    userId,
+    content: parsed.data.content,
+    type: parsed.data.type,
+    category: parsed.data.category ?? null,
+    tags: parsed.data.tags ?? [],
+    todoStatus: parsed.data.type === 'todo' ? 'pending' as const : null,
+    todoDue: parsed.data.todoDue ?? null,
+    summary: null,
+    aiProcessed: false,
+    pinned: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await db.insert(schema.notes).values(note);
+
+  // 异步 AI 处理（不阻塞响应）
+  processNoteWithAi(userId, note.id, note.content, note.tags as string[]).catch(() => {});
+
+  return c.json({ data: note }, 201);
+});
+
+// PATCH /api/notes/:id
+app.patch('/:id', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const body = await c.req.json();
+  const parsed = updateNoteSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+
+  const existing = await db.select().from(schema.notes)
+    .where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId)))
+    .get();
+  if (!existing) return c.json({ error: '笔记不存在' }, 404);
+
+  const updates: Record<string, any> = { updatedAt: dayjs().toISOString() };
+  const data = parsed.data;
+  if (data.content !== undefined) updates.content = data.content;
+  if (data.summary !== undefined) updates.summary = data.summary;
+  if (data.category !== undefined) updates.category = data.category;
+  if (data.tags !== undefined) updates.tags = data.tags;
+  if (data.type !== undefined) updates.type = data.type;
+  if (data.todoStatus !== undefined) updates.todoStatus = data.todoStatus;
+  if (data.todoDue !== undefined) updates.todoDue = data.todoDue;
+  if (data.pinned !== undefined) updates.pinned = data.pinned;
+
+  await db.update(schema.notes).set(updates).where(eq(schema.notes.id, id));
+  const updated = await db.select().from(schema.notes).where(eq(schema.notes.id, id)).get();
+  return c.json({ data: updated });
+});
+
+// DELETE /api/notes/:id — 软删除（移入回收站）
+app.delete('/:id', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+
+  const existing = await db.select().from(schema.notes)
+    .where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId)))
+    .get();
+  if (!existing) return c.json({ error: '笔记不存在' }, 404);
+
+  await db.update(schema.notes)
+    .set({ deletedAt: dayjs().toISOString() })
+    .where(eq(schema.notes.id, id));
+  return c.json({ message: '已移入回收站' });
+});
+
+// ── 回收站 ──
+
+// GET /api/notes/trash — 已删除的笔记
+app.get('/trash', async (c) => {
+  const userId = c.get('userId');
+  const results = await db.select().from(schema.notes)
+    .where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`))
+    .orderBy(desc(schema.notes.deletedAt))
+    .all();
+  return c.json({ data: results });
+});
+
+// POST /api/notes/trash/:id/restore — 恢复
+app.post('/trash/:id/restore', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const existing = await db.select().from(schema.notes)
+    .where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId))).get();
+  if (!existing || !existing.deletedAt) return c.json({ error: '笔记不存在' }, 404);
+
+  await db.update(schema.notes).set({ deletedAt: null }).where(eq(schema.notes.id, id));
+  return c.json({ message: '已恢复' });
+});
+
+// DELETE /api/notes/trash/:id — 永久删除
+app.delete('/trash/:id', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  await db.delete(schema.notes).where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId)));
+  return c.json({ message: '已永久删除' });
+});
+
+// DELETE /api/notes/trash — 清空回收站
+app.delete('/trash', async (c) => {
+  const userId = c.get('userId');
+  await db.delete(schema.notes).where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`));
+  return c.json({ message: '已清空' });
+});
+
+// GET /api/notes/tags — 获取当前用户所有标签（去重）
+app.get('/tags', async (c) => {
+  const userId = c.get('userId');
+  const notes = await db.select({ tags: schema.notes.tags })
+    .from(schema.notes).where(eq(schema.notes.userId, userId)).all();
+  const tagSet = new Set<string>();
+  for (const n of notes) {
+    const t = (n.tags as string[]) || [];
+    t.forEach(tag => tagSet.add(tag));
+  }
+  return c.json({ data: [...tagSet].sort() });
+});
+
+/**
+ * 异步 AI 处理：自动标签 + 自动分类
+ * 不阻塞笔记保存，后台静默执行
+ */
+async function processNoteWithAi(userId: string, noteId: string, content: string, existingTags: string[]) {
+  try {
+    const [tags, category, summary] = await Promise.all([
+      existingTags.length > 0 ? Promise.resolve(existingTags) : autoTag(userId, content),
+      autoClassify(userId, content),
+      autoSummary(userId, content),
+    ]);
+
+    const updates: Record<string, any> = { aiProcessed: true };
+    if (tags.length > 0 && existingTags.length === 0) updates.tags = tags;
+    if (category) updates.category = category;
+    if (summary) updates.summary = summary;
+
+    await db.update(schema.notes).set(updates).where(eq(schema.notes.id, noteId));
+    console.log(`[AI] Note ${noteId}: tags=${JSON.stringify(tags)}, category=${category}, summary=${summary}`);
+  } catch (err) {
+    console.error(`[AI] Failed to process note ${noteId}:`, err);
+  }
+}
+
+export default app;

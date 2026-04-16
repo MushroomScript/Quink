@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Quink</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: transparent;
+      overflow: hidden;
+      -webkit-app-region: no-drag;
+      user-select: none;
+    }
+
+    .container {
+      background: rgba(28, 28, 46, 0.92);
+      backdrop-filter: blur(40px);
+      -webkit-backdrop-filter: blur(40px);
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 240px;
+      margin: 8px;
+    }
+
+    .title-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      -webkit-app-region: drag;
+    }
+
+    .title-bar .logo { font-size: 13px; font-weight: 700; color: #a78bfa; }
+    .title-bar .hint { font-size: 11px; color: rgba(255,255,255,0.3); }
+
+    .type-bar { display: flex; gap: 4px; padding: 8px 16px; }
+
+    .type-btn {
+      padding: 4px 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      background: transparent;
+      color: rgba(255,255,255,0.4);
+      transition: all 0.15s;
+    }
+    .type-btn:hover { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); }
+    .type-btn.active { background: rgba(124, 58, 237, 0.25); color: #c4b5fd; font-weight: 600; }
+
+    .input-area { flex: 1; padding: 0 16px 12px; }
+
+    textarea {
+      width: 100%; height: 100%; border: none; outline: none; resize: none;
+      font-size: 14px; line-height: 1.6; color: rgba(255,255,255,0.9);
+      font-family: inherit; background: transparent;
+    }
+    textarea::placeholder { color: rgba(255,255,255,0.25); }
+
+    .footer {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 16px; border-top: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .footer .shortcut { font-size: 11px; color: rgba(255,255,255,0.25); }
+    .footer .shortcut kbd {
+      background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px;
+      font-size: 10px; font-family: inherit; color: rgba(255,255,255,0.4);
+    }
+
+    .save-btn {
+      padding: 5px 18px; background: #7c3aed; color: white; border: none;
+      border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: all 0.15s; box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
+    }
+    .save-btn:hover { background: #6d28d9; }
+    .save-btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+
+    .toast {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%) scale(0.9);
+      background: #10b981; color: white; padding: 8px 20px;
+      border-radius: 10px; font-size: 13px; font-weight: 600;
+      opacity: 0; transition: all 0.2s; pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    .toast.error { background: #ef4444; }
+  </style>
+</head>
+<body spellcheck="false">
+  <div class="container">
+    <div class="title-bar">
+      <span class="logo">Quink</span>
+      <span class="hint">Esc 关闭</span>
+    </div>
+
+    <div class="type-bar">
+      <button class="type-btn active" data-type="note">💡 灵感</button>
+      <button class="type-btn" data-type="todo">✅ 待办</button>
+      <button class="type-btn" data-type="snippet">📝 笔记</button>
+    </div>
+
+    <div class="input-area">
+      <textarea id="input" placeholder="写下你的想法..." autofocus></textarea>
+    </div>
+
+    <div class="footer">
+      <span class="shortcut"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 保存 &nbsp; <kbd>Tab</kbd> 切换类型</span>
+      <button class="save-btn" id="saveBtn" disabled>保存</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const input = document.getElementById('input');
+    const saveBtn = document.getElementById('saveBtn');
+    const toast = document.getElementById('toast');
+    const typeBtns = document.querySelectorAll('.type-btn');
+    const types = ['note', 'todo', 'snippet'];
+    let currentTypeIdx = 0;
+
+    typeBtns.forEach((btn, i) => {
+      btn.addEventListener('click', () => {
+        typeBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentTypeIdx = i;
+        input.focus();
+      });
+    });
+
+    input.addEventListener('input', () => { saveBtn.disabled = !input.value.trim(); });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); save(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); window.quink.hideWindow(); return; }
+      if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        typeBtns[currentTypeIdx].classList.remove('active');
+        currentTypeIdx = (currentTypeIdx + 1) % types.length;
+        typeBtns[currentTypeIdx].classList.add('active');
+        return;
+      }
+    });
+
+    saveBtn.addEventListener('click', save);
+
+    async function save() {
+      const raw = input.value.trim();
+      if (!raw) return;
+      saveBtn.disabled = true;
+      saveBtn.textContent = '保存中...';
+      // 转成 HTML 格式，和 Web 端 Tiptap 输出保持一致
+      const content = raw.split('\n').map(line => '<p>' + (line || '<br>') + '</p>').join('');
+      const result = await window.quink.saveNote(content, types[currentTypeIdx]);
+      if (result.success) {
+        showToast('已保存', false);
+        input.value = '';
+        saveBtn.textContent = '保存';
+        setTimeout(() => { window.quink.hideWindow(); }, 600);
+      } else {
+        showToast('保存失败: ' + result.error, true);
+        saveBtn.disabled = false;
+        saveBtn.textContent = '保存';
+      }
+    }
+
+    function showToast(message, isError) {
+      toast.textContent = message;
+      toast.className = 'toast show' + (isError ? ' error' : '');
+      setTimeout(() => { toast.className = 'toast'; }, 1500);
+    }
+
+    window.quink.onWindowShown(() => { input.focus(); });
+    window.quink.onWindowHidden(() => {});
+  </script>
+</body>
+</html>

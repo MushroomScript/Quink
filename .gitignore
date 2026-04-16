@@ -1,0 +1,27 @@
+node_modules/
+dist/
+.env
+.env.local
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+.DS_Store
+Thumbs.db
+pnpm-lock.yaml
+
+# Vditor static files (copied from node_modules, regenerated on install)
+packages/web/public/vditor/
+
+# Electron build output
+packages/desktop/dist/
+
+# Uploads
+packages/server/uploads/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+*.log
