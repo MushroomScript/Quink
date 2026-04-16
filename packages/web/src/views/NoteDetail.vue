@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, inject } from 'vue';
+import { ref, onMounted, inject, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useNotesStore } from '@/stores/notes';
 import { api, type Note } from '@/api';
 import Vditor from 'vditor';
 import dayjs from 'dayjs';
@@ -12,6 +13,7 @@ dayjs.locale('zh-cn');
 
 const route = useRoute();
 const router = useRouter();
+const store = useNotesStore();
 const note = ref<Note | null>(null);
 const rendered = ref('');
 const loading = ref(true);
@@ -19,7 +21,7 @@ const openEditModal = inject<(note: Note) => void>('openEditModal');
 
 const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '代码片段', link: '链接' };
 
-onMounted(async () => {
+async function loadNote() {
   const id = route.params.id as string;
   try {
     const res = await api.getNote(id);
@@ -29,13 +31,26 @@ onMounted(async () => {
     note.value = null;
   }
   loading.value = false;
-});
+}
+
+// 编辑保存后 store 里的笔记会更新，监听变化自动刷新
+watch(() => store.notes, () => {
+  if (note.value) {
+    const updated = store.notes.find(n => n.id === note.value!.id);
+    if (updated && updated.updatedAt !== note.value.updatedAt) {
+      note.value = updated;
+      Vditor.md2html(updated.content).then(html => { rendered.value = html; });
+    }
+  }
+}, { deep: true });
 
 function goBack() { router.back(); }
+
+onMounted(loadNote);
 </script>
 
 <template>
-  <div class="px-8 py-6">
+  <div class="px-4 md:px-8 py-6">
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <div v-else-if="!note" class="text-center py-16">
@@ -44,9 +59,9 @@ function goBack() { router.back(); }
       <button @click="goBack" class="mt-4 text-xs text-primary hover:underline">返回</button>
     </div>
 
-    <div v-else class="max-w-screen-md">
+    <div v-else>
       <!-- Header -->
-      <div class="flex items-center gap-3 mb-6">
+      <div class="flex items-center gap-3 mb-6 flex-wrap">
         <button @click="goBack" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
         </button>
@@ -55,8 +70,11 @@ function goBack() { router.back(); }
           <span v-if="note.category" class="text-xs text-gray-400">{{ note.category }}</span>
         </div>
         <span class="text-xs text-gray-400 ml-auto">{{ dayjs(note.createdAt).format('YYYY-MM-DD HH:mm') }}</span>
-        <button @click="openEditModal?.(note)" class="px-3 py-1 text-xs rounded-lg hover:bg-gray-100 text-gray-400" title="编辑">✏️ 编辑</button>
+        <button @click="openEditModal?.(note)" class="px-3 py-1 text-xs rounded-lg hover:bg-gray-100 text-gray-400">✏️ 编辑</button>
       </div>
+
+      <!-- Summary -->
+      <p v-if="note.summary" class="text-sm text-gray-500 italic mb-4">{{ note.summary }}</p>
 
       <!-- Tags -->
       <div v-if="note.tags?.length" class="flex flex-wrap gap-1.5 mb-4">
@@ -64,7 +82,7 @@ function goBack() { router.back(); }
       </div>
 
       <!-- Content -->
-      <div class="bg-white rounded-2xl shadow-sm p-8 note-content prose prose-sm max-w-none" v-html="rendered" />
+      <div class="bg-white rounded-2xl shadow-sm p-6 md:p-8 note-content prose prose-sm max-w-none" v-html="rendered" />
     </div>
   </div>
 </template>

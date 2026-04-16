@@ -53,6 +53,12 @@ const router = createRouter({
       meta: { title: '笔记详情', hideSearch: true },
     },
     {
+      path: '/tags',
+      name: 'tags',
+      component: () => import('@/views/Tags.vue'),
+      meta: { title: '标签', hideSearch: true },
+    },
+    {
       path: '/trash',
       name: 'trash',
       component: () => import('@/views/Trash.vue'),

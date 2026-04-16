@@ -227,7 +227,8 @@ function handleShortcutKeydown(e: KeyboardEvent) {
   if (e.ctrlKey) parts.push('Ctrl');
   if (e.altKey) parts.push('Alt');
   if (e.shiftKey) parts.push('Shift');
-  if (e.metaKey) parts.push('Meta');
+  // Windows 上忽略 Meta(Win) 键，避免误触发
+  if (e.metaKey && navigator.platform.indexOf('Mac') !== -1) parts.push('Meta');
 
   const key = e.key;
   if (!['Control', 'Alt', 'Shift', 'Meta'].includes(key)) {

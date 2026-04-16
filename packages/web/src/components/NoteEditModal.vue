@@ -53,15 +53,17 @@ function onKeydown(e: KeyboardEvent) {
         </div>
 
         <!-- Shared RichEditor -->
-        <RichEditor
-          :initial-content="note.content"
-          :initial-type="note.type"
-          :initial-tags="note.tags || []"
-          :show-auto-type="false"
-          submit-label="保存"
-          :z-index="110"
-          @submit="onSubmit"
-        />
+        <div class="flex-1 flex flex-col overflow-hidden">
+          <RichEditor
+            :initial-content="note.content"
+            :initial-type="note.type"
+            :initial-tags="note.tags || []"
+            :show-auto-type="false"
+            submit-label="保存"
+            :z-index="110"
+            @submit="onSubmit"
+          />
+        </div>
       </div>
     </div>
   </Teleport>

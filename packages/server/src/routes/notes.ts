@@ -247,7 +247,17 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
 
     const updates: Record<string, any> = { aiProcessed: true };
     if (tags.length > 0 && existingTags.length === 0) updates.tags = tags;
-    if (category) updates.category = category;
+    if (category) {
+      updates.category = category;
+      // 自动创建分类（如果不存在）
+      const existing = await db.select().from(schema.categories)
+        .where(and(eq(schema.categories.userId, userId), eq(schema.categories.name, category))).get();
+      if (!existing) {
+        await db.insert(schema.categories).values({
+          userId, name: category, parentId: null, icon: null, sortOrder: 0,
+        }).catch(() => {}); // 忽略重复
+      }
+    }
     if (summary) updates.summary = summary;
 
     await db.update(schema.notes).set(updates).where(eq(schema.notes.id, noteId));

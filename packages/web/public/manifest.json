@@ -1,0 +1,21 @@
+{
+  "name": "Quink - 一念",
+  "short_name": "Quink",
+  "description": "记录你的每一个闪念",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f5f7",
+  "theme_color": "#748ffc",
+  "icons": [
+    {
+      "src": "/quink-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/quink-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

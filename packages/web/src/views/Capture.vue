@@ -42,8 +42,11 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => {
-  auth.fetchMe();
+const notLoggedIn = ref(false);
+
+onMounted(async () => {
+  const user = await auth.fetchMe();
+  if (!user) notLoggedIn.value = true;
   document.addEventListener('keydown', onKeydown);
 });
 onUnmounted(() => {
@@ -59,8 +62,16 @@ onUnmounted(() => {
       <span class="text-[10px]" style="color: var(--sb-dim); -webkit-app-region: no-drag">Esc 关闭 | Ctrl+Enter 保存</span>
     </div>
 
+    <!-- Not logged in -->
+    <div v-if="notLoggedIn" class="flex-1 flex items-center justify-center bg-white rounded-b-xl shadow-2xl">
+      <div class="text-center">
+        <p class="text-gray-500 text-sm">请先在主窗口登录</p>
+        <p class="text-gray-400 text-xs mt-1">Esc 关闭</p>
+      </div>
+    </div>
+
     <!-- Editor -->
-    <div class="flex-1 overflow-hidden bg-white rounded-b-xl shadow-2xl flex flex-col">
+    <div v-else class="flex-1 overflow-hidden bg-white rounded-b-xl shadow-2xl flex flex-col">
       <RichEditor ref="editorRef" @submit="onSubmit" :show-auto-type="true" :show-ai="false" :min-height="150" placeholder="快速记录你的想法..." class="flex-1 flex flex-col" />
     </div>
 

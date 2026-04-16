@@ -62,6 +62,7 @@ const navItems = [
   { path: '/ai', label: 'AI', icon: '🤖' },
   { path: '/stats', label: '统计', icon: '📊' },
   { path: '/resources', label: '资源', icon: '📁' },
+  { path: '/tags', label: '标签', icon: '🏷️' },
   { path: '/trash', label: '回收站', icon: '🗑️' },
 ];
 
