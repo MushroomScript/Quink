@@ -11,7 +11,7 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 
-const showChrome = computed(() => route.name !== 'login' && route.name !== 'capture');
+const showChrome = computed(() => !['login', 'capture', 'float', 'ai-chat'].includes(route.name as string));
 const showMobileSidebar = ref(false);
 const appReady = ref(false);
 

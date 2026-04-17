@@ -76,6 +76,18 @@ const router = createRouter({
       component: () => import('@/views/Capture.vue'),
       meta: { public: false, hideChrome: true },
     },
+    {
+      path: '/float',
+      name: 'float',
+      component: () => import('@/views/FloatingMenu.vue'),
+      meta: { public: false, hideChrome: true },
+    },
+    {
+      path: '/ai-chat',
+      name: 'ai-chat',
+      component: () => import('@/views/AiChat.vue'),
+      meta: { public: false, hideChrome: true },
+    },
   ],
 });
 
