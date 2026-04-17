@@ -16,6 +16,10 @@ packages/web/public/vditor/
 # Electron build output
 packages/desktop/dist/
 
+# Rust build output
+packages/native/target/
+packages/native/*.node
+
 # Uploads
 packages/server/uploads/
 
