@@ -95,6 +95,13 @@ function setsEqual(a: Set<number>, b: Set<number>): boolean {
   return true;
 }
 
+type KeydownCallback = (e: { keycode: number; ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean; metaKey?: boolean }) => void;
+const keydownListeners: KeydownCallback[] = [];
+
+export function onKeydown(cb: KeydownCallback) {
+  keydownListeners.push(cb);
+}
+
 let started = false;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -121,7 +128,18 @@ export function startHook() {
 
   uIOhook.on('keydown', (e) => {
     pressedKeys.add(e.keycode);
-    checkBindings();
+    try { checkBindings(); } catch (err) { console.error('[checkBindings error]', err); }
+    for (const cb of keydownListeners) {
+      try {
+        cb({
+          keycode: e.keycode,
+          ctrlKey: pressedKeys.has(UiohookKey.Ctrl) || pressedKeys.has(UiohookKey.CtrlRight),
+          shiftKey: pressedKeys.has(UiohookKey.Shift) || pressedKeys.has(UiohookKey.ShiftRight),
+          altKey: pressedKeys.has(UiohookKey.Alt) || pressedKeys.has(UiohookKey.AltRight),
+          metaKey: pressedKeys.has(UiohookKey.Meta) || pressedKeys.has(UiohookKey.MetaRight),
+        });
+      } catch (err) { console.error('[keydownListener error]', err); }
+    }
   });
 
   uIOhook.on('keyup', (e) => {

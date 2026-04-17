@@ -92,6 +92,57 @@ app.get('/', async (c) => {
   });
 });
 
+// ── 回收站（必须在 /:id 之前注册）──
+
+// GET /api/notes/trash
+app.get('/trash', async (c) => {
+  const userId = c.get('userId');
+  const results = await db.select().from(schema.notes)
+    .where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`))
+    .orderBy(desc(schema.notes.deletedAt))
+    .all();
+  return c.json({ data: results });
+});
+
+// POST /api/notes/trash/:id/restore
+app.post('/trash/:id/restore', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const existing = await db.select().from(schema.notes)
+    .where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId))).get();
+  if (!existing || !existing.deletedAt) return c.json({ error: '笔记不存在' }, 404);
+  await db.update(schema.notes).set({ deletedAt: null }).where(eq(schema.notes.id, id));
+  return c.json({ message: '已恢复' });
+});
+
+// DELETE /api/notes/trash/:id
+app.delete('/trash/:id', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  await db.delete(schema.notes).where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId)));
+  return c.json({ message: '已永久删除' });
+});
+
+// DELETE /api/notes/trash — 清空
+app.delete('/trash', async (c) => {
+  const userId = c.get('userId');
+  await db.delete(schema.notes).where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`));
+  return c.json({ message: '已清空' });
+});
+
+// GET /api/notes/tags（必须在 /:id 之前注册）
+app.get('/tags', async (c) => {
+  const userId = c.get('userId');
+  const notes = await db.select({ tags: schema.notes.tags })
+    .from(schema.notes).where(eq(schema.notes.userId, userId)).all();
+  const tagSet = new Set<string>();
+  for (const n of notes) {
+    const t = (n.tags as string[]) || [];
+    t.forEach(tag => tagSet.add(tag));
+  }
+  return c.json({ data: [...tagSet].sort() });
+});
+
 // GET /api/notes/:id
 app.get('/:id', async (c) => {
   const userId = c.get('userId');
@@ -179,58 +230,6 @@ app.delete('/:id', async (c) => {
     .set({ deletedAt: dayjs().toISOString() })
     .where(eq(schema.notes.id, id));
   return c.json({ message: '已移入回收站' });
-});
-
-// ── 回收站 ──
-
-// GET /api/notes/trash — 已删除的笔记
-app.get('/trash', async (c) => {
-  const userId = c.get('userId');
-  const results = await db.select().from(schema.notes)
-    .where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`))
-    .orderBy(desc(schema.notes.deletedAt))
-    .all();
-  return c.json({ data: results });
-});
-
-// POST /api/notes/trash/:id/restore — 恢复
-app.post('/trash/:id/restore', async (c) => {
-  const userId = c.get('userId');
-  const { id } = c.req.param();
-  const existing = await db.select().from(schema.notes)
-    .where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId))).get();
-  if (!existing || !existing.deletedAt) return c.json({ error: '笔记不存在' }, 404);
-
-  await db.update(schema.notes).set({ deletedAt: null }).where(eq(schema.notes.id, id));
-  return c.json({ message: '已恢复' });
-});
-
-// DELETE /api/notes/trash/:id — 永久删除
-app.delete('/trash/:id', async (c) => {
-  const userId = c.get('userId');
-  const { id } = c.req.param();
-  await db.delete(schema.notes).where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId)));
-  return c.json({ message: '已永久删除' });
-});
-
-// DELETE /api/notes/trash — 清空回收站
-app.delete('/trash', async (c) => {
-  const userId = c.get('userId');
-  await db.delete(schema.notes).where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`));
-  return c.json({ message: '已清空' });
-});
-
-// GET /api/notes/tags — 获取当前用户所有标签（去重）
-app.get('/tags', async (c) => {
-  const userId = c.get('userId');
-  const notes = await db.select({ tags: schema.notes.tags })
-    .from(schema.notes).where(eq(schema.notes.userId, userId)).all();
-  const tagSet = new Set<string>();
-  for (const n of notes) {
-    const t = (n.tags as string[]) || [];
-    t.forEach(tag => tagSet.add(tag));
-  }
-  return c.json({ data: [...tagSet].sort() });
 });
 
 /**

@@ -1,5 +1,4 @@
-use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadSafeCallContext, ThreadsafeFunctionCallMode};
-use std::sync::atomic::{AtomicBool, Ordering};
+use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -15,28 +14,20 @@ pub fn set_callback(cb: ThreadsafeFunction<SelectionEvent, ErrorStrategy::Fatal>
     let _ = CALLBACK.set(cb);
 }
 
-/// Called when user presses the hotkey — grab selected text and return it.
 pub fn grab_selection() {
     std::thread::spawn(|| {
-        // Save current clipboard
         let old_clipboard = get_clipboard_text().unwrap_or_default();
-
-        // Get cursor position
         let (x, y) = get_cursor_pos();
 
-        // Simulate Ctrl+C
-        simulate_ctrl_c();
+        // 用 keybd_event 模拟 Ctrl+C（比 SendInput 更底层，兼容性更好）
+        simulate_ctrl_c_keybd_event();
 
-        // Wait for clipboard to update
-        std::thread::sleep(Duration::from_millis(150));
+        std::thread::sleep(Duration::from_millis(200));
 
-        // Read new clipboard
         let new_clipboard = get_clipboard_text().unwrap_or_default();
 
         if !new_clipboard.is_empty() && new_clipboard != old_clipboard {
             let text = new_clipboard.trim().to_string();
-
-            // Restore old clipboard
             set_clipboard_text(&old_clipboard);
 
             if !text.is_empty() && text.len() < 10000 {
@@ -47,66 +38,17 @@ pub fn grab_selection() {
                     );
                 }
             }
-        } else {
-            // Nothing new selected, restore clipboard just in case
-            set_clipboard_text(&old_clipboard);
         }
     });
 }
 
-fn simulate_ctrl_c() {
+fn simulate_ctrl_c_keybd_event() {
     unsafe {
-        let inputs = [
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_CONTROL,
-                        wScan: 0,
-                        dwFlags: KEYBD_EVENT_FLAGS(0),
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_C,
-                        wScan: 0,
-                        dwFlags: KEYBD_EVENT_FLAGS(0),
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_C,
-                        wScan: 0,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_CONTROL,
-                        wScan: 0,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            },
-        ];
-        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        // keybd_event 比 SendInput 更底层
+        keybd_event(VK_CONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+        keybd_event(VK_C.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+        keybd_event(VK_C.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_CONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
     }
 }
 

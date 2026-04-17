@@ -47,23 +47,26 @@ onMounted(async () => {
 </script>
 
 <template>
-  <!-- Loading -->
-  <div v-if="!appReady" class="h-full flex items-center justify-center" style="background: var(--c-body, #f5f5f7)">
+  <!-- 无 chrome 路由(float / capture / ai-chat / login):直接渲染,跳过全屏 loading -->
+  <RouterView v-if="!showChrome" />
+
+  <!-- 主界面 loading -->
+  <div v-else-if="!appReady" class="h-full flex items-center justify-center" style="background: var(--c-body, #f5f5f7)">
     <div class="text-center">
       <h1 class="text-2xl font-bold" style="color: rgb(var(--c-accent, 116 143 252))">Quink</h1>
       <p class="text-xs text-gray-400 mt-1">加载中...</p>
     </div>
   </div>
 
-  <!-- App -->
+  <!-- 主界面 -->
   <template v-else>
     <div class="flex h-full overflow-hidden">
-      <div v-if="showChrome" class="hidden md:block">
+      <div class="hidden md:block">
         <Sidebar />
       </div>
 
       <!-- Mobile sidebar drawer -->
-      <div v-if="showMobileSidebar && showChrome" class="fixed inset-0 z-50 md:hidden">
+      <div v-if="showMobileSidebar" class="fixed inset-0 z-50 md:hidden">
         <div class="absolute inset-0 bg-black/40" @click="showMobileSidebar = false" />
         <div class="absolute left-0 -top-[200px] -bottom-[200px] w-60 shadow-2xl overflow-y-auto bg-sidebar pt-[200px] pb-[200px]" @click.stop>
           <Sidebar />
@@ -71,7 +74,7 @@ onMounted(async () => {
       </div>
 
       <div class="flex-1 flex flex-col overflow-hidden">
-        <TopBar v-if="showChrome" />
+        <TopBar />
         <main class="flex-1 overflow-y-auto">
           <RouterView />
         </main>

@@ -11,7 +11,7 @@ import {
 } from 'electron';
 import * as path from 'path';
 import { createTrayIcon } from './tray-icon';
-import { registerShortcut, unregisterAll, startHook, stopHook } from './shortcuts';
+import { registerShortcut, unregisterAll, startHook, stopHook, onKeydown } from './shortcuts';
 
 const API_BASE = `http://localhost:${process.env.QUINK_PORT || '38999'}`;
 const WEB_URL = `http://localhost:${process.env.QUINK_WEB_PORT || '24888'}`;
@@ -207,7 +207,14 @@ function createTray() {
     },
     {
       label: '抓取选中文字  Ctrl+Shift+E',
-      click: () => grabAndShowFloat(),
+      click: () => {
+        try {
+          const native = require(path.join(__dirname, '..', '..', 'native', 'index.js'));
+          native.grabSelection();
+        } catch {
+          grabAndShowFloat();
+        }
+      },
     },
     { type: 'separator' },
     {
@@ -379,8 +386,8 @@ function showFloatWindow(text: string, x: number, y: number) {
   // 多显示器：找到鼠标所在的显示器
   const cursorDisplay = screen.getDisplayNearestPoint({ x, y });
   const bounds = cursorDisplay.workArea;
-  const winW = 180;
-  const winH = 44;
+  const winW = 300;
+  const winH = 32;
   const px = Math.max(bounds.x, Math.min(x + 10, bounds.x + bounds.width - winW - 10));
   const py = Math.max(bounds.y, Math.min(y + 10, bounds.y + bounds.height - winH - 10));
 
@@ -427,14 +434,36 @@ function showFloatWindow(text: string, x: number, y: number) {
 }
 
 function tryInitSelectionGrabber() {
-  // 用 Electron globalShortcut（不用 uiohook，三键组合更可靠）
-  const ok = globalShortcut.register('CommandOrControl+Shift+E', () => {
-    grabAndShowFloat();
+  let nativeModule: any = null;
+  try {
+    nativeModule = require(path.join(__dirname, '..', '..', 'native', 'index.js'));
+    nativeModule.onSelection((event: { text: string; x: number; y: number }) => {
+      if (event.text && event.text.trim()) {
+        showFloatWindow(event.text.trim(), event.x, event.y);
+      }
+    });
+  } catch {
+    console.log('Native module not available, using clipboard fallback.');
+  }
+
+  // 用 onKeydown 监听（共享 uiohook 实例，不新建）
+  onKeydown((e) => {
+    // Ctrl+E 触发悬浮窗
+    if (e.keycode === 18 && e.ctrlKey && !e.shiftKey && !e.altKey) {
+      console.log('[Float] Ctrl+E detected');
+      if (nativeModule) {
+        nativeModule.grabSelection();
+      } else {
+        grabAndShowFloat();
+      }
+    }
   });
-  console.log(`Selection grabber: Ctrl+Shift+E(${ok}).`);
+
+  console.log('Selection grabber ready (Ctrl+E).');
 }
 
 function grabAndShowFloat() {
+  // 兜底方案：直接读剪贴板（需用户先 Ctrl+C）
   const text = clipboard.readText();
   if (text && text.trim()) {
     const pos = screen.getCursorScreenPoint();

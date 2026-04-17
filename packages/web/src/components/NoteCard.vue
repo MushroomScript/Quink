@@ -18,13 +18,11 @@ const openEditModal = inject<(note: Note) => void>('openEditModal');
 function goDetail() { router.push(`/note/${props.note.id}`); }
 
 function handleClick(e: MouseEvent) {
-  // Ctrl+Click 进入选择模式并切换选中
   if (e.ctrlKey || e.metaKey) {
     if (!store.selectMode) store.toggleSelectMode();
     store.toggleSelect(props.note.id);
     return;
   }
-  // 选择模式下点击切换选中
   if (store.selectMode) {
     store.toggleSelect(props.note.id);
     return;

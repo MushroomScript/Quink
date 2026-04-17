@@ -26,8 +26,16 @@ async function loadNote() {
   try {
     const res = await api.getNote(id);
     note.value = res.data;
-    rendered.value = await Vditor.md2html(res.data.content);
-  } catch {
+    try {
+      rendered.value = await Vditor.md2html(res.data.content);
+    } catch (e) {
+      console.error('[NoteDetail] Vditor render failed:', e);
+      const esc = res.data.content
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      rendered.value = `<div style="white-space:pre-wrap">${esc}</div>`;
+    }
+  } catch (e) {
+    console.error('[NoteDetail] load note failed:', e);
     note.value = null;
   }
   loading.value = false;
