@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onActivated, ref } from 'vue';
 import { useNotesStore } from '@/stores/notes';
 import NoteInput from '@/components/NoteInput.vue';
 import MobileInput from '@/components/MobileInput.vue';
 import NoteCard from '@/components/NoteCard.vue';
 import dayjs from 'dayjs';
 import 'dayjs/locale/zh-cn';
+
+defineOptions({ name: 'inspiration' });
 
 dayjs.locale('zh-cn');
 
@@ -21,8 +23,8 @@ function formatDateHeader(dateStr: string) {
   return d.format('YYYY年M月D日');
 }
 
-onMounted(() => {
-  store.filterType = '';
+onActivated(() => {
+  store.filterType = 'note';
   store.searchQuery = '';
   store.fetchNotes();
 });
@@ -32,7 +34,7 @@ onMounted(() => {
   <div class="px-4 md:px-8 py-4 md:py-6">
     <div class="mb-4 md:mb-6">
       <MobileInput v-if="isMobile" />
-      <NoteInput v-else />
+      <NoteInput v-else default-type="note" />
     </div>
 
     <div v-if="store.loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
@@ -48,7 +50,7 @@ onMounted(() => {
         <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
           {{ formatDateHeader(date) }}
         </h3>
-        <div class="space-y-3">
+        <div class="notes-masonry">
           <NoteCard v-for="note in notes" :key="note.id" :note="note" />
         </div>
       </div>

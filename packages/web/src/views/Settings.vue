@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import { useToast } from '@/composables/useToast';
 import { api } from '@/api';
 
 const router = useRouter();
 const auth = useAuthStore();
+const toast = useToast();
 
 const activeTab = ref('profile');
 const saving = ref(false);
-const saveMsg = ref('');
-const saveMsgType = ref<'success' | 'error'>('success');
 
 // ── Profile ──
 const nickname = ref('');
@@ -20,12 +20,12 @@ const uploadingAvatar = ref(false);
 // ── Preferences ──
 const theme = ref('blueberry');
 const fontSize = ref('14');
-const defaultPage = ref('/');
 
 // ── Shortcuts ──
 const shortcuts = ref({
   capture: 'Shift+Space',
   aiChat: 'Alt+Space',
+  float: 'Alt+Q',
 });
 const editingShortcut = ref<string | null>(null);
 const recordingKeys = ref('');
@@ -172,12 +172,13 @@ onMounted(() => {
     const prefs = auth.user.preferences || {};
     theme.value = prefs.theme || 'blueberry';
     fontSize.value = String(prefs.fontSize || 14);
-    defaultPage.value = prefs.defaultPage || '/';
     if (prefs.shortcuts) {
       shortcuts.value = { ...shortcuts.value, ...prefs.shortcuts };
     }
   }
   loadAiData();
+  // 延到下一个 tick 再开启 watch,避免初始化赋值触发自动保存
+  setTimeout(() => { prefsLoaded = true; }, 0);
 });
 
 // ── Avatar upload ──
@@ -256,7 +257,9 @@ async function saveProfile() {
   }
 }
 
-async function savePreferences() {
+let prefsLoaded = false;
+
+async function savePreferences(silent = false) {
   saving.value = true;
   try {
     await auth.updateProfile({
@@ -264,19 +267,25 @@ async function savePreferences() {
         ...(auth.user?.preferences || {}),
         theme: theme.value,
         fontSize: parseInt(fontSize.value),
-        defaultPage: defaultPage.value,
       },
     });
-    // 实时应用
     document.documentElement.setAttribute('data-theme', theme.value);
     document.documentElement.style.fontSize = fontSize.value + 'px';
-    showMsg('已保存');
+    if (!silent) showMsg('已保存');
   } catch (err: any) {
     showMsg('保存失败: ' + err.message, 'error');
   } finally {
     saving.value = false;
   }
 }
+
+// 主题、字号、划词开关 变化时自动静默保存
+let savePrefsTimer: ReturnType<typeof setTimeout> | null = null;
+watch([theme, fontSize], () => {
+  if (!prefsLoaded) return;
+  if (savePrefsTimer) clearTimeout(savePrefsTimer);
+  savePrefsTimer = setTimeout(() => savePreferences(true).then(() => toast.show('已保存')), 300);
+});
 
 async function saveShortcuts() {
   saving.value = true;
@@ -349,9 +358,7 @@ function applyTheme(t: string) {
 }
 
 function showMsg(msg: string, type: 'success' | 'error' = 'success') {
-  saveMsg.value = msg;
-  saveMsgType.value = type;
-  setTimeout(() => (saveMsg.value = ''), 2500);
+  toast.show(msg, type === 'error' ? 'error' : 'default');
 }
 
 function goBack() {
@@ -362,7 +369,7 @@ function goBack() {
 <template>
   <div class="px-4 md:px-8 py-8" @keydown="handleShortcutKeydown">
     <!-- Tabs -->
-    <div class="flex gap-1 border-b border-gray-200 mb-6 overflow-x-auto">
+    <div class="flex flex-wrap gap-1 border-b border-gray-200 mb-6">
       <button
         v-for="tab in tabs"
         :key="tab.id"
@@ -375,13 +382,6 @@ function goBack() {
         {{ tab.label }}
       </button>
     </div>
-
-    <!-- Save notification -->
-    <Transition enter-active-class="transition duration-200" enter-from-class="opacity-0 -translate-y-2" leave-active-class="transition duration-150" leave-to-class="opacity-0">
-      <div v-if="saveMsg" class="mb-4 px-4 py-2 rounded-lg text-sm" :class="saveMsgType === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'">
-        {{ saveMsg }}
-      </div>
-    </Transition>
 
     <!-- ═══ 基本信息 ═══ -->
     <div v-if="activeTab === 'profile'" class="space-y-6">
@@ -487,16 +487,6 @@ function goBack() {
             <option value="22">22px</option>
           </select>
         </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">默认首页</label>
-          <select v-model="defaultPage" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none">
-            <option value="/">时间线</option>
-            <option value="/todos">待办事项</option>
-          </select>
-        </div>
-        <button @click="savePreferences" :disabled="saving" class="px-5 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark disabled:opacity-50">
-          {{ saving ? '保存中...' : '保存' }}
-        </button>
       </div>
     </div>
 
@@ -540,19 +530,24 @@ function goBack() {
             </button>
           </div>
 
+          <!-- Float shortcut -->
+          <div class="flex items-center justify-between py-3 border-b border-gray-50">
+            <div>
+              <div class="text-sm text-gray-700 font-medium">悬浮窗</div>
+              <div class="text-xs text-gray-400">抓取选中文字，弹出操作菜单</div>
+            </div>
+            <button
+              @click="startRecording('float')"
+              class="px-3 py-1.5 rounded-lg text-xs font-mono border transition-colors min-w-[140px] text-center"
+              :class="editingShortcut === 'float'
+                ? 'border-primary bg-primary-light text-primary animate-pulse'
+                : 'border-gray-200 bg-gray-50 text-gray-600 hover:border-gray-300'"
+            >
+              {{ editingShortcut === 'float' ? (recordingKeys || '按下快捷键...') : shortcuts.float }}
+            </button>
+          </div>
+
           <!-- Fixed shortcuts -->
-          <div class="flex items-center justify-between py-3 border-b border-gray-50 opacity-60">
-            <div>
-              <div class="text-sm text-gray-700">保存笔记</div>
-            </div>
-            <kbd class="px-3 py-1.5 bg-gray-50 text-gray-500 text-xs font-mono rounded-lg border border-gray-200">Ctrl+Enter</kbd>
-          </div>
-          <div class="flex items-center justify-between py-3 opacity-60">
-            <div>
-              <div class="text-sm text-gray-700">关闭弹窗</div>
-            </div>
-            <kbd class="px-3 py-1.5 bg-gray-50 text-gray-500 text-xs font-mono rounded-lg border border-gray-200">Esc</kbd>
-          </div>
         </div>
 
         <button @click="saveShortcuts" :disabled="saving" class="mt-4 px-5 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark disabled:opacity-50">
@@ -694,7 +689,8 @@ function goBack() {
         <h3 class="text-sm font-medium text-gray-800">数据导入</h3>
         <p class="text-sm text-gray-500">从之前导出的 ZIP 文件恢复笔记。</p>
         <button @click="triggerImport" :disabled="importing"
-          class="px-4 py-2 border border-gray-200 text-sm rounded-lg hover:bg-gray-50 text-gray-700">
+          class="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+          style="background: rgb(var(--c-accent) / 0.1); color: rgb(var(--c-accent))">
           {{ importing ? '导入中...' : '选择 ZIP 文件导入' }}
         </button>
         <p v-if="importResult" class="text-xs" :class="importResult.startsWith('成功') ? 'text-green-600' : 'text-red-500'">{{ importResult }}</p>

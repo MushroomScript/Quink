@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import Sidebar from '@/components/Sidebar.vue';
 import TopBar from '@/components/TopBar.vue';
 import NoteEditModal from '@/components/NoteEditModal.vue';
+import GlobalToast from '@/components/GlobalToast.vue';
 import type { Note } from '@/api';
 
 const route = useRoute();
@@ -38,11 +39,6 @@ onMounted(async () => {
 
   const refId = route.query.ref as string;
   if (refId) { router.replace(`/note/${refId}`); return; }
-
-  const defaultPage = prefs.defaultPage;
-  if (defaultPage && defaultPage !== '/' && route.path === '/') {
-    router.replace(defaultPage);
-  }
 });
 </script>
 
@@ -75,12 +71,19 @@ onMounted(async () => {
 
       <div class="flex-1 flex flex-col overflow-hidden">
         <TopBar />
-        <main class="flex-1 overflow-y-auto">
-          <RouterView />
+        <main class="flex-1 overflow-y-auto" style="scrollbar-gutter: stable">
+          <RouterView v-slot="{ Component }">
+            <KeepAlive :include="['inspiration', 'notes', 'todos']">
+              <component :is="Component" />
+            </KeepAlive>
+          </RouterView>
         </main>
       </div>
     </div>
 
     <NoteEditModal v-if="editingNote" :note="editingNote" @close="closeEditModal" />
   </template>
+
+  <!-- 全局 Toast(所有路由,包括浮窗/登录等) -->
+  <GlobalToast />
 </template>

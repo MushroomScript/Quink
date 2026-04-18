@@ -15,6 +15,9 @@ onMounted(async () => {
   style.textContent = 'html,body,#app{background:transparent !important;overflow:hidden !important;}';
   document.head.appendChild(style);
   await auth.fetchMe();
+  // 跟主窗口一样,根据用户偏好设置主题
+  const theme = auth.user?.preferences?.theme || 'blueberry';
+  document.documentElement.setAttribute('data-theme', theme);
   const params = new URLSearchParams(window.location.search);
   text.value = params.get('text') || '';
 });

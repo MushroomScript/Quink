@@ -40,12 +40,12 @@ app.get('/api/stats', authMiddleware, async (c) => {
   const userId = c.get('userId');
 
   const totalNotes = db.select({ count: sql<number>`count(*)` })
-    .from(schema.notes).where(eq(schema.notes.userId, userId)).get();
+    .from(schema.notes).where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NULL`)).get();
   const totalTodos = db.select({ count: sql<number>`count(*)` })
-    .from(schema.notes).where(and(eq(schema.notes.userId, userId), eq(schema.notes.type, 'todo'))).get();
+    .from(schema.notes).where(and(eq(schema.notes.userId, userId), eq(schema.notes.type, 'todo'), sql`${schema.notes.deletedAt} IS NULL`)).get();
   const pendingTodos = db.select({ count: sql<number>`count(*)` })
     .from(schema.notes).where(
-      and(eq(schema.notes.userId, userId), sql`${schema.notes.type} = 'todo' AND ${schema.notes.todoStatus} = 'pending'`)
+      and(eq(schema.notes.userId, userId), sql`${schema.notes.type} = 'todo' AND ${schema.notes.todoStatus} = 'pending' AND ${schema.notes.deletedAt} IS NULL`)
     ).get();
 
   // 每日记录数（热力图，最近365天）

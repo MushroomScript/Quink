@@ -103,7 +103,7 @@ export function onKeydown(cb: KeydownCallback) {
 }
 
 let started = false;
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let lastFireAt = 0;
 
 export function registerShortcut(combo: string, callback: ShortcutCallback): boolean {
   const keys = parseShortcut(combo);
@@ -181,8 +181,11 @@ function checkBindings() {
   }
 
   if (bestMatch) {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    const cb = bestMatch.callback;
-    debounceTimer = setTimeout(() => { cb(); }, 50);
+    const now = Date.now();
+    // 冷却 300ms 避免 keydown auto-repeat 重复触发
+    if (now - lastFireAt > 300) {
+      lastFireAt = now;
+      bestMatch.callback();
+    }
   }
 }

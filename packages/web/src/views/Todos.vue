@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { onMounted, computed, ref } from 'vue';
+import { onActivated, computed, ref } from 'vue';
 import { useNotesStore } from '@/stores/notes';
 import NoteInput from '@/components/NoteInput.vue';
 import MobileInput from '@/components/MobileInput.vue';
 import NoteCard from '@/components/NoteCard.vue';
+
+defineOptions({ name: 'todos' });
 
 const store = useNotesStore();
 const isMobile = ref(window.innerWidth < 768);
@@ -15,7 +17,7 @@ const doneTodos = computed(() =>
   store.notes.filter((n) => n.type === 'todo' && n.todoStatus === 'done')
 );
 
-onMounted(() => {
+onActivated(() => {
   store.filterType = 'todo';
   store.searchQuery = '';
   store.fetchNotes();
@@ -31,14 +33,14 @@ onMounted(() => {
 
     <div v-if="pendingTodos.length > 0" class="mb-6 md:mb-8">
       <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">未完成 ({{ pendingTodos.length }})</h3>
-      <div class="space-y-3">
+      <div class="notes-masonry">
         <NoteCard v-for="note in pendingTodos" :key="note.id" :note="note" />
       </div>
     </div>
 
     <div v-if="doneTodos.length > 0">
       <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">已完成 ({{ doneTodos.length }})</h3>
-      <div class="space-y-3 opacity-60">
+      <div class="notes-masonry opacity-60">
         <NoteCard v-for="note in doneTodos" :key="note.id" :note="note" />
       </div>
     </div>

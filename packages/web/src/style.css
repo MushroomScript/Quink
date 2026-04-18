@@ -194,6 +194,20 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
   overflow: hidden;
 }
 
+/* 便签瀑布流:根据容器宽度自动分列,每卡片高度由内容决定 */
+.notes-masonry {
+  column-width: 260px;
+  column-gap: 14px;
+}
+.notes-masonry > * {
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 14px 0;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+}
+
 /* Search highlight */
 .search-highlight {
   background: rgb(var(--c-accent) / 0.2);

@@ -9,13 +9,9 @@ import type { Note } from '@/api';
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
 
-import { useRouter } from 'vue-router';
 const props = defineProps<{ note: Note }>();
 const store = useNotesStore();
-const router = useRouter();
 const openEditModal = inject<(note: Note) => void>('openEditModal');
-
-function goDetail() { router.push(`/note/${props.note.id}`); }
 
 function handleClick(e: MouseEvent) {
   if (e.ctrlKey || e.metaKey) {
@@ -27,7 +23,7 @@ function handleClick(e: MouseEvent) {
     store.toggleSelect(props.note.id);
     return;
   }
-  goDetail();
+  openEditModal?.(props.note);
 }
 
 const confirmDelete = ref(false);
@@ -56,7 +52,7 @@ watchEffect(async () => {
 const timeAgo = computed(() => dayjs(props.note.createdAt).fromNow());
 const fullTime = computed(() => dayjs(props.note.createdAt).format('YYYY-MM-DD HH:mm'));
 
-const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '代码片段', link: '链接' };
+const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '笔记', link: '链接' };
 const typeColor: Record<string, string> = {
   note: 'bg-primary-light text-primary',
   todo: 'bg-amber-100 text-amber-600',
@@ -77,7 +73,7 @@ async function handleDelete() {
 <template>
   <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group"
     :class="{ 'ring-2 ring-primary/50': note.pinned, 'ring-2 ring-primary': store.selectedIds.has(note.id) }">
-    <div class="px-3 py-3 md:px-5 md:py-4 cursor-pointer" @click="handleClick" @dblclick.prevent="openEditModal?.(note)">
+    <div class="px-3 py-3 md:px-5 md:py-4 cursor-pointer" @click="handleClick">
       <div class="flex items-center gap-2 mb-2.5">
         <!-- Checkbox (visible in select mode or when selected) -->
         <div v-if="store.selectMode"

@@ -9,39 +9,32 @@ const props = withDefaults(defineProps<{
   initialType?: string;
   initialTags?: string[];
   placeholder?: string;
-  showAutoType?: boolean;
+  showTypeSelector?: boolean;
   submitLabel?: string;
   zIndex?: number;
   minHeight?: number;
   showAi?: boolean;
 }>(), {
   initialContent: '',
-  initialType: 'auto',
+  initialType: 'note',
   initialTags: () => [],
   placeholder: '写下你的想法...',
-  showAutoType: true,
+  showTypeSelector: true,
   submitLabel: '保存',
   showAi: true,
   zIndex: 50,
-  minHeight: 240,
+  minHeight: 120,
 });
 
 const emit = defineEmits<{
   (e: 'submit', data: { html: string; type: string; tags: string[] }): void;
 }>();
 
-const noteTypes = props.showAutoType
-  ? [
-      { value: 'auto', label: '自动', icon: '🔮' },
-      { value: 'note', label: '灵感', icon: '💡' },
-      { value: 'snippet', label: '笔记', icon: '📝' },
-      { value: 'todo', label: '待办', icon: '✅' },
-    ]
-  : [
-      { value: 'note', label: '灵感', icon: '💡' },
-      { value: 'snippet', label: '笔记', icon: '📝' },
-      { value: 'todo', label: '待办', icon: '✅' },
-    ];
+const noteTypes = [
+  { value: 'note', label: '灵感', icon: '💡' },
+  { value: 'snippet', label: '笔记', icon: '📝' },
+  { value: 'todo', label: '待办', icon: '✅' },
+];
 
 const noteType = ref(props.initialType);
 const tags = ref<string[]>([...props.initialTags]);
@@ -142,18 +135,13 @@ function handleSubmit() {
   const md = vditor.getValue().trim();
   if (!md) return;
 
-  let type = noteType.value;
-  if (type === 'auto') {
-    type = md.includes('- [ ]') || md.includes('- [x]') ? 'todo' : 'note';
-  }
-
-  emit('submit', { html: md, type, tags: [...tags.value] });
+  emit('submit', { html: md, type: noteType.value, tags: [...tags.value] });
 }
 
 function clearContent() {
   vditor?.setValue('');
   tags.value = [];
-  noteType.value = props.showAutoType ? 'auto' : 'note';
+  noteType.value = props.initialType;
 }
 
 // ── Tags ──
@@ -233,14 +221,14 @@ defineExpose({ clearContent });
     <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-t border-gray-100 select-none">
       <div class="flex items-center gap-2">
         <!-- Type selector -->
-        <div class="flex gap-0.5">
+        <div v-if="showTypeSelector" class="flex gap-0.5">
           <button v-for="t in noteTypes" :key="t.value" @click="noteType = t.value"
             class="px-2 py-1 rounded-md text-xs transition-colors"
             :class="noteType === t.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'">
             {{ t.icon }} {{ t.label }}
           </button>
         </div>
-        <span class="sep"></span>
+        <span v-if="showTypeSelector" class="sep"></span>
 
         <!-- AI buttons with labels -->
         <template v-if="showAi">

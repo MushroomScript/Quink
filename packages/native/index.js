@@ -11,4 +11,6 @@ if (existsSync(localPath)) {
 module.exports = {
   onSelection: nativeBinding?.onSelection || (() => {}),
   grabSelection: nativeBinding?.grabSelection || (() => {}),
+  readSelectionUia: nativeBinding?.readSelectionUia || (() => null),
+  getForegroundWindow: nativeBinding?.getForegroundWindow || (() => 0),
 };

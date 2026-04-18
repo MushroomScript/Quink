@@ -47,6 +47,8 @@ const notLoggedIn = ref(false);
 onMounted(async () => {
   const user = await auth.fetchMe();
   if (!user) notLoggedIn.value = true;
+  const theme = user?.preferences?.theme || 'blueberry';
+  document.documentElement.setAttribute('data-theme', theme);
   document.addEventListener('keydown', onKeydown);
 });
 onUnmounted(() => {

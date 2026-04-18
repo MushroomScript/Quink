@@ -28,9 +28,23 @@ let aiChatWindow: BrowserWindow | null = null;
 const DEFAULT_SHORTCUTS = {
   capture: 'Shift+Space',
   aiChat: 'Alt+Space',
+  float: 'Alt+Q',
 };
 
 let currentShortcuts = { ...DEFAULT_SHORTCUTS };
+let nativeModuleRef: any = null;
+let currentTheme = 'blueberry';
+
+// 每个主题的 accent-dark RGB(跟 style.css 一致),用于 toast 背景
+const THEME_ACCENT_DARK: Record<string, string> = {
+  blueberry: 'rgb(88,112,230)',
+  lavender: 'rgb(139,107,228)',
+  mint: 'rgb(62,178,144)',
+  peach: 'rgb(235,120,100)',
+  lemon: 'rgb(215,160,50)',
+  cloud: 'rgb(105,125,155)',
+  dark: 'rgb(100,130,230)',
+};
 
 // ──────────────────────────────────
 //  从后端获取用户快捷键配置
@@ -47,7 +61,99 @@ async function loadUserShortcuts() {
     if (prefs?.shortcuts) {
       currentShortcuts = { ...DEFAULT_SHORTCUTS, ...prefs.shortcuts };
     }
+    if (prefs?.theme && typeof prefs.theme === 'string') {
+      currentTheme = prefs.theme;
+    }
   } catch {}
+}
+
+// 统一的浮窗触发:优先 UIA(无感、瞬时、不碰剪贴板),失败再 Ctrl+C 兜底
+async function triggerFloatWindow() {
+  // 1) UIA 优先:浏览器 / UWP / Office / 大部分现代应用支持
+  if (nativeModuleRef?.readSelectionUia) {
+    try {
+      const sel = await nativeModuleRef.readSelectionUia();
+      if (sel && sel.text && sel.text.trim().length >= 1) {
+        if (!isOwnWindow(sel.hwnd)) {
+          showFloatWindow(sel.text.trim(), sel.x, sel.y);
+          return;
+        }
+      }
+    } catch (e) {
+      console.log('[Float] UIA read failed:', e);
+    }
+  }
+  // 2) Ctrl+C fallback:Notepad / 老 Win32 / Qt 等
+  if (nativeModuleRef?.grabSelection) {
+    nativeModuleRef.grabSelection();
+  } else {
+    grabAndShowFloat();
+  }
+}
+
+// 判断 hwnd 是否是 Quink 自己的任一窗口
+function isOwnWindow(hwnd: number | bigint): boolean {
+  if (!hwnd) return false;
+  const target = BigInt(hwnd);
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed()) continue;
+    try {
+      const buf = w.getNativeWindowHandle();
+      // Windows 下是 8 字节 HWND(小端)
+      const h = buf.length >= 8 ? buf.readBigInt64LE(0) : BigInt(buf.readInt32LE(0));
+      if (h === target) return true;
+    } catch {}
+  }
+  return false;
+}
+
+function toggleUiaAuto() {
+  // 划词识别已移除
+}
+
+// ──────────────────────────────────
+//  自定义 Toast 窗口(避开 Windows 系统通知排队)
+// ──────────────────────────────────
+let toastWin: BrowserWindow | null = null;
+let toastTimer: NodeJS.Timeout | null = null;
+
+function showToast(msg: string) {
+  const bounds = screen.getPrimaryDisplay().workArea;
+  const w = 240, h = 44;
+  const x = bounds.x + bounds.width - w - 16;
+  const y = bounds.y + bounds.height - h - 16;
+
+  const bg = THEME_ACCENT_DARK[currentTheme] || THEME_ACCENT_DARK.blueberry;
+  const html = `<!DOCTYPE html><html><head><style>
+    html,body{margin:0;padding:0;background:transparent;overflow:hidden;font-family:system-ui,sans-serif;}
+    .toast{height:100%;display:flex;align-items:center;justify-content:center;
+      background:${bg};color:#fff;font-size:13px;font-weight:500;border-radius:10px;
+      box-shadow:0 4px 16px rgba(0,0,0,0.25)}
+  </style></head><body><div class="toast">${msg}</div></body></html>`;
+
+  if (toastWin && !toastWin.isDestroyed()) {
+    toastWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    toastWin.setPosition(x, y);
+  } else {
+    toastWin = new BrowserWindow({
+      width: w, height: h, x, y,
+      frame: false, resizable: false,
+      alwaysOnTop: true, skipTaskbar: true, focusable: false,
+      show: false,
+      transparent: true, roundedCorners: false, hasShadow: false,
+      webPreferences: { nodeIntegration: false, contextIsolation: true },
+    });
+    toastWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    toastWin.once('ready-to-show', () => toastWin?.showInactive());
+    toastWin.on('closed', () => { toastWin = null; });
+  }
+
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    if (toastWin && !toastWin.isDestroyed()) toastWin.close();
+    toastWin = null;
+    toastTimer = null;
+  }, 1400);
 }
 
 function applyShortcuts() {
@@ -55,8 +161,9 @@ function applyShortcuts() {
 
   const ok1 = registerShortcut(currentShortcuts.capture, () => toggleCaptureWindow());
   const ok2 = registerShortcut(currentShortcuts.aiChat, () => toggleAiChatWindow());
+  const ok3 = registerShortcut(currentShortcuts.float, () => triggerFloatWindow());
 
-  console.log(`Shortcuts registered: capture=${currentShortcuts.capture}(${ok1}), aiChat=${currentShortcuts.aiChat}(${ok2})`);
+  console.log(`Shortcuts: capture=${currentShortcuts.capture}(${ok1}), aiChat=${currentShortcuts.aiChat}(${ok2}), float=${currentShortcuts.float}(${ok3})`);
 }
 
 // ──────────────────────────────────
@@ -206,14 +313,10 @@ function createTray() {
       click: () => toggleAiChatWindow(),
     },
     {
-      label: '抓取选中文字  Ctrl+Shift+E',
+      label: `抓取选中文字  ${currentShortcuts.float}`,
       click: () => {
-        try {
-          const native = require(path.join(__dirname, '..', '..', 'native', 'index.js'));
-          native.grabSelection();
-        } catch {
-          grabAndShowFloat();
-        }
+        // 延迟等托盘菜单关闭、焦点回到之前的应用
+        setTimeout(() => triggerFloatWindow(), 200);
       },
     },
     { type: 'separator' },
@@ -377,7 +480,7 @@ app.on('window-all-closed', () => {
 // ──────────────────────────────────
 
 function showFloatWindow(text: string, x: number, y: number) {
-  if (!authToken) return;
+  if (!authToken) { console.log('[Float] no auth token, skip'); return; }
 
   if (floatWindow && !floatWindow.isDestroyed()) {
     floatWindow.close();
@@ -434,32 +537,19 @@ function showFloatWindow(text: string, x: number, y: number) {
 }
 
 function tryInitSelectionGrabber() {
-  let nativeModule: any = null;
   try {
-    nativeModule = require(path.join(__dirname, '..', '..', 'native', 'index.js'));
-    nativeModule.onSelection((event: { text: string; x: number; y: number }) => {
+    nativeModuleRef = require(path.join(__dirname, '..', '..', 'native', 'index.js'));
+    // 剪贴板 fallback 成功后回调,直接弹浮窗
+    nativeModuleRef.onSelection((event: { text: string; x: number; y: number }) => {
       if (event.text && event.text.trim()) {
         showFloatWindow(event.text.trim(), event.x, event.y);
       }
     });
   } catch {
-    console.log('Native module not available, using clipboard fallback.');
+    console.log('Native module not available.');
   }
 
-  // 用 onKeydown 监听（共享 uiohook 实例，不新建）
-  onKeydown((e) => {
-    // Ctrl+E 触发悬浮窗
-    if (e.keycode === 18 && e.ctrlKey && !e.shiftKey && !e.altKey) {
-      console.log('[Float] Ctrl+E detected');
-      if (nativeModule) {
-        nativeModule.grabSelection();
-      } else {
-        grabAndShowFloat();
-      }
-    }
-  });
-
-  console.log('Selection grabber ready (Ctrl+E).');
+  console.log('Selection grabber ready.');
 }
 
 function grabAndShowFloat() {
