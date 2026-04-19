@@ -194,10 +194,22 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
   overflow: hidden;
 }
 
-/* 便签瀑布流:根据容器宽度自动分列,每卡片高度由内容决定 */
+/* 便签瀑布流:强制列数,响应式 */
 .notes-masonry {
-  column-width: 260px;
+  column-count: 3;
   column-gap: 14px;
+}
+@media (max-width: 900px) {
+  .notes-masonry { column-count: 2; }
+}
+@media (max-width: 600px) {
+  .notes-masonry { column-count: 1; }
+}
+@media (min-width: 1400px) {
+  .notes-masonry { column-count: 4; }
+}
+@media (min-width: 1800px) {
+  .notes-masonry { column-count: 5; }
 }
 .notes-masonry > * {
   display: inline-block;
@@ -206,6 +218,24 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
   break-inside: avoid;
   -webkit-column-break-inside: avoid;
   page-break-inside: avoid;
+}
+
+/* 引用笔记链接:紧凑标签样式 */
+.note-ref-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  text-decoration: none !important;
+  background: rgb(var(--c-accent-light));
+  color: rgb(var(--c-accent-dark)) !important;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.note-ref-link:hover {
+  opacity: 0.75;
 }
 
 /* Search highlight */

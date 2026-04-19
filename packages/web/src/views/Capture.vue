@@ -57,7 +57,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-full flex flex-col bg-transparent">
+  <div class="h-full flex flex-col bg-transparent tooltip-below">
     <!-- Draggable title bar (follows theme) -->
     <div class="flex items-center justify-between px-4 py-2 rounded-t-xl" style="-webkit-app-region: drag; background: rgb(var(--c-sidebar))">
       <span class="text-xs font-semibold" style="color: var(--sb-text)">Quink</span>
@@ -73,8 +73,8 @@ onUnmounted(() => {
     </div>
 
     <!-- Editor -->
-    <div v-else class="flex-1 overflow-hidden bg-white rounded-b-xl shadow-2xl flex flex-col">
-      <RichEditor ref="editorRef" @submit="onSubmit" :show-auto-type="true" :show-ai="false" :min-height="150" placeholder="快速记录你的想法..." class="flex-1 flex flex-col" />
+    <div v-else class="flex-1 overflow-hidden bg-white rounded-b-xl shadow-2xl">
+      <RichEditor ref="editorRef" @submit="onSubmit" :show-ai="false" :show-fullscreen-btn="false" :max-height="80" :min-height="60" placeholder="快速记录你的想法..." />
     </div>
 
     <!-- Toast -->

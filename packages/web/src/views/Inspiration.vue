@@ -4,24 +4,11 @@ import { useNotesStore } from '@/stores/notes';
 import NoteInput from '@/components/NoteInput.vue';
 import MobileInput from '@/components/MobileInput.vue';
 import NoteCard from '@/components/NoteCard.vue';
-import dayjs from 'dayjs';
-import 'dayjs/locale/zh-cn';
 
 defineOptions({ name: 'inspiration' });
 
-dayjs.locale('zh-cn');
-
 const store = useNotesStore();
 const isMobile = ref(window.innerWidth < 768);
-
-function formatDateHeader(dateStr: string) {
-  const d = dayjs(dateStr);
-  const today = dayjs().format('YYYY-MM-DD');
-  const yesterday = dayjs().subtract(1, 'day').format('YYYY-MM-DD');
-  if (dateStr === today) return '今天';
-  if (dateStr === yesterday) return '昨天';
-  return d.format('YYYY年M月D日');
-}
 
 onActivated(() => {
   store.filterType = 'note';
@@ -45,15 +32,8 @@ onActivated(() => {
       <p class="text-gray-400 text-xs mt-1">在上方输入框写下你的第一个闪念吧</p>
     </div>
 
-    <div v-else class="space-y-6 md:space-y-8">
-      <div v-for="(notes, date) in store.groupedByDate" :key="date">
-        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-          {{ formatDateHeader(date) }}
-        </h3>
-        <div class="notes-masonry">
-          <NoteCard v-for="note in notes" :key="note.id" :note="note" />
-        </div>
-      </div>
+    <div v-else class="notes-masonry">
+      <NoteCard v-for="note in store.notes" :key="note.id" :note="note" />
     </div>
 
     <div v-if="store.total > store.notes.length" class="text-center py-6">

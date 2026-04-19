@@ -227,13 +227,13 @@ function createCaptureWindow() {
 
   captureWindow = new BrowserWindow({
     width: 650,
-    height: 350,
+    height: 217,
     minWidth: 650,
-    minHeight: 350,
+    minHeight: 217,
     x: Math.round(screenWidth / 2 - 325),
     y: Math.round(screenHeight * 0.2),
     frame: false,
-    resizable: true,
+    resizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,

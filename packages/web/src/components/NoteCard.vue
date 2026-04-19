@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, inject, watchEffect } from 'vue';
+import { useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
@@ -11,9 +12,22 @@ dayjs.locale('zh-cn');
 
 const props = defineProps<{ note: Note }>();
 const store = useNotesStore();
+const router = useRouter();
 const openEditModal = inject<(note: Note) => void>('openEditModal');
 
 function handleClick(e: MouseEvent) {
+  // 引用链接点击 → 跳转
+  const link = (e.target as HTMLElement).closest('a');
+  if (link) {
+    const href = link.getAttribute('href') || '';
+    if (href.includes('?ref=')) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = new URL(href, location.origin).searchParams.get('ref');
+      if (id) router.push(`/note/${id}`);
+      return;
+    }
+  }
   if (e.ctrlKey || e.metaKey) {
     if (!store.selectMode) store.toggleSelectMode();
     store.toggleSelect(props.note.id);
@@ -37,6 +51,11 @@ watchEffect(async () => {
   const content = props.note.content;
   try {
     let html = await Vditor.md2html(content);
+    // 引用链接美化:紧凑标签样式
+    html = html.replace(
+      /<a href="(\/?\?ref=[^"]+)">([^<]*)<\/a>/g,
+      '<a href="$1" class="note-ref-link">$2</a>'
+    );
     // 搜索关键词高亮
     const q = store.searchQuery;
     if (q && q.trim()) {

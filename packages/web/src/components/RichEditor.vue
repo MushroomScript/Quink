@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import { api } from '@/api';
@@ -13,7 +13,9 @@ const props = withDefaults(defineProps<{
   submitLabel?: string;
   zIndex?: number;
   minHeight?: number;
+  maxHeight?: number;
   showAi?: boolean;
+  showFullscreenBtn?: boolean;
 }>(), {
   initialContent: '',
   initialType: 'note',
@@ -24,7 +26,12 @@ const props = withDefaults(defineProps<{
   showAi: true,
   zIndex: 50,
   minHeight: 120,
+  maxHeight: 320,
+  showFullscreenBtn: true,
 });
+
+const isFullscreen = ref(false);
+function toggleFullscreen() { isFullscreen.value = !isFullscreen.value; }
 
 const emit = defineEmits<{
   (e: 'submit', data: { html: string; type: string; tags: string[] }): void;
@@ -60,6 +67,7 @@ const aiFeatureOptions = [
 
 const editorRef = ref<HTMLDivElement>();
 let vditor: Vditor | null = null;
+const dirty = ref(false);
 
 onMounted(() => {
   if (!editorRef.value) return;
@@ -106,7 +114,7 @@ onMounted(() => {
       vditor?.focus();
     },
     input: () => {
-      // Tab key handling done via keydown
+      dirty.value = true;
     },
   });
 });
@@ -118,6 +126,12 @@ onBeforeUnmount(() => {
 
 // ── Tab key to switch type ──
 function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && isFullscreen.value) {
+    e.preventDefault();
+    e.stopPropagation();
+    isFullscreen.value = false;
+    return;
+  }
   if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
     e.preventDefault();
     const idx = noteTypes.findIndex(t => t.value === noteType.value);
@@ -136,12 +150,14 @@ function handleSubmit() {
   if (!md) return;
 
   emit('submit', { html: md, type: noteType.value, tags: [...tags.value] });
+  dirty.value = false;
 }
 
 function clearContent() {
   vditor?.setValue('');
   tags.value = [];
   noteType.value = props.initialType;
+  dirty.value = false;
 }
 
 // ── Tags ──
@@ -159,7 +175,8 @@ async function searchRefs() {
   try { const r = await api.getNotes({ search: refQuery.value, limit: '5' }); refResults.value = r.data; } catch { refResults.value = []; }
 }
 function insertRef(note: any) {
-  const label = note.content.replace(/[#*`\[\]]/g, '').slice(0, 40).trim() || '引用';
+  const firstLine = (note.content || '').split('\n').find((l: string) => l.trim()) || '';
+  const label = firstLine.replace(/[#*`\[\]!>~]/g, '').trim().slice(0, 20) || '引用笔记';
   vditor?.insertValue(`[📌 ${label}](/?ref=${note.id})`);
   showRefSearch.value = false; refQuery.value = ''; refResults.value = [];
 }
@@ -209,13 +226,18 @@ function applyAiResult() {
 function closeAiPanel() { showAiPanel.value = false; }
 function closePopups() { showTagInput.value = false; showRefSearch.value = false; }
 
-defineExpose({ clearContent });
+defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 </script>
 
 <template>
-  <div @keydown="onKeydown" class="flex flex-col h-full">
+  <div @keydown="onKeydown"
+    :data-fullscreen="isFullscreen || undefined"
+    :class="isFullscreen
+      ? 'fixed inset-0 z-[200] bg-white flex flex-col'
+      : 'flex flex-col'">
     <!-- Vditor editor -->
-    <div ref="editorRef" class="vditor-wrapper flex-1"></div>
+    <div ref="editorRef" class="vditor-wrapper"
+      :style="isFullscreen ? { flex: '1 1 auto', minHeight: 0 } : { '--editor-max': maxHeight + 'px' }"></div>
 
     <!-- AI buttons + bottom bar -->
     <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-t border-gray-100 select-none">
@@ -266,13 +288,25 @@ defineExpose({ clearContent });
         </div>
       </div>
 
-      <!-- Submit -->
-      <slot name="submit-button">
-        <button @click="handleSubmit"
-          class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-          {{ submitLabel }}
+      <!-- Submit + fullscreen -->
+      <div class="flex items-center gap-1.5">
+        <button v-if="showFullscreenBtn" @click="toggleFullscreen"
+          class="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+          :title="isFullscreen ? '退出全屏 (Esc)' : '全屏编辑'">
+          <svg v-if="!isFullscreen" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+          </svg>
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+          </svg>
         </button>
-      </slot>
+        <slot name="submit-button">
+          <button @click="handleSubmit"
+            class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            {{ submitLabel }}
+          </button>
+        </slot>
+      </div>
     </div>
 
     <!-- AI Panel -->
@@ -321,20 +355,17 @@ defineExpose({ clearContent });
 </template>
 
 <style>
-/* Vditor theme overrides */
-.vditor-wrapper .vditor {
+/* Vditor theme overrides —— Vditor 把 .vditor class 合并到 .vditor-wrapper 上 */
+.vditor-wrapper {
   border: none !important;
   width: 100% !important;
-  height: 100% !important;
   display: flex !important;
   flex-direction: column !important;
 }
-.vditor-wrapper .vditor .vditor-content {
-  flex: 1 !important;
-}
-.vditor-wrapper {
-  display: flex;
-  flex-direction: column;
+/* 非全屏:限制内容区 max-height + overflow */
+.vditor-wrapper > .vditor-content {
+  max-height: var(--editor-max, none) !important;
+  overflow-y: auto !important;
 }
 .vditor-wrapper .vditor-toolbar {
   border-bottom: 1px solid #f1f5f9 !important;
@@ -396,6 +427,35 @@ defineExpose({ clearContent });
 }
 .vditor-wrapper .vditor-reset {
   color: #1e293b;
+}
+.vditor-wrapper .vditor-reset::before {
+  color: #9ca3af !important;
+}
+/* 全屏时 toolbar 不 pin(fixed + fixed 会遮挡编辑区） */
+[data-fullscreen="true"] .vditor-toolbar--pin {
+  position: static !important;
+}
+[data-fullscreen="true"] > .vditor-wrapper > .vditor-content {
+  flex: 1 1 0 !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  height: 0 !important;
+}
+/* tooltip 统一翻转到下方（全屏贴顶/Capture 被标题栏挡） */
+[data-fullscreen="true"] .vditor-tooltipped::after,
+.tooltip-below .vditor-tooltipped::after {
+  top: 100% !important;
+  bottom: auto !important;
+  margin-top: 5px !important;
+  margin-bottom: 0 !important;
+}
+[data-fullscreen="true"] .vditor-tooltipped::before,
+.tooltip-below .vditor-tooltipped::before {
+  top: 100% !important;
+  bottom: auto !important;
+  border: 5px solid transparent !important;
+  border-bottom-color: rgba(0,0,0,0.8) !important;
+  margin-top: -1px !important;
 }
 /* Fix emoji panel */
 .vditor-wrapper .vditor-hint, .vditor-wrapper .vditor-panel--arrow {
