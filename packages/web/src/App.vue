@@ -2,11 +2,12 @@
 import { RouterView, useRoute, useRouter } from 'vue-router';
 import { computed, onMounted, provide, ref, watch } from 'vue';
 import { useAuthStore } from '@/stores/auth';
+import { api, type Note } from '@/api';
+import Vditor from 'vditor';
 import Sidebar from '@/components/Sidebar.vue';
 import TopBar from '@/components/TopBar.vue';
 import NoteEditModal from '@/components/NoteEditModal.vue';
 import GlobalToast from '@/components/GlobalToast.vue';
-import type { Note } from '@/api';
 
 const route = useRoute();
 const router = useRouter();
@@ -25,6 +26,32 @@ provide('toggleMobileSidebar', () => { showMobileSidebar.value = !showMobileSide
 // 路由变化时自动关闭手机端抽屉
 watch(() => route.path, () => { showMobileSidebar.value = false; });
 
+// ── 引用预览 ──
+const refPreviewNote = ref<Note | null>(null);
+const refPreviewHtml = ref('');
+
+async function openRefPreview(noteId: string) {
+  try {
+    const res = await api.getNote(noteId);
+    refPreviewNote.value = res.data;
+    let html = await Vditor.md2html(res.data.content);
+    html = html.replace(
+      /<a\s[^>]*href="([^"]*\bref=[^"]*)"[^>]*>([\s\S]*?)<\/a>/g,
+      '<span class="note-ref-link" data-ref="$1">$2</span>'
+    );
+    refPreviewHtml.value = html;
+  } catch {}
+}
+
+function closeRefPreview() { refPreviewNote.value = null; }
+
+function extractRefId(el: HTMLElement): string | null {
+  const href = el.getAttribute('href') || el.getAttribute('data-ref') || '';
+  try {
+    return new URL(href, location.origin).searchParams.get('ref');
+  } catch { return null; }
+}
+
 onMounted(async () => {
   const user = await auth.fetchMe();
   appReady.value = true;
@@ -37,20 +64,30 @@ onMounted(async () => {
   const fontSize = prefs.fontSize || 16;
   document.documentElement.style.fontSize = fontSize + 'px';
 
-  // 全局拦截引用链接点击(PC 端在应用内跳转,不打开浏览器)
+  // 全局拦截引用链接单击 → 弹预览(不走路由,不打开新标签)
   document.addEventListener('click', (e) => {
-    const link = (e.target as HTMLElement).closest?.('a');
-    if (!link) return;
-    const href = link.getAttribute('href') || '';
-    if (href.includes('ref=')) {
+    const el = (e.target as HTMLElement).closest?.('a, .note-ref-link') as HTMLElement | null;
+    if (!el) return;
+    const refId = extractRefId(el);
+    if (refId) {
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
+      openRefPreview(refId);
+    }
+  }, true);
+
+  // 拦截 window.open(兜底:Vditor 可能用 window.open 打开链接)
+  const origOpen = window.open.bind(window);
+  window.open = function(url?: string | URL, target?: string, features?: string) {
+    if (url && typeof url === 'string') {
       try {
-        const id = new URL(href, location.origin).searchParams.get('ref');
-        if (id) router.push(`/note/${id}`);
+        const u = new URL(url, location.origin);
+        const refId = u.searchParams.get('ref');
+        if (refId) { openRefPreview(refId); return null; }
       } catch {}
     }
-  });
+    return origOpen(url, target, features);
+  } as typeof window.open;
 });
 </script>
 
@@ -94,8 +131,36 @@ onMounted(async () => {
     </div>
 
     <NoteEditModal v-if="editingNote" :note="editingNote" @close="closeEditModal" />
+
+    <!-- 引用预览 Modal(z-150 覆盖编辑 modal z-100) -->
+    <Teleport to="body">
+      <div v-if="refPreviewNote" class="fixed inset-0 z-[150] flex items-center justify-center"
+        @keydown.escape.stop="closeRefPreview" tabindex="-1" ref="refPreviewEl">
+        <div class="absolute inset-0 bg-black/30 backdrop-blur-sm" @click="closeRefPreview" />
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 max-h-[70vh] flex flex-col overflow-hidden ring-1 ring-black/5">
+          <div class="flex items-center justify-between px-5 py-3 bg-gray-50/80 shrink-0">
+            <div class="flex items-center gap-2">
+              <button @click="closeRefPreview" class="p-1 rounded-lg hover:bg-gray-200/60 text-gray-400">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+              </button>
+              <span class="text-xs font-medium text-gray-500">引用预览</span>
+            </div>
+            <button @click="closeRefPreview" class="p-1 rounded-lg hover:bg-gray-200/60 text-gray-400">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto px-6 py-4">
+            <div v-if="refPreviewNote.summary" class="text-sm text-gray-500 italic mb-3">{{ refPreviewNote.summary }}</div>
+            <div class="prose prose-sm max-w-none note-content" v-html="refPreviewHtml" />
+            <div v-if="refPreviewNote.tags?.length" class="flex flex-wrap gap-1.5 mt-4 pt-3 border-t border-gray-100">
+              <span v-for="tag in refPreviewNote.tags" :key="tag" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">#{{ tag }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </template>
 
-  <!-- 全局 Toast(所有路由,包括浮窗/登录等) -->
+  <!-- 全局 Toast -->
   <GlobalToast />
 </template>

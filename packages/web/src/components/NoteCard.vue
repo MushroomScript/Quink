@@ -16,19 +16,19 @@ const router = useRouter();
 const openEditModal = inject<(note: Note) => void>('openEditModal');
 
 function handleClick(e: MouseEvent) {
-  // 引用链接点击 → 跳转
-  const link = (e.target as HTMLElement).closest('a');
-  if (link) {
-    const href = link.getAttribute('href') || '';
-    if (href.includes('?ref=')) {
+  if (e.ctrlKey || e.metaKey) {
+    // Ctrl+点击引用标签 → 跳转详情
+    const ref = (e.target as HTMLElement).closest('.note-ref-link');
+    if (ref) {
       e.preventDefault();
       e.stopPropagation();
-      const id = new URL(href, location.origin).searchParams.get('ref');
-      if (id) router.push(`/note/${id}`);
-      return;
+      try {
+        const href = ref.getAttribute('data-ref') || '';
+        const refId = new URL(href, location.origin).searchParams.get('ref');
+        if (refId) { router.push(`/note/${refId}`); return; }
+      } catch {}
     }
-  }
-  if (e.ctrlKey || e.metaKey) {
+    // Ctrl+点击空白区 → 选择模式
     if (!store.selectMode) store.toggleSelectMode();
     store.toggleSelect(props.note.id);
     return;
@@ -51,10 +51,10 @@ watchEffect(async () => {
   const content = props.note.content;
   try {
     let html = await Vditor.md2html(content);
-    // 引用链接美化:紧凑标签样式
+    // 引用链接:改成 span(去掉 <a> 默认导航行为,Ctrl+点击才跳转)
     html = html.replace(
       /<a\s[^>]*href="([^"]*\bref=[^"]*)"[^>]*>([\s\S]*?)<\/a>/g,
-      '<a href="$1" class="note-ref-link">$2</a>'
+      '<span class="note-ref-link" data-ref="$1">$2</span>'
     );
     // 搜索关键词高亮
     const q = store.searchQuery;

@@ -27,7 +27,12 @@ async function loadNote() {
     const res = await api.getNote(id);
     note.value = res.data;
     try {
-      rendered.value = await Vditor.md2html(res.data.content);
+      let html = await Vditor.md2html(res.data.content);
+      html = html.replace(
+        /<a\s[^>]*href="([^"]*\bref=[^"]*)"[^>]*>([\s\S]*?)<\/a>/g,
+        '<span class="note-ref-link" data-ref="$1">$2</span>'
+      );
+      rendered.value = html;
     } catch (e) {
       console.error('[NoteDetail] Vditor render failed:', e);
       const esc = res.data.content

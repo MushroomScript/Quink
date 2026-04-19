@@ -56,11 +56,15 @@ const tagBtnEl = ref<HTMLElement>();
 function getPopupPos(el: HTMLElement | undefined, width: number) {
   if (!el) return { display: 'none' };
   const r = el.getBoundingClientRect();
+  const maxH = Math.max(r.top - 8, 100);
   return {
     position: 'fixed' as const,
     bottom: `${window.innerHeight - r.top + 4}px`,
     left: `${Math.max(r.right - width, 8)}px`,
     zIndex: 9999,
+    maxHeight: `${maxH}px`,
+    display: 'flex',
+    flexDirection: 'column' as const,
   };
 }
 
@@ -185,7 +189,7 @@ function removeTag(tag: string) { tags.value = tags.value.filter(t => t !== tag)
 // ── Reference ──
 async function searchRefs() {
   if (!refQuery.value.trim()) { refResults.value = []; return; }
-  try { const r = await api.getNotes({ search: refQuery.value, limit: '5' }); refResults.value = r.data; } catch { refResults.value = []; }
+  try { const r = await api.getNotes({ search: refQuery.value, limit: '20' }); refResults.value = r.data; } catch { refResults.value = []; }
 }
 function insertRef(note: any) {
   const firstLine = (note.content || '').split('\n').find((l: string) => l.trim()) || '';
@@ -360,13 +364,13 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
     <!-- Reference popup -->
     <div v-if="showRefSearch" class="bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-64"
       :style="getPopupPos(refBtnEl, 256)">
-      <input v-model="refQuery" @input="searchRefs" @click.stop placeholder="搜索笔记..." class="popup-input w-full mb-1" />
-      <div v-if="refResults.length" class="max-h-32 overflow-y-auto space-y-1">
+      <div v-if="refResults.length" class="flex-1 min-h-0 overflow-y-auto space-y-1 mb-1">
         <button v-for="r in refResults" :key="r.id" @click.stop="insertRef(r)" class="w-full text-left px-2 py-1.5 rounded hover:bg-gray-50 text-xs text-gray-600 truncate">
           {{ r.content.replace(/[#*`\[\]<>]/g, '').split('\n')[0]?.slice(0, 40) }}
         </button>
       </div>
-      <div v-else-if="refQuery.trim()" class="text-xs text-gray-400 py-2 text-center">无结果</div>
+      <div v-else-if="refQuery.trim()" class="text-xs text-gray-400 py-2 text-center mb-1">无结果</div>
+      <input v-model="refQuery" @input="searchRefs" @click.stop placeholder="搜索笔记..." class="popup-input w-full shrink-0" />
     </div>
   </Teleport>
 </template>

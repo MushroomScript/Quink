@@ -190,8 +190,34 @@ function createMainWindow() {
   mainWindow.loadURL(WEB_URL);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // 引用链接:应用内预览
+    try {
+      const u = new URL(url);
+      const refId = u.searchParams.get('ref');
+      if (refId) {
+        mainWindow!.webContents.executeJavaScript(
+          `document.querySelector('.note-ref-link[data-ref*="ref=${refId}"]')?.click()`
+        ).catch(() => {});
+        return { action: 'deny' };
+      }
+    } catch {}
     shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // 拦截内部导航(防止 <a href> 刷新页面,让 SPA 处理)
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const u = new URL(url);
+      const webOrigin = new URL(WEB_URL).origin;
+      if (u.origin === webOrigin) {
+        event.preventDefault();
+        const path = u.pathname + u.search;
+        mainWindow!.webContents.executeJavaScript(
+          `window.history.pushState(null,'','${path}');window.dispatchEvent(new PopStateEvent('popstate'))`
+        ).catch(() => {});
+      }
+    } catch {}
   });
 
   mainWindow.on('close', (e) => {
