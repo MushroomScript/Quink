@@ -37,8 +37,20 @@ onMounted(async () => {
   const fontSize = prefs.fontSize || 16;
   document.documentElement.style.fontSize = fontSize + 'px';
 
-  const refId = route.query.ref as string;
-  if (refId) { router.replace(`/note/${refId}`); return; }
+  // 全局拦截引用链接点击(PC 端在应用内跳转,不打开浏览器)
+  document.addEventListener('click', (e) => {
+    const link = (e.target as HTMLElement).closest?.('a');
+    if (!link) return;
+    const href = link.getAttribute('href') || '';
+    if (href.includes('ref=')) {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        const id = new URL(href, location.origin).searchParams.get('ref');
+        if (id) router.push(`/note/${id}`);
+      } catch {}
+    }
+  });
 });
 </script>
 

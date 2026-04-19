@@ -92,6 +92,10 @@ const router = createRouter({
 });
 
 router.beforeEach((to) => {
+  // 引用链接 /?ref=id → 重定向到详情页
+  if (to.query.ref) {
+    return { path: `/note/${to.query.ref}`, replace: true };
+  }
   if (!to.meta.public && !isLoggedIn()) {
     return { name: 'login' };
   }

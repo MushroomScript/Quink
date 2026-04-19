@@ -53,7 +53,7 @@ watchEffect(async () => {
     let html = await Vditor.md2html(content);
     // 引用链接美化:紧凑标签样式
     html = html.replace(
-      /<a href="(\/?\?ref=[^"]+)">([^<]*)<\/a>/g,
+      /<a\s[^>]*href="([^"]*\bref=[^"]*)"[^>]*>([\s\S]*?)<\/a>/g,
       '<a href="$1" class="note-ref-link">$2</a>'
     );
     // 搜索关键词高亮

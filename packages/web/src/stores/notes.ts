@@ -79,6 +79,7 @@ export const useNotesStore = defineStore('notes', () => {
     const note = notes.value.find((n) => n.id === id);
     if (note) {
       await updateNote(id, { pinned: !note.pinned });
+      await fetchNotes();
     }
   }
 

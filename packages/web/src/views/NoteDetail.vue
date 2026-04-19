@@ -52,7 +52,13 @@ watch(() => store.notes, () => {
   }
 }, { deep: true });
 
-function goBack() { router.back(); }
+function goBack() {
+  if (window.history.length > 1) {
+    router.back();
+  } else {
+    router.push('/');
+  }
+}
 
 onMounted(loadNote);
 </script>
