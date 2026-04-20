@@ -238,6 +238,40 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
   opacity: 0.75;
 }
 
+/* 任务列表 checkbox:圆形 + 主题色 */
+.vditor-reset input[type="checkbox"],
+.note-content input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgb(var(--c-accent));
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  vertical-align: middle;
+  position: relative;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+.vditor-reset input[type="checkbox"]:checked,
+.note-content input[type="checkbox"]:checked {
+  background: rgb(var(--c-accent));
+  border-color: rgb(var(--c-accent));
+}
+.vditor-reset input[type="checkbox"]:checked::after,
+.note-content input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0px;
+  width: 6px;
+  height: 10px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
 /* Search highlight */
 .search-highlight {
   background: rgb(var(--c-accent) / 0.2);

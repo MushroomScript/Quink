@@ -27,6 +27,9 @@ function closeEditModal() { editingNote.value = null; editFullscreen.value = fal
 provide('openEditModal', openEditModal);
 provide('toggleMobileSidebar', () => { showMobileSidebar.value = !showMobileSidebar.value; });
 
+const detailTitle = ref('');
+provide('detailTitle', detailTitle);
+
 // 路由变化时自动关闭手机端抽屉
 watch(() => route.path, () => { showMobileSidebar.value = false; });
 
@@ -39,7 +42,8 @@ async function openRefPreview(noteId: string) {
   try {
     const res = await api.getNote(noteId);
     refPreviewNote.value = res.data;
-    const processed = res.data.content.replace(
+    let md = res.data.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
+    const processed = md.replace(
       /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
       (_: string, label: string, href: string) => {
         const clean = label.replace(/[\n\r#*`\[\]!>~]/g, ' ').trim().slice(0, 30) || '引用笔记';

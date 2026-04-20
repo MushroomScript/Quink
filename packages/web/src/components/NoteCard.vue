@@ -49,8 +49,10 @@ import Vditor from 'vditor';
 watchEffect(async () => {
   const content = props.note.content;
   try {
+    // 任务列表:* [X] → - [x] (Vditor md2html 只认 - 开头的任务列表)
+    let md = content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
     // 引用链接:先在 Markdown 层面简化(旧数据可能有多行 label,Vditor 解析不了)
-    const processed = content.replace(
+    const processed = md.replace(
       /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
       (_: string, label: string, href: string) => {
         const clean = label.replace(/[\n\r#*`\[\]!>~]/g, ' ').trim().slice(0, 20) || '引用笔记';

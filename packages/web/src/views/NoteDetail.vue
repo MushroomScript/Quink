@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, inject, watch } from 'vue';
+import { ref, onMounted, onUnmounted, inject, watch, type Ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import { api, type Note } from '@/api';
@@ -18,23 +18,26 @@ const note = ref<Note | null>(null);
 const rendered = ref('');
 const loading = ref(true);
 const openEditModal = inject<(note: Note, fullscreen?: boolean) => void>('openEditModal');
+const detailTitle = inject<Ref<string>>('detailTitle');
 
-const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '代码片段', link: '链接' };
+const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '笔记', link: '链接' };
 
 async function loadNote() {
   const id = route.params.id as string;
   try {
     const res = await api.getNote(id);
     note.value = res.data;
+    if (detailTitle) detailTitle.value = typeLabels[res.data.type] + '详情';
     try {
-      const processed = res.data.content.replace(
+      let md = res.data.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
+      const processed = md.replace(
         /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
         (_: string, label: string, href: string) => {
           const clean = label.replace(/[\n\r#*`\[\]!>~]/g, ' ').trim().slice(0, 30) || '引用笔记';
           return `<span class="note-ref-link" data-ref="${href}">📌 ${clean}</span>`;
         }
       );
-      let html = await Vditor.md2html(processed);
+      let html = await Vditor.md2html(processed, { cdn: '/vditor' });
       rendered.value = html;
     } catch (e) {
       console.error('[NoteDetail] Vditor render failed:', e);
@@ -55,7 +58,15 @@ watch(() => store.notes, () => {
     const updated = store.notes.find(n => n.id === note.value!.id);
     if (updated && updated.updatedAt !== note.value.updatedAt) {
       note.value = updated;
-      Vditor.md2html(updated.content).then(html => { rendered.value = html; });
+      let md = updated.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
+      md = md.replace(
+        /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
+        (_: string, label: string, href: string) => {
+          const clean = label.replace(/[\n\r#*`\[\]!>~]/g, ' ').trim().slice(0, 30) || '引用笔记';
+          return `<span class="note-ref-link" data-ref="${href}">📌 ${clean}</span>`;
+        }
+      );
+      Vditor.md2html(md, { cdn: '/vditor' }).then(html => { rendered.value = html; });
     }
   }
 }, { deep: true });
@@ -69,6 +80,7 @@ function goBack() {
 }
 
 onMounted(loadNote);
+onUnmounted(() => { if (detailTitle) detailTitle.value = ''; });
 </script>
 
 <template>

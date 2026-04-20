@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, inject, type Ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import { api, type Category } from '@/api';
@@ -32,7 +32,8 @@ watch(() => route.path, () => {
   if (store.selectMode) store.toggleSelectMode();
 });
 
-const title = computed(() => (route.meta.title as string) || '');
+const detailTitle = inject<Ref<string>>('detailTitle', ref(''));
+const title = computed(() => detailTitle.value || (route.meta.title as string) || '');
 const hideSearch = computed(() => !!route.meta.hideSearch);
 const hasFilters = computed(() => filterTag.value || filterDateFrom.value);
 

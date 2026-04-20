@@ -50,7 +50,7 @@ const router = createRouter({
       path: '/note/:id',
       name: 'note-detail',
       component: () => import('@/views/NoteDetail.vue'),
-      meta: { title: '笔记详情', hideSearch: true },
+      meta: { title: '', hideSearch: true },
     },
     {
       path: '/tags',
