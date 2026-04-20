@@ -17,7 +17,7 @@ const store = useNotesStore();
 const note = ref<Note | null>(null);
 const rendered = ref('');
 const loading = ref(true);
-const openEditModal = inject<(note: Note) => void>('openEditModal');
+const openEditModal = inject<(note: Note, fullscreen?: boolean) => void>('openEditModal');
 
 const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '代码片段', link: '链接' };
 
@@ -27,11 +27,14 @@ async function loadNote() {
     const res = await api.getNote(id);
     note.value = res.data;
     try {
-      let html = await Vditor.md2html(res.data.content);
-      html = html.replace(
-        /<a\s[^>]*href="([^"]*\bref=[^"]*)"[^>]*>([\s\S]*?)<\/a>/g,
-        '<span class="note-ref-link" data-ref="$1">$2</span>'
+      const processed = res.data.content.replace(
+        /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
+        (_: string, label: string, href: string) => {
+          const clean = label.replace(/[\n\r#*`\[\]!>~]/g, ' ').trim().slice(0, 30) || '引用笔记';
+          return `<span class="note-ref-link" data-ref="${href}">📌 ${clean}</span>`;
+        }
       );
+      let html = await Vditor.md2html(processed);
       rendered.value = html;
     } catch (e) {
       console.error('[NoteDetail] Vditor render failed:', e);
@@ -89,7 +92,7 @@ onMounted(loadNote);
           <span v-if="note.category" class="text-xs text-gray-400">{{ note.category }}</span>
         </div>
         <span class="text-xs text-gray-400 ml-auto">{{ dayjs(note.createdAt).format('YYYY-MM-DD HH:mm') }}</span>
-        <button @click="openEditModal?.(note)" class="px-3 py-1 text-xs rounded-lg hover:bg-gray-100 text-gray-400">✏️ 编辑</button>
+        <button @click="openEditModal?.(note, true)" class="px-3 py-1 text-xs rounded-lg hover:bg-gray-100 text-gray-400">✏️ 编辑</button>
       </div>
 
       <!-- Summary -->

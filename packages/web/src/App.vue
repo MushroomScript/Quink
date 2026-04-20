@@ -18,8 +18,12 @@ const showMobileSidebar = ref(false);
 const appReady = ref(false);
 
 const editingNote = ref<Note | null>(null);
-function openEditModal(note: Note) { editingNote.value = note; }
-function closeEditModal() { editingNote.value = null; }
+const editFullscreen = ref(false);
+function openEditModal(note: Note, fullscreen = false) {
+  editingNote.value = note;
+  editFullscreen.value = fullscreen;
+}
+function closeEditModal() { editingNote.value = null; editFullscreen.value = false; }
 provide('openEditModal', openEditModal);
 provide('toggleMobileSidebar', () => { showMobileSidebar.value = !showMobileSidebar.value; });
 
@@ -29,21 +33,44 @@ watch(() => route.path, () => { showMobileSidebar.value = false; });
 // ── 引用预览 ──
 const refPreviewNote = ref<Note | null>(null);
 const refPreviewHtml = ref('');
+let refPreviewEscHandler: ((e: KeyboardEvent) => void) | null = null;
 
 async function openRefPreview(noteId: string) {
   try {
     const res = await api.getNote(noteId);
     refPreviewNote.value = res.data;
-    let html = await Vditor.md2html(res.data.content);
-    html = html.replace(
-      /<a\s[^>]*href="([^"]*\bref=[^"]*)"[^>]*>([\s\S]*?)<\/a>/g,
-      '<span class="note-ref-link" data-ref="$1">$2</span>'
+    const processed = res.data.content.replace(
+      /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
+      (_: string, label: string, href: string) => {
+        const clean = label.replace(/[\n\r#*`\[\]!>~]/g, ' ').trim().slice(0, 30) || '引用笔记';
+        return `<span class="note-ref-link" data-ref="${href}">📌 ${clean}</span>`;
+      }
     );
+    let html = await Vditor.md2html(processed, { cdn: '/vditor' });
     refPreviewHtml.value = html;
-  } catch {}
+
+    // Esc 关闭预览(capture phase,比编辑 modal 更早)
+    refPreviewEscHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        closeRefPreview();
+      }
+    };
+    document.addEventListener('keydown', refPreviewEscHandler, true);
+  } catch (err) {
+    console.error('[RefPreview] load failed:', err);
+  }
 }
 
-function closeRefPreview() { refPreviewNote.value = null; }
+function closeRefPreview() {
+  refPreviewNote.value = null;
+  refPreviewHtml.value = '';
+  if (refPreviewEscHandler) {
+    document.removeEventListener('keydown', refPreviewEscHandler, true);
+    refPreviewEscHandler = null;
+  }
+}
 
 function extractRefId(el: HTMLElement): string | null {
   const href = el.getAttribute('href') || el.getAttribute('data-ref') || '';
@@ -130,12 +157,11 @@ onMounted(async () => {
       </div>
     </div>
 
-    <NoteEditModal v-if="editingNote" :note="editingNote" @close="closeEditModal" />
+    <NoteEditModal v-if="editingNote" :note="editingNote" :initial-fullscreen="editFullscreen" @close="closeEditModal" />
 
     <!-- 引用预览 Modal(z-150 覆盖编辑 modal z-100) -->
     <Teleport to="body">
-      <div v-if="refPreviewNote" class="fixed inset-0 z-[150] flex items-center justify-center"
-        @keydown.escape.stop="closeRefPreview" tabindex="-1" ref="refPreviewEl">
+      <div v-if="refPreviewNote" class="fixed inset-0 z-[150] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30 backdrop-blur-sm" @click="closeRefPreview" />
         <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 max-h-[70vh] flex flex-col overflow-hidden ring-1 ring-black/5">
           <div class="flex items-center justify-between px-5 py-3 bg-gray-50/80 shrink-0">

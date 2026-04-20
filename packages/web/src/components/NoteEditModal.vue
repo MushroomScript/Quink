@@ -4,7 +4,7 @@ import { useNotesStore } from '@/stores/notes';
 import RichEditor from './RichEditor.vue';
 import type { Note } from '@/api';
 
-const props = defineProps<{ note: Note }>();
+const props = defineProps<{ note: Note; initialFullscreen?: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const store = useNotesStore();
@@ -79,6 +79,7 @@ function onKeydown(e: KeyboardEvent) {
             :initial-content="note.content"
             :initial-type="note.type"
             :initial-tags="note.tags || []"
+            :initial-fullscreen="initialFullscreen"
             :max-height="450"
             submit-label="保存"
             :z-index="110"

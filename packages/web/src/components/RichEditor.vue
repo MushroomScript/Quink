@@ -8,6 +8,7 @@ const props = withDefaults(defineProps<{
   initialContent?: string;
   initialType?: string;
   initialTags?: string[];
+  initialFullscreen?: boolean;
   placeholder?: string;
   showTypeSelector?: boolean;
   submitLabel?: string;
@@ -20,6 +21,7 @@ const props = withDefaults(defineProps<{
   initialContent: '',
   initialType: 'note',
   initialTags: () => [],
+  initialFullscreen: false,
   placeholder: '写下你的想法...',
   showTypeSelector: true,
   submitLabel: '保存',
@@ -30,7 +32,7 @@ const props = withDefaults(defineProps<{
   showFullscreenBtn: true,
 });
 
-const isFullscreen = ref(false);
+const isFullscreen = ref(props.initialFullscreen);
 function toggleFullscreen() { isFullscreen.value = !isFullscreen.value; }
 
 const emit = defineEmits<{

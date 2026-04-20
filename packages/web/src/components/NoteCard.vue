@@ -37,10 +37,9 @@ function handleClick(e: MouseEvent) {
     store.toggleSelect(props.note.id);
     return;
   }
-  openEditModal?.(props.note);
+  router.push(`/note/${props.note.id}`);
 }
-
-const confirmDelete = ref(false);
+const showMenu = ref(false);
 
 const renderedContent = ref('');
 
@@ -50,12 +49,15 @@ import Vditor from 'vditor';
 watchEffect(async () => {
   const content = props.note.content;
   try {
-    let html = await Vditor.md2html(content);
-    // 引用链接:改成 span(去掉 <a> 默认导航行为,Ctrl+点击才跳转)
-    html = html.replace(
-      /<a\s[^>]*href="([^"]*\bref=[^"]*)"[^>]*>([\s\S]*?)<\/a>/g,
-      '<span class="note-ref-link" data-ref="$1">$2</span>'
+    // 引用链接:先在 Markdown 层面简化(旧数据可能有多行 label,Vditor 解析不了)
+    const processed = content.replace(
+      /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
+      (_: string, label: string, href: string) => {
+        const clean = label.replace(/[\n\r#*`\[\]!>~]/g, ' ').trim().slice(0, 20) || '引用笔记';
+        return `<span class="note-ref-link" data-ref="${href}">📌 ${clean}</span>`;
+      }
     );
+    let html = await Vditor.md2html(processed, { cdn: '/vditor' });
     // 搜索关键词高亮
     const q = store.searchQuery;
     if (q && q.trim()) {
@@ -90,10 +92,10 @@ async function handleDelete() {
 </script>
 
 <template>
-  <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group"
+  <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group relative"
     :class="{ 'ring-2 ring-primary/50': note.pinned, 'ring-2 ring-primary': store.selectedIds.has(note.id) }">
-    <div class="px-3 py-3 md:px-5 md:py-4 cursor-pointer" @click="handleClick">
-      <div class="flex items-center gap-2 mb-2.5">
+    <div class="px-3 py-2.5 md:px-4 md:py-3 cursor-pointer" @click="handleClick">
+      <div class="flex items-center gap-2 mb-2">
         <!-- Checkbox (visible in select mode or when selected) -->
         <div v-if="store.selectMode"
           class="w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors"
@@ -105,34 +107,54 @@ async function handleDelete() {
         </span>
         <span v-if="note.category" class="text-xs text-gray-400">{{ note.category }}</span>
         <span class="ml-auto text-[11px] text-gray-400" :title="fullTime">{{ timeAgo }}</span>
+        <!-- 三点菜单 -->
+        <button @click.stop="showMenu = !showMenu"
+          class="p-0.5 rounded-md text-gray-300 hover:text-gray-500 hover:bg-gray-100 transition-colors">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>
+          </svg>
+        </button>
       </div>
 
       <p v-if="note.summary" class="text-xs text-gray-500 mb-1.5 italic">{{ note.summary }}</p>
       <div class="prose prose-sm max-w-none text-gray-700 note-content line-clamp-4" v-html="renderedContent" />
 
-      <div v-if="note.tags && note.tags.length > 0" class="flex flex-wrap gap-1.5 mt-3">
+      <div v-if="note.tags && note.tags.length > 0" class="flex flex-wrap gap-1.5 mt-2">
         <span v-for="tag in note.tags" :key="tag" class="text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
           #{{ tag }}
         </span>
       </div>
     </div>
 
-    <div class="flex items-center gap-1 px-3 md:px-4 py-1.5 md:py-2 border-t border-gray-50 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-      <button @click="store.togglePin(note.id)" class="p-1.5 rounded-lg hover:bg-gray-100 text-xs text-gray-400 transition-colors" :title="note.pinned ? '取消置顶' : '置顶'">
-        {{ note.pinned ? '📌' : '📍' }}
-      </button>
-      <button @click="openEditModal?.(note)" class="p-1.5 rounded-lg hover:bg-gray-100 text-xs text-gray-400 transition-colors" title="编辑">
-        ✏️
-      </button>
-      <button v-if="note.type === 'todo'" @click="store.toggleTodo(note.id)" class="p-1.5 rounded-lg hover:bg-gray-100 text-xs transition-colors"
-        :class="note.todoStatus === 'done' ? 'text-green-500' : 'text-gray-400'"
-        :title="note.todoStatus === 'done' ? '标记未完成' : '标记完成'">
-        {{ note.todoStatus === 'done' ? '✅' : '⬜' }}
-      </button>
-      <button @click="handleDelete" class="p-1.5 rounded-lg hover:bg-red-50 text-xs ml-auto transition-colors"
-        :class="confirmDelete ? 'text-red-500 font-medium' : 'text-gray-400'">
-        {{ confirmDelete ? '确认?' : '🗑️' }}
-      </button>
-    </div>
+    <!-- 下拉菜单 -->
+    <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
+      leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
+      <div v-if="showMenu" class="absolute right-3 top-10 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 min-w-[100px]">
+        <button @click.stop="store.togglePin(note.id); showMenu = false"
+          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+          {{ note.pinned ? '📌 取消置顶' : '📍 置顶' }}
+        </button>
+        <button @click.stop="openEditModal?.(note); showMenu = false"
+          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+          ✏️ 编辑
+        </button>
+        <button v-if="note.type === 'todo'" @click.stop="store.toggleTodo(note.id); showMenu = false"
+          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors"
+          :class="note.todoStatus === 'done' ? 'text-green-600 hover:bg-green-50' : 'text-gray-600 hover:bg-gray-50'">
+          {{ note.todoStatus === 'done' ? '✅ 标记未完成' : '⬜ 标记完成' }}
+        </button>
+        <div class="border-t border-gray-100 my-0.5"></div>
+        <button @click.stop="handleDelete; showMenu = false"
+          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors"
+          :class="confirmDelete ? 'text-red-500 font-medium hover:bg-red-50' : 'text-gray-600 hover:bg-gray-50'">
+          {{ confirmDelete ? '⚠️ 确认删除' : '🗑️ 删除' }}
+        </button>
+      </div>
+    </Transition>
+
+    <!-- 菜单外部点击关闭 -->
+    <Teleport to="body">
+      <div v-if="showMenu" class="fixed inset-0 z-40" @click="showMenu = false" />
+    </Teleport>
   </div>
 </template>
