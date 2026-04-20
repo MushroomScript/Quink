@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('quink', {
   saveNote: (content: string, type: string) => ipcRenderer.invoke('save-note', content, type),
   hideWindow: () => ipcRenderer.send('hide-window'),
+  noteSaved: () => ipcRenderer.send('note-saved'),
   onWindowShown: (callback: () => void) => {
     ipcRenderer.on('window-shown', () => callback());
   },

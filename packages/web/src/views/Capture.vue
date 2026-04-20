@@ -17,17 +17,13 @@ async function onSubmit(data: { html: string; type: string; tags: string[] }) {
   try {
     await store.createNote(data.html, data.type, data.tags.length ? data.tags : undefined);
     editorRef.value?.clearContent();
-    toastMsg.value = '已保存';
-    showToast.value = true;
-    setTimeout(() => (showToast.value = false), 1500);
 
     // 通知主窗口刷新
     window.dispatchEvent(new CustomEvent('quink-note-created'));
 
-    // 自动隐藏弹窗
-    setTimeout(() => {
-      try { (window as any).quink?.hideWindow(); } catch {}
-    }, 800);
+    // 先关闭弹窗,再通知主进程显示 toast
+    try { (window as any).quink?.hideWindow(); } catch {}
+    try { (window as any).quink?.noteSaved?.(); } catch {}
   } catch (err: any) {
     toastMsg.value = '保存失败: ' + err.message;
     showToast.value = true;
@@ -50,6 +46,15 @@ onMounted(async () => {
   const theme = user?.preferences?.theme || 'blueberry';
   document.documentElement.setAttribute('data-theme', theme);
   document.addEventListener('keydown', onKeydown);
+
+  // 每次窗口显示时聚焦编辑器
+  try {
+    (window as any).quink?.onWindowShown?.(() => {
+      setTimeout(() => {
+        document.querySelector<HTMLElement>('.vditor-ir [contenteditable]')?.focus();
+      }, 50);
+    });
+  } catch {}
 });
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown);

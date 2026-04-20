@@ -117,36 +117,45 @@ function toggleUiaAuto() {
 let toastWin: BrowserWindow | null = null;
 let toastTimer: NodeJS.Timeout | null = null;
 
+function showToastAt(msg: string, tx: number, ty: number) {
+  _showToast(msg, tx, ty);
+}
+
 function showToast(msg: string) {
   const bounds = screen.getPrimaryDisplay().workArea;
   const w = 240, h = 44;
   const x = bounds.x + bounds.width - w - 16;
   const y = bounds.y + bounds.height - h - 16;
+  _showToast(msg, x, y);
+}
+
+function _showToast(msg: string, x: number, y: number) {
+  const w = 140, h = 50;
 
   const bg = THEME_ACCENT_DARK[currentTheme] || THEME_ACCENT_DARK.blueberry;
   const html = `<!DOCTYPE html><html><head><style>
-    html,body{margin:0;padding:0;background:transparent;overflow:hidden;font-family:system-ui,sans-serif;}
+    html,body{margin:0;padding:0;background:transparent;overflow:hidden;font-family:system-ui,sans-serif;height:100%;}
     .toast{height:100%;display:flex;align-items:center;justify-content:center;
-      background:${bg};color:#fff;font-size:13px;font-weight:500;border-radius:10px;
+      background:${bg};color:#fff;font-size:15px;font-weight:600;border-radius:10px;
       box-shadow:0 4px 16px rgba(0,0,0,0.25)}
   </style></head><body><div class="toast">${msg}</div></body></html>`;
 
   if (toastWin && !toastWin.isDestroyed()) {
-    toastWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-    toastWin.setPosition(x, y);
-  } else {
-    toastWin = new BrowserWindow({
-      width: w, height: h, x, y,
-      frame: false, resizable: false,
-      alwaysOnTop: true, skipTaskbar: true, focusable: false,
-      show: false,
-      transparent: true, roundedCorners: false, hasShadow: false,
-      webPreferences: { nodeIntegration: false, contextIsolation: true },
-    });
-    toastWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-    toastWin.once('ready-to-show', () => toastWin?.showInactive());
-    toastWin.on('closed', () => { toastWin = null; });
+    toastWin.close();
+    toastWin = null;
   }
+
+  toastWin = new BrowserWindow({
+    width: w, height: h, x, y,
+    frame: false, resizable: false,
+    alwaysOnTop: true, skipTaskbar: true, focusable: false,
+    show: false,
+    transparent: true, roundedCorners: false, hasShadow: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  });
+  toastWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  toastWin.once('ready-to-show', () => toastWin?.showInactive());
+  toastWin.on('closed', () => { toastWin = null; });
 
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
@@ -257,7 +266,7 @@ function createCaptureWindow() {
     minWidth: 650,
     minHeight: 155,
     x: Math.round(screenWidth / 2 - 325),
-    y: Math.round(screenHeight * 0.2),
+    y: Math.round(screenHeight / 2 - 78),
     frame: false,
     resizable: false,
     alwaysOnTop: true,
@@ -389,9 +398,23 @@ ipcMain.handle('save-note', async (_event, content: string, type: string) => {
 });
 
 ipcMain.on('hide-window', (_event) => {
-  // 找到发送消息的窗口并隐藏
   const win = BrowserWindow.fromWebContents(_event.sender);
   if (win) win.hide();
+});
+
+ipcMain.on('note-saved', () => {
+  // toast 显示在快捷弹窗原来的中心位置
+  const bounds = captureWindow?.getBounds();
+  if (bounds) {
+    showToastAt('已保存', bounds.x + Math.round((bounds.width - 240) / 2), bounds.y + Math.round((bounds.height - 44) / 2));
+  } else {
+    showToast('已保存');
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.executeJavaScript(
+      `window.dispatchEvent(new CustomEvent('quink-note-created'))`
+    ).catch(() => {});
+  }
 });
 
 ipcMain.on('sync-token', (_event, token: string | null) => {
