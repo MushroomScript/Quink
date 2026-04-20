@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<{
   maxHeight?: number;
   showAi?: boolean;
   showFullscreenBtn?: boolean;
+  hintText?: string;
 }>(), {
   initialContent: '',
   initialType: 'note',
@@ -30,6 +31,7 @@ const props = withDefaults(defineProps<{
   minHeight: 120,
   maxHeight: 320,
   showFullscreenBtn: true,
+  hintText: '',
 });
 
 const isFullscreen = ref(props.initialFullscreen);
@@ -259,12 +261,12 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
       :style="isFullscreen ? { flex: '1 1 auto', minHeight: 0 } : { '--editor-max': maxHeight + 'px' }"></div>
 
     <!-- AI buttons + bottom bar -->
-    <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-t border-gray-100 select-none">
+    <div class="flex items-center justify-between px-3 py-0.5 bg-gray-50 border-t border-gray-100 select-none">
       <div class="flex items-center gap-2">
         <!-- Type selector -->
         <div v-if="showTypeSelector" class="flex gap-0.5">
           <button v-for="t in noteTypes" :key="t.value" @click="noteType = t.value"
-            class="px-2 py-1 rounded-md text-xs transition-colors"
+            class="px-2 py-0.5 rounded-md text-[11px] transition-colors"
             :class="noteType === t.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'">
             {{ t.icon }} {{ t.label }}
           </button>
@@ -276,7 +278,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
           <div class="flex gap-0.5">
             <button v-for="f in aiFeatureOptions" :key="f.value"
               @click="aiFeature === f.value && showAiPanel ? closeAiPanel() : openAiPanel(f.value)"
-              class="px-2 py-1 rounded-md text-xs transition-colors"
+              class="px-2 py-0.5 rounded-md text-xs transition-colors"
               :class="showAiPanel && aiFeature === f.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'">
               {{ f.icon }} {{ f.label }}
             </button>
@@ -296,6 +298,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 
       <!-- Submit + fullscreen -->
       <div class="flex items-center gap-1.5">
+        <span v-if="hintText" class="text-[11px] text-gray-400 mr-1">{{ hintText }}</span>
         <button v-if="showFullscreenBtn" @click="toggleFullscreen"
           class="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
           :title="isFullscreen ? '退出全屏 (Esc)' : '全屏编辑'">
@@ -308,7 +311,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         </button>
         <slot name="submit-button">
           <button @click="handleSubmit"
-            class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            class="px-3 py-1 bg-primary text-white text-[11px] leading-none font-medium rounded-lg hover:bg-primary-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center">
             {{ submitLabel }}
           </button>
         </slot>

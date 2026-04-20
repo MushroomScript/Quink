@@ -57,15 +57,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-full flex flex-col bg-transparent tooltip-below">
-    <!-- Draggable title bar (follows theme) -->
-    <div class="flex items-center justify-between px-4 py-2 rounded-t-xl" style="-webkit-app-region: drag; background: rgb(var(--c-sidebar))">
-      <span class="text-xs font-semibold" style="color: var(--sb-text)">Quink</span>
-      <span class="text-[10px]" style="color: var(--sb-dim); -webkit-app-region: no-drag">Esc 关闭 | Ctrl+Enter 保存</span>
-    </div>
-
+  <div class="h-full flex flex-col bg-transparent tooltip-below capture-drag">
     <!-- Not logged in -->
-    <div v-if="notLoggedIn" class="flex-1 flex items-center justify-center bg-white rounded-b-xl shadow-2xl">
+    <div v-if="notLoggedIn" class="flex-1 flex items-center justify-center bg-white rounded-xl shadow-2xl">
       <div class="text-center">
         <p class="text-gray-500 text-sm">请先在主窗口登录</p>
         <p class="text-gray-400 text-xs mt-1">Esc 关闭</p>
@@ -73,8 +67,8 @@ onUnmounted(() => {
     </div>
 
     <!-- Editor -->
-    <div v-else class="flex-1 overflow-hidden bg-white rounded-b-xl shadow-2xl">
-      <RichEditor ref="editorRef" @submit="onSubmit" :show-ai="false" :show-fullscreen-btn="false" :max-height="80" :min-height="60" placeholder="快速记录你的想法..." />
+    <div v-else class="flex-1 overflow-hidden bg-white rounded-xl shadow-2xl">
+      <RichEditor ref="editorRef" @submit="onSubmit" :show-ai="false" :show-fullscreen-btn="false" :max-height="80" :min-height="60" hint-text="Esc 关闭 | Ctrl+Enter 保存" placeholder="快速记录你的想法..." />
     </div>
 
     <!-- Toast -->
@@ -87,3 +81,12 @@ onUnmounted(() => {
     </Transition>
   </div>
 </template>
+
+<style>
+.capture-drag .vditor-toolbar {
+  -webkit-app-region: drag;
+}
+.capture-drag .vditor-toolbar__item {
+  -webkit-app-region: no-drag;
+}
+</style>
