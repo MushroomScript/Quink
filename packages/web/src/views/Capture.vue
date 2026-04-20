@@ -94,4 +94,18 @@ onUnmounted(() => {
 .capture-drag .vditor-toolbar__item {
   -webkit-app-region: no-drag;
 }
+/* 快捷弹窗专用:底部栏更紧凑 */
+.capture-drag .bg-gray-50.border-t {
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+}
+.capture-drag .bg-gray-50.border-t .bg-primary {
+  padding: 2px 12px !important;
+  font-size: 11px !important;
+}
+.capture-drag .bg-gray-50.border-t .rounded-md {
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+  font-size: 11px !important;
+}
 </style>
