@@ -15,48 +15,103 @@ const searchInput = ref<HTMLInputElement>();
 const searchText = ref('');
 const showFilters = ref(false);
 const showMobileSearch = ref(false);
-const filterTag = ref('');
+const filterTags = ref<string[]>([]);
 const filterDateFrom = ref('');
 const filterDateTo = ref(new Date().toISOString().slice(0, 10));
 const allTags = ref<string[]>([]);
 let searchTimer: ReturnType<typeof setTimeout>;
+const showTagSuggestions = ref(false);
 
 watch(() => route.path, () => {
   clearTimeout(searchTimer);
   searchText.value = '';
-  filterTag.value = '';
+  filterTags.value = [];
   filterDateFrom.value = '';
   filterDateTo.value = new Date().toISOString().slice(0, 10);
-  showFilters.value = false;
   showMobileSearch.value = false;
+  showTagSuggestions.value = false;
   if (store.selectMode) store.toggleSelectMode();
+  // 有分类过滤时保持筛选面板开启
+  showFilters.value = !!store.filterCategory;
 });
 
 const detailTitle = inject<Ref<string>>('detailTitle', ref(''));
 const title = computed(() => detailTitle.value || (route.meta.title as string) || '');
 const hideSearch = computed(() => !!route.meta.hideSearch);
-const hasFilters = computed(() => filterTag.value || filterDateFrom.value);
+const hasFilters = computed(() => filterTags.value.length > 0 || filterDateFrom.value || store.filterCategory);
+
+const tagSuggestions = computed(() => {
+  const q = searchText.value.trim();
+  if (!q) return [];
+  return allTags.value.filter(t => t.includes(q) && !filterTags.value.includes(t)).slice(0, 6);
+});
 
 function doSearch() {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     store.searchQuery = searchText.value;
     store.fetchNotes({
-      tag: filterTag.value || undefined,
+      tags: filterTags.value.length ? filterTags.value.join(',') : undefined,
       dateFrom: filterDateFrom.value || undefined,
       dateTo: filterDateFrom.value ? (filterDateTo.value || undefined) : undefined,
     });
   }, 300);
 }
 
-function onSearch() { doSearch(); }
+function onSearch() {
+  // 加载标签列表(首次)
+  if (allTags.value.length === 0) {
+    api.getTags().then(res => { allTags.value = res.data; }).catch(() => {});
+  }
+  showTagSuggestions.value = true;
+  doSearch();
+}
+
+function addTag(t: string) {
+  if (!filterTags.value.includes(t)) filterTags.value.push(t);
+  searchText.value = '';
+  showTagSuggestions.value = false;
+  showFilters.value = true;
+  doSearch();
+}
+
+function removeTag(t: string) {
+  filterTags.value = filterTags.value.filter(x => x !== t);
+  doSearch();
+}
+
+// 分类/标签变化时自动展开筛选面板
+watch(() => store.filterCategory, (v) => { if (v) showFilters.value = true; });
+watch(filterTags, (v) => { if (v.length) showFilters.value = true; }, { deep: true });
 function applyFilters() { doSearch(); }
 
 function clearFilters() {
-  filterTag.value = '';
+  store.filterCategory = '';
+  filterTags.value = [];
   filterDateFrom.value = '';
   filterDateTo.value = new Date().toISOString().slice(0, 10);
   doSearch();
+}
+
+function clearCategory() {
+  store.filterCategory = '';
+  doSearch();
+}
+
+function clearTag() {
+  filterTags.value = [];
+  doSearch();
+}
+
+function clearAll() {
+  searchText.value = '';
+  store.searchQuery = '';
+  store.filterCategory = '';
+  filterTags.value = [];
+  filterDateFrom.value = '';
+  filterDateTo.value = new Date().toISOString().slice(0, 10);
+  showTagSuggestions.value = false;
+  store.fetchNotes();
 }
 
 async function toggleFilters() {
@@ -112,12 +167,27 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       <!-- Right: search -->
       <div v-if="!hideSearch" class="flex items-center gap-1.5">
         <!-- Desktop search -->
-        <div class="relative hidden md:block">
-          <input ref="searchInput" v-model="searchText" @input="onSearch" type="text" placeholder="搜索...  Ctrl+F"
-            class="w-64 pl-9 pr-3 py-1.5 bg-gray-100/80 border-0 rounded-full text-sm outline-none focus:bg-white focus:ring-2 focus:ring-primary/30 transition placeholder-gray-400" />
-          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="relative hidden md:flex items-center w-56 bg-gray-100/80 rounded-full border border-gray-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition">
+          <svg class="ml-3 w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
+          <input ref="searchInput" v-model="searchText" @input="onSearch" @focus="onSearch" @blur="setTimeout(() => showTagSuggestions = false, 200)" type="text"
+            placeholder="搜索...      Ctrl + F"
+            class="flex-1 min-w-0 px-2 py-1.5 bg-transparent border-0 text-sm outline-none placeholder-gray-400" />
+          <!-- 清空搜索 -->
+          <button v-if="searchText" @click="searchText = ''; store.searchQuery = ''; doSearch()" class="mr-2 text-gray-400 hover:text-gray-600 shrink-0">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <!-- 标签建议下拉 -->
+          <div v-if="showTagSuggestions && tagSuggestions.length" class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[9999]">
+            <button v-for="t in tagSuggestions" :key="t" @mousedown.prevent="addTag(t)"
+              class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 flex items-center gap-1.5">
+              <span class="px-1.5 py-0.5 rounded-full text-[10px] bg-primary-light text-primary-dark">🏷️</span>
+              {{ t }}
+            </button>
+          </div>
         </div>
 
         <!-- Mobile search toggle -->
@@ -151,21 +221,38 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
     <!-- Desktop filter panel -->
     <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="opacity-0 -translate-y-1"
       leave-active-class="transition duration-100 ease-in" leave-to-class="opacity-0 -translate-y-1">
-      <div v-if="showFilters" class="px-6 pb-3 flex items-center gap-4 flex-wrap hidden md:flex">
-        <div class="flex items-center gap-1.5">
-          <span class="text-xs text-gray-400">标签</span>
-          <select v-model="filterTag" @change="applyFilters" class="px-2 py-1 border border-gray-200 rounded-lg text-xs outline-none bg-white">
-            <option value="">全部</option>
-            <option v-for="t in allTags" :key="t" :value="t">#{{ t }}</option>
-          </select>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <span class="text-xs text-gray-400">时间</span>
+      <div v-if="showFilters" class="px-6 pb-3 space-y-2 hidden md:block">
+        <!-- 分类 + 时间 + 清除 -->
+        <div class="flex items-center gap-3 h-7">
+          <div class="flex items-center gap-1.5 w-56 shrink-0">
+            <span class="text-xs text-gray-400 w-8 shrink-0">分类</span>
+            <span v-if="store.filterCategory" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium max-w-[200px]"
+              style="background: #FFE0CC; color: #D46B27">
+              <span class="truncate">📂 {{ store.filterCategory }}</span>
+              <button @click="clearCategory()" class="hover:opacity-60 shrink-0">×</button>
+            </span>
+            <span v-else class="text-xs text-gray-300">无</span>
+          </div>
+          <span class="text-gray-200">|</span>
+          <span class="text-xs text-gray-400 shrink-0">时间</span>
           <input v-model="filterDateFrom" @change="applyFilters" type="date" class="px-2 py-1 border border-gray-200 rounded-lg text-xs outline-none bg-white" />
           <span class="text-xs text-gray-400">-</span>
           <input v-model="filterDateTo" @change="applyFilters" type="date" class="px-2 py-1 border border-gray-200 rounded-lg text-xs outline-none bg-white" />
+          <button @click="clearFilters"
+            class="text-xs font-medium px-3 py-1 rounded-lg transition-colors ml-auto shrink-0"
+            :class="hasFilters ? 'text-white bg-red-400 hover:bg-red-500' : 'text-gray-400 bg-gray-100 hover:bg-gray-200'">
+            清除全部筛选
+          </button>
         </div>
-        <button v-if="hasFilters" @click="clearFilters" class="text-xs text-gray-400 hover:text-gray-600">清除筛选</button>
+        <!-- 标签 -->
+        <div class="flex items-center gap-1.5 flex-wrap h-7">
+          <span class="text-xs text-gray-400 w-8 shrink-0">标签</span>
+          <span v-for="t in filterTags" :key="t" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-primary-light text-primary-dark">
+            🏷️ {{ t }}
+            <button @click="removeTag(t)" class="hover:opacity-60">×</button>
+          </span>
+          <span v-if="!filterTags.length" class="text-xs text-gray-300">无（在搜索栏输入关键词匹配标签）</span>
+        </div>
       </div>
     </Transition>
 

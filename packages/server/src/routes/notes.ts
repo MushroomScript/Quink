@@ -34,7 +34,7 @@ const updateNoteSchema = z.object({
 // GET /api/notes
 app.get('/', async (c) => {
   const userId = c.get('userId');
-  const { search, category, type, tag, dateFrom, dateTo, page = '1', limit = '50' } = c.req.query();
+  const { search, category, type, tag, tags, dateFrom, dateTo, page = '1', limit = '50' } = c.req.query();
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   const conditions: any[] = [
@@ -60,8 +60,13 @@ app.get('/', async (c) => {
     conditions.push(eq(schema.notes.type, type as any));
   }
   if (tag) {
-    // 标签搜索放到 SQL 层面
     conditions.push(sql`${schema.notes.tags} LIKE ${'%"' + tag + '"%'}`);
+  }
+  if (tags) {
+    for (const t of tags.split(',')) {
+      const trimmed = t.trim();
+      if (trimmed) conditions.push(sql`${schema.notes.tags} LIKE ${'%"' + trimmed + '"%'}`);
+    }
   }
   if (dateFrom) {
     conditions.push(sql`${schema.notes.createdAt} >= ${dateFrom}`);

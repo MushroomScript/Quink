@@ -44,6 +44,7 @@ export const useNotesStore = defineStore('notes', () => {
       if (filterCategory.value) params.category = filterCategory.value;
       if (filterType.value) params.type = filterType.value;
       if (extra?.tag) params.tag = extra.tag;
+      if (extra?.tags) params.tags = extra.tags;
       if (extra?.dateFrom) params.dateFrom = extra.dateFrom;
       if (extra?.dateTo) params.dateTo = extra.dateTo;
 

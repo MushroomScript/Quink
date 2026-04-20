@@ -27,6 +27,7 @@ async function loadCategories() {
 loadStats();
 loadCategories();
 watch(() => notesStore.notes, () => { loadStats(); }, { deep: true });
+watch(() => notesStore.filterCategory, (v) => { activeCategory.value = v; });
 
 async function addCategory() {
   const name = newCategoryName.value.trim();
@@ -52,7 +53,11 @@ function filterByCategory(name: string) {
     notesStore.filterCategory = name;
   }
   notesStore.fetchNotes();
-  router.push('/');
+  // 只在非内容页时跳灵感,灵感/笔记/待办页原地筛选
+  const contentPaths = ['/', '/notes', '/todos'];
+  if (!contentPaths.includes(route.path)) {
+    router.push('/');
+  }
 }
 
 const mainNav = [
