@@ -15,6 +15,9 @@ const categories = ref<Category[]>([]);
 const showAddCategory = ref(false);
 const newCategoryName = ref('');
 const activeCategory = ref('');
+const showDeleteConfirm = ref(false);
+const deletingCategoryId = ref<number | null>(null);
+const deletingCategoryName = ref('');
 
 async function loadStats() {
   if (!isLoggedIn()) return;
@@ -41,7 +44,24 @@ async function addCategory() {
 }
 
 async function deleteCategory(id: number) {
-  try { await api.deleteCategory(id); await loadCategories(); } catch {}
+  try {
+    await api.deleteCategory(id);
+    await loadCategories();
+    if (activeCategory.value === deletingCategoryName.value) {
+      activeCategory.value = '';
+      notesStore.filterCategory = '';
+      notesStore.fetchNotes();
+    }
+  } catch {}
+  showDeleteConfirm.value = false;
+  deletingCategoryId.value = null;
+  deletingCategoryName.value = '';
+}
+
+function confirmDelete(cat: any) {
+  deletingCategoryId.value = cat.id;
+  deletingCategoryName.value = cat.name;
+  showDeleteConfirm.value = true;
 }
 
 function filterByCategory(name: string) {
@@ -160,13 +180,7 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
     <div class="px-3 py-2" style="border-top: 1px solid var(--sb-border)">
       <div class="flex items-center justify-between px-3 mb-1">
         <span class="text-[11px] font-medium" style="color: var(--sb-dim)">分类</span>
-        <button @click="showAddCategory = !showAddCategory" class="text-xs" style="color: var(--sb-dim)" title="新增分类">+</button>
-      </div>
-      <!-- Add form -->
-      <div v-if="showAddCategory" class="flex gap-1 px-2 mb-2">
-        <input v-model="newCategoryName" @keydown.enter="addCategory" placeholder="分类名称"
-          class="flex-1 px-2 py-1 rounded-md text-xs outline-none" style="background: var(--sb-hover); color: var(--sb-text)" />
-        <button @click="addCategory" class="px-2 py-1 rounded-md text-xs" style="background: var(--sb-hover); color: var(--sb-text)">添加</button>
+        <button @click="showAddCategory = true" class="text-xs" style="color: var(--sb-dim)" title="新增分类">+</button>
       </div>
       <!-- Tree -->
       <div v-if="categories.length === 0 && !showAddCategory" class="px-3 py-2">
@@ -181,8 +195,7 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
             : { color: 'var(--sb-dim)' }">
           <span>📂</span>
           <span class="flex-1 truncate">{{ cat.name }}</span>
-          <button @click.stop="deleteCategory(cat.id)" class="opacity-0 group-hover:opacity-100 text-[10px] hover:text-red-400" style="color: var(--sb-dim)">✕</button>
-          <!-- Children -->
+          <button @click.stop="confirmDelete(cat)" class="opacity-0 group-hover:opacity-100 text-[10px] hover:text-red-400" style="color: var(--sb-dim)">✕</button>
         </div>
         <template v-for="cat in categories" :key="'children-' + cat.id">
           <div v-for="child in cat.children" :key="child.id"
@@ -193,7 +206,7 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
               : { color: 'var(--sb-dim)' }">
             <span>📄</span>
             <span class="flex-1 truncate">{{ child.name }}</span>
-            <button @click.stop="deleteCategory(child.id)" class="opacity-0 group-hover:opacity-100 text-[10px] hover:text-red-400" style="color: var(--sb-dim)">✕</button>
+            <button @click.stop="confirmDelete(child)" class="opacity-0 group-hover:opacity-100 text-[10px] hover:text-red-400" style="color: var(--sb-dim)">✕</button>
           </div>
         </template>
       </div>
@@ -203,6 +216,38 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
 
   <Teleport to="body">
     <div v-if="showUserMenu" class="fixed inset-0 z-40" @click="closeUserMenu" />
+
+    <!-- 添加分类弹窗 -->
+    <div v-if="showAddCategory" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/30" @click="showAddCategory = false" />
+      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72">
+        <p class="text-sm font-medium text-gray-700 mb-3">新增分类</p>
+        <input v-model="newCategoryName" @keydown.enter="addCategory" placeholder="输入分类名称" autofocus
+          class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
+        <div class="flex gap-2 mt-4 justify-end">
+          <button @click="showAddCategory = false; newCategoryName = ''"
+            class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+          <button @click="addCategory"
+            class="px-4 py-1.5 text-xs rounded-lg text-white font-medium"
+            style="background: rgb(var(--c-accent-dark))">添加</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 删除分类确认弹窗 -->
+    <div v-if="showDeleteConfirm" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/30" @click="showDeleteConfirm = false" />
+      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+        <p class="text-sm text-gray-700 mb-1">确认删除分类</p>
+        <p class="text-xs text-gray-400 mb-4">「{{ deletingCategoryName }}」及关联笔记的分类将被清除</p>
+        <div class="flex gap-2 justify-center">
+          <button @click="showDeleteConfirm = false"
+            class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+          <button @click="deleteCategory(deletingCategoryId!)"
+            class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+        </div>
+      </div>
+    </div>
   </Teleport>
 </template>
 

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { authMiddleware } from '../auth.js';
 
 const app = new Hono();
@@ -63,6 +63,9 @@ app.delete('/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
   const cat = await db.select().from(schema.categories).where(and(eq(schema.categories.id, id), eq(schema.categories.userId, userId))).get();
   if (!cat) return c.json({ error: '分类不存在' }, 404);
+  // 清空关联笔记的分类
+  await db.update(schema.notes).set({ category: null })
+    .where(and(eq(schema.notes.userId, userId), eq(schema.notes.category, cat.name)));
   await db.delete(schema.categories).where(eq(schema.categories.id, id));
   return c.json({ message: '已删除' });
 });
