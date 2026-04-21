@@ -699,16 +699,29 @@ function goBack() {
 
     <!-- ═══ 关于 ═══ -->
     <div v-if="activeTab === 'about'">
-      <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-        <div class="text-center py-4">
-          <h3 class="text-2xl font-bold text-primary">Quink</h3>
-          <p class="text-gray-400 text-sm mt-1">一念 - Quick Think</p>
-          <p class="text-gray-400 text-xs mt-2">v0.1.0</p>
+      <div class="bg-white rounded-xl border border-gray-200 p-8 max-w-md mx-auto">
+        <div class="text-center mb-6">
+          <div class="w-16 h-16 rounded-2xl mx-auto mb-3 flex items-center justify-center text-3xl" style="background: rgb(var(--c-accent-light))">
+            📝
+          </div>
+          <h3 class="text-2xl font-bold" style="color: rgb(var(--c-accent-dark))">Quink</h3>
+          <p class="text-gray-500 text-sm mt-1">一念 · Quick Think</p>
+          <p class="text-xs text-gray-400 mt-1">v0.1.0</p>
         </div>
-        <div class="border-t border-gray-100 pt-4 space-y-2 text-sm text-gray-500">
-          <p>按下快捷键，闪电记录脑中闪念。AI 自动归类总结，随时回顾。</p>
-          <p class="text-xs text-gray-400 mt-4">技术栈: Electron + Vue 3 + Hono + SQLite</p>
+
+        <div class="space-y-3 text-sm text-gray-500 mb-6">
+          <p class="text-center">按下快捷键，闪电记录脑中闪念</p>
+          <p class="text-center">AI 自动归类总结，随时回顾</p>
         </div>
+
+        <div class="border-t border-gray-100 pt-4">
+          <div class="flex justify-between text-xs">
+            <span class="text-gray-400">技术栈</span>
+            <span class="text-gray-500">Electron + Vue 3 + Hono + SQLite</span>
+          </div>
+        </div>
+
+        <p class="text-center text-[10px] text-gray-300 mt-6">Made with ❤️ by Mushroom</p>
       </div>
     </div>
   </div>

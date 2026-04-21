@@ -198,15 +198,51 @@ function createMainWindow() {
   Menu.setApplicationMenu(null);
   mainWindow.loadURL(WEB_URL);
 
-  // 右键上下文菜单
-  mainWindow.webContents.on('context-menu', () => {
-    Menu.buildFromTemplate([
-      { label: '剪切', role: 'cut' },
-      { label: '复制', role: 'copy' },
-      { label: '粘贴', role: 'paste' },
-      { type: 'separator' },
-      { label: '全选', role: 'selectAll' },
-    ]).popup();
+  // 右键上下文菜单(仅编辑区和内容显示区)
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    // 只在编辑区(.vditor)或内容区(.note-content/.prose)内显示
+    mainWindow!.webContents.executeJavaScript(`
+      (function() {
+        var el = document.elementFromPoint(${params.x}, ${params.y});
+        return !!(el && (el.closest('.vditor') || el.closest('.note-content') || el.closest('.prose')));
+      })()
+    `).then((inContentArea: boolean) => {
+      if (!inContentArea) return;
+
+      const hasSelection = params.selectionText.length > 0;
+
+      if (params.isEditable) {
+        Menu.buildFromTemplate([
+          { label: '剪切', role: 'cut', enabled: hasSelection },
+          { label: '复制', role: 'copy', enabled: hasSelection },
+          { label: '粘贴', role: 'paste' },
+          { type: 'separator' },
+          { label: '全选', role: 'selectAll' },
+        ]).popup();
+      } else {
+        Menu.buildFromTemplate([
+          { label: '复制', role: 'copy', enabled: hasSelection },
+          { type: 'separator' },
+          {
+            label: '全选',
+            click: () => {
+              mainWindow!.webContents.executeJavaScript(`
+                (function() {
+                  var el = document.querySelector('.note-content') || document.querySelector('.vditor-reset');
+                  if (el) {
+                    var range = document.createRange();
+                    range.selectNodeContents(el);
+                    var sel = window.getSelection();
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                  }
+                })()
+              `).catch(() => {});
+            },
+          },
+        ]).popup();
+      }
+    }).catch(() => {});
   });
 
   // F5 / Ctrl+R 刷新, Ctrl+Shift+R 强刷
