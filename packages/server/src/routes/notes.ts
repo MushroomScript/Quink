@@ -248,10 +248,16 @@ app.delete('/:id', async (c) => {
  */
 async function processNoteWithAi(userId: string, noteId: string, content: string, existingTags: string[]) {
   try {
+    // 读用户偏好:自动摘要开关和最小字符数
+    const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+    const prefs = (user as any)?.preferences || {};
+    const summaryEnabled = prefs.autoSummary !== false;
+    const summaryMinLen = prefs.autoSummaryMinLen || 50;
+
     const [tags, category, summary] = await Promise.all([
       existingTags.length > 0 ? Promise.resolve(existingTags) : autoTag(userId, content),
       autoClassify(userId, content),
-      content.length >= 50 ? autoSummary(userId, content) : Promise.resolve(null),
+      summaryEnabled && content.length >= summaryMinLen ? autoSummary(userId, content) : Promise.resolve(null),
     ]);
 
     const updates: Record<string, any> = { aiProcessed: true };

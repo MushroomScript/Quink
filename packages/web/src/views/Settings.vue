@@ -20,6 +20,8 @@ const uploadingAvatar = ref(false);
 // ── Preferences ──
 const theme = ref('blueberry');
 const fontSize = ref('14');
+const autoSummary = ref(true);
+const autoSummaryMinLen = ref(50);
 
 // ── Shortcuts ──
 const shortcuts = ref({
@@ -172,6 +174,8 @@ onMounted(() => {
     const prefs = auth.user.preferences || {};
     theme.value = prefs.theme || 'blueberry';
     fontSize.value = String(prefs.fontSize || 14);
+    if (typeof prefs.autoSummary === 'boolean') autoSummary.value = prefs.autoSummary;
+    if (prefs.autoSummaryMinLen) autoSummaryMinLen.value = prefs.autoSummaryMinLen;
     if (prefs.shortcuts) {
       shortcuts.value = { ...shortcuts.value, ...prefs.shortcuts };
     }
@@ -267,6 +271,8 @@ async function savePreferences(silent = false) {
         ...(auth.user?.preferences || {}),
         theme: theme.value,
         fontSize: parseInt(fontSize.value),
+        autoSummary: autoSummary.value,
+        autoSummaryMinLen: autoSummaryMinLen.value,
       },
     });
     document.documentElement.setAttribute('data-theme', theme.value);
@@ -281,7 +287,7 @@ async function savePreferences(silent = false) {
 
 // 主题、字号、划词开关 变化时自动静默保存
 let savePrefsTimer: ReturnType<typeof setTimeout> | null = null;
-watch([theme, fontSize], () => {
+watch([theme, fontSize, autoSummary, autoSummaryMinLen], () => {
   if (!prefsLoaded) return;
   if (savePrefsTimer) clearTimeout(savePrefsTimer);
   savePrefsTimer = setTimeout(() => savePreferences(true).then(() => toast.show('已保存')), 300);
@@ -486,6 +492,25 @@ function goBack() {
             <option value="20">20px</option>
             <option value="22">22px</option>
           </select>
+        </div>
+        <!-- 自动摘要 -->
+        <div class="flex items-center justify-between pt-2 border-t border-gray-100">
+          <div>
+            <div class="text-sm text-gray-700 font-medium">自动摘要</div>
+            <div class="text-xs text-gray-400 mt-0.5">新建笔记后 AI 自动生成内容摘要</div>
+          </div>
+          <button @click="autoSummary = !autoSummary"
+            class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4"
+            :class="autoSummary ? 'bg-primary' : 'bg-gray-300'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
+              :class="autoSummary ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
+        </div>
+        <div v-if="autoSummary" class="flex items-center gap-2">
+          <span class="text-xs text-gray-400 shrink-0">最少字符数</span>
+          <input v-model.number="autoSummaryMinLen" type="number" min="10" max="500" step="10"
+            class="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs outline-none bg-white text-center" />
+          <span class="text-xs text-gray-300">少于此长度不生成摘要</span>
         </div>
       </div>
     </div>
