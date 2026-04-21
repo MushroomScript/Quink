@@ -79,8 +79,15 @@ function goBack() {
   }
 }
 
-onMounted(loadNote);
-onUnmounted(() => { if (detailTitle) detailTitle.value = ''; });
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') goBack();
+}
+
+onMounted(() => { document.addEventListener('keydown', onKeydown); loadNote(); });
+onUnmounted(() => {
+  if (detailTitle) detailTitle.value = '';
+  document.removeEventListener('keydown', onKeydown);
+});
 </script>
 
 <template>

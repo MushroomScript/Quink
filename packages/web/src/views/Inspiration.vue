@@ -11,9 +11,12 @@ const store = useNotesStore();
 const isMobile = ref(window.innerWidth < 768);
 
 onActivated(() => {
+  const needRefresh = store.filterType !== 'note';
   store.filterType = 'note';
-  store.searchQuery = '';
-  store.fetchNotes();
+  if (needRefresh) {
+    store.searchQuery = '';
+    store.fetchNotes();
+  }
 });
 </script>
 

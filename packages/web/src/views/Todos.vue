@@ -18,9 +18,12 @@ const doneTodos = computed(() =>
 );
 
 onActivated(() => {
+  const needRefresh = store.filterType !== 'todo';
   store.filterType = 'todo';
-  store.searchQuery = '';
-  store.fetchNotes();
+  if (needRefresh) {
+    store.searchQuery = '';
+    store.fetchNotes();
+  }
 });
 </script>
 

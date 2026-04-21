@@ -11,10 +11,13 @@ const store = useNotesStore();
 const isMobile = ref(window.innerWidth < 768);
 
 onActivated(() => {
+  const needRefresh = store.filterType !== 'snippet';
   store.filterType = 'snippet';
-  store.filterCategory = '';
-  store.searchQuery = '';
-  store.fetchNotes();
+  if (needRefresh) {
+    store.filterCategory = '';
+    store.searchQuery = '';
+    store.fetchNotes();
+  }
 });
 </script>
 

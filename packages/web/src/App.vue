@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { RouterView, useRoute, useRouter } from 'vue-router';
-import { computed, onMounted, provide, ref, watch } from 'vue';
+import { computed, onMounted, provide, ref, watch, nextTick } from 'vue';
 import { useAuthStore } from '@/stores/auth';
+import { useNotesStore } from '@/stores/notes';
 import { api, type Note } from '@/api';
 import Vditor from 'vditor';
 import Sidebar from '@/components/Sidebar.vue';
@@ -12,6 +13,7 @@ import GlobalToast from '@/components/GlobalToast.vue';
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+const store = useNotesStore();
 
 const showChrome = computed(() => !['login', 'capture', 'float', 'ai-chat'].includes(route.name as string));
 const showMobileSidebar = ref(false);
@@ -32,6 +34,25 @@ provide('detailTitle', detailTitle);
 
 // 路由变化时自动关闭手机端抽屉
 watch(() => route.path, () => { showMobileSidebar.value = false; });
+
+// 保存/恢复 main 滚动位置
+const mainEl = ref<HTMLElement>();
+const scrollPositions = new Map<string, number>();
+
+router.beforeEach((to, from) => {
+  if (mainEl.value && from.path) {
+    scrollPositions.set(from.path, mainEl.value.scrollTop);
+  }
+});
+
+router.afterEach((to) => {
+  const saved = scrollPositions.get(to.path);
+  if (saved != null) {
+    nextTick(() => {
+      if (mainEl.value) mainEl.value.scrollTop = saved;
+    });
+  }
+});
 
 // ── 引用预览（栈结构支持多级） ──
 const refPreviewStack = ref<{ note: Note; html: string }[]>([]);
@@ -159,7 +180,7 @@ onMounted(async () => {
 
       <div class="flex-1 flex flex-col overflow-hidden">
         <TopBar />
-        <main class="flex-1 overflow-y-auto" style="scrollbar-gutter: stable">
+        <main ref="mainEl" class="flex-1 overflow-y-auto" style="scrollbar-gutter: stable">
           <RouterView v-slot="{ Component }">
             <KeepAlive :include="['inspiration', 'notes', 'todos']">
               <component :is="Component" />
