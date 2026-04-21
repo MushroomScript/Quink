@@ -33,15 +33,15 @@ provide('detailTitle', detailTitle);
 // 路由变化时自动关闭手机端抽屉
 watch(() => route.path, () => { showMobileSidebar.value = false; });
 
-// ── 引用预览 ──
-const refPreviewNote = ref<Note | null>(null);
-const refPreviewHtml = ref('');
+// ── 引用预览（栈结构支持多级） ──
+const refPreviewStack = ref<{ note: Note; html: string }[]>([]);
+const refPreviewNote = computed(() => refPreviewStack.value.length ? refPreviewStack.value[refPreviewStack.value.length - 1].note : null);
+const refPreviewHtml = computed(() => refPreviewStack.value.length ? refPreviewStack.value[refPreviewStack.value.length - 1].html : '');
 let refPreviewEscHandler: ((e: KeyboardEvent) => void) | null = null;
 
 async function openRefPreview(noteId: string) {
   try {
     const res = await api.getNote(noteId);
-    refPreviewNote.value = res.data;
     let md = res.data.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
     const processed = md.replace(
       /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
@@ -51,25 +51,33 @@ async function openRefPreview(noteId: string) {
       }
     );
     let html = await Vditor.md2html(processed, { cdn: '/vditor' });
-    refPreviewHtml.value = html;
+    refPreviewStack.value.push({ note: res.data, html });
 
-    // Esc 关闭预览(capture phase,比编辑 modal 更早)
-    refPreviewEscHandler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopImmediatePropagation();
-        e.preventDefault();
-        closeRefPreview();
-      }
-    };
-    document.addEventListener('keydown', refPreviewEscHandler, true);
+    if (!refPreviewEscHandler) {
+      refPreviewEscHandler = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          goBackRefPreview();
+        }
+      };
+      document.addEventListener('keydown', refPreviewEscHandler, true);
+    }
   } catch (err) {
     console.error('[RefPreview] load failed:', err);
   }
 }
 
+function goBackRefPreview() {
+  if (refPreviewStack.value.length > 1) {
+    refPreviewStack.value.pop();
+  } else {
+    closeRefPreview();
+  }
+}
+
 function closeRefPreview() {
-  refPreviewNote.value = null;
-  refPreviewHtml.value = '';
+  refPreviewStack.value = [];
   if (refPreviewEscHandler) {
     document.removeEventListener('keydown', refPreviewEscHandler, true);
     refPreviewEscHandler = null;
@@ -166,14 +174,14 @@ onMounted(async () => {
     <!-- 引用预览 Modal(z-150 覆盖编辑 modal z-100) -->
     <Teleport to="body">
       <div v-if="refPreviewNote" class="fixed inset-0 z-[150] flex items-center justify-center">
-        <div class="absolute inset-0 bg-black/30 backdrop-blur-sm" @click="closeRefPreview" />
+        <div class="absolute inset-0 bg-black/30 backdrop-blur-sm" @click="goBackRefPreview" />
         <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 max-h-[70vh] flex flex-col overflow-hidden ring-1 ring-black/5">
           <div class="flex items-center justify-between px-5 py-3 bg-gray-50/80 shrink-0">
             <div class="flex items-center gap-2">
-              <button @click="closeRefPreview" class="p-1 rounded-lg hover:bg-gray-200/60 text-gray-400">
+              <button @click="goBackRefPreview" class="p-1 rounded-lg hover:bg-gray-200/60 text-gray-400">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
               </button>
-              <span class="text-xs font-medium text-gray-500">引用预览</span>
+              <span class="text-xs font-medium text-gray-500">引用预览{{ refPreviewStack.length > 1 ? ` (${refPreviewStack.length})` : '' }}</span>
             </div>
             <button @click="closeRefPreview" class="p-1 rounded-lg hover:bg-gray-200/60 text-gray-400">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>

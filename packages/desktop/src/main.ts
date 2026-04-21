@@ -198,6 +198,14 @@ function createMainWindow() {
   Menu.setApplicationMenu(null);
   mainWindow.loadURL(WEB_URL);
 
+  // F5 / Ctrl+R 刷新, Ctrl+Shift+R 强刷
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F5' || (input.control && input.key === 'r')) {
+      event.preventDefault();
+      mainWindow?.webContents.reloadIgnoringCache();
+    }
+  });
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     // 引用链接:应用内预览
     try {
