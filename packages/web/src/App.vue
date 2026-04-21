@@ -16,6 +16,8 @@ const auth = useAuthStore();
 const store = useNotesStore();
 
 const showChrome = computed(() => !['login', 'capture', 'float', 'ai-chat'].includes(route.name as string));
+const isElectron = !!(window as any).quinkDesktop?.isElectron;
+const desk = (window as any).quinkDesktop;
 const showMobileSidebar = ref(false);
 const appReady = ref(false);
 
@@ -186,10 +188,28 @@ onMounted(async () => {
 
   <!-- 主界面 -->
   <template v-else>
-    <div class="flex h-full overflow-hidden">
-      <div class="hidden md:block">
-        <Sidebar />
+    <div class="flex flex-col h-full overflow-hidden">
+      <!-- 自定义标题栏(仅 Electron) -->
+      <div v-if="isElectron" class="flex items-center justify-between h-9 px-4 shrink-0"
+        style="-webkit-app-region: drag; background: rgb(var(--c-sidebar))">
+        <span class="text-xs font-semibold" style="color: var(--sb-text)">Quink - 一念</span>
+        <div class="flex items-center" style="-webkit-app-region: no-drag">
+          <button @click="desk?.minimize()" class="w-10 h-9 flex items-center justify-center hover:bg-black/10 transition-colors" style="color: var(--sb-dim)">
+            <svg width="12" height="1" viewBox="0 0 12 1"><rect width="12" height="1" fill="currentColor"/></svg>
+          </button>
+          <button @click="desk?.maximize()" class="w-10 h-9 flex items-center justify-center hover:bg-black/10 transition-colors" style="color: var(--sb-dim)">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="0.5" width="9" height="9" rx="1"/></svg>
+          </button>
+          <button @click="desk?.close()" class="w-10 h-9 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors" style="color: var(--sb-dim)">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+          </button>
+        </div>
       </div>
+
+      <div class="flex flex-1 overflow-hidden">
+        <div class="hidden md:block">
+          <Sidebar />
+        </div>
 
       <!-- Mobile sidebar drawer -->
       <div v-if="showMobileSidebar" class="fixed inset-0 z-50 md:hidden">
@@ -208,6 +228,7 @@ onMounted(async () => {
             </KeepAlive>
           </RouterView>
         </main>
+      </div>
       </div>
     </div>
 

@@ -185,7 +185,7 @@ function createMainWindow() {
     minWidth: 1166,
     minHeight: 860,
     title: 'Quink - 一念',
-    autoHideMenuBar: true,
+    frame: false,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload-main.js'),
@@ -408,6 +408,24 @@ ipcMain.handle('save-note', async (_event, content: string, type: string) => {
 ipcMain.on('hide-window', (_event) => {
   const win = BrowserWindow.fromWebContents(_event.sender);
   if (win) win.hide();
+});
+
+ipcMain.on('win-minimize', (_event) => {
+  const win = BrowserWindow.fromWebContents(_event.sender);
+  if (win) win.minimize();
+});
+
+ipcMain.on('win-maximize', (_event) => {
+  const win = BrowserWindow.fromWebContents(_event.sender);
+  if (win) {
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+  }
+});
+
+ipcMain.on('win-close', (_event) => {
+  const win = BrowserWindow.fromWebContents(_event.sender);
+  if (win) win.close();
 });
 
 ipcMain.on('note-saved', () => {

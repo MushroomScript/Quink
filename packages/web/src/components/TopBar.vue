@@ -144,6 +144,9 @@ async function toggleFilters() {
   }
 }
 
+const isElectron = !!(window as any).quinkDesktop?.isElectron;
+const desk = (window as any).quinkDesktop;
+
 async function loadCategories() {
   try { const res = await api.getCategories(); categories.value = res.data; } catch {}
 }
