@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
-import { eq, desc, like, or, and, sql } from 'drizzle-orm';
+import { eq, desc, like, or, and, sql, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
@@ -34,7 +34,7 @@ const updateNoteSchema = z.object({
 // GET /api/notes
 app.get('/', async (c) => {
   const userId = c.get('userId');
-  const { search, category, type, tag, tags, dateFrom, dateTo, page = '1', limit = '50' } = c.req.query();
+  const { search, category, type, tag, tags, types, dateFrom, dateTo, page = '1', limit = '50' } = c.req.query();
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   const conditions: any[] = [
@@ -56,7 +56,12 @@ app.get('/', async (c) => {
   if (category) {
     conditions.push(like(schema.notes.category, `${category}%`));
   }
-  if (type) {
+  if (types) {
+    const typeList = types.split(',').map(t => t.trim()).filter(Boolean);
+    if (typeList.length > 0 && typeList.length < 4) {
+      conditions.push(inArray(schema.notes.type, typeList as any));
+    }
+  } else if (type) {
     conditions.push(eq(schema.notes.type, type as any));
   }
   if (tag) {

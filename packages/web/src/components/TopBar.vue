@@ -16,6 +16,7 @@ const searchText = ref('');
 const showFilters = ref(false);
 const showMobileSearch = ref(false);
 const filterTags = ref<string[]>([]);
+const filterTypes = ref<string[]>(['note', 'snippet', 'todo']);
 const filterDateFrom = ref('');
 const filterDateTo = ref(new Date().toISOString().slice(0, 10));
 const allTags = ref<string[]>([]);
@@ -26,6 +27,7 @@ watch(() => route.path, () => {
   clearTimeout(searchTimer);
   searchText.value = '';
   filterTags.value = [];
+  filterTypes.value = ['note', 'snippet', 'todo'];
   filterDateFrom.value = '';
   filterDateTo.value = new Date().toISOString().slice(0, 10);
   showMobileSearch.value = false;
@@ -38,7 +40,23 @@ watch(() => route.path, () => {
 const detailTitle = inject<Ref<string>>('detailTitle', ref(''));
 const title = computed(() => detailTitle.value || (route.meta.title as string) || '');
 const hideSearch = computed(() => !!route.meta.hideSearch);
-const hasFilters = computed(() => filterTags.value.length > 0 || filterDateFrom.value || store.filterCategory);
+const hasFilters = computed(() => filterTags.value.length > 0 || filterDateFrom.value || store.filterCategory || filterTypes.value.length < 3);
+
+const typeOptions = [
+  { value: 'note', label: '灵感', icon: '💡' },
+  { value: 'snippet', label: '笔记', icon: '📝' },
+  { value: 'todo', label: '待办', icon: '✅' },
+];
+
+function toggleType(t: string) {
+  const idx = filterTypes.value.indexOf(t);
+  if (idx >= 0) {
+    if (filterTypes.value.length > 1) filterTypes.value.splice(idx, 1);
+  } else {
+    filterTypes.value.push(t);
+  }
+  doSearch();
+}
 
 const tagSuggestions = computed(() => {
   const q = searchText.value.trim();
@@ -50,8 +68,12 @@ function doSearch() {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     store.searchQuery = searchText.value;
+    // types 筛选激活时覆盖页面级 filterType
+    const useTypes = filterTypes.value.length < 3;
+    if (useTypes) store.filterType = '';
     store.fetchNotes({
       tags: filterTags.value.length ? filterTags.value.join(',') : undefined,
+      types: useTypes ? filterTypes.value.join(',') : undefined,
       dateFrom: filterDateFrom.value || undefined,
       dateTo: filterDateFrom.value ? (filterDateTo.value || undefined) : undefined,
     });
@@ -88,6 +110,7 @@ function applyFilters() { doSearch(); }
 function clearFilters() {
   store.filterCategory = '';
   filterTags.value = [];
+  filterTypes.value = ['note', 'snippet', 'todo'];
   filterDateFrom.value = '';
   filterDateTo.value = new Date().toISOString().slice(0, 10);
   doSearch();
@@ -222,16 +245,15 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
     <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="opacity-0 -translate-y-1"
       leave-active-class="transition duration-100 ease-in" leave-to-class="opacity-0 -translate-y-1">
       <div v-if="showFilters" class="px-6 pb-3 space-y-2 hidden md:block">
-        <!-- 分类 + 时间 + 清除 -->
+        <!-- 类型 + 时间 + 清除 -->
         <div class="flex items-center gap-3 h-7">
-          <div class="flex items-center gap-1.5 w-56 shrink-0">
-            <span class="text-xs text-gray-400 w-8 shrink-0">分类</span>
-            <span v-if="store.filterCategory" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium max-w-[200px]"
-              style="background: #FFE0CC; color: #D46B27">
-              <span class="truncate">📂 {{ store.filterCategory }}</span>
-              <button @click="clearCategory()" class="hover:opacity-60 shrink-0">×</button>
-            </span>
-            <span v-else class="text-xs text-gray-300">无</span>
+          <span class="text-xs text-gray-400 w-8 shrink-0">类型</span>
+          <div class="flex items-center gap-1">
+            <button v-for="t in typeOptions" :key="t.value" @click="toggleType(t.value)"
+              class="px-2 py-0.5 rounded-full text-xs font-medium transition-colors"
+              :class="filterTypes.includes(t.value) ? 'bg-primary-light text-primary-dark' : 'bg-gray-100 text-gray-400'">
+              {{ t.icon }} {{ t.label }}
+            </button>
           </div>
           <span class="text-gray-200">|</span>
           <span class="text-xs text-gray-400 shrink-0">时间</span>
@@ -244,14 +266,19 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
             清除全部筛选
           </button>
         </div>
-        <!-- 标签 -->
+        <!-- 分类 + 标签 -->
         <div class="flex items-center gap-1.5 flex-wrap h-7">
-          <span class="text-xs text-gray-400 w-8 shrink-0">标签</span>
+          <span class="text-xs text-gray-400 w-8 shrink-0">筛选</span>
+          <span v-if="store.filterCategory" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium"
+            style="background: #FFE0CC; color: #D46B27">
+            <span class="truncate max-w-[120px]">📂 {{ store.filterCategory }}</span>
+            <button @click="clearCategory()" class="hover:opacity-60 shrink-0">×</button>
+          </span>
           <span v-for="t in filterTags" :key="t" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-primary-light text-primary-dark">
             🏷️ {{ t }}
             <button @click="removeTag(t)" class="hover:opacity-60">×</button>
           </span>
-          <span v-if="!filterTags.length" class="text-xs text-gray-300">无（在搜索栏输入关键词匹配标签）</span>
+          <span v-if="!store.filterCategory && !filterTags.length" class="text-xs text-gray-300">无（侧边栏选分类，搜索栏输入匹配标签）</span>
         </div>
       </div>
     </Transition>
