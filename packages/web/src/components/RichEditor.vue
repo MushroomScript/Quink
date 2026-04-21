@@ -106,7 +106,7 @@ onMounted(() => {
       'code', 'inline-code', 'table', 'line', '|',
       'upload', 'undo', 'redo',
     ],
-    toolbarConfig: { pin: true },
+    toolbarConfig: { pin: false },
     counter: { enable: false },
     preview: { actions: [] },
     cache: { enable: false },
@@ -457,10 +457,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 .vditor-wrapper .vditor-reset::before {
   color: #9ca3af !important;
 }
-/* 全屏时 toolbar 不 pin(fixed + fixed 会遮挡编辑区） */
-[data-fullscreen="true"] .vditor-toolbar--pin {
-  position: static !important;
-}
+/* 全屏时 content 撑满 */
 [data-fullscreen="true"] > .vditor-wrapper > .vditor-content {
   flex: 1 1 0 !important;
   max-height: none !important;
