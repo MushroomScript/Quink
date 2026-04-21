@@ -201,9 +201,6 @@ function createMainWindow() {
   // 右键上下文菜单
   mainWindow.webContents.on('context-menu', () => {
     Menu.buildFromTemplate([
-      { label: '撤销', role: 'undo' },
-      { label: '重做', role: 'redo' },
-      { type: 'separator' },
       { label: '剪切', role: 'cut' },
       { label: '复制', role: 'copy' },
       { label: '粘贴', role: 'paste' },
@@ -236,19 +233,26 @@ function createMainWindow() {
     return { action: 'deny' };
   });
 
-  // 拦截内部导航(防止 <a href> 刷新页面,让 SPA 处理)
+  // 拦截所有导航:同域走 SPA,外域用外部浏览器
   mainWindow.webContents.on('will-navigate', (event, url) => {
     try {
       const u = new URL(url);
       const webOrigin = new URL(WEB_URL).origin;
       if (u.origin === webOrigin) {
+        // 同域:SPA 内部导航
         event.preventDefault();
-        const path = u.pathname + u.search;
+        const navPath = u.pathname + u.search;
         mainWindow!.webContents.executeJavaScript(
-          `window.history.pushState(null,'','${path}');window.dispatchEvent(new PopStateEvent('popstate'))`
+          `window.history.pushState(null,'','${navPath}');window.dispatchEvent(new PopStateEvent('popstate'))`
         ).catch(() => {});
+      } else {
+        // 外域:用外部浏览器打开
+        event.preventDefault();
+        shell.openExternal(url);
       }
-    } catch {}
+    } catch {
+      event.preventDefault();
+    }
   });
 
   mainWindow.on('close', (e) => {
