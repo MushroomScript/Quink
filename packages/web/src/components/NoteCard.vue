@@ -40,6 +40,17 @@ function handleClick(e: MouseEvent) {
   router.push(`/note/${props.note.id}`);
 }
 const showMenu = ref(false);
+const confirmDelete = ref(false);
+
+function askDelete() {
+  showMenu.value = false;
+  confirmDelete.value = true;
+}
+
+async function doDelete() {
+  confirmDelete.value = false;
+  await store.deleteNote(props.note.id);
+}
 
 const renderedContent = ref('');
 
@@ -82,15 +93,6 @@ const typeColor: Record<string, string> = {
   snippet: 'bg-emerald-100 text-emerald-600',
   link: 'bg-sky-100 text-sky-600',
 };
-
-async function handleDelete() {
-  if (!confirmDelete.value) {
-    confirmDelete.value = true;
-    setTimeout(() => (confirmDelete.value = false), 3000);
-    return;
-  }
-  await store.deleteNote(props.note.id);
-}
 </script>
 
 <template>
@@ -146,13 +148,29 @@ async function handleDelete() {
           {{ note.todoStatus === 'done' ? '✅ 标记未完成' : '⬜ 标记完成' }}
         </button>
         <div class="border-t border-gray-100 my-0.5"></div>
-        <button @click.stop="handleDelete; showMenu = false"
-          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors"
-          :class="confirmDelete ? 'text-red-500 font-medium hover:bg-red-50' : 'text-gray-600 hover:bg-gray-50'">
-          {{ confirmDelete ? '⚠️ 确认删除' : '🗑️ 删除' }}
+        <button @click.stop="askDelete()"
+          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-red-50 hover:text-red-500 transition-colors">
+          🗑️ 删除
         </button>
       </div>
     </Transition>
+
+    <!-- 删除确认弹窗 -->
+    <Teleport to="body">
+      <div v-if="confirmDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="confirmDelete = false" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">确认删除</p>
+          <p class="text-xs text-gray-400 mb-4">删除后将移入回收站</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="confirmDelete = false"
+              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doDelete()"
+              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- 菜单外部点击关闭 -->
     <Teleport to="body">
