@@ -19,6 +19,8 @@ const rendered = ref('');
 const loading = ref(true);
 const openEditModal = inject<(note: Note, fullscreen?: boolean) => void>('openEditModal');
 const detailTitle = inject<Ref<string>>('detailTitle');
+const hasRefPreviewPending = inject<Ref<boolean>>('hasRefPreviewPending');
+const restoreRefPreview = inject<() => void>('restoreRefPreview');
 
 const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '笔记', link: '链接' };
 
@@ -72,6 +74,11 @@ watch(() => store.notes, () => {
 }, { deep: true });
 
 function goBack() {
+  // 有预览栈等待恢复 → 先显示预览,不导航
+  if (hasRefPreviewPending?.value) {
+    restoreRefPreview?.();
+    return;
+  }
   if (window.history.length > 1) {
     router.back();
   } else {
@@ -84,6 +91,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 onMounted(() => { document.addEventListener('keydown', onKeydown); loadNote(); });
+watch(() => route.params.id, () => { loadNote(); });
 onUnmounted(() => {
   if (detailTitle) detailTitle.value = '';
   document.removeEventListener('keydown', onKeydown);
