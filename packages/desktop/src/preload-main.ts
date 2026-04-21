@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('quinkDesktop', {
   syncToken: (token: string | null) => ipcRenderer.send('sync-token', token),
   reloadShortcuts: () => ipcRenderer.send('reload-shortcuts'),
+  syncTheme: (theme: string) => ipcRenderer.send('sync-theme', theme),
   minimize: () => ipcRenderer.send('win-minimize'),
   maximize: () => ipcRenderer.send('win-maximize'),
   close: () => ipcRenderer.send('win-close'),

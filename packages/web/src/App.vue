@@ -143,6 +143,7 @@ onMounted(async () => {
 
   const theme = prefs.theme || 'blueberry';
   document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('quink_theme', theme);
 
   const fontSize = prefs.fontSize || 16;
   document.documentElement.style.fontSize = fontSize + 'px';

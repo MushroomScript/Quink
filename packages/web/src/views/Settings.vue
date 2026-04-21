@@ -276,6 +276,8 @@ async function savePreferences(silent = false) {
       },
     });
     document.documentElement.setAttribute('data-theme', theme.value);
+    localStorage.setItem('quink_theme', theme.value);
+    try { (window as any).quinkDesktop?.syncTheme?.(theme.value); } catch {}
     document.documentElement.style.fontSize = fontSize.value + 'px';
     if (!silent) showMsg('已保存');
   } catch (err: any) {
@@ -302,7 +304,8 @@ async function saveShortcuts() {
         shortcuts: shortcuts.value,
       },
     });
-    showMsg('已保存，重启桌面端后生效');
+    showMsg('已保存');
+    try { (window as any).quinkDesktop?.reloadShortcuts?.(); } catch {}
   } catch (err: any) {
     showMsg('保存失败: ' + err.message, 'error');
   } finally {

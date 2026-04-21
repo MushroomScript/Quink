@@ -375,9 +375,18 @@ function toggleCaptureWindow() {
   if (captureWindow.isVisible()) {
     hideCaptureWindow();
   } else {
+    // 先透明 show,等主题重绘后再显示
+    captureWindow.setOpacity(0);
     captureWindow.show();
-    captureWindow.focus();
-    captureWindow.webContents.send('window-shown');
+    captureWindow.webContents.executeJavaScript(
+      `document.documentElement.setAttribute('data-theme',localStorage.getItem('quink_theme')||'blueberry')`
+    ).finally(() => {
+      setTimeout(() => {
+        captureWindow?.setOpacity(1);
+        captureWindow?.focus();
+        captureWindow?.webContents.send('window-shown');
+      }, 30);
+    });
   }
 }
 
@@ -504,6 +513,13 @@ ipcMain.on('sync-token', (_event, token: string | null) => {
   }
 });
 
+ipcMain.on('sync-theme', (_event, theme: string) => {
+  const js = `document.documentElement.setAttribute('data-theme','${theme}')`;
+  [captureWindow, aiChatWindow, floatWindow].forEach(w => {
+    if (w && !w.isDestroyed()) w.webContents.executeJavaScript(js).catch(() => {});
+  });
+});
+
 ipcMain.on('reload-shortcuts', () => {
   loadUserShortcuts().then(() => {
     applyShortcuts();
@@ -515,6 +531,20 @@ ipcMain.on('reload-shortcuts', () => {
 // ──────────────────────────────────
 //  启动
 // ──────────────────────────────────
+// 单实例锁:防止重复启动
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 app.whenReady().then(() => {
   createMainWindow();
   createCaptureWindow();

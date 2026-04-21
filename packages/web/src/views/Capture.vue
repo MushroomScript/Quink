@@ -47,9 +47,12 @@ onMounted(async () => {
   document.documentElement.setAttribute('data-theme', theme);
   document.addEventListener('keydown', onKeydown);
 
-  // 每次窗口显示时聚焦编辑器
+  // 每次窗口显示时同步主题 + 聚焦编辑器
   try {
     (window as any).quink?.onWindowShown?.(() => {
+      // 同步读 localStorage(不闪烁)
+      const t = localStorage.getItem('quink_theme') || 'blueberry';
+      document.documentElement.setAttribute('data-theme', t);
       setTimeout(() => {
         document.querySelector<HTMLElement>('.vditor-ir [contenteditable]')?.focus();
       }, 50);
