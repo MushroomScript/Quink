@@ -235,3 +235,35 @@ export async function aiChat(userId: string, question: string, context: string):
   const result = await callAi(config, filledPrompt, question);
   return result;
 }
+
+/**
+ * 语音转文字(Whisper API)
+ */
+export async function transcribeAudio(userId: string, audioBuffer: Buffer, mimeType: string): Promise<string> {
+  const config = await getConfigForFeature(userId, 'auto_tag');
+  if (!config || !config.apiKey) throw new Error('未配置 AI');
+
+  let baseUrl = config.baseUrl.replace(/\/+$/, '');
+  // OpenAI 兼容:自动拼 /v1
+  if (!baseUrl.includes('/v1')) baseUrl += '/v1';
+
+  const formData = new FormData();
+  const ext = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
+  formData.append('file', new Blob([audioBuffer], { type: mimeType }), `audio.${ext}`);
+  formData.append('model', 'whisper-1');
+  formData.append('language', 'zh');
+
+  const res = await fetch(`${baseUrl}/audio/transcriptions`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${config.apiKey}` },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Whisper API error: ${res.status} ${err}`);
+  }
+
+  const data = await res.json() as { text: string };
+  return data.text || '';
+}

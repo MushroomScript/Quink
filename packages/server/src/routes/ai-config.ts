@@ -267,4 +267,21 @@ app.post('/chat', async (c) => {
   }
 });
 
+// POST /api/ai/transcribe — 语音转文字
+app.post('/transcribe', async (c) => {
+  const userId = c.get('userId');
+  try {
+    const formData = await c.req.formData();
+    const file = formData.get('file') as File;
+    if (!file) return c.json({ error: '缺少音频文件' }, 400);
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const { transcribeAudio } = await import('../ai/client.js');
+    const text = await transcribeAudio(userId, buffer, file.type);
+    return c.json({ data: { text } });
+  } catch (err: any) {
+    return c.json({ error: err.message || '语音识别失败' }, 500);
+  }
+});
+
 export default app;

@@ -285,6 +285,19 @@ export const api = {
     });
   },
 
+  async transcribe(audioBlob: Blob): Promise<{ data: { text: string } }> {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'audio.webm');
+    const token = getToken();
+    const res = await fetch('/api/ai/transcribe', {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!res.ok) throw new Error((await res.json()).error || '语音识别失败');
+    return res.json();
+  },
+
   // Export / Import
   async exportData(): Promise<void> {
     const token = getToken();

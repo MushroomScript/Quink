@@ -247,6 +247,57 @@ function applyAiResult() {
 function closeAiPanel() { showAiPanel.value = false; }
 function closePopups() { showTagInput.value = false; showRefSearch.value = false; }
 
+// ── 录音 ──
+const isRecording = ref(false);
+const recordingTime = ref(0);
+let mediaRecorder: MediaRecorder | null = null;
+let audioChunks: Blob[] = [];
+let recordTimer: ReturnType<typeof setInterval> | null = null;
+
+async function toggleRecording() {
+  if (isRecording.value) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    audioChunks = [];
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      if (audioChunks.length === 0) return;
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      try {
+        const res = await api.transcribe(blob);
+        if (res.data.text && vditor) {
+          vditor.insertValue(res.data.text);
+        }
+      } catch (e: any) {
+        console.error('[录音] 转文字失败:', e.message);
+      }
+    };
+    mediaRecorder.start();
+    isRecording.value = true;
+    recordingTime.value = 0;
+    recordTimer = setInterval(() => { recordingTime.value++; }, 1000);
+  } catch (e) {
+    console.error('[录音] 无法获取麦克风:', e);
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  isRecording.value = false;
+  if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
+}
+
 defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 </script>
 
@@ -294,6 +345,13 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         <div class="relative">
           <button ref="refBtnEl" @click.stop="showRefSearch = !showRefSearch" class="tbtn text-gray-400" title="引用笔记">📌</button>
         </div>
+        <!-- 录音 -->
+        <button @click="toggleRecording"
+          class="tbtn transition-colors"
+          :class="isRecording ? 'text-red-500 animate-pulse' : 'text-gray-400'"
+          :title="isRecording ? `录音中 ${recordingTime}s (点击停止)` : '语音输入'">
+          🎙️
+        </button>
       </div>
 
       <!-- Submit + fullscreen -->
