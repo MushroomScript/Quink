@@ -247,12 +247,14 @@ function applyAiResult() {
 function closeAiPanel() { showAiPanel.value = false; }
 function closePopups() { showTagInput.value = false; showRefSearch.value = false; }
 
-// ── 录音 ──
+// ── 录音(讯飞流式语音听写) ──
 const isRecording = ref(false);
 const recordingTime = ref(0);
-let mediaRecorder: MediaRecorder | null = null;
-let audioChunks: Blob[] = [];
 let recordTimer: ReturnType<typeof setInterval> | null = null;
+let audioContext: AudioContext | null = null;
+let mediaStream: MediaStream | null = null;
+let iatWs: WebSocket | null = null;
+let scriptNode: ScriptProcessorNode | null = null;
 
 async function toggleRecording() {
   if (isRecording.value) {
@@ -264,36 +266,80 @@ async function toggleRecording() {
 
 async function startRecording() {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-    audioChunks = [];
-    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
-    mediaRecorder.onstop = async () => {
-      stream.getTracks().forEach(t => t.stop());
-      if (audioChunks.length === 0) return;
-      const blob = new Blob(audioChunks, { type: 'audio/webm' });
-      try {
-        const res = await api.transcribe(blob);
-        if (res.data.text && vditor) {
-          vditor.insertValue(res.data.text);
-        }
-      } catch (e: any) {
-        console.error('[录音] 转文字失败:', e.message);
-      }
+    // 1. 获取鉴权 URL
+    const res = await api.getIatUrl();
+    const { url, appId } = res.data;
+
+    // 2. 获取麦克风
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
+    audioContext = new AudioContext({ sampleRate: 16000 });
+    const source = audioContext.createMediaStreamSource(mediaStream);
+    scriptNode = audioContext.createScriptProcessor(4096, 1, 1);
+
+    // 3. 建 WebSocket
+    iatWs = new WebSocket(url);
+    let frameIndex = 0;
+
+    iatWs.onopen = () => {
+      isRecording.value = true;
+      recordingTime.value = 0;
+      recordTimer = setInterval(() => { recordingTime.value++; }, 1000);
     };
-    mediaRecorder.start();
-    isRecording.value = true;
-    recordingTime.value = 0;
-    recordTimer = setInterval(() => { recordingTime.value++; }, 1000);
-  } catch (e) {
-    console.error('[录音] 无法获取麦克风:', e);
+
+    iatWs.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.data?.result?.ws) {
+          const text = msg.data.result.ws.map((w: any) => w.cw.map((c: any) => c.w).join('')).join('');
+          if (text && vditor) vditor.insertValue(text);
+        }
+      } catch {}
+    };
+
+    iatWs.onerror = () => { stopRecording(); };
+    iatWs.onclose = () => { stopRecording(); };
+
+    // 4. 采集 PCM 发送
+    scriptNode.onaudioprocess = (e) => {
+      if (!iatWs || iatWs.readyState !== WebSocket.OPEN) return;
+      const pcm = e.inputBuffer.getChannelData(0);
+      const int16 = new Int16Array(pcm.length);
+      for (let i = 0; i < pcm.length; i++) {
+        int16[i] = Math.max(-1, Math.min(1, pcm[i])) * 0x7FFF;
+      }
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(int16.buffer)));
+
+      const frame: any = {
+        data: { status: frameIndex === 0 ? 0 : 1, format: 'audio/L16;rate=16000', encoding: 'raw', audio: base64 },
+      };
+      if (frameIndex === 0) {
+        frame.common = { app_id: appId };
+        frame.business = { language: 'zh_cn', domain: 'iat', accent: 'mandarin', ptt: 0 };
+      }
+      iatWs.send(JSON.stringify(frame));
+      frameIndex++;
+    };
+
+    source.connect(scriptNode);
+    scriptNode.connect(audioContext.destination);
+  } catch (e: any) {
+    console.error('[录音] 启动失败:', e.message);
+    stopRecording();
   }
 }
 
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
+  // 发结束帧
+  if (iatWs && iatWs.readyState === WebSocket.OPEN) {
+    iatWs.send(JSON.stringify({ data: { status: 2, format: 'audio/L16;rate=16000', encoding: 'raw', audio: '' } }));
   }
+  setTimeout(() => {
+    iatWs?.close();
+    iatWs = null;
+  }, 500);
+  if (scriptNode) { scriptNode.disconnect(); scriptNode = null; }
+  if (audioContext) { audioContext.close(); audioContext = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
   isRecording.value = false;
   if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
 }

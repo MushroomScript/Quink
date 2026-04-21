@@ -22,6 +22,9 @@ const theme = ref('blueberry');
 const fontSize = ref('14');
 const autoSummary = ref(true);
 const autoSummaryMinLen = ref(50);
+const xfAppId = ref('');
+const xfApiKey = ref('');
+const xfApiSecret = ref('');
 
 // ── Shortcuts ──
 const shortcuts = ref({
@@ -176,6 +179,11 @@ onMounted(() => {
     fontSize.value = String(prefs.fontSize || 14);
     if (typeof prefs.autoSummary === 'boolean') autoSummary.value = prefs.autoSummary;
     if (prefs.autoSummaryMinLen) autoSummaryMinLen.value = prefs.autoSummaryMinLen;
+    if (prefs.xfyun) {
+      xfAppId.value = prefs.xfyun.appId || '';
+      xfApiKey.value = prefs.xfyun.apiKey || '';
+      xfApiSecret.value = prefs.xfyun.apiSecret || '';
+    }
     if (prefs.shortcuts) {
       shortcuts.value = { ...shortcuts.value, ...prefs.shortcuts };
     }
@@ -273,6 +281,7 @@ async function savePreferences(silent = false) {
         fontSize: parseInt(fontSize.value),
         autoSummary: autoSummary.value,
         autoSummaryMinLen: autoSummaryMinLen.value,
+        xfyun: { appId: xfAppId.value, apiKey: xfApiKey.value, apiSecret: xfApiSecret.value },
       },
     });
     document.documentElement.setAttribute('data-theme', theme.value);
@@ -289,7 +298,7 @@ async function savePreferences(silent = false) {
 
 // 主题、字号、划词开关 变化时自动静默保存
 let savePrefsTimer: ReturnType<typeof setTimeout> | null = null;
-watch([theme, fontSize, autoSummary, autoSummaryMinLen], () => {
+watch([theme, fontSize, autoSummary, autoSummaryMinLen, xfAppId, xfApiKey, xfApiSecret], () => {
   if (!prefsLoaded) return;
   if (savePrefsTimer) clearTimeout(savePrefsTimer);
   savePrefsTimer = setTimeout(() => savePreferences(true).then(() => toast.show('已保存')), 300);
@@ -514,6 +523,16 @@ function goBack() {
           <input v-model.number="autoSummaryMinLen" type="number" min="10" max="500" step="10"
             class="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs outline-none bg-white text-center" />
           <span class="text-xs text-gray-300">少于此长度不生成摘要</span>
+        </div>
+        <!-- 讯飞语音识别 -->
+        <div class="pt-2 border-t border-gray-100 space-y-2">
+          <div class="text-sm text-gray-700 font-medium">语音识别（讯飞）</div>
+          <div class="text-xs text-gray-400 mb-1">用于编辑器的语音输入功能，注册 xfyun.cn 获取</div>
+          <div class="grid grid-cols-3 gap-2">
+            <input v-model="xfAppId" placeholder="APPID" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+            <input v-model="xfApiKey" placeholder="APIKey" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+            <input v-model="xfApiSecret" placeholder="APISecret" type="password" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
         </div>
       </div>
     </div>

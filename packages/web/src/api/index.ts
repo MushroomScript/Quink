@@ -298,6 +298,10 @@ export const api = {
     return res.json();
   },
 
+  getIatUrl() {
+    return request<{ data: { url: string; appId: string } }>('/ai/iat-url');
+  },
+
   // Export / Import
   async exportData(): Promise<void> {
     const token = getToken();

@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import { eq, and } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
+import { authMiddleware } from '../auth.js';
+import crypto from 'crypto';
 import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
 import { DEFAULT_PROMPTS, AI_FEATURES, AI_FEATURE_LABELS } from '../ai/prompts.js';
@@ -282,6 +284,29 @@ app.post('/transcribe', async (c) => {
   } catch (err: any) {
     return c.json({ error: err.message || '语音识别失败' }, 500);
   }
+});
+
+// GET /api/ai/iat-url — 讯飞语音听写鉴权 URL
+app.get('/iat-url', async (c) => {
+  const userId = c.get('userId');
+  const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+  const prefs = (user as any)?.preferences || {};
+  const xf = prefs.xfyun || {};
+  if (!xf.appId || !xf.apiKey || !xf.apiSecret) {
+    return c.json({ error: '未配置讯飞语音' }, 400);
+  }
+
+  const host = 'iat-api.xfyun.cn';
+  const date = new Date().toUTCString();
+  const requestLine = 'GET /v2/iat HTTP/1.1';
+  const signatureOrigin = `host: ${host}\ndate: ${date}\n${requestLine}`;
+  const signature = crypto.createHmac('sha256', xf.apiSecret)
+    .update(signatureOrigin).digest('base64');
+  const authorizationOrigin = `api_key="${xf.apiKey}", algorithm="hmac-sha256", headers="host date request-line", signature="${signature}"`;
+  const authorization = Buffer.from(authorizationOrigin).toString('base64');
+  const url = `wss://${host}/v2/iat?authorization=${encodeURIComponent(authorization)}&date=${encodeURIComponent(date)}&host=${host}`;
+
+  return c.json({ data: { url, appId: xf.appId } });
 });
 
 export default app;

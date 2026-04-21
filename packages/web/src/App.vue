@@ -55,16 +55,34 @@ router.beforeEach((to, from) => {
   }
 });
 
+const keepAlivePaths = ['/', '/notes', '/todos'];
+let pendingScroll: number | null = null;
+
 router.afterEach((to) => {
-  const saved = scrollPositions.get(to.path);
-  if (saved != null) {
-    nextTick(() => {
-      if (mainEl.value) mainEl.value.scrollTop = saved;
-    });
+  if (keepAlivePaths.includes(to.path)) {
+    const saved = scrollPositions.get(to.path);
+    if (saved != null) {
+      pendingScroll = saved;
+      nextTick(() => {
+        if (pendingScroll !== null && mainEl.value && !store.loading) {
+          mainEl.value.scrollTop = pendingScroll;
+          pendingScroll = null;
+        }
+      });
+    }
+  } else {
+    nextTick(() => { if (mainEl.value) mainEl.value.scrollTop = 0; });
   }
-  // 从详情页返回时恢复引用预览
   if (refPreviewHidden.value && !to.path.startsWith('/note/')) {
     refPreviewHidden.value = false;
+  }
+});
+
+watch(() => store.loading, (loading) => {
+  if (!loading && pendingScroll !== null) {
+    const pos = pendingScroll;
+    pendingScroll = null;
+    nextTick(() => { if (mainEl.value) mainEl.value.scrollTop = pos; });
   }
 });
 
