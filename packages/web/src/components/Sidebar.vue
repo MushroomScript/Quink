@@ -152,7 +152,7 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
         <span class="text-base">{{ item.icon }}</span>
         <span>{{ item.label }}</span>
         <span v-if="item.label === '待办' && stats.pendingTodos > 0"
-          class="ml-auto bg-red-500 text-white text-xs leading-none w-5 h-5 flex items-center justify-center rounded-full font-semibold">
+          class="ml-auto bg-red-400/70 text-white text-xs leading-none w-5 h-5 flex items-center justify-center rounded-full font-semibold">
           {{ stats.pendingTodos }}
         </span>
       </router-link>

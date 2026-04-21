@@ -198,6 +198,20 @@ function createMainWindow() {
   Menu.setApplicationMenu(null);
   mainWindow.loadURL(WEB_URL);
 
+  // 右键上下文菜单
+  mainWindow.webContents.on('context-menu', () => {
+    Menu.buildFromTemplate([
+      { label: '撤销', role: 'undo' },
+      { label: '重做', role: 'redo' },
+      { type: 'separator' },
+      { label: '剪切', role: 'cut' },
+      { label: '复制', role: 'copy' },
+      { label: '粘贴', role: 'paste' },
+      { type: 'separator' },
+      { label: '全选', role: 'selectAll' },
+    ]).popup();
+  });
+
   // F5 / Ctrl+R 刷新, Ctrl+Shift+R 强刷
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F5' || (input.control && input.key === 'r')) {

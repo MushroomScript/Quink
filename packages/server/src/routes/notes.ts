@@ -251,7 +251,7 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
     const [tags, category, summary] = await Promise.all([
       existingTags.length > 0 ? Promise.resolve(existingTags) : autoTag(userId, content),
       autoClassify(userId, content),
-      autoSummary(userId, content),
+      content.length >= 50 ? autoSummary(userId, content) : Promise.resolve(null),
     ]);
 
     const updates: Record<string, any> = { aiProcessed: true };
