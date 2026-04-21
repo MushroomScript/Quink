@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import { api } from '@/api';
@@ -55,6 +55,7 @@ const showRefSearch = ref(false);
 const refQuery = ref('');
 const refResults = ref<any[]>([]);
 const refBtnEl = ref<HTMLElement>();
+const liveTextEl = ref<HTMLElement>();
 const tagBtnEl = ref<HTMLElement>();
 
 function getPopupPos(el: HTMLElement | undefined, width: number) {
@@ -255,6 +256,8 @@ let audioContext: AudioContext | null = null;
 let mediaStream: MediaStream | null = null;
 let iatWs: WebSocket | null = null;
 let scriptNode: ScriptProcessorNode | null = null;
+let iatResultText = '';
+const iatLiveText = ref('');
 
 async function toggleRecording() {
   if (isRecording.value) {
@@ -266,19 +269,20 @@ async function toggleRecording() {
 
 async function startRecording() {
   try {
-    // 1. 获取鉴权 URL
     const res = await api.getIatUrl();
     const { url, appId } = res.data;
 
-    // 2. 获取麦克风
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
     audioContext = new AudioContext({ sampleRate: 16000 });
     const source = audioContext.createMediaStreamSource(mediaStream);
     scriptNode = audioContext.createScriptProcessor(4096, 1, 1);
 
-    // 3. 建 WebSocket
     iatWs = new WebSocket(url);
+    iatResultText = '';
+    iatLiveText.value = '';
+    isFinishing = false;
     let frameIndex = 0;
+    const resultMap = new Map<number, string>();
 
     iatWs.onopen = () => {
       isRecording.value = true;
@@ -289,17 +293,31 @@ async function startRecording() {
     iatWs.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
-        if (msg.data?.result?.ws) {
-          const text = msg.data.result.ws.map((w: any) => w.cw.map((c: any) => c.w).join('')).join('');
-          if (text && vditor) vditor.insertValue(text);
+        if (msg.code !== 0) { console.error('[讯飞] error:', msg.message); return; }
+        if (msg.data?.result) {
+          const r = msg.data.result;
+          const sn = r.sn;
+          const pgs = r.pgs;
+          const text = r.ws?.map((w: any) => w.cw.map((c: any) => c.w).join('')).join('') || '';
+          // dwa=wpgs 模式：pgs='rpl' 时先删除 rg 范围内的旧片段再覆盖
+          if (pgs === 'rpl' && r.rg) {
+            for (let i = r.rg[0]; i <= r.rg[1]; i++) resultMap.delete(i);
+          }
+          resultMap.set(sn, text);
+          const sorted = [...resultMap.entries()].sort((a, b) => a[0] - b[0]);
+          iatResultText = sorted.map(([, t]) => t).join('');
+          iatLiveText.value = iatResultText;
+          nextTick(() => { if (liveTextEl.value) liveTextEl.value.scrollLeft = liveTextEl.value.scrollWidth; });
+        }
+        if (msg.data?.status === 2) {
+          finishRecording();
         }
       } catch {}
     };
 
-    iatWs.onerror = () => { stopRecording(); };
-    iatWs.onclose = () => { stopRecording(); };
+    iatWs.onerror = () => { finishRecording(); };
+    iatWs.onclose = () => {};
 
-    // 4. 采集 PCM 发送
     scriptNode.onaudioprocess = (e) => {
       if (!iatWs || iatWs.readyState !== WebSocket.OPEN) return;
       const pcm = e.inputBuffer.getChannelData(0);
@@ -307,14 +325,17 @@ async function startRecording() {
       for (let i = 0; i < pcm.length; i++) {
         int16[i] = Math.max(-1, Math.min(1, pcm[i])) * 0x7FFF;
       }
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(int16.buffer)));
+      const bytes = new Uint8Array(int16.buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const base64 = btoa(binary);
 
       const frame: any = {
         data: { status: frameIndex === 0 ? 0 : 1, format: 'audio/L16;rate=16000', encoding: 'raw', audio: base64 },
       };
       if (frameIndex === 0) {
         frame.common = { app_id: appId };
-        frame.business = { language: 'zh_cn', domain: 'iat', accent: 'mandarin', ptt: 0 };
+        frame.business = { language: 'zh_cn', domain: 'iat', accent: 'mandarin', ptt: 1, vad_eos: 10000, dwa: 'wpgs' };
       }
       iatWs.send(JSON.stringify(frame));
       frameIndex++;
@@ -328,18 +349,36 @@ async function startRecording() {
   }
 }
 
+let isFinishing = false;
+
+function finishRecording() {
+  if (isFinishing) return;
+  isFinishing = true;
+  const text = iatResultText.trim();
+  iatResultText = '';
+  iatLiveText.value = '';
+  cleanupRecording();
+  if (text && vditor) {
+    vditor.focus();
+    setTimeout(() => { vditor?.insertValue(text); }, 80);
+  }
+}
+
 function stopRecording() {
-  // 发结束帧
   if (iatWs && iatWs.readyState === WebSocket.OPEN) {
     iatWs.send(JSON.stringify({ data: { status: 2, format: 'audio/L16;rate=16000', encoding: 'raw', audio: '' } }));
   }
+  // 等讯飞返回最终结果(500ms),然后 finishRecording
   setTimeout(() => {
-    iatWs?.close();
-    iatWs = null;
-  }, 500);
+    if (isRecording.value) finishRecording();
+  }, 1000);
+}
+
+function cleanupRecording() {
   if (scriptNode) { scriptNode.disconnect(); scriptNode = null; }
-  if (audioContext) { audioContext.close(); audioContext = null; }
+  if (audioContext) { audioContext.close().catch(() => {}); audioContext = null; }
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (iatWs) { try { iatWs.close(); } catch {} iatWs = null; }
   isRecording.value = false;
   if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
 }
@@ -356,6 +395,12 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
     <!-- Vditor editor -->
     <div ref="editorRef" class="vditor-wrapper"
       :style="isFullscreen ? { flex: '1 1 auto', minHeight: 0 } : { '--editor-max': maxHeight + 'px' }"></div>
+
+    <!-- 语音识别实时预览 -->
+    <div v-if="isRecording || iatLiveText" class="flex items-center gap-2 px-3 py-1.5" style="background: rgba(var(--c-accent), 0.06)">
+      <span class="w-1.5 h-1.5 rounded-full animate-pulse shrink-0" style="background: rgb(var(--c-accent))"></span>
+      <span ref="liveTextEl" class="text-sm flex-1 min-w-0 overflow-x-auto whitespace-nowrap scrollbar-hide" style="color: rgb(var(--c-accent-dark))">{{ iatLiveText || '正在聆听...' }}</span>
+    </div>
 
     <!-- AI buttons + bottom bar -->
     <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-t border-gray-100 select-none">
@@ -394,10 +439,14 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         <!-- 录音 -->
         <button @click="toggleRecording"
           class="tbtn transition-colors"
-          :class="isRecording ? 'text-red-500 animate-pulse' : 'text-gray-400'"
-          :title="isRecording ? `录音中 ${recordingTime}s (点击停止)` : '语音输入'">
-          🎙️
+          :class="isRecording ? 'text-red-500 bg-red-100 rounded-md' : 'text-gray-400'"
+          :title="isRecording ? '' : '语音输入'">
+          <svg v-if="isRecording" class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="#ef4444"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+          <span v-else>🎙️</span>
         </button>
+        <span v-if="isRecording" class="text-[11px] text-red-500 font-medium tabular-nums select-none">
+          {{ recordingTime }}s
+        </span>
       </div>
 
       <!-- Submit + fullscreen -->
@@ -485,6 +534,8 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 </template>
 
 <style>
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
 /* Vditor theme overrides —— Vditor 把 .vditor class 合并到 .vditor-wrapper 上 */
 .vditor-wrapper {
   border: none !important;
