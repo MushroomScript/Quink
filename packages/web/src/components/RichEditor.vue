@@ -132,11 +132,12 @@ onMounted(() => {
       },
     },
     after: () => {
-      // Focus editor
       vditor?.focus();
+      setupAudioButtons();
     },
     input: () => {
       dirty.value = true;
+      requestAnimationFrame(setupAudioButtons);
     },
   });
 });
@@ -145,6 +146,79 @@ onBeforeUnmount(() => {
   vditor?.destroy();
   vditor = null;
 });
+
+// ── 编辑器内音频链接：插入播放按钮 ──
+let editorAudio: HTMLAudioElement | null = null;
+let editorPlayingBtn: HTMLElement | null = null;
+
+function setupAudioButtons() {
+  if (!editorRef.value) return;
+  const links = editorRef.value.querySelectorAll<HTMLElement>('span.vditor-ir__marker--link, a[href]');
+  links.forEach(el => {
+    let href = '';
+    if (el.tagName === 'A') {
+      href = el.getAttribute('href') || '';
+    } else {
+      href = el.textContent || '';
+    }
+    if (!/\.(webm|mp3|wav|ogg|m4a)$/i.test(href)) return;
+
+    const parent = el.closest('.vditor-ir__node') || el.parentElement;
+    if (!parent || parent.querySelector('.voice-play-btn')) return;
+
+    const btn = document.createElement('span');
+    btn.className = 'voice-play-btn';
+    btn.contentEditable = 'false';
+    btn.setAttribute('data-src', href);
+    btn.innerHTML = '▶';
+    btn.title = '播放语音';
+    parent.style.position = 'relative';
+    parent.appendChild(btn);
+
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const src = btn.getAttribute('data-src') || '';
+      if (!src) return;
+
+      if (editorPlayingBtn === btn && editorAudio && !editorAudio.paused) {
+        editorAudio.pause();
+        editorAudio.currentTime = 0;
+        btn.innerHTML = '▶';
+        btn.classList.remove('voice-play-btn--playing');
+        editorAudio = null;
+        editorPlayingBtn = null;
+        return;
+      }
+
+      if (editorAudio) {
+        editorAudio.pause();
+        editorAudio.currentTime = 0;
+        if (editorPlayingBtn) {
+          editorPlayingBtn.innerHTML = '▶';
+          editorPlayingBtn.classList.remove('voice-play-btn--playing');
+        }
+      }
+
+      const audio = new Audio(src);
+      editorAudio = audio;
+      editorPlayingBtn = btn;
+      btn.innerHTML = '⏸';
+      btn.classList.add('voice-play-btn--playing');
+
+      audio.addEventListener('ended', () => {
+        btn.innerHTML = '▶';
+        btn.classList.remove('voice-play-btn--playing');
+        editorAudio = null;
+        editorPlayingBtn = null;
+      });
+      audio.play().catch(() => {
+        btn.innerHTML = '▶';
+        btn.classList.remove('voice-play-btn--playing');
+      });
+    });
+  });
+}
 
 // ── Tab key to switch type ──
 function onKeydown(e: KeyboardEvent) {
@@ -424,7 +498,7 @@ async function startVoiceRecord() {
         if (res.data?.url && vditor) {
           vditor.focus();
           setTimeout(() => {
-            vditor?.insertValue(`[🎵 语音备忘 ${dur}s](${res.data.url})`);
+            vditor?.insertValue(`[语音备忘 ${dur}s](${res.data.url})`);
           }, 80);
         }
       } catch (err: any) {
@@ -622,6 +696,25 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 <style>
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
+/* 编辑器内音频播放按钮 */
+.voice-play-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgb(var(--c-accent));
+  color: white;
+  font-size: 10px;
+  cursor: pointer;
+  user-select: none;
+  vertical-align: middle;
+  margin-left: 4px;
+  line-height: 1;
+}
+.voice-play-btn:hover { opacity: 0.8; }
+.voice-play-btn--playing { animation: voice-pulse 1s ease-in-out infinite; }
 /* Vditor theme overrides —— Vditor 把 .vditor class 合并到 .vditor-wrapper 上 */
 .vditor-wrapper {
   border: none !important;

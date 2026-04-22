@@ -288,7 +288,23 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
 .vditor-reset a[href$=".wav"]::before,
 .vditor-reset a[href$=".ogg"]::before,
 .vditor-reset a[href$=".m4a"]::before {
-  content: "🔊 ";
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 5px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M11 5L6 9H2v6h4l5 4V5z'/%3E%3Cpath d='M15.54 8.46a5 5 0 010 7.07'/%3E%3Cpath d='M19.07 4.93a10 10 0 010 14.14'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+
+.note-content a[href$=".webm"]::after,
+.note-content a[href$=".mp3"]::after,
+.note-content a[href$=".wav"]::after,
+.note-content a[href$=".ogg"]::after,
+.note-content a[href$=".m4a"]::after {
+  content: none !important;
+  display: none !important;
 }
 
 /* 播放中动画 */
