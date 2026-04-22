@@ -2,18 +2,19 @@
 import { ref, onMounted, nextTick, watch } from 'vue';
 import { api } from '@/api';
 import Vditor from 'vditor';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 
 interface Conversation { id: string; title: string; createdAt: string; updatedAt: string; }
 interface Message { id: string; role: 'user' | 'assistant'; content: string; sources: string[]; html?: string; }
 
 const router = useRouter();
+const route = useRoute();
 const conversations = ref<Conversation[]>([]);
 const currentConvId = ref('');
 const messages = ref<Message[]>([]);
 const query = ref('');
-const loading = ref(false);
-const streamingContent = ref('');
+const loadingConvs = ref(new Set<string>());
+const streamingMap = ref(new Map<string, string>());
 const messagesEl = ref<HTMLDivElement>();
 const editingTitle = ref('');
 const editingConvId = ref('');
@@ -22,6 +23,10 @@ const sourceNotes = ref<Record<string, { id: string; summary: string; content: s
 
 onMounted(async () => {
   await loadConversations();
+  const convId = route.query.conv as string;
+  if (convId && conversations.value.find(c => c.id === convId)) {
+    await selectConversation(convId);
+  }
 });
 
 async function loadConversations() {
@@ -41,8 +46,8 @@ async function newConversation() {
 
 async function selectConversation(id: string) {
   currentConvId.value = id;
+  router.replace({ query: { conv: id } });
   messages.value = [];
-  streamingContent.value = '';
   try {
     const res = await api.getMessages(id);
     for (const msg of res.data) {
@@ -84,18 +89,20 @@ async function saveTitle() {
 
 async function sendMessage() {
   const text = query.value.trim();
-  if (!text || loading.value) return;
+  if (!text) return;
   if (!currentConvId.value) await newConversation();
+  const targetConvId = currentConvId.value;
+  if (loadingConvs.value.has(targetConvId)) return;
 
   messages.value.push({ id: 'temp-user', role: 'user', content: text, sources: [] });
   query.value = '';
-  loading.value = true;
-  streamingContent.value = '';
+  loadingConvs.value.add(targetConvId);
+  streamingMap.value.set(targetConvId, '');
   scrollToBottom();
 
   try {
     const token = localStorage.getItem('quink_token');
-    const res = await fetch(`/api/ai/chat/conversations/${currentConvId.value}/messages`, {
+    const res = await fetch(`/api/ai/chat/conversations/${targetConvId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ question: text }),
@@ -103,8 +110,9 @@ async function sendMessage() {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'AI 调用失败' }));
-      messages.value.push({ id: 'err', role: 'assistant', content: err.error || 'AI 调用失败', sources: [] });
-      loading.value = false;
+      if (currentConvId.value === targetConvId) {
+        messages.value.push({ id: 'err', role: 'assistant', content: err.error || 'AI 调用失败', sources: [] });
+      }
       return;
     }
 
@@ -128,13 +136,13 @@ async function sendMessage() {
           const data = JSON.parse(line.slice(6));
           if (data.type === 'delta') {
             fullContent += data.content;
-            streamingContent.value = fullContent;
-            scrollToBottom();
+            streamingMap.value.set(targetConvId, fullContent);
+            if (currentConvId.value === targetConvId) scrollToBottom();
           } else if (data.type === 'done') {
             aiSources = data.sources || [];
             aiMsgId = data.messageId || '';
           } else if (data.type === 'title') {
-            const conv = conversations.value.find(c => c.id === currentConvId.value);
+            const conv = conversations.value.find(c => c.id === targetConvId);
             if (conv) conv.title = data.title;
           } else if (data.type === 'error') {
             fullContent += `\n\n**错误**: ${data.error}`;
@@ -145,13 +153,17 @@ async function sendMessage() {
 
     let html: string | undefined;
     try { html = await Vditor.md2html(fullContent, { cdn: '/vditor' }); } catch {}
-    messages.value.push({ id: aiMsgId || 'ai-resp', role: 'assistant', content: fullContent, sources: aiSources, html });
-    streamingContent.value = '';
+    if (currentConvId.value === targetConvId) {
+      messages.value.push({ id: aiMsgId || 'ai-resp', role: 'assistant', content: fullContent, sources: aiSources, html });
+    }
   } catch (err: any) {
-    messages.value.push({ id: 'err', role: 'assistant', content: err.message || 'AI 调用失败', sources: [] });
+    if (currentConvId.value === targetConvId) {
+      messages.value.push({ id: 'err', role: 'assistant', content: err.message || 'AI 调用失败', sources: [] });
+    }
   } finally {
-    loading.value = false;
-    scrollToBottom();
+    loadingConvs.value.delete(targetConvId);
+    streamingMap.value.delete(targetConvId);
+    if (currentConvId.value === targetConvId) scrollToBottom();
   }
 }
 
@@ -252,14 +264,14 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
         </div>
 
         <!-- 流式输出中 -->
-        <div v-if="streamingContent" class="flex justify-start">
+        <div v-if="streamingMap.get(currentConvId)" class="flex justify-start">
           <div class="max-w-[80%] px-4 py-3 bg-white border border-gray-100 text-gray-700 rounded-2xl rounded-bl-md shadow-sm text-sm">
-            <div class="note-content prose prose-sm max-w-none whitespace-pre-wrap">{{ streamingContent }}<span class="animate-pulse">▊</span></div>
+            <div class="note-content prose prose-sm max-w-none whitespace-pre-wrap">{{ streamingMap.get(currentConvId) }}<span class="animate-pulse">▊</span></div>
           </div>
         </div>
 
         <!-- loading -->
-        <div v-if="loading && !streamingContent" class="flex justify-start">
+        <div v-if="loadingConvs.has(currentConvId) && !streamingMap.get(currentConvId)" class="flex justify-start">
           <div class="bg-white border border-gray-100 text-gray-400 px-4 py-3 rounded-2xl rounded-bl-md text-sm shadow-sm">
             <span class="inline-flex gap-1">
               <span class="animate-bounce" style="animation-delay: 0ms">·</span>
@@ -276,7 +288,7 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
         <div class="flex gap-2">
           <textarea v-model="query" @keydown="handleKeydown" placeholder="问点什么..." rows="1"
             class="flex-1 px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:border-primary resize-none" />
-          <button @click="sendMessage" :disabled="!query.trim() || loading"
+          <button @click="sendMessage" :disabled="!query.trim() || loadingConvs.has(currentConvId)"
             class="px-5 py-2.5 text-white text-sm font-medium rounded-xl disabled:opacity-40 transition-colors shrink-0"
             style="background: rgb(var(--c-accent))">
             发送

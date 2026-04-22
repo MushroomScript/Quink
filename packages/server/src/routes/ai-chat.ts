@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { streamSSE } from 'hono/streaming';
 import { db, schema } from '../db/index.js';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
@@ -161,7 +160,14 @@ app.post('/conversations/:id/messages', async (c) => {
     messages[messages.length - 1] = { role: 'user', content: imageContents };
   }
 
-  return streamSSE(c, async (s) => {
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+
+  const write = (obj: any) => writer.write(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+
+  // 后台异步处理流式 AI 调用
+  (async () => {
     try {
       const aiStream = await callAiStream(config, messages, reserveTokens);
       const reader = aiStream.getReader();
@@ -171,7 +177,7 @@ app.post('/conversations/:id/messages', async (c) => {
         const { done, value } = await reader.read();
         if (done) break;
         fullResponse += value;
-        await s.writeSSE({ data: JSON.stringify({ type: 'delta', content: value }) });
+        await write({ type: 'delta', content: value });
       }
 
       // 保存 AI 回复
@@ -181,7 +187,7 @@ app.post('/conversations/:id/messages', async (c) => {
         sources: noteCtx.noteIds, createdAt: dayjs().toISOString(),
       });
 
-      await s.writeSSE({ data: JSON.stringify({ type: 'done', sources: noteCtx.noteIds, messageId: aiMsgId }) });
+      await write({ type: 'done', sources: noteCtx.noteIds, messageId: aiMsgId });
 
       // 第一轮对话：自动生成标题
       const msgCount = await db.select({ count: sql`count(*)` }).from(schema.aiMessages)
@@ -196,19 +202,30 @@ app.post('/conversations/:id/messages', async (c) => {
             const base = config.baseUrl.replace(/\/+$/, '');
             const ep = base.includes('/v1/messages') ? base : base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`;
             const res = await fetch(ep, { method: 'POST', headers: titleHeaders, body: JSON.stringify({ model: config.model, max_tokens: 30, messages: [{ role: 'user', content: titlePrompt }] }) });
-            if (res.ok) { const d = await res.json() as any; const t = d.content?.[0]?.text?.trim().slice(0, 20); if (t) { await db.update(schema.aiConversations).set({ title: t }).where(eq(schema.aiConversations.id, id)); await s.writeSSE({ data: JSON.stringify({ type: 'title', title: t }) }); } }
+            if (res.ok) { const d = await res.json() as any; const t = d.content?.[0]?.text?.trim().slice(0, 20); if (t) { await db.update(schema.aiConversations).set({ title: t }).where(eq(schema.aiConversations.id, id)); await write({ type: 'title', title: t }); } }
           } else {
             if (config.apiKey) titleHeaders['Authorization'] = `Bearer ${config.apiKey}`;
             const base = config.baseUrl.replace(/\/+$/, '');
             const ep = base.includes('/chat/completions') ? base : base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`;
             const res = await fetch(ep, { method: 'POST', headers: titleHeaders, body: JSON.stringify({ model: config.model, messages: [{ role: 'user', content: titlePrompt }], max_tokens: 30, temperature: 0.3 }) });
-            if (res.ok) { const d = await res.json() as any; const t = d.choices?.[0]?.message?.content?.trim().slice(0, 20); if (t) { await db.update(schema.aiConversations).set({ title: t }).where(eq(schema.aiConversations.id, id)); await s.writeSSE({ data: JSON.stringify({ type: 'title', title: t }) }); } }
+            if (res.ok) { const d = await res.json() as any; const t = d.choices?.[0]?.message?.content?.trim().slice(0, 20); if (t) { await db.update(schema.aiConversations).set({ title: t }).where(eq(schema.aiConversations.id, id)); await write({ type: 'title', title: t }); } }
           }
         } catch {}
       }
     } catch (err: any) {
-      await s.writeSSE({ data: JSON.stringify({ type: 'error', error: err.message || 'AI 调用失败' }) });
+      console.error('[AI Chat] stream error:', err);
+      await write({ type: 'error', error: err.message || 'AI 调用失败' });
+    } finally {
+      writer.close();
     }
+  })();
+
+  return new Response(readable, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
   });
 });
 
