@@ -28,8 +28,8 @@ app.route('/api/auth', authRoutes);
 app.route('/api/notes', notesRoutes);
 app.route('/api/categories', categoriesRoutes);
 app.route('/api/upload', uploadRoutes);
-app.route('/api/ai', aiConfigRoutes);
 app.route('/api/ai/chat', aiChatRoutes);
+app.route('/api/ai', aiConfigRoutes);
 app.route('/api/data', exportRoutes); // GET /api/data = export, POST /api/data = import
 
 // Health check（不需要登录）

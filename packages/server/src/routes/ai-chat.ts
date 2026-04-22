@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { stream } from 'hono/streaming';
+import { streamSSE } from 'hono/streaming';
 import { db, schema } from '../db/index.js';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
@@ -122,27 +122,27 @@ app.post('/conversations/:id/messages', async (c) => {
   // token 预算分配
   let usedTokens = estimateTokens(systemContent) + estimateTokens(question);
 
-  // 加载历史消息
+  // 加载历史消息（按时间降序，从最新往前裁剪）
   const history = await db.select().from(schema.aiMessages)
     .where(eq(schema.aiMessages.conversationId, id))
     .orderBy(desc(schema.aiMessages.createdAt))
     .all();
-  // 去掉刚插入的用户消息
-  const pastMessages = history.filter(m => m.id !== userMsgId).reverse();
+  const pastMessages = history.filter(m => m.id !== userMsgId);
 
-  const historyMessages: ChatMessage[] = [];
-  for (const msg of pastMessages.reverse()) {
+  // 从最近开始选，直到 token 预算用完
+  const selectedHistory: ChatMessage[] = [];
+  for (const msg of pastMessages) {
     const msgTokens = estimateTokens(typeof msg.content === 'string' ? msg.content : '');
     if (usedTokens + msgTokens > budget) break;
     usedTokens += msgTokens;
-    historyMessages.unshift({ role: msg.role as 'user' | 'assistant', content: msg.content });
+    selectedHistory.push({ role: msg.role as 'user' | 'assistant', content: msg.content });
   }
-  historyMessages.reverse();
+  selectedHistory.reverse(); // 翻回时间正序
 
   // 构建最终 messages
   const messages: ChatMessage[] = [
     { role: 'system', content: systemContent },
-    ...historyMessages.reverse(),
+    ...selectedHistory,
     { role: 'user', content: question },
   ];
 
@@ -161,12 +161,7 @@ app.post('/conversations/:id/messages', async (c) => {
     messages[messages.length - 1] = { role: 'user', content: imageContents };
   }
 
-  // SSE 流式响应
-  c.header('Content-Type', 'text/event-stream');
-  c.header('Cache-Control', 'no-cache');
-  c.header('Connection', 'keep-alive');
-
-  return stream(c, async (s) => {
+  return streamSSE(c, async (s) => {
     try {
       const aiStream = await callAiStream(config, messages, reserveTokens);
       const reader = aiStream.getReader();
@@ -176,7 +171,7 @@ app.post('/conversations/:id/messages', async (c) => {
         const { done, value } = await reader.read();
         if (done) break;
         fullResponse += value;
-        await s.write(`data: ${JSON.stringify({ type: 'delta', content: value })}\n\n`);
+        await s.writeSSE({ data: JSON.stringify({ type: 'delta', content: value }) });
       }
 
       // 保存 AI 回复
@@ -186,36 +181,33 @@ app.post('/conversations/:id/messages', async (c) => {
         sources: noteCtx.noteIds, createdAt: dayjs().toISOString(),
       });
 
-      // 发送完成事件（含来源）
-      await s.write(`data: ${JSON.stringify({ type: 'done', sources: noteCtx.noteIds, messageId: aiMsgId })}\n\n`);
+      await s.writeSSE({ data: JSON.stringify({ type: 'done', sources: noteCtx.noteIds, messageId: aiMsgId }) });
 
       // 第一轮对话：自动生成标题
       const msgCount = await db.select({ count: sql`count(*)` }).from(schema.aiMessages)
         .where(eq(schema.aiMessages.conversationId, id)).get();
       if ((msgCount as any)?.count <= 2 && conv.title === '新对话') {
         try {
-          const { default: callAiFn } = await import('../ai/client.js');
           const titlePrompt = `根据以下对话生成一个5-10字的简短标题，只返回标题文字：\n用户：${question}\nAI：${fullResponse.slice(0, 200)}`;
-          const titleConfig = config;
           const titleHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-          if (titleConfig.provider === 'anthropic') {
-            titleHeaders['x-api-key'] = titleConfig.apiKey || '';
+          if (config.provider === 'anthropic') {
+            titleHeaders['x-api-key'] = config.apiKey || '';
             titleHeaders['anthropic-version'] = '2023-06-01';
-            const base = titleConfig.baseUrl.replace(/\/+$/, '');
+            const base = config.baseUrl.replace(/\/+$/, '');
             const ep = base.includes('/v1/messages') ? base : base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`;
-            const res = await fetch(ep, { method: 'POST', headers: titleHeaders, body: JSON.stringify({ model: titleConfig.model, max_tokens: 30, messages: [{ role: 'user', content: titlePrompt }] }) });
-            if (res.ok) { const d = await res.json() as any; const t = d.content?.[0]?.text?.trim().slice(0, 20); if (t) { await db.update(schema.aiConversations).set({ title: t }).where(eq(schema.aiConversations.id, id)); await s.write(`data: ${JSON.stringify({ type: 'title', title: t })}\n\n`); } }
+            const res = await fetch(ep, { method: 'POST', headers: titleHeaders, body: JSON.stringify({ model: config.model, max_tokens: 30, messages: [{ role: 'user', content: titlePrompt }] }) });
+            if (res.ok) { const d = await res.json() as any; const t = d.content?.[0]?.text?.trim().slice(0, 20); if (t) { await db.update(schema.aiConversations).set({ title: t }).where(eq(schema.aiConversations.id, id)); await s.writeSSE({ data: JSON.stringify({ type: 'title', title: t }) }); } }
           } else {
-            if (titleConfig.apiKey) titleHeaders['Authorization'] = `Bearer ${titleConfig.apiKey}`;
-            const base = titleConfig.baseUrl.replace(/\/+$/, '');
+            if (config.apiKey) titleHeaders['Authorization'] = `Bearer ${config.apiKey}`;
+            const base = config.baseUrl.replace(/\/+$/, '');
             const ep = base.includes('/chat/completions') ? base : base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`;
-            const res = await fetch(ep, { method: 'POST', headers: titleHeaders, body: JSON.stringify({ model: titleConfig.model, messages: [{ role: 'user', content: titlePrompt }], max_tokens: 30, temperature: 0.3 }) });
-            if (res.ok) { const d = await res.json() as any; const t = d.choices?.[0]?.message?.content?.trim().slice(0, 20); if (t) { await db.update(schema.aiConversations).set({ title: t }).where(eq(schema.aiConversations.id, id)); await s.write(`data: ${JSON.stringify({ type: 'title', title: t })}\n\n`); } }
+            const res = await fetch(ep, { method: 'POST', headers: titleHeaders, body: JSON.stringify({ model: config.model, messages: [{ role: 'user', content: titlePrompt }], max_tokens: 30, temperature: 0.3 }) });
+            if (res.ok) { const d = await res.json() as any; const t = d.choices?.[0]?.message?.content?.trim().slice(0, 20); if (t) { await db.update(schema.aiConversations).set({ title: t }).where(eq(schema.aiConversations.id, id)); await s.writeSSE({ data: JSON.stringify({ type: 'title', title: t }) }); } }
           }
         } catch {}
       }
     } catch (err: any) {
-      await s.write(`data: ${JSON.stringify({ type: 'error', error: err.message || 'AI 调用失败' })}\n\n`);
+      await s.writeSSE({ data: JSON.stringify({ type: 'error', error: err.message || 'AI 调用失败' }) });
     }
   });
 });

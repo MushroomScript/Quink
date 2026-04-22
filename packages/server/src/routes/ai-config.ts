@@ -7,7 +7,7 @@ import { authMiddleware } from '../auth.js';
 import crypto from 'crypto';
 import dayjs from 'dayjs';
 import { DEFAULT_PROMPTS, AI_FEATURES, AI_FEATURE_LABELS } from '../ai/prompts.js';
-import { aiProcess, aiChat } from '../ai/client.js';
+import { aiProcess } from '../ai/client.js';
 
 const app = new Hono();
 app.use('*', authMiddleware);
@@ -224,44 +224,6 @@ app.post('/process', async (c) => {
 
   try {
     const result = await aiProcess(userId, feature, content, customPrompt || undefined);
-    return c.json({ data: { result } });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-// ── AI Chat (RAG) ──
-app.post('/chat', async (c) => {
-  const userId = c.get('userId');
-  const { question } = await c.req.json();
-  if (!question?.trim()) return c.json({ error: '请输入问题' }, 400);
-
-  // 简单 RAG：搜索相关笔记作为上下文
-  const { like, and: andOp, desc: descOp } = await import('drizzle-orm');
-  const notes = await db.select({ content: schema.notes.content, tags: schema.notes.tags, category: schema.notes.category })
-    .from(schema.notes)
-    .where(andOp(
-      eq(schema.notes.userId, userId),
-      sql`${schema.notes.deletedAt} IS NULL`,
-      like(schema.notes.content, `%${question.slice(0, 20)}%`)
-    ))
-    .limit(5)
-    .all();
-
-  // 如果关键词搜不到，取最近的笔记作为上下文
-  let context = notes.map(n => n.content).join('\n\n---\n\n');
-  if (!context.trim()) {
-    const recent = await db.select({ content: schema.notes.content })
-      .from(schema.notes)
-      .where(andOp(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NULL`))
-      .orderBy(descOp(schema.notes.createdAt))
-      .limit(10)
-      .all();
-    context = recent.map(n => n.content).join('\n\n---\n\n');
-  }
-
-  try {
-    const result = await aiChat(userId, question, context);
     return c.json({ data: { result } });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
