@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useNotesStore } from '@/stores/notes';
 import { api, type Note } from '@/api';
 import Vditor from 'vditor';
+import { initAudioBubbleHandler } from '@/utils/audio';
 import Sidebar from '@/components/Sidebar.vue';
 import TopBar from '@/components/TopBar.vue';
 import NoteEditModal from '@/components/NoteEditModal.vue';
@@ -154,6 +155,7 @@ function extractRefId(el: HTMLElement): string | null {
 }
 
 onMounted(async () => {
+  initAudioBubbleHandler();
   const user = await auth.fetchMe();
   appReady.value = true;
   if (!user) return;
@@ -168,6 +170,7 @@ onMounted(async () => {
 
   // 全局拦截引用链接单击 → 弹预览(不走路由,不打开新标签)
   document.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest?.('.voice-bubble')) return;
     const el = (e.target as HTMLElement).closest?.('a, .note-ref-link') as HTMLElement | null;
     if (!el) return;
     const refId = extractRefId(el);
@@ -184,6 +187,8 @@ onMounted(async () => {
     if (url && typeof url === 'string') {
       try {
         const u = new URL(url, location.origin);
+        // 音频文件:不打开新窗口
+        if (/\.(webm|mp3|wav|ogg|m4a)$/i.test(u.pathname)) return null;
         const refId = u.searchParams.get('ref');
         if (refId) { openRefPreview(refId); return null; }
       } catch {}

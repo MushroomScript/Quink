@@ -16,6 +16,7 @@ const router = useRouter();
 const openEditModal = inject<(note: Note) => void>('openEditModal');
 
 function handleClick(e: MouseEvent) {
+  if ((e.target as HTMLElement).closest?.('.voice-bubble')) return;
   if (e.ctrlKey || e.metaKey) {
     // Ctrl+点击引用标签 → 跳转详情
     const ref = (e.target as HTMLElement).closest('.note-ref-link');

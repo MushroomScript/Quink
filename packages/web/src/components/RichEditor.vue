@@ -383,6 +383,79 @@ function cleanupRecording() {
   if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
 }
 
+// ── 录音保存(语音备忘) ──
+const isVoiceRecording = ref(false);
+const voiceRecordTime = ref(0);
+let voiceRecordTimer: ReturnType<typeof setInterval> | null = null;
+let mediaRecorder: MediaRecorder | null = null;
+let voiceChunks: Blob[] = [];
+let voiceStream: MediaStream | null = null;
+const voiceUploading = ref(false);
+
+async function toggleVoiceRecord() {
+  if (isVoiceRecording.value) {
+    stopVoiceRecord();
+  } else {
+    startVoiceRecord();
+  }
+}
+
+async function startVoiceRecord() {
+  try {
+    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(voiceStream, { mimeType: 'audio/webm;codecs=opus' });
+    voiceChunks = [];
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) voiceChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      const dur = voiceRecordTime.value;
+      cleanupVoiceRecord();
+      if (!voiceChunks.length) return;
+
+      const blob = new Blob(voiceChunks, { type: 'audio/webm' });
+      voiceChunks = [];
+      voiceUploading.value = true;
+      try {
+        const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
+        const res = await api.uploadFile(file, 'file');
+        if (res.data?.url && vditor) {
+          vditor.focus();
+          setTimeout(() => {
+            vditor?.insertValue(`[🎵 语音备忘 ${dur}s](${res.data.url})`);
+          }, 80);
+        }
+      } catch (err: any) {
+        console.error('[录音保存] 上传失败:', err.message);
+      } finally {
+        voiceUploading.value = false;
+      }
+    };
+
+    mediaRecorder.start(1000);
+    isVoiceRecording.value = true;
+    voiceRecordTime.value = 0;
+    voiceRecordTimer = setInterval(() => { voiceRecordTime.value++; }, 1000);
+  } catch (e: any) {
+    console.error('[录音保存] 启动失败:', e.message);
+  }
+}
+
+function stopVoiceRecord() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+}
+
+function cleanupVoiceRecord() {
+  if (voiceStream) { voiceStream.getTracks().forEach(t => t.stop()); voiceStream = null; }
+  mediaRecorder = null;
+  isVoiceRecording.value = false;
+  if (voiceRecordTimer) { clearInterval(voiceRecordTimer); voiceRecordTimer = null; }
+}
+
 defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 </script>
 
@@ -446,6 +519,19 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         </button>
         <span v-if="isRecording" class="text-[11px] text-red-500 font-medium tabular-nums select-none">
           {{ recordingTime }}s
+        </span>
+        <!-- 录音保存 -->
+        <button @click="toggleVoiceRecord" :disabled="voiceUploading || isRecording"
+          class="tbtn transition-colors"
+          :class="isVoiceRecording ? 'rounded-md' : voiceUploading ? 'text-gray-300' : 'text-gray-400'"
+          :style="isVoiceRecording ? 'color: white; background: rgb(var(--c-accent))' : ''"
+          :title="isVoiceRecording ? '' : voiceUploading ? '上传中...' : '录音保存'">
+          <svg v-if="isVoiceRecording" class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="white"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+          <span v-else-if="voiceUploading" class="animate-pulse">🎤</span>
+          <span v-else>🎤</span>
+        </button>
+        <span v-if="isVoiceRecording" class="text-[11px] font-medium tabular-nums select-none" style="color: rgb(var(--c-accent))">
+          {{ voiceRecordTime }}s
         </span>
       </div>
 

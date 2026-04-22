@@ -238,6 +238,69 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
   opacity: 0.75;
 }
 
+/* ── 语音气泡（微信风格，CSS 属性选择器直接作用于 <a> 标签） ── */
+.note-content a[href$=".webm"],
+.note-content a[href$=".mp3"],
+.note-content a[href$=".wav"],
+.note-content a[href$=".ogg"],
+.note-content a[href$=".m4a"],
+.vditor-reset a[href$=".webm"],
+.vditor-reset a[href$=".mp3"],
+.vditor-reset a[href$=".wav"],
+.vditor-reset a[href$=".ogg"],
+.vditor-reset a[href$=".m4a"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  background: rgb(var(--c-accent)) !important;
+  color: white !important;
+  text-decoration: none !important;
+  cursor: pointer;
+  user-select: none;
+  min-width: 80px;
+  max-width: 240px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: opacity 0.15s, filter 0.15s;
+  vertical-align: middle;
+  margin: 4px 0;
+}
+.note-content a[href$=".webm"]:hover,
+.note-content a[href$=".mp3"]:hover,
+.note-content a[href$=".wav"]:hover,
+.note-content a[href$=".ogg"]:hover,
+.note-content a[href$=".m4a"]:hover,
+.vditor-reset a[href$=".webm"]:hover,
+.vditor-reset a[href$=".mp3"]:hover,
+.vditor-reset a[href$=".wav"]:hover,
+.vditor-reset a[href$=".ogg"]:hover,
+.vditor-reset a[href$=".m4a"]:hover { opacity: 0.85; }
+
+.note-content a[href$=".webm"]::before,
+.note-content a[href$=".mp3"]::before,
+.note-content a[href$=".wav"]::before,
+.note-content a[href$=".ogg"]::before,
+.note-content a[href$=".m4a"]::before,
+.vditor-reset a[href$=".webm"]::before,
+.vditor-reset a[href$=".mp3"]::before,
+.vditor-reset a[href$=".wav"]::before,
+.vditor-reset a[href$=".ogg"]::before,
+.vditor-reset a[href$=".m4a"]::before {
+  content: "🔊 ";
+}
+
+/* 播放中动画 */
+.note-content a.voice-playing,
+.vditor-reset a.voice-playing {
+  animation: voice-pulse 1s ease-in-out infinite;
+}
+@keyframes voice-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 /* 任务列表 checkbox:圆形 + 主题色 */
 .vditor-reset input[type="checkbox"],
 .note-content input[type="checkbox"] {
