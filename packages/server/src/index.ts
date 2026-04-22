@@ -11,6 +11,7 @@ import notesRoutes from './routes/notes.js';
 import categoriesRoutes from './routes/categories.js';
 import uploadRoutes from './routes/upload.js';
 import aiConfigRoutes from './routes/ai-config.js';
+import aiChatRoutes from './routes/ai-chat.js';
 import exportRoutes from './routes/export.js';
 
 const app = new Hono();
@@ -28,6 +29,7 @@ app.route('/api/notes', notesRoutes);
 app.route('/api/categories', categoriesRoutes);
 app.route('/api/upload', uploadRoutes);
 app.route('/api/ai', aiConfigRoutes);
+app.route('/api/ai/chat', aiChatRoutes);
 app.route('/api/data', exportRoutes); // GET /api/data = export, POST /api/data = import
 
 // Health check（不需要登录）

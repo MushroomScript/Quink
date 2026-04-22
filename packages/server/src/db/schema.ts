@@ -72,6 +72,32 @@ export const config = sqliteTable('config', {
   value: text('value', { mode: 'json' }),
 });
 
+export const aiConversations = sqliteTable('ai_conversations', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  title: text('title').notNull().default('新对话'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const aiMessages = sqliteTable('ai_messages', {
+  id: text('id').primaryKey(),
+  conversationId: text('conversation_id').notNull().references(() => aiConversations.id),
+  role: text('role', { enum: ['user', 'assistant'] }).notNull(),
+  content: text('content').notNull(),
+  sources: text('sources', { mode: 'json' }).$type<string[]>().default([]),
+  createdAt: text('created_at').notNull(),
+});
+
+export const voiceTranscriptions = sqliteTable('voice_transcriptions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  audioUrl: text('audio_url').notNull(),
+  text: text('text').default(''),
+  status: text('status', { enum: ['pending', 'done', 'failed'] }).notNull().default('pending'),
+  createdAt: text('created_at').notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Note = typeof notes.$inferSelect;
@@ -80,3 +106,6 @@ export type Category = typeof categories.$inferSelect;
 export type FileRecord = typeof files.$inferSelect;
 export type AiConfig = typeof aiConfigs.$inferSelect;
 export type AiPrompt = typeof aiPrompts.$inferSelect;
+export type AiConversation = typeof aiConversations.$inferSelect;
+export type AiMessage = typeof aiMessages.$inferSelect;
+export type VoiceTranscription = typeof voiceTranscriptions.$inferSelect;

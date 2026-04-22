@@ -22,6 +22,8 @@ const theme = ref('blueberry');
 const fontSize = ref('14');
 const autoSummary = ref(true);
 const autoSummaryMinLen = ref(50);
+const autoTranscribeVoice = ref(false);
+const aiChatMaxTokens = ref(8192);
 const xfAppId = ref('');
 const xfApiKey = ref('');
 const xfApiSecret = ref('');
@@ -179,6 +181,8 @@ onMounted(() => {
     fontSize.value = String(prefs.fontSize || 14);
     if (typeof prefs.autoSummary === 'boolean') autoSummary.value = prefs.autoSummary;
     if (prefs.autoSummaryMinLen) autoSummaryMinLen.value = prefs.autoSummaryMinLen;
+    if (typeof prefs.autoTranscribeVoice === 'boolean') autoTranscribeVoice.value = prefs.autoTranscribeVoice;
+    if (prefs.aiChatMaxTokens) aiChatMaxTokens.value = prefs.aiChatMaxTokens;
     if (prefs.xfyun) {
       xfAppId.value = prefs.xfyun.appId || '';
       xfApiKey.value = prefs.xfyun.apiKey || '';
@@ -281,6 +285,8 @@ async function savePreferences(silent = false) {
         fontSize: parseInt(fontSize.value),
         autoSummary: autoSummary.value,
         autoSummaryMinLen: autoSummaryMinLen.value,
+        autoTranscribeVoice: autoTranscribeVoice.value,
+        aiChatMaxTokens: aiChatMaxTokens.value,
         xfyun: { appId: xfAppId.value, apiKey: xfApiKey.value, apiSecret: xfApiSecret.value },
       },
     });
@@ -298,7 +304,7 @@ async function savePreferences(silent = false) {
 
 // 主题、字号、划词开关 变化时自动静默保存
 let savePrefsTimer: ReturnType<typeof setTimeout> | null = null;
-watch([theme, fontSize, autoSummary, autoSummaryMinLen, xfAppId, xfApiKey, xfApiSecret], () => {
+watch([theme, fontSize, autoSummary, autoSummaryMinLen, autoTranscribeVoice, aiChatMaxTokens, xfAppId, xfApiKey, xfApiSecret], () => {
   if (!prefsLoaded) return;
   if (savePrefsTimer) clearTimeout(savePrefsTimer);
   savePrefsTimer = setTimeout(() => savePreferences(true).then(() => toast.show('已保存')), 300);
@@ -532,6 +538,37 @@ function goBack() {
             <input v-model="xfAppId" placeholder="APPID" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
             <input v-model="xfApiKey" placeholder="APIKey" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
             <input v-model="xfApiSecret" placeholder="APISecret" type="password" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
+          <!-- 自动转写 -->
+          <div class="flex items-center justify-between mt-3">
+            <div>
+              <div class="text-xs text-gray-600">录音时自动转写文字</div>
+              <div class="text-[11px] text-gray-400">开启后录音保存时自动调讯飞转写，AI 对话可引用语音内容</div>
+            </div>
+            <button @click="autoTranscribeVoice = !autoTranscribeVoice"
+              class="w-12 h-6 rounded-full transition-colors relative"
+              :class="autoTranscribeVoice ? 'bg-primary' : 'bg-gray-300'">
+              <span class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform"
+                :class="autoTranscribeVoice ? 'translate-x-6' : 'translate-x-1'" />
+            </button>
+          </div>
+        </div>
+
+        <!-- AI 对话设置 -->
+        <div class="pt-2 border-t border-gray-100 space-y-2">
+          <div class="text-sm text-gray-700 font-medium">AI 对话</div>
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-xs text-gray-600">上下文 Token 上限</div>
+              <div class="text-[11px] text-gray-400">越大记住越多对话历史，但消耗更多 Token</div>
+            </div>
+            <select v-model.number="aiChatMaxTokens" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30">
+              <option :value="4096">4K</option>
+              <option :value="8192">8K</option>
+              <option :value="16384">16K</option>
+              <option :value="32768">32K</option>
+              <option :value="65536">64K</option>
+            </select>
           </div>
         </div>
       </div>

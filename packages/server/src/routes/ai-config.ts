@@ -1,12 +1,11 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { authMiddleware } from '../auth.js';
 import crypto from 'crypto';
 import dayjs from 'dayjs';
-import { authMiddleware } from '../auth.js';
 import { DEFAULT_PROMPTS, AI_FEATURES, AI_FEATURE_LABELS } from '../ai/prompts.js';
 import { aiProcess, aiChat } from '../ai/client.js';
 
@@ -307,6 +306,59 @@ app.get('/iat-url', async (c) => {
   const url = `wss://${host}/v2/iat?authorization=${encodeURIComponent(authorization)}&date=${encodeURIComponent(date)}&host=${host}`;
 
   return c.json({ data: { url, appId: xf.appId } });
+});
+
+// POST /api/ai/transcribe-async — 异步转写语音（录音保存时调用）
+app.post('/transcribe-async', async (c) => {
+  const userId = c.get('userId');
+  const { audioUrl } = await c.req.json();
+  if (!audioUrl) return c.json({ error: '缺少 audioUrl' }, 400);
+
+  const existing = await db.select().from(schema.voiceTranscriptions)
+    .where(and(eq(schema.voiceTranscriptions.userId, userId), eq(schema.voiceTranscriptions.audioUrl, audioUrl))).get();
+  if (existing) return c.json({ data: existing });
+
+  const id = nanoid(12);
+  const record = { id, userId, audioUrl, text: '', status: 'pending' as const, createdAt: dayjs().toISOString() };
+  await db.insert(schema.voiceTranscriptions).values(record);
+
+  // 后台异步转写（不阻塞响应）
+  (async () => {
+    try {
+      const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+      const prefs = (user as any)?.preferences || {};
+      const xf = prefs.xfyun || {};
+      if (!xf.appId || !xf.apiKey || !xf.apiSecret) {
+        await db.update(schema.voiceTranscriptions).set({ status: 'failed', text: '未配置讯飞语音' }).where(eq(schema.voiceTranscriptions.id, id));
+        return;
+      }
+
+      // 下载音频文件
+      const { resolve: pathResolve } = await import('path');
+      const { readFileSync } = await import('fs');
+      const filePath = pathResolve(process.cwd(), audioUrl.replace(/^\/api\//, ''));
+      const buffer = readFileSync(filePath);
+
+      const { transcribeAudio } = await import('../ai/client.js');
+      const text = await transcribeAudio(userId, buffer, 'audio/webm');
+      await db.update(schema.voiceTranscriptions).set({ status: 'done', text }).where(eq(schema.voiceTranscriptions.id, id));
+    } catch (err: any) {
+      await db.update(schema.voiceTranscriptions).set({ status: 'failed', text: err.message || '转写失败' }).where(eq(schema.voiceTranscriptions.id, id));
+    }
+  })();
+
+  return c.json({ data: record }, 201);
+});
+
+// GET /api/ai/transcription — 查询转写结果
+app.get('/transcription', async (c) => {
+  const userId = c.get('userId');
+  const audioUrl = c.req.query('audioUrl');
+  if (!audioUrl) return c.json({ error: '缺少 audioUrl' }, 400);
+
+  const record = await db.select().from(schema.voiceTranscriptions)
+    .where(and(eq(schema.voiceTranscriptions.userId, userId), eq(schema.voiceTranscriptions.audioUrl, audioUrl))).get();
+  return c.json({ data: record || null });
 });
 
 export default app;

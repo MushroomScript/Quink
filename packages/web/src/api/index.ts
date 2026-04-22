@@ -339,6 +339,32 @@ export const api = {
     return request<{ data: { result: string } }>('/ai/chat', { method: 'POST', body: JSON.stringify({ question }) });
   },
 
+  // Voice Transcription
+  transcribeAsync(audioUrl: string) {
+    return request<{ data: { id: string; audioUrl: string; text: string; status: string } }>('/ai/transcribe-async', { method: 'POST', body: JSON.stringify({ audioUrl }) });
+  },
+  getTranscription(audioUrl: string) {
+    return request<{ data: { id: string; audioUrl: string; text: string; status: string } | null }>(`/ai/transcription?audioUrl=${encodeURIComponent(audioUrl)}`);
+  },
+
+  // AI Conversations
+  getConversations(params?: Record<string, string>) {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return request<{ data: Array<{ id: string; title: string; createdAt: string; updatedAt: string }> }>(`/ai/chat/conversations${qs}`);
+  },
+  createConversation() {
+    return request<{ data: { id: string; title: string; createdAt: string; updatedAt: string } }>('/ai/chat/conversations', { method: 'POST' });
+  },
+  updateConversation(id: string, data: { title: string }) {
+    return request<{ data: { id: string; title: string } }>(`/ai/chat/conversations/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  deleteConversation(id: string) {
+    return request<{ message: string }>(`/ai/chat/conversations/${id}`, { method: 'DELETE' });
+  },
+  getMessages(conversationId: string) {
+    return request<{ data: Array<{ id: string; role: string; content: string; sources: string[]; createdAt: string }> }>(`/ai/chat/conversations/${conversationId}/messages`);
+  },
+
   // Stats
   getStats() {
     return request<{ data: { totalNotes: number; totalTodos: number; pendingTodos: number } }>('/stats');

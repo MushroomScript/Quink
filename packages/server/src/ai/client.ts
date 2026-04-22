@@ -132,6 +132,105 @@ async function callAi(config: AiConfig, systemPrompt: string, userMessage: strin
   }
 }
 
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string | Array<{ type: string; text?: string; image_url?: { url: string }; source?: { type: string; media_type: string; data: string } }>;
+}
+
+export async function callAiStream(config: AiConfig, messages: ChatMessage[], maxTokens = 2048): Promise<ReadableStream<string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const endpoint = buildEndpoint(config);
+
+  if (config.provider === 'anthropic') {
+    headers['x-api-key'] = config.apiKey || '';
+    headers['anthropic-version'] = '2023-06-01';
+
+    const systemMsg = messages.find(m => m.role === 'system');
+    const nonSystem = messages.filter(m => m.role !== 'system');
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: config.model,
+        max_tokens: maxTokens,
+        stream: true,
+        system: typeof systemMsg?.content === 'string' ? systemMsg.content : '',
+        messages: nonSystem.map(m => ({ role: m.role, content: m.content })),
+      }),
+    });
+    if (!res.ok) throw new Error(`Anthropic API error: ${res.status}`);
+
+    return new ReadableStream<string>({
+      async start(controller) {
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.type === 'content_block_delta' && data.delta?.text) {
+                  controller.enqueue(data.delta.text);
+                }
+              } catch {}
+            }
+          }
+        }
+        controller.close();
+      }
+    });
+  } else {
+    if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: config.model,
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        max_tokens: maxTokens,
+        temperature: 0.3,
+        stream: true,
+      }),
+    });
+    if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+
+    return new ReadableStream<string>({
+      async start(controller) {
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+              try {
+                const data = JSON.parse(line.slice(6));
+                const content = data.choices?.[0]?.delta?.content;
+                if (content) controller.enqueue(content);
+              } catch {}
+            }
+          }
+        }
+        controller.close();
+      }
+    });
+  }
+}
+
+export { getConfigForFeature, buildEndpoint };
+
 /**
  * Clean content for AI. Now content is Markdown, just trim it.
  * Also strips HTML tags for backwards compatibility with old notes.

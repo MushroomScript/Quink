@@ -500,6 +500,14 @@ async function startVoiceRecord() {
           setTimeout(() => {
             vditor?.insertValue(`[语音备忘 ${dur}s](${res.data.url})`);
           }, 80);
+          // 自动转写（如果开启）
+          try {
+            const me = await api.getMe();
+            const prefs = me.data?.preferences || {};
+            if (prefs.autoTranscribeVoice) {
+              api.transcribeAsync(res.data.url).catch(() => {});
+            }
+          } catch {}
         }
       } catch (err: any) {
         console.error('[录音保存] 上传失败:', err.message);

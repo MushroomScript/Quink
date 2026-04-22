@@ -83,6 +83,32 @@ sqlite.exec(`
     key TEXT PRIMARY KEY,
     value TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS ai_conversations (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL DEFAULT '新对话',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES ai_conversations(id),
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    sources TEXT DEFAULT '[]',
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS voice_transcriptions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    audio_url TEXT NOT NULL,
+    text TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL
+  );
 `);
 
 // Migrate: add deleted_at column if not exists
