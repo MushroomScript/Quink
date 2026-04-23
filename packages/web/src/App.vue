@@ -56,7 +56,7 @@ router.beforeEach((to, from) => {
   }
 });
 
-const keepAlivePaths = ['/', '/notes', '/todos'];
+const keepAlivePaths = ['/', '/notes', '/todos', '/ai'];
 let pendingScroll: number | null = null;
 
 router.afterEach((to) => {
@@ -247,7 +247,7 @@ onMounted(async () => {
         <TopBar />
         <main ref="mainEl" class="flex-1 overflow-y-auto" style="scrollbar-gutter: stable">
           <RouterView v-slot="{ Component }">
-            <KeepAlive :include="['inspiration', 'notes', 'todos']">
+            <KeepAlive :include="['inspiration', 'notes', 'todos', 'ai-page']">
               <component :is="Component" />
             </KeepAlive>
           </RouterView>

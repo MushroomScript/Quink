@@ -145,14 +145,23 @@ export const TOOL_DEFINITIONS = [
 
 // ── 工具执行 ──
 
+function cleanContent(content: string): string {
+  return content
+    .replace(/\[[\s\S]*?\]\(\/?[?&]ref=[^)]+\)/g, '')
+    .replace(/\[语音备忘\s*\d+s\]\([^)]+\)/g, '[语音]')
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, '[图片]')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function formatNote(note: any): string {
-  const meta = [`ID:${note.id}`, `类型:${note.type}`];
+  const meta = [`ID:${note.id}`];
+  if (note.todoStatus) meta.push(`状态:${note.todoStatus === 'done' ? '已完成' : '未完成'}`);
   if (note.category) meta.push(`分类:${note.category}`);
   if (note.tags?.length) meta.push(`标签:${(note.tags as string[]).join(',')}`);
-  if (note.todoStatus) meta.push(`状态:${note.todoStatus}`);
   if (note.pinned) meta.push('置顶');
-  meta.push(`创建:${note.createdAt?.slice(0, 10)}`);
-  return `[${meta.join(' | ')}]\n${note.content}`;
+  meta.push(note.createdAt?.slice(0, 10));
+  return `[${meta.join(' | ')}]\n${cleanContent(note.content)}`;
 }
 
 export async function executeTool(userId: string, name: string, args: any): Promise<{ result: string; noteIds: string[] }> {

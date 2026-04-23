@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue';
+defineOptions({ name: 'ai-page' });
+import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick, watch } from 'vue';
 import { api } from '@/api';
 import Vditor from 'vditor';
 import { useRouter, useRoute } from 'vue-router';
@@ -15,6 +16,9 @@ const messages = ref<Message[]>([]);
 const query = ref('');
 const loadingConvs = ref(new Set<string>());
 const streamingMap = ref(new Map<string, string>());
+const abortControllers = new Map<string, AbortController>();
+const editingMsgId = ref('');
+const editingMsgText = ref('');
 const messagesEl = ref<HTMLDivElement>();
 const editingTitle = ref('');
 const editingConvId = ref('');
@@ -30,15 +34,51 @@ const TOOL_LABELS: Record<string, string> = {
 
 onMounted(async () => {
   await loadConversations();
-  const convId = route.query.conv as string;
+  const convId = (route.query.conv as string) || sessionStorage.getItem('quink_ai_conv') || '';
   if (convId && conversations.value.find(c => c.id === convId)) {
-    await selectConversation(convId);
-    // 恢复滚动位置（从笔记详情返回时）
-    if (savedScrollTop.value && messagesEl.value) {
-      nextTick(() => { if (messagesEl.value) messagesEl.value.scrollTop = savedScrollTop.value; });
+    const savedScroll = parseInt(sessionStorage.getItem('quink_ai_scroll') || '0');
+    await selectConversation(convId, !!savedScroll);
+    if (savedScroll && messagesEl.value) {
+      setTimeout(() => { if (messagesEl.value) messagesEl.value.scrollTop = savedScroll; }, 100);
     }
   }
+  nextTick(() => {
+    if (messagesEl.value) messagesEl.value.addEventListener('scroll', onMessagesScroll, { passive: true });
+  });
 });
+
+let cachedScrollTop = 0;
+let isActive = true;
+const restoring = ref(false);
+
+onDeactivated(() => {
+  isActive = false;
+});
+
+onActivated(() => {
+  isActive = true;
+  const pos = cachedScrollTop;
+  if (pos) {
+    restoring.value = true;
+    setTimeout(() => {
+      if (messagesEl.value) messagesEl.value.scrollTop = pos;
+      requestAnimationFrame(() => { restoring.value = false; });
+    }, 30);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (messagesEl.value) {
+    messagesEl.value.removeEventListener('scroll', onMessagesScroll);
+  }
+});
+
+function onMessagesScroll() {
+  if (messagesEl.value && isActive) {
+    cachedScrollTop = messagesEl.value.scrollTop;
+    sessionStorage.setItem('quink_ai_scroll', String(cachedScrollTop));
+  }
+}
 
 async function loadConversations() {
   try {
@@ -55,8 +95,9 @@ async function newConversation() {
   } catch {}
 }
 
-async function selectConversation(id: string) {
+async function selectConversation(id: string, skipScroll = false) {
   currentConvId.value = id;
+  sessionStorage.setItem('quink_ai_conv', id);
   router.replace({ query: { conv: id } });
   messages.value = [];
   try {
@@ -71,7 +112,7 @@ async function selectConversation(id: string) {
       }
       messages.value.push({ ...msg, role: msg.role as 'user' | 'assistant', sources: msg.sources || [], html, thinkingHtml });
     }
-    scrollToBottom();
+    if (!skipScroll) scrollToBottom();
   } catch {}
 }
 
@@ -114,12 +155,16 @@ async function sendMessage() {
   streamingMap.value.set(targetConvId, '');
   scrollToBottom();
 
+  const abortCtrl = new AbortController();
+  abortControllers.set(targetConvId, abortCtrl);
+
   try {
     const token = localStorage.getItem('quink_token');
     const res = await fetch(`/api/ai/chat/conversations/${targetConvId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ question: text }),
+      signal: abortCtrl.signal,
     });
 
     if (!res.ok) {
@@ -176,10 +221,11 @@ async function sendMessage() {
       messages.value.push({ id: aiMsgId || 'ai-resp', role: 'assistant', content: fullContent, sources: aiSources, html });
     }
   } catch (err: any) {
-    if (currentConvId.value === targetConvId) {
+    if (err.name !== 'AbortError' && currentConvId.value === targetConvId) {
       messages.value.push({ id: 'err', role: 'assistant', content: err.message || 'AI 调用失败', sources: [] });
     }
   } finally {
+    abortControllers.delete(targetConvId);
     loadingConvs.value.delete(targetConvId);
     streamingMap.value.delete(targetConvId);
     toolCallStatus.value.delete(targetConvId);
@@ -187,11 +233,34 @@ async function sendMessage() {
   }
 }
 
+function stopGeneration() {
+  const ctrl = abortControllers.get(currentConvId.value);
+  if (ctrl) ctrl.abort();
+}
+
+function startEditMsg(msg: Message) {
+  editingMsgId.value = msg.id;
+  editingMsgText.value = msg.content;
+}
+
+async function submitEditMsg(msg: Message) {
+  const text = editingMsgText.value.trim();
+  editingMsgId.value = '';
+  if (!text || text === msg.content) return;
+  // 删掉这条及之后的所有消息，重新发送
+  const idx = messages.value.findIndex(m => m.id === msg.id);
+  if (idx >= 0) messages.value.splice(idx);
+  query.value = text;
+  await sendMessage();
+}
+
+function cancelEditMsg() { editingMsgId.value = ''; }
+
 async function toggleSources(msgId: string, noteIds: string[]) {
   showSources.value[msgId] = !showSources.value[msgId];
   if (showSources.value[msgId] && !sourceNotes.value[msgId]) {
     const notes: { id: string; summary: string; content: string }[] = [];
-    for (const nid of noteIds.slice(0, 5)) {
+    for (const nid of noteIds) {
       try {
         const res = await api.getNote(nid);
         notes.push({ id: nid, summary: res.data.summary || '', content: res.data.content.slice(0, 100) });
@@ -210,10 +279,8 @@ function parseThinking(text: string): { thinking: string; answer: string } {
   return { thinking, answer };
 }
 
-const savedScrollTop = ref(0);
-
 function goToNote(noteId: string) {
-  if (messagesEl.value) savedScrollTop.value = messagesEl.value.scrollTop;
+  if (messagesEl.value) sessionStorage.setItem('quink_ai_scroll', String(messagesEl.value.scrollTop));
   router.push(`/note/${noteId}`);
 }
 
@@ -260,7 +327,7 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
 
     <!-- 右侧：消息区 -->
     <div class="flex-1 flex flex-col min-w-0">
-      <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-4">
+      <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-4" :style="restoring ? 'visibility:hidden' : ''">
         <!-- 空状态 -->
         <div v-if="!currentConvId || messages.length === 0" class="text-center py-16">
           <div class="text-4xl mb-3">🤖</div>
@@ -276,9 +343,25 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
 
         <!-- 消息列表 -->
         <div v-for="msg in messages" :key="msg.id" class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
-          <div class="max-w-[80%]">
-            <div class="px-4 py-3 rounded-2xl text-sm"
-              :class="msg.role === 'user' ? 'bg-primary text-white rounded-br-md' : 'bg-white border border-gray-100 text-gray-700 rounded-bl-md shadow-sm'">
+          <div :class="msg.role === 'user' && editingMsgId === msg.id ? 'w-full max-w-[90%] md:max-w-[70%]' : msg.role === 'user' ? 'max-w-[80%] group' : 'max-w-[80%]'">
+            <!-- 用户消息：编辑模式 -->
+            <div v-if="msg.role === 'user' && editingMsgId === msg.id" class="flex flex-col gap-1.5">
+              <textarea v-model="editingMsgText" rows="3"
+                class="px-4 py-2.5 bg-white border border-primary/40 rounded-xl text-sm outline-none resize-none ring-2 ring-primary/20" />
+              <div class="flex justify-end gap-1.5">
+                <button @click="cancelEditMsg" class="px-3 py-1 text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">取消</button>
+                <button @click="submitEditMsg(msg)" class="px-3 py-1 text-xs rounded-lg text-white" style="background: rgb(var(--c-accent))">重新发送</button>
+              </div>
+            </div>
+            <!-- 用户消息：正常显示 -->
+            <div v-else-if="msg.role === 'user'" class="relative">
+              <div class="px-4 py-3 rounded-2xl rounded-br-md text-sm bg-primary text-white">{{ msg.content }}</div>
+              <button @click="startEditMsg(msg)" class="absolute -left-8 top-1/2 -translate-y-1/2 p-1 rounded-md text-gray-300 hover:text-gray-500 hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity" title="编辑">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+            </div>
+            <!-- AI 消息 -->
+            <div v-else class="px-4 py-3 rounded-2xl rounded-bl-md text-sm bg-white border border-gray-100 text-gray-700 shadow-sm">
               <!-- 思考模型：折叠的思考过程 -->
               <details v-if="msg.role === 'assistant' && parseThinking(msg.content).thinking" class="mb-2">
                 <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-500 select-none">查看思考过程</summary>
@@ -293,7 +376,7 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
                 📎 参考了 {{ msg.sources.length }} 条笔记
                 <span class="text-[10px]">{{ showSources[msg.id] ? '▲' : '▼' }}</span>
               </button>
-              <div v-if="showSources[msg.id] && sourceNotes[msg.id]" class="mt-1 space-y-1">
+              <div v-show="showSources[msg.id] && sourceNotes[msg.id]" class="mt-1 space-y-1 max-h-60 overflow-y-auto">
                 <div v-for="note in sourceNotes[msg.id]" :key="note.id"
                   @click="goToNote(note.id)"
                   class="px-3 py-1.5 bg-gray-50 rounded-lg text-xs text-gray-500 cursor-pointer hover:bg-gray-100 transition-colors truncate">
@@ -344,13 +427,17 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
 
       <!-- 输入框 -->
       <div class="px-4 md:px-6 py-3 border-t border-gray-100">
-        <div class="flex gap-2">
+        <div class="flex gap-2 items-end">
           <textarea v-model="query" @keydown="handleKeydown" placeholder="问点什么..." rows="1"
             class="flex-1 px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:border-primary resize-none" />
-          <button @click="sendMessage" :disabled="!query.trim() || loadingConvs.has(currentConvId)"
-            class="px-5 py-2.5 text-white text-sm font-medium rounded-xl disabled:opacity-40 transition-colors shrink-0"
-            style="background: rgb(var(--c-accent))">
-            发送
+          <button v-if="loadingConvs.has(currentConvId)" @click="stopGeneration"
+            class="p-2.5 rounded-xl border border-gray-200 text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors shrink-0" title="停止生成">
+            <svg class="w-4 h-4" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+          </button>
+          <button v-else @click="sendMessage" :disabled="!query.trim()"
+            class="p-2.5 rounded-xl text-white disabled:opacity-40 transition-colors shrink-0"
+            style="background: rgb(var(--c-accent))" title="发送">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
           </button>
         </div>
       </div>

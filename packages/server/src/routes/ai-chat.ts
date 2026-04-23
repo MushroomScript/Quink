@@ -104,7 +104,6 @@ app.post('/conversations/:id/messages', async (c) => {
   const userPrompt = await db.select().from(schema.aiPrompts)
     .where(and(eq(schema.aiPrompts.userId, userId), eq(schema.aiPrompts.feature, 'chat'))).get();
   let systemContent = userPrompt?.prompt || DEFAULT_PROMPTS.chat;
-  systemContent += '\n\n' + TOOLS_PROMPT;
 
   // 加载历史消息 + token 裁剪
   let usedTokens = estimateTokens(systemContent) + estimateTokens(question);

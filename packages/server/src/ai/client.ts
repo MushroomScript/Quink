@@ -1,6 +1,7 @@
 import { db, schema } from '../db/index.js';
 import { eq, and } from 'drizzle-orm';
 import { DEFAULT_PROMPTS, type AiFeature } from './prompts.js';
+import { TOOLS_PROMPT } from './tools.js';
 
 interface AiCallOptions {
   userId: string;
@@ -303,24 +304,34 @@ export async function callAiWithToolLoop(
 
   for (let round = 0; round < maxRounds; round++) {
     let response: { content: string | null; toolCalls: { name: string; args: any; id: string }[] };
+    const t0 = Date.now();
 
     try {
       response = await callAiNonStream(config, msgsCopy, supportsTools ? tools : undefined);
     } catch (err: any) {
       if (err.message.includes('400') && supportsTools) {
         supportsTools = false;
+        console.log(`[AI] round ${round}: FC not supported, falling back to prompt mode`);
+        // 降级：把工具描述注入 system prompt
+        const sysIdx = msgsCopy.findIndex(m => m.role === 'system');
+        if (sysIdx >= 0 && typeof msgsCopy[sysIdx].content === 'string' && !(msgsCopy[sysIdx].content as string).includes('可用工具')) {
+          msgsCopy[sysIdx] = { ...msgsCopy[sysIdx], content: msgsCopy[sysIdx].content + '\n\n' + TOOLS_PROMPT };
+        }
         response = await callAiNonStream(config, msgsCopy);
       } else {
         throw err;
       }
     }
+    console.log(`[AI] round ${round}: model responded in ${Date.now() - t0}ms, toolCalls=${response.toolCalls.length}`);
 
     // 原生工具调用
     if (response.toolCalls.length > 0) {
       msgsCopy.push({ role: 'assistant', content: response.content || '' });
       for (const tc of response.toolCalls) {
+        const t1 = Date.now();
         onToolCall?.({ name: tc.name, args: tc.args });
         const { result, noteIds } = await executeToolFn(tc.name, tc.args);
+        console.log(`[AI] tool ${tc.name}(${JSON.stringify(tc.args)}) executed in ${Date.now() - t1}ms, results: ${result.length} chars`);
         allNoteIds.push(...noteIds);
         msgsCopy.push({ role: 'tool' as any, content: result, tool_call_id: tc.id } as any);
       }
