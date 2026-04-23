@@ -231,6 +231,132 @@ export async function callAiStream(config: AiConfig, messages: ChatMessage[], ma
 
 export { getConfigForFeature, buildEndpoint };
 
+// ── Function Calling 工具调用循环 ──
+
+interface ToolCallResult {
+  toolCalls: { name: string; args: any; id: string }[];
+}
+
+async function callAiNonStream(config: AiConfig, messages: ChatMessage[], tools?: any[]): Promise<{ content: string | null; toolCalls: { name: string; args: any; id: string }[] }> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const endpoint = buildEndpoint(config);
+
+  if (config.provider === 'anthropic') {
+    headers['x-api-key'] = config.apiKey || '';
+    headers['anthropic-version'] = '2023-06-01';
+    const systemMsg = messages.find(m => m.role === 'system');
+    const nonSystem = messages.filter(m => m.role !== 'system');
+    const body: any = {
+      model: config.model, max_tokens: 2048,
+      system: typeof systemMsg?.content === 'string' ? systemMsg.content : '',
+      messages: nonSystem.map(m => ({ role: m.role, content: m.content })),
+    };
+    if (tools?.length) body.tools = tools.map(t => ({ name: t.function.name, description: t.function.description, input_schema: t.function.parameters }));
+    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`Anthropic API error: ${res.status} ${await res.text()}`);
+    const data = await res.json() as any;
+    const textBlock = data.content?.find((b: any) => b.type === 'text');
+    const toolBlocks = data.content?.filter((b: any) => b.type === 'tool_use') || [];
+    return {
+      content: textBlock?.text || null,
+      toolCalls: toolBlocks.map((b: any) => ({ name: b.name, args: b.input, id: b.id })),
+    };
+  } else {
+    if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
+    const body: any = {
+      model: config.model,
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      max_tokens: 2048, temperature: 0.3,
+    };
+    if (tools?.length) body.tools = tools;
+    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`OpenAI API error: ${res.status} ${await res.text()}`);
+    const data = await res.json() as any;
+    const choice = data.choices?.[0]?.message;
+    return {
+      content: choice?.content || null,
+      toolCalls: (choice?.tool_calls || []).map((tc: any) => ({
+        name: tc.function.name,
+        args: typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments,
+        id: tc.id,
+      })),
+    };
+  }
+}
+
+export interface ToolCallEvent {
+  name: string;
+  args: any;
+}
+
+export async function callAiWithToolLoop(
+  config: AiConfig,
+  messages: ChatMessage[],
+  tools: any[],
+  executeToolFn: (name: string, args: any) => Promise<{ result: string; noteIds: string[] }>,
+  onToolCall?: (event: ToolCallEvent) => void,
+  maxRounds = 5,
+): Promise<{ stream: ReadableStream<string>; noteIds: string[] }> {
+  const allNoteIds: string[] = [];
+  const msgsCopy = [...messages];
+  let supportsTools = true;
+
+  for (let round = 0; round < maxRounds; round++) {
+    let response: { content: string | null; toolCalls: { name: string; args: any; id: string }[] };
+
+    try {
+      response = await callAiNonStream(config, msgsCopy, supportsTools ? tools : undefined);
+    } catch (err: any) {
+      if (err.message.includes('400') && supportsTools) {
+        supportsTools = false;
+        response = await callAiNonStream(config, msgsCopy);
+      } else {
+        throw err;
+      }
+    }
+
+    // 原生工具调用
+    if (response.toolCalls.length > 0) {
+      msgsCopy.push({ role: 'assistant', content: response.content || '' });
+      for (const tc of response.toolCalls) {
+        onToolCall?.({ name: tc.name, args: tc.args });
+        const { result, noteIds } = await executeToolFn(tc.name, tc.args);
+        allNoteIds.push(...noteIds);
+        msgsCopy.push({ role: 'tool' as any, content: result, tool_call_id: tc.id } as any);
+      }
+      continue;
+    }
+
+    // 提示词降级模式：检测 <tool> 标签
+    if (response.content && response.content.includes('<tool>')) {
+      const toolRegex = /<tool>([\s\S]*?)<\/tool>/g;
+      let match;
+      const calls: { name: string; args: any }[] = [];
+      while ((match = toolRegex.exec(response.content)) !== null) {
+        try { calls.push(JSON.parse(match[1])); } catch {}
+      }
+      if (calls.length > 0) {
+        msgsCopy.push({ role: 'assistant', content: response.content });
+        for (const tc of calls) {
+          onToolCall?.({ name: tc.name, args: tc.args });
+          const { result, noteIds } = await executeToolFn(tc.name, tc.args);
+          allNoteIds.push(...noteIds);
+          msgsCopy.push({ role: 'user', content: `[工具 ${tc.name} 执行结果]:\n${result}` });
+        }
+        continue;
+      }
+    }
+
+    // 无工具调用 → 最终回答，用流式输出
+    const finalStream = await callAiStream(config, msgsCopy, 2048);
+    return { stream: finalStream, noteIds: [...new Set(allNoteIds)] };
+  }
+
+  // 超过最大轮次，强制流式输出
+  const finalStream = await callAiStream(config, msgsCopy, 2048);
+  return { stream: finalStream, noteIds: [...new Set(allNoteIds)] };
+}
+
 /**
  * Clean content for AI. Now content is Markdown, just trim it.
  * Also strips HTML tags for backwards compatibility with old notes.

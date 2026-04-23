@@ -5,7 +5,7 @@ import Vditor from 'vditor';
 import { useRouter, useRoute } from 'vue-router';
 
 interface Conversation { id: string; title: string; createdAt: string; updatedAt: string; }
-interface Message { id: string; role: 'user' | 'assistant'; content: string; sources: string[]; html?: string; }
+interface Message { id: string; role: 'user' | 'assistant'; content: string; sources: string[]; html?: string; thinkingHtml?: string; }
 
 const router = useRouter();
 const route = useRoute();
@@ -20,6 +20,13 @@ const editingTitle = ref('');
 const editingConvId = ref('');
 const showSources = ref<Record<string, boolean>>({});
 const sourceNotes = ref<Record<string, { id: string; summary: string; content: string }[]>>({});
+const toolCallStatus = ref(new Map<string, string>());
+const TOOL_LABELS: Record<string, string> = {
+  search_notes: '搜索笔记', get_note: '查看笔记', get_todos: '获取待办',
+  get_recent_notes: '获取最近笔记', get_categories: '获取分类', get_tags: '获取标签',
+  get_stats: '获取统计', get_voice_transcription: '获取语音转写',
+  create_note: '创建笔记', update_note: '更新笔记',
+};
 
 onMounted(async () => {
   await loadConversations();
@@ -56,10 +63,13 @@ async function selectConversation(id: string) {
     const res = await api.getMessages(id);
     for (const msg of res.data) {
       let html: string | undefined;
+      let thinkingHtml: string | undefined;
       if (msg.role === 'assistant') {
-        try { html = await Vditor.md2html(msg.content, { cdn: '/vditor' }); } catch {}
+        const { answer } = parseThinking(msg.content);
+        const renderContent = answer || msg.content;
+        try { html = await Vditor.md2html(renderContent, { cdn: '/vditor' }); } catch {}
       }
-      messages.value.push({ ...msg, role: msg.role as 'user' | 'assistant', sources: msg.sources || [], html });
+      messages.value.push({ ...msg, role: msg.role as 'user' | 'assistant', sources: msg.sources || [], html, thinkingHtml });
     }
     scrollToBottom();
   } catch {}
@@ -138,7 +148,10 @@ async function sendMessage() {
         if (!line.startsWith('data: ')) continue;
         try {
           const data = JSON.parse(line.slice(6));
-          if (data.type === 'delta') {
+          if (data.type === 'tool_call') {
+            toolCallStatus.value.set(targetConvId, TOOL_LABELS[data.name] || data.name);
+          } else if (data.type === 'delta') {
+            toolCallStatus.value.delete(targetConvId);
             fullContent += data.content;
             streamingMap.value.set(targetConvId, fullContent);
             if (currentConvId.value === targetConvId) scrollToBottom();
@@ -156,7 +169,9 @@ async function sendMessage() {
     }
 
     let html: string | undefined;
-    try { html = await Vditor.md2html(fullContent, { cdn: '/vditor' }); } catch {}
+    const { answer: answerText } = parseThinking(fullContent);
+    const renderText = answerText || fullContent;
+    try { html = await Vditor.md2html(renderText, { cdn: '/vditor' }); } catch {}
     if (currentConvId.value === targetConvId) {
       messages.value.push({ id: aiMsgId || 'ai-resp', role: 'assistant', content: fullContent, sources: aiSources, html });
     }
@@ -167,6 +182,7 @@ async function sendMessage() {
   } finally {
     loadingConvs.value.delete(targetConvId);
     streamingMap.value.delete(targetConvId);
+    toolCallStatus.value.delete(targetConvId);
     if (currentConvId.value === targetConvId) scrollToBottom();
   }
 }
@@ -183,6 +199,15 @@ async function toggleSources(msgId: string, noteIds: string[]) {
     }
     sourceNotes.value[msgId] = notes;
   }
+}
+
+function parseThinking(text: string): { thinking: string; answer: string } {
+  const thinkMatch = text.match(/<think>([\s\S]*?)(<\/think>|$)/);
+  if (!thinkMatch) return { thinking: '', answer: text };
+  const thinking = thinkMatch[1].trim();
+  const closed = text.includes('</think>');
+  const answer = closed ? text.replace(/<think>[\s\S]*?<\/think>/, '').trim() : '';
+  return { thinking, answer };
 }
 
 const savedScrollTop = ref(0);
@@ -254,8 +279,13 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
           <div class="max-w-[80%]">
             <div class="px-4 py-3 rounded-2xl text-sm"
               :class="msg.role === 'user' ? 'bg-primary text-white rounded-br-md' : 'bg-white border border-gray-100 text-gray-700 rounded-bl-md shadow-sm'">
-              <div v-if="msg.html" class="note-content prose prose-sm max-w-none" v-html="msg.html" />
-              <template v-else>{{ msg.content }}</template>
+              <!-- 思考模型：折叠的思考过程 -->
+              <details v-if="msg.role === 'assistant' && parseThinking(msg.content).thinking" class="mb-2">
+                <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-500 select-none">查看思考过程</summary>
+                <div class="mt-1 px-3 py-2 bg-gray-50 rounded-lg text-xs text-gray-400 italic whitespace-pre-wrap max-h-40 overflow-y-auto">{{ parseThinking(msg.content).thinking }}</div>
+              </details>
+              <div v-if="msg.html" class="note-content prose prose-sm max-w-none" v-html="msg.thinkingHtml || msg.html" />
+              <template v-else>{{ parseThinking(msg.content).answer || msg.content }}</template>
             </div>
             <!-- 来源标注 -->
             <div v-if="msg.role === 'assistant' && msg.sources?.length" class="mt-1.5 ml-1">
@@ -274,15 +304,33 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
           </div>
         </div>
 
-        <!-- 流式输出中 -->
-        <div v-if="streamingMap.get(currentConvId)" class="flex justify-start">
-          <div class="max-w-[80%] px-4 py-3 bg-white border border-gray-100 text-gray-700 rounded-2xl rounded-bl-md shadow-sm text-sm">
-            <div class="note-content prose prose-sm max-w-none whitespace-pre-wrap">{{ streamingMap.get(currentConvId) }}<span class="animate-pulse">▊</span></div>
+        <!-- 工具调用状态 -->
+        <div v-if="toolCallStatus.get(currentConvId)" class="flex justify-start">
+          <div class="bg-white border border-gray-100 text-gray-400 px-4 py-3 rounded-2xl rounded-bl-md text-sm shadow-sm flex items-center gap-2">
+            <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            正在{{ toolCallStatus.get(currentConvId) }}...
           </div>
         </div>
 
-        <!-- loading -->
-        <div v-if="loadingConvs.has(currentConvId) && !streamingMap.get(currentConvId)" class="flex justify-start">
+        <!-- 流式输出中（含思考模型解析） -->
+        <div v-if="streamingMap.get(currentConvId)" class="flex justify-start">
+          <div class="max-w-[80%] px-4 py-3 bg-white border border-gray-100 text-gray-700 rounded-2xl rounded-bl-md shadow-sm text-sm">
+            <!-- 思考过程 -->
+            <div v-if="parseThinking(streamingMap.get(currentConvId) || '').thinking" class="mb-2 px-3 py-2 bg-gray-50 rounded-lg text-xs text-gray-400 italic">
+              <div class="font-medium text-gray-500 mb-1 flex items-center gap-1">
+                <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                思考中...
+              </div>
+              <div class="whitespace-pre-wrap max-h-32 overflow-y-auto">{{ parseThinking(streamingMap.get(currentConvId) || '').thinking }}</div>
+            </div>
+            <!-- 正式回答 -->
+            <div v-if="parseThinking(streamingMap.get(currentConvId) || '').answer" class="note-content prose prose-sm max-w-none whitespace-pre-wrap">{{ parseThinking(streamingMap.get(currentConvId) || '').answer }}<span class="animate-pulse">▊</span></div>
+            <div v-else-if="!parseThinking(streamingMap.get(currentConvId) || '').thinking" class="note-content prose prose-sm max-w-none whitespace-pre-wrap">{{ streamingMap.get(currentConvId) }}<span class="animate-pulse">▊</span></div>
+          </div>
+        </div>
+
+        <!-- loading（无工具调用、无流式时显示） -->
+        <div v-if="loadingConvs.has(currentConvId) && !streamingMap.get(currentConvId) && !toolCallStatus.get(currentConvId)" class="flex justify-start">
           <div class="bg-white border border-gray-100 text-gray-400 px-4 py-3 rounded-2xl rounded-bl-md text-sm shadow-sm">
             <span class="inline-flex gap-1">
               <span class="animate-bounce" style="animation-delay: 0ms">·</span>

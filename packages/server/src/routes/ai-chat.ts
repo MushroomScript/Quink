@@ -4,9 +4,10 @@ import { eq, and, desc, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { authMiddleware } from '../auth.js';
 import dayjs from 'dayjs';
-import { getConfigForFeature, callAiStream, type ChatMessage } from '../ai/client.js';
+import { getConfigForFeature, callAiWithToolLoop, type ChatMessage } from '../ai/client.js';
 import { DEFAULT_PROMPTS } from '../ai/prompts.js';
-import { searchRelevantNotes, buildNoteContext, estimateTokens, readImageAsBase64 } from '../ai/context.js';
+import { estimateTokens } from '../ai/context.js';
+import { TOOL_DEFINITIONS, TOOLS_PROMPT, executeTool } from '../ai/tools.js';
 
 const app = new Hono();
 app.use('*', authMiddleware);
@@ -71,7 +72,7 @@ app.get('/conversations/:id/messages', async (c) => {
   return c.json({ data: messages });
 });
 
-// POST /conversations/:id/messages — 发送消息 + SSE 流式回复
+// POST /conversations/:id/messages — 发送消息 + Function Calling + SSE 流式回复
 app.post('/conversations/:id/messages', async (c) => {
   const userId = c.get('userId');
   const { id } = c.req.param();
@@ -97,45 +98,21 @@ app.post('/conversations/:id/messages', async (c) => {
   const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
   const prefs = (user as any)?.preferences || {};
   const maxTokens = prefs.aiChatMaxTokens || 8192;
-  const reserveTokens = 2048;
-  const budget = maxTokens - reserveTokens;
+  const budget = maxTokens - 2048;
 
-  // 获取用户自定义 prompt 或默认
+  // system prompt
   const userPrompt = await db.select().from(schema.aiPrompts)
     .where(and(eq(schema.aiPrompts.userId, userId), eq(schema.aiPrompts.feature, 'chat'))).get();
-  const systemPrompt = userPrompt?.prompt || DEFAULT_PROMPTS.chat;
+  let systemContent = userPrompt?.prompt || DEFAULT_PROMPTS.chat;
+  systemContent += '\n\n' + TOOLS_PROMPT;
 
-  // 从最近的 assistant 消息中提取上轮引用的笔记 ID
-  const recentAssistant = await db.select().from(schema.aiMessages)
-    .where(and(eq(schema.aiMessages.conversationId, id), eq(schema.aiMessages.role, 'assistant')))
-    .orderBy(desc(schema.aiMessages.createdAt))
-    .limit(1).get();
-  const previousSourceIds: string[] = recentAssistant?.sources ? (recentAssistant.sources as string[]) : [];
-
-  // 搜索相关笔记（含意图检测 + 上轮引用笔记）
-  const relevantNotes = await searchRelevantNotes(userId, question, 8, previousSourceIds);
-  const isMultimodal = config.provider === 'anthropic' || config.model.includes('vision') || config.model.includes('gpt-4o') || config.model.includes('gpt-4-turbo');
-  const noteCtx = relevantNotes.length > 0
-    ? await buildNoteContext(userId, relevantNotes, isMultimodal)
-    : { text: '', imageUrls: [], noteIds: [] };
-
-  // 构建 system 消息
-  let systemContent = systemPrompt;
-  if (noteCtx.text) {
-    systemContent += `\n\n以下是用户相关的笔记内容：\n${noteCtx.text}`;
-  }
-
-  // token 预算分配
+  // 加载历史消息 + token 裁剪
   let usedTokens = estimateTokens(systemContent) + estimateTokens(question);
-
-  // 加载历史消息（按时间降序，从最新往前裁剪）
   const history = await db.select().from(schema.aiMessages)
     .where(eq(schema.aiMessages.conversationId, id))
     .orderBy(desc(schema.aiMessages.createdAt))
     .all();
   const pastMessages = history.filter(m => m.id !== userMsgId);
-
-  // 从最近开始选，直到 token 预算用完
   const selectedHistory: ChatMessage[] = [];
   for (const msg of pastMessages) {
     const msgTokens = estimateTokens(typeof msg.content === 'string' ? msg.content : '');
@@ -143,43 +120,30 @@ app.post('/conversations/:id/messages', async (c) => {
     usedTokens += msgTokens;
     selectedHistory.push({ role: msg.role as 'user' | 'assistant', content: msg.content });
   }
-  selectedHistory.reverse(); // 翻回时间正序
+  selectedHistory.reverse();
 
-  // 构建最终 messages
   const messages: ChatMessage[] = [
     { role: 'system', content: systemContent },
     ...selectedHistory,
     { role: 'user', content: question },
   ];
 
-  // 多模态：添加图片到用户消息
-  if (isMultimodal && noteCtx.imageUrls.length > 0) {
-    const imageContents: any[] = [{ type: 'text', text: question }];
-    for (const imgUrl of noteCtx.imageUrls.slice(0, 5)) {
-      const img = await readImageAsBase64(imgUrl);
-      if (!img) continue;
-      if (config.provider === 'anthropic') {
-        imageContents.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.base64 } });
-      } else {
-        imageContents.push({ type: 'image_url', image_url: { url: `data:${img.mediaType};base64,${img.base64}` } });
-      }
-    }
-    messages[messages.length - 1] = { role: 'user', content: imageContents };
-  }
-
+  // SSE 响应
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
-
   const write = (obj: any) => writer.write(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
 
-  // 后台异步处理流式 AI 调用
   (async () => {
     try {
-      const aiStream = await callAiStream(config, messages, reserveTokens);
+      const { stream: aiStream, noteIds } = await callAiWithToolLoop(
+        config, messages, TOOL_DEFINITIONS,
+        (name, args) => executeTool(userId, name, args),
+        (event) => { write({ type: 'tool_call', name: event.name, args: event.args }); },
+      );
+
       const reader = aiStream.getReader();
       let fullResponse = '';
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -191,12 +155,11 @@ app.post('/conversations/:id/messages', async (c) => {
       const aiMsgId = nanoid(12);
       await db.insert(schema.aiMessages).values({
         id: aiMsgId, conversationId: id, role: 'assistant', content: fullResponse,
-        sources: noteCtx.noteIds, createdAt: dayjs().toISOString(),
+        sources: noteIds, createdAt: dayjs().toISOString(),
       });
+      await write({ type: 'done', sources: noteIds, messageId: aiMsgId });
 
-      await write({ type: 'done', sources: noteCtx.noteIds, messageId: aiMsgId });
-
-      // 第一轮对话：自动生成标题
+      // 首轮自动生成标题
       const msgCount = await db.select({ count: sql`count(*)` }).from(schema.aiMessages)
         .where(eq(schema.aiMessages.conversationId, id)).get();
       if ((msgCount as any)?.count <= 2 && conv.title === '新对话') {
@@ -220,7 +183,7 @@ app.post('/conversations/:id/messages', async (c) => {
         } catch {}
       }
     } catch (err: any) {
-      console.error('[AI Chat] stream error:', err);
+      console.error('[AI Chat] error:', err);
       await write({ type: 'error', error: err.message || 'AI 调用失败' });
     } finally {
       writer.close();
@@ -228,11 +191,7 @@ app.post('/conversations/:id/messages', async (c) => {
   })();
 
   return new Response(readable, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    },
+    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
   });
 });
 
