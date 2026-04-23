@@ -105,8 +105,15 @@ app.post('/conversations/:id/messages', async (c) => {
     .where(and(eq(schema.aiPrompts.userId, userId), eq(schema.aiPrompts.feature, 'chat'))).get();
   const systemPrompt = userPrompt?.prompt || DEFAULT_PROMPTS.chat;
 
-  // 搜索相关笔记
-  const relevantNotes = await searchRelevantNotes(userId, question, 8);
+  // 从最近的 assistant 消息中提取上轮引用的笔记 ID
+  const recentAssistant = await db.select().from(schema.aiMessages)
+    .where(and(eq(schema.aiMessages.conversationId, id), eq(schema.aiMessages.role, 'assistant')))
+    .orderBy(desc(schema.aiMessages.createdAt))
+    .limit(1).get();
+  const previousSourceIds: string[] = recentAssistant?.sources ? (recentAssistant.sources as string[]) : [];
+
+  // 搜索相关笔记（含意图检测 + 上轮引用笔记）
+  const relevantNotes = await searchRelevantNotes(userId, question, 8, previousSourceIds);
   const isMultimodal = config.provider === 'anthropic' || config.model.includes('vision') || config.model.includes('gpt-4o') || config.model.includes('gpt-4-turbo');
   const noteCtx = relevantNotes.length > 0
     ? await buildNoteContext(userId, relevantNotes, isMultimodal)

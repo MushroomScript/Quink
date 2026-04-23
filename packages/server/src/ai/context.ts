@@ -33,30 +33,76 @@ export function extractKeywords(question: string): string[] {
   return [...new Set(words)].slice(0, 15);
 }
 
-export async function searchRelevantNotes(userId: string, question: string, limit = 10): Promise<typeof schema.notes.$inferSelect[]> {
+const INTENT_TYPE_MAP: Record<string, string[]> = {
+  '待办': ['todo'], '代办': ['todo'], 'todo': ['todo'],
+  '笔记': ['snippet', 'note'], '灵感': ['note'], '记录': ['note', 'snippet'],
+};
+
+function detectIntentTypes(question: string): string[] {
+  const types: string[] = [];
+  for (const [keyword, noteTypes] of Object.entries(INTENT_TYPE_MAP)) {
+    if (question.includes(keyword)) types.push(...noteTypes);
+  }
+  return [...new Set(types)];
+}
+
+export async function searchRelevantNotes(userId: string, question: string, limit = 10, previousSourceIds: string[] = []): Promise<typeof schema.notes.$inferSelect[]> {
+  const resultMap = new Map<string, typeof schema.notes.$inferSelect>();
+
+  // 1. 上轮引用的笔记直接带入（解决"这条笔记还写了啥"类追问）
+  if (previousSourceIds.length) {
+    for (const nid of previousSourceIds) {
+      const note = await db.select().from(schema.notes)
+        .where(and(eq(schema.notes.id, nid), eq(schema.notes.userId, userId))).get();
+      if (note && !note.deletedAt) resultMap.set(nid, note);
+    }
+  }
+
+  // 2. 意图检测：待办/笔记等类型过滤
+  const intentTypes = detectIntentTypes(question);
+  if (intentTypes.length) {
+    const typed = await db.select().from(schema.notes)
+      .where(and(
+        eq(schema.notes.userId, userId),
+        sql`${schema.notes.deletedAt} IS NULL`,
+        inArray(schema.notes.type, intentTypes)
+      ))
+      .orderBy(desc(schema.notes.updatedAt))
+      .limit(limit)
+      .all();
+    for (const n of typed) resultMap.set(n.id, n);
+  }
+
+  // 3. 关键词搜索
   const keywords = extractKeywords(question);
-  if (!keywords.length) return [];
+  if (keywords.length) {
+    const conditions = keywords.slice(0, 8).map(kw =>
+      or(
+        like(schema.notes.content, `%${kw}%`),
+        like(schema.notes.tags, `%${kw}%`),
+        like(schema.notes.category, `%${kw}%`)
+      )
+    );
 
-  const conditions = keywords.slice(0, 8).map(kw =>
-    or(
-      like(schema.notes.content, `%${kw}%`),
-      like(schema.notes.tags, `%${kw}%`),
-      like(schema.notes.category, `%${kw}%`)
-    )
-  );
+    const found = await db.select().from(schema.notes)
+      .where(and(
+        eq(schema.notes.userId, userId),
+        sql`${schema.notes.deletedAt} IS NULL`,
+        or(...conditions)
+      ))
+      .orderBy(desc(schema.notes.updatedAt))
+      .limit(limit * 2)
+      .all();
 
-  const notes = await db.select().from(schema.notes)
-    .where(and(
-      eq(schema.notes.userId, userId),
-      sql`${schema.notes.deletedAt} IS NULL`,
-      or(...conditions)
-    ))
-    .orderBy(desc(schema.notes.updatedAt))
-    .limit(limit * 2)
-    .all();
+    for (const n of found) resultMap.set(n.id, n);
+  }
 
+  // 按相关度排序
+  const notes = [...resultMap.values()];
   const scored = notes.map(note => {
     let score = 0;
+    if (previousSourceIds.includes(note.id)) score += 10;
+    if (intentTypes.length && intentTypes.includes(note.type)) score += 5;
     const text = (note.content + ' ' + (note.tags as string[]).join(' ') + ' ' + (note.category || '')).toLowerCase();
     for (const kw of keywords) {
       if (text.includes(kw.toLowerCase())) score++;

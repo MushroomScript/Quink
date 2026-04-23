@@ -26,6 +26,10 @@ onMounted(async () => {
   const convId = route.query.conv as string;
   if (convId && conversations.value.find(c => c.id === convId)) {
     await selectConversation(convId);
+    // 恢复滚动位置（从笔记详情返回时）
+    if (savedScrollTop.value && messagesEl.value) {
+      nextTick(() => { if (messagesEl.value) messagesEl.value.scrollTop = savedScrollTop.value; });
+    }
   }
 });
 
@@ -181,6 +185,13 @@ async function toggleSources(msgId: string, noteIds: string[]) {
   }
 }
 
+const savedScrollTop = ref(0);
+
+function goToNote(noteId: string) {
+  if (messagesEl.value) savedScrollTop.value = messagesEl.value.scrollTop;
+  router.push(`/note/${noteId}`);
+}
+
 function scrollToBottom() {
   nextTick(() => { if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight; });
 }
@@ -254,7 +265,7 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
               </button>
               <div v-if="showSources[msg.id] && sourceNotes[msg.id]" class="mt-1 space-y-1">
                 <div v-for="note in sourceNotes[msg.id]" :key="note.id"
-                  @click="router.push(`/note/${note.id}`)"
+                  @click="goToNote(note.id)"
                   class="px-3 py-1.5 bg-gray-50 rounded-lg text-xs text-gray-500 cursor-pointer hover:bg-gray-100 transition-colors truncate">
                   {{ note.summary || note.content }}
                 </div>
