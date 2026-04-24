@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 import { authMiddleware } from '../auth.js';
 import dayjs from 'dayjs';
 import { getConfigForFeature, callAiWithToolLoop, type ChatMessage } from '../ai/client.js';
-import { DEFAULT_PROMPTS } from '../ai/prompts.js';
+import { DEFAULT_PROMPTS, AI_PERSONAS } from '../ai/prompts.js';
 import { estimateTokens } from '../ai/context.js';
 import { TOOL_DEFINITIONS, TOOLS_PROMPT, executeTool } from '../ai/tools.js';
 
@@ -100,10 +100,15 @@ app.post('/conversations/:id/messages', async (c) => {
   const maxTokens = prefs.aiChatMaxTokens || 8192;
   const budget = maxTokens - 2048;
 
-  // system prompt
+  // system prompt + 人格
   const userPrompt = await db.select().from(schema.aiPrompts)
     .where(and(eq(schema.aiPrompts.userId, userId), eq(schema.aiPrompts.feature, 'chat'))).get();
-  let systemContent = userPrompt?.prompt || DEFAULT_PROMPTS.chat;
+  const basePrompt = userPrompt?.prompt || DEFAULT_PROMPTS.chat;
+  const personaKey = prefs.aiPersona || 'concise';
+  const persona = personaKey === 'custom'
+    ? (prefs.aiPersonaCustom || '')
+    : (AI_PERSONAS[personaKey]?.prompt || AI_PERSONAS.concise.prompt);
+  let systemContent = `${basePrompt}\n\n${persona}`;
 
   // 加载历史消息 + token 裁剪
   let usedTokens = estimateTokens(systemContent) + estimateTokens(question);

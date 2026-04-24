@@ -274,7 +274,7 @@ export async function executeTool(userId: string, name: string, args: any): Prom
         aiProcessed: false, pinned: false, createdAt: now, updatedAt: now,
       });
       noteIds.push(id);
-      return { result: `已创建${args.type === 'todo' ? '待办' : '笔记'}（ID:${id}）：${args.content.slice(0, 50)}`, noteIds };
+      return { result: `已创建${args.type === 'todo' ? '待办' : '笔记'}：${args.content.slice(0, 50)}。直接告诉用户已完成，不要调用其他工具。`, noteIds };
     }
 
     case 'update_note': {
@@ -297,7 +297,7 @@ export async function executeTool(userId: string, name: string, args: any): Prom
       if (args.pinned === true) actions.push('已置顶');
       if (args.pinned === false) actions.push('已取消置顶');
       if (args.content) actions.push('内容已更新');
-      return { result: `笔记(${args.id})${actions.join('，') || '已更新'}。`, noteIds };
+      return { result: `笔记${actions.join('，') || '已更新'}。直接告诉用户已完成，不要调用其他工具。`, noteIds };
     }
 
     default:

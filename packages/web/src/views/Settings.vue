@@ -24,6 +24,15 @@ const autoSummary = ref(true);
 const autoSummaryMinLen = ref(50);
 const autoTranscribeVoice = ref(false);
 const aiChatMaxTokens = ref(8192);
+const aiPersona = ref('concise');
+const aiPersonaCustom = ref('');
+const personas: Record<string, { label: string; description: string }> = {
+  concise: { label: '简洁高效', description: '极简回复，一句话说清' },
+  friendly: { label: '亲切友好', description: '温暖有礼，像朋友聊天' },
+  professional: { label: '专业严谨', description: '条理清晰，结构化输出' },
+  humorous: { label: '幽默轻松', description: '风趣幽默，带点调侃' },
+  custom: { label: '自定义', description: '自己写人格提示词' },
+};
 const xfAppId = ref('');
 const xfApiKey = ref('');
 const xfApiSecret = ref('');
@@ -183,6 +192,8 @@ onMounted(() => {
     if (prefs.autoSummaryMinLen) autoSummaryMinLen.value = prefs.autoSummaryMinLen;
     if (typeof prefs.autoTranscribeVoice === 'boolean') autoTranscribeVoice.value = prefs.autoTranscribeVoice;
     if (prefs.aiChatMaxTokens) aiChatMaxTokens.value = prefs.aiChatMaxTokens;
+    if (prefs.aiPersona) aiPersona.value = prefs.aiPersona;
+    if (prefs.aiPersonaCustom) aiPersonaCustom.value = prefs.aiPersonaCustom;
     if (prefs.xfyun) {
       xfAppId.value = prefs.xfyun.appId || '';
       xfApiKey.value = prefs.xfyun.apiKey || '';
@@ -287,6 +298,8 @@ async function savePreferences(silent = false) {
         autoSummaryMinLen: autoSummaryMinLen.value,
         autoTranscribeVoice: autoTranscribeVoice.value,
         aiChatMaxTokens: aiChatMaxTokens.value,
+        aiPersona: aiPersona.value,
+        aiPersonaCustom: aiPersonaCustom.value,
         xfyun: { appId: xfAppId.value, apiKey: xfApiKey.value, apiSecret: xfApiSecret.value },
       },
     });
@@ -304,7 +317,7 @@ async function savePreferences(silent = false) {
 
 // 主题、字号、划词开关 变化时自动静默保存
 let savePrefsTimer: ReturnType<typeof setTimeout> | null = null;
-watch([theme, fontSize, autoSummary, autoSummaryMinLen, autoTranscribeVoice, aiChatMaxTokens, xfAppId, xfApiKey, xfApiSecret], () => {
+watch([theme, fontSize, autoSummary, autoSummaryMinLen, autoTranscribeVoice, aiChatMaxTokens, aiPersona, aiPersonaCustom, xfAppId, xfApiKey, xfApiSecret], () => {
   if (!prefsLoaded) return;
   if (savePrefsTimer) clearTimeout(savePrefsTimer);
   savePrefsTimer = setTimeout(() => savePreferences(true).then(() => toast.show('已保存')), 300);
@@ -534,10 +547,19 @@ function goBack() {
         <div class="pt-2 border-t border-gray-100 space-y-2">
           <div class="text-sm text-gray-700 font-medium">语音识别（讯飞）</div>
           <div class="text-xs text-gray-400 mb-1">用于编辑器的语音输入功能，注册 xfyun.cn 获取</div>
-          <div class="grid grid-cols-3 gap-2">
-            <input v-model="xfAppId" placeholder="APPID" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
-            <input v-model="xfApiKey" placeholder="APIKey" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
-            <input v-model="xfApiSecret" placeholder="APISecret" type="password" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+          <div class="space-y-1.5">
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-gray-500 w-16 shrink-0">APPID</span>
+              <input v-model="xfAppId" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-gray-500 w-16 shrink-0">APIKey</span>
+              <input v-model="xfApiKey" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-gray-500 w-16 shrink-0">APISecret</span>
+              <input v-model="xfApiSecret" type="password" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
           </div>
           <!-- 自动转写 -->
           <div class="flex items-center justify-between mt-3">
@@ -546,17 +568,32 @@ function goBack() {
               <div class="text-[11px] text-gray-400">开启后录音保存时自动调讯飞转写，AI 对话可引用语音内容</div>
             </div>
             <button @click="autoTranscribeVoice = !autoTranscribeVoice"
-              class="w-12 h-6 rounded-full transition-colors relative"
+              class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4"
               :class="autoTranscribeVoice ? 'bg-primary' : 'bg-gray-300'">
-              <span class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform"
+              <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
                 :class="autoTranscribeVoice ? 'translate-x-6' : 'translate-x-1'" />
             </button>
           </div>
         </div>
 
         <!-- AI 对话设置 -->
-        <div class="pt-2 border-t border-gray-100 space-y-2">
+        <div class="pt-2 border-t border-gray-100 space-y-3">
           <div class="text-sm text-gray-700 font-medium">AI 对话</div>
+          <!-- 人格选择 -->
+          <div>
+            <div class="text-xs text-gray-600 mb-1.5">AI 人格风格</div>
+            <div class="grid grid-cols-2 gap-1.5">
+              <button v-for="(p, key) in personas" :key="key" @click="aiPersona = key"
+                class="px-3 py-2 rounded-lg text-left text-xs transition-colors border"
+                :class="aiPersona === key ? 'border-primary bg-primary-light text-primary-dark font-medium' : 'border-gray-200 text-gray-500 hover:bg-gray-50'">
+                <div class="font-medium">{{ p.label }}</div>
+                <div class="text-[11px] mt-0.5 opacity-70">{{ p.description }}</div>
+              </button>
+            </div>
+            <textarea v-if="aiPersona === 'custom'" v-model="aiPersonaCustom" rows="3" placeholder="输入自定义人格提示词..."
+              class="w-full mt-2 px-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+          </div>
+          <!-- Token 上限 -->
           <div class="flex items-center justify-between">
             <div>
               <div class="text-xs text-gray-600">上下文 Token 上限</div>
@@ -568,6 +605,10 @@ function goBack() {
               <option :value="16384">16K</option>
               <option :value="32768">32K</option>
               <option :value="65536">64K</option>
+              <option :value="131072">128K</option>
+              <option :value="262144">256K</option>
+              <option :value="524288">512K</option>
+              <option :value="1048576">1M</option>
             </select>
           </div>
         </div>

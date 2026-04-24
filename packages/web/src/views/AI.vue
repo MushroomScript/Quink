@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineOptions({ name: 'ai-page' });
-import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick, watch } from 'vue';
+import { ref, onMounted, onActivated, onDeactivated, nextTick, watch } from 'vue';
 import { api } from '@/api';
 import Vditor from 'vditor';
 import { useRouter, useRoute } from 'vue-router';
@@ -32,53 +32,31 @@ const TOOL_LABELS: Record<string, string> = {
   create_note: '创建笔记', update_note: '更新笔记',
 };
 
+let savedScroll = 0;
+
 onMounted(async () => {
   await loadConversations();
   const convId = (route.query.conv as string) || sessionStorage.getItem('quink_ai_conv') || '';
   if (convId && conversations.value.find(c => c.id === convId)) {
-    const savedScroll = parseInt(sessionStorage.getItem('quink_ai_scroll') || '0');
-    await selectConversation(convId, !!savedScroll);
-    if (savedScroll && messagesEl.value) {
-      setTimeout(() => { if (messagesEl.value) messagesEl.value.scrollTop = savedScroll; }, 100);
-    }
+    await selectConversation(convId);
   }
-  nextTick(() => {
-    if (messagesEl.value) messagesEl.value.addEventListener('scroll', onMessagesScroll, { passive: true });
-  });
+  watch(messagesEl, (el) => {
+    if (el) el.addEventListener('scroll', () => { savedScroll = el.scrollTop; }, { passive: true });
+  }, { immediate: true });
 });
 
-let cachedScrollTop = 0;
-let isActive = true;
-const restoring = ref(false);
-
 onDeactivated(() => {
-  isActive = false;
+  if (messagesEl.value) messagesEl.value.style.visibility = 'hidden';
 });
 
 onActivated(() => {
-  isActive = true;
-  const pos = cachedScrollTop;
-  if (pos) {
-    restoring.value = true;
-    setTimeout(() => {
-      if (messagesEl.value) messagesEl.value.scrollTop = pos;
-      requestAnimationFrame(() => { restoring.value = false; });
-    }, 30);
-  }
+  requestAnimationFrame(() => {
+    if (messagesEl.value) {
+      messagesEl.value.scrollTop = savedScroll;
+      messagesEl.value.style.visibility = '';
+    }
+  });
 });
-
-onBeforeUnmount(() => {
-  if (messagesEl.value) {
-    messagesEl.value.removeEventListener('scroll', onMessagesScroll);
-  }
-});
-
-function onMessagesScroll() {
-  if (messagesEl.value && isActive) {
-    cachedScrollTop = messagesEl.value.scrollTop;
-    sessionStorage.setItem('quink_ai_scroll', String(cachedScrollTop));
-  }
-}
 
 async function loadConversations() {
   try {
@@ -95,7 +73,7 @@ async function newConversation() {
   } catch {}
 }
 
-async function selectConversation(id: string, skipScroll = false) {
+async function selectConversation(id: string) {
   currentConvId.value = id;
   sessionStorage.setItem('quink_ai_conv', id);
   router.replace({ query: { conv: id } });
@@ -107,12 +85,12 @@ async function selectConversation(id: string, skipScroll = false) {
       let thinkingHtml: string | undefined;
       if (msg.role === 'assistant') {
         const { answer } = parseThinking(msg.content);
-        const renderContent = answer || msg.content;
+        const renderContent = stripOuterCodeFence(answer || msg.content);
         try { html = await Vditor.md2html(renderContent, { cdn: '/vditor' }); } catch {}
       }
       messages.value.push({ ...msg, role: msg.role as 'user' | 'assistant', sources: msg.sources || [], html, thinkingHtml });
     }
-    if (!skipScroll) scrollToBottom();
+    scrollToBottom();
   } catch {}
 }
 
@@ -215,7 +193,7 @@ async function sendMessage() {
 
     let html: string | undefined;
     const { answer: answerText } = parseThinking(fullContent);
-    const renderText = answerText || fullContent;
+    const renderText = stripOuterCodeFence(answerText || fullContent);
     try { html = await Vditor.md2html(renderText, { cdn: '/vditor' }); } catch {}
     if (currentConvId.value === targetConvId) {
       messages.value.push({ id: aiMsgId || 'ai-resp', role: 'assistant', content: fullContent, sources: aiSources, html });
@@ -256,6 +234,12 @@ async function submitEditMsg(msg: Message) {
 
 function cancelEditMsg() { editingMsgId.value = ''; }
 
+function stripOuterCodeFence(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^```(?:markdown|md|text)?\n([\s\S]*?)\n```$/);
+  return match ? match[1] : text;
+}
+
 async function toggleSources(msgId: string, noteIds: string[]) {
   showSources.value[msgId] = !showSources.value[msgId];
   if (showSources.value[msgId] && !sourceNotes.value[msgId]) {
@@ -280,7 +264,6 @@ function parseThinking(text: string): { thinking: string; answer: string } {
 }
 
 function goToNote(noteId: string) {
-  if (messagesEl.value) sessionStorage.setItem('quink_ai_scroll', String(messagesEl.value.scrollTop));
   router.push(`/note/${noteId}`);
 }
 
@@ -327,7 +310,7 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
 
     <!-- 右侧：消息区 -->
     <div class="flex-1 flex flex-col min-w-0">
-      <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-4" :style="restoring ? 'visibility:hidden' : ''">
+      <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-4">
         <!-- 空状态 -->
         <div v-if="!currentConvId || messages.length === 0" class="text-center py-16">
           <div class="text-4xl mb-3">🤖</div>
