@@ -15,6 +15,35 @@ app.use('*', authMiddleware);
 // GET /conversations — 对话列表
 app.get('/conversations', async (c) => {
   const userId = c.get('userId');
+  const search = c.req.query('search')?.trim();
+
+  if (search) {
+    const like = (await import('drizzle-orm')).like;
+    const or = (await import('drizzle-orm')).or;
+    // 先搜消息内容找到匹配的 conversationId
+    const msgMatches = await db.selectDistinct({ conversationId: schema.aiMessages.conversationId })
+      .from(schema.aiMessages)
+      .where(like(schema.aiMessages.content, `%${search}%`))
+      .all();
+    const msgConvIds = msgMatches.map(m => m.conversationId);
+
+    // 搜标题 + 消息匹配的 conversationId
+    const conditions: any[] = [
+      eq(schema.aiConversations.userId, userId),
+      or(
+        like(schema.aiConversations.title, `%${search}%`),
+        ...(msgConvIds.length ? [sql`${schema.aiConversations.id} IN (${sql.join(msgConvIds.map(id => sql`${id}`), sql`, `)})`] : [])
+      ),
+    ];
+
+    const rows = await db.select().from(schema.aiConversations)
+      .where(and(...conditions))
+      .orderBy(desc(schema.aiConversations.updatedAt))
+      .limit(50)
+      .all();
+    return c.json({ data: rows });
+  }
+
   const conversations = await db.select().from(schema.aiConversations)
     .where(eq(schema.aiConversations.userId, userId))
     .orderBy(desc(schema.aiConversations.updatedAt))

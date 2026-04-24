@@ -6,27 +6,95 @@ import Vditor from 'vditor';
 
 const auth = useAuthStore();
 const query = ref('');
-const messages = ref<{ role: 'user' | 'ai'; content: string; html?: string }[]>([]);
+const messages = ref<{ id: string; role: 'user' | 'assistant'; content: string; html?: string }[]>([]);
 const loading = ref(false);
+const streamingContent = ref('');
 const notLoggedIn = ref(false);
 const messagesEl = ref<HTMLDivElement>();
 const inputEl = ref<HTMLInputElement>();
+const convId = ref('');
+
+function parseThinking(text: string): { thinking: string; answer: string } {
+  const m = text.match(/<think>([\s\S]*?)(<\/think>|$)/);
+  if (!m) return { thinking: '', answer: text };
+  return { thinking: m[1].trim(), answer: text.includes('</think>') ? text.replace(/<think>[\s\S]*?<\/think>/, '').trim() : '' };
+}
+
+function stripOuterCodeFence(text: string): string {
+  const m = text.trim().match(/^```(?:markdown|md|text)?\n([\s\S]*?)\n```$/);
+  return m ? m[1] : text;
+}
+
+async function ensureConversation() {
+  if (!convId.value) {
+    const res = await api.createConversation();
+    convId.value = res.data.id;
+  }
+}
 
 async function sendMessage() {
   const text = query.value.trim();
   if (!text || loading.value) return;
+  await ensureConversation();
 
-  messages.value.push({ role: 'user', content: text });
+  messages.value.push({ id: 'u-' + Date.now(), role: 'user', content: text });
   query.value = '';
   loading.value = true;
+  streamingContent.value = '';
   scrollToBottom();
 
   try {
-    const res = await api.aiChat(text);
-    const html = await Vditor.md2html(res.data.result);
-    messages.value.push({ role: 'ai', content: res.data.result, html });
+    const token = localStorage.getItem('quink_token');
+    const res = await fetch(`/api/ai/chat/conversations/${convId.value}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ question: text }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'AI 调用失败' }));
+      messages.value.push({ id: 'err', role: 'assistant', content: err.error || 'AI 调用失败' });
+      return;
+    }
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullContent = '';
+    let aiMsgId = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.type === 'delta') {
+            fullContent += data.content;
+            streamingContent.value = fullContent;
+            scrollToBottom();
+          } else if (data.type === 'done') {
+            aiMsgId = data.messageId || '';
+          } else if (data.type === 'error') {
+            fullContent += `\n\n**错误**: ${data.error}`;
+          }
+        } catch {}
+      }
+    }
+
+    let html: string | undefined;
+    const renderText = stripOuterCodeFence(parseThinking(fullContent).answer || fullContent);
+    try { html = await Vditor.md2html(renderText, { cdn: '/vditor' }); } catch {}
+    messages.value.push({ id: aiMsgId || 'ai', role: 'assistant', content: fullContent, html });
+    streamingContent.value = '';
   } catch (err: any) {
-    messages.value.push({ role: 'ai', content: err.message || 'AI 处理失败' });
+    if (err.name !== 'AbortError') {
+      messages.value.push({ id: 'err', role: 'assistant', content: err.message || 'AI 调用失败' });
+    }
   } finally {
     loading.value = false;
     scrollToBottom();
@@ -34,13 +102,17 @@ async function sendMessage() {
 }
 
 function scrollToBottom() {
-  nextTick(() => {
-    if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight;
-  });
+  nextTick(() => { if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight; });
 }
 
 function handleInputKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function newChat() {
+  convId.value = '';
+  messages.value = [];
+  streamingContent.value = '';
 }
 
 function onGlobalKeydown(e: KeyboardEvent) {
@@ -58,9 +130,7 @@ onMounted(async () => {
   setTimeout(() => inputEl.value?.focus(), 500);
 });
 
-onUnmounted(() => {
-  document.removeEventListener('keydown', onGlobalKeydown);
-});
+onUnmounted(() => { document.removeEventListener('keydown', onGlobalKeydown); });
 </script>
 
 <template>
@@ -68,7 +138,10 @@ onUnmounted(() => {
     <!-- Title bar -->
     <div class="flex items-center justify-between px-4 py-2 shrink-0" style="-webkit-app-region: drag; background: rgb(var(--c-sidebar))">
       <span class="text-xs font-semibold" style="color: var(--sb-text)">🤖 AI 对话</span>
-      <span class="text-[10px]" style="color: var(--sb-dim); -webkit-app-region: no-drag">Esc 关闭</span>
+      <div class="flex items-center gap-2" style="-webkit-app-region: no-drag">
+        <button @click="newChat" class="text-[10px] px-2 py-0.5 rounded hover:bg-white/10" style="color: var(--sb-dim)">新对话</button>
+        <span class="text-[10px]" style="color: var(--sb-dim)">Esc 关闭</span>
+      </div>
     </div>
 
     <div v-if="notLoggedIn" class="flex-1 flex items-center justify-center bg-white">
@@ -76,34 +149,39 @@ onUnmounted(() => {
     </div>
 
     <template v-else>
-      <!-- Messages -->
       <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-white">
-        <div v-if="messages.length === 0" class="text-center py-8">
+        <div v-if="messages.length === 0 && !streamingContent" class="text-center py-8">
           <div class="text-3xl mb-2">🤖</div>
-          <p class="text-gray-400 text-xs">问我任何关于你笔记的问题</p>
+          <p class="text-gray-400 text-xs">问我任何问题</p>
         </div>
 
-        <div v-for="(msg, i) in messages" :key="i" class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+        <div v-for="msg in messages" :key="msg.id" class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
           <div class="max-w-[85%] px-3 py-2 rounded-2xl text-sm"
             :class="msg.role === 'user' ? 'bg-primary text-white rounded-br-md' : 'bg-gray-100 text-gray-700 rounded-bl-md'">
             <div v-if="msg.html" class="note-content prose prose-sm max-w-none" v-html="msg.html" />
-            <template v-else>{{ msg.content }}</template>
+            <template v-else>{{ parseThinking(msg.content).answer || msg.content }}</template>
           </div>
         </div>
 
-        <div v-if="loading" class="flex justify-start">
+        <div v-if="streamingContent" class="flex justify-start">
+          <div class="max-w-[85%] px-3 py-2 bg-gray-100 text-gray-700 rounded-2xl rounded-bl-md text-sm whitespace-pre-wrap">{{ parseThinking(streamingContent).answer || streamingContent }}<span class="animate-pulse">▊</span></div>
+        </div>
+
+        <div v-if="loading && !streamingContent" class="flex justify-start">
           <div class="bg-gray-100 text-gray-400 px-3 py-2 rounded-2xl rounded-bl-md text-sm">思考中...</div>
         </div>
       </div>
 
-      <!-- Input -->
       <div class="px-3 py-2 border-t border-gray-100 bg-white shrink-0">
-        <div class="flex gap-2">
+        <div class="flex gap-2 items-end">
           <input ref="inputEl" v-model="query" @keydown="handleInputKeydown" placeholder="问点什么..."
             class="flex-1 px-3 py-2 bg-gray-50 border-0 rounded-full text-sm outline-none focus:bg-white focus:ring-2 focus:ring-primary/30" />
-          <button @click="sendMessage" :disabled="!query.trim() || loading"
-            class="px-4 py-2 bg-primary text-white text-xs font-medium rounded-full hover:bg-primary-dark disabled:opacity-40 shrink-0">
-            发送
+          <button v-if="loading" @click="loading = false" class="p-2 rounded-full border border-gray-200 text-gray-500 hover:text-red-500 shrink-0">
+            <svg class="w-4 h-4" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+          </button>
+          <button v-else @click="sendMessage" :disabled="!query.trim()"
+            class="p-2 rounded-full text-white disabled:opacity-40 shrink-0" style="background: rgb(var(--c-accent))">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
           </button>
         </div>
       </div>

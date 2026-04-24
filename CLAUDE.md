@@ -84,5 +84,22 @@ Static files served from `packages/web/public/vditor/dist/` (copied from node_mo
 - Soft delete for notes (`deleted_at` field), auto-purge after 30 days.
 - Ports: backend 38999, frontend 24888. These are configured in `vite.config.ts` and `server/src/index.ts`.
 
+## Coding Standards
+
+### Naming
+| 场景 | 规范 | 示例 |
+|------|------|------|
+| 数据库列名 | snake_case | `user_id`, `created_at`, `todo_status` |
+| TypeScript 变量/函数 | camelCase | `userId`, `sendMessage`, `currentConvId` |
+| TypeScript 类型/接口 | PascalCase | `Note`, `AiConfig`, `ChatMessage` |
+| Vue 组件文件 | PascalCase | `NoteCard.vue`, `TopBar.vue` |
+| CSS 类名 | kebab-case | `note-content`, `voice-bubble` |
+| 常量 | UPPER_SNAKE_CASE | `DEFAULT_PROMPTS`, `TOOL_DEFINITIONS` |
+| API JSON 响应字段 | camelCase | `{ userId, createdAt, todoStatus }` |
+
+### Database Queries
+- **必须使用 Drizzle ORM 查询**，禁止使用 `db.all(sql\`...\`)` 等原始 SQL 返回数据给客户端（ORM 自动处理 snake_case → camelCase 映射）。
+- 原始 SQL 仅限内部统计/迁移等不直接返回给前端的场景。如必须使用，需给列加 `AS camelCase` 别名。
+
 ## File Upload
 Upload endpoint at `/api/upload/file`, static serving at `/api/uploads/*`. Files stored in `packages/server/uploads/` and tracked in `files` table. Max 20MB. Avatar upload at `/api/upload/avatar` (2MB limit).
