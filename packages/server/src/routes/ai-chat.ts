@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { db, schema } from '../db/index.js';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, like, or, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { authMiddleware } from '../auth.js';
 import dayjs from 'dayjs';
@@ -18,26 +18,19 @@ app.get('/conversations', async (c) => {
   const search = c.req.query('search')?.trim();
 
   if (search) {
-    const like = (await import('drizzle-orm')).like;
-    const or = (await import('drizzle-orm')).or;
-    // 先搜消息内容找到匹配的 conversationId
     const msgMatches = await db.selectDistinct({ conversationId: schema.aiMessages.conversationId })
       .from(schema.aiMessages)
       .where(like(schema.aiMessages.content, `%${search}%`))
       .all();
     const msgConvIds = msgMatches.map(m => m.conversationId);
 
-    // 搜标题 + 消息匹配的 conversationId
-    const conditions: any[] = [
-      eq(schema.aiConversations.userId, userId),
-      or(
-        like(schema.aiConversations.title, `%${search}%`),
-        ...(msgConvIds.length ? [sql`${schema.aiConversations.id} IN (${sql.join(msgConvIds.map(id => sql`${id}`), sql`, `)})`] : [])
-      ),
-    ];
+    const titleMatch = like(schema.aiConversations.title, `%${search}%`);
+    const condition = msgConvIds.length
+      ? and(eq(schema.aiConversations.userId, userId), or(titleMatch, inArray(schema.aiConversations.id, msgConvIds)))
+      : and(eq(schema.aiConversations.userId, userId), titleMatch);
 
     const rows = await db.select().from(schema.aiConversations)
-      .where(and(...conditions))
+      .where(condition)
       .orderBy(desc(schema.aiConversations.updatedAt))
       .limit(50)
       .all();
