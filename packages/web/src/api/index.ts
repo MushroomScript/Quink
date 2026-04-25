@@ -364,6 +364,9 @@ export const api = {
   getMessages(conversationId: string) {
     return request<{ data: Array<{ id: string; role: string; content: string; sources: string[]; createdAt: string }> }>(`/ai/chat/conversations/${conversationId}/messages`);
   },
+  deleteMessagesFrom(conversationId: string, msgId: string) {
+    return request<{ message: string }>(`/ai/chat/conversations/${conversationId}/messages/${msgId}`, { method: 'DELETE' });
+  },
 
   // Stats
   getStats() {

@@ -112,12 +112,16 @@ async function loadConversations() {
   } catch {}
 }
 
-async function newConversation() {
-  try {
-    const res = await api.createConversation();
-    conversations.value.unshift(res.data);
-    await selectConversation(res.data.id);
-  } catch {}
+function newConversation() {
+  saveConvState();
+  clearHighlights();
+  currentConvId.value = '';
+  messages.value = [];
+  query.value = '';
+  showFindBar.value = false;
+  findQuery.value = '';
+  sessionStorage.removeItem('quink_ai_conv');
+  router.replace({ query: {} });
 }
 
 const filteredConversations = ref<Conversation[]>([]);
@@ -257,7 +261,16 @@ async function saveTitle() {
 async function sendMessage() {
   const text = query.value.trim();
   if (!text) return;
-  if (!currentConvId.value) await newConversation();
+  // 延迟创建：第一次发消息时才在后端建对话
+  if (!currentConvId.value) {
+    try {
+      const res = await api.createConversation();
+      currentConvId.value = res.data.id;
+      conversations.value.unshift(res.data);
+      sessionStorage.setItem('quink_ai_conv', res.data.id);
+      router.replace({ query: { conv: res.data.id } });
+    } catch { return; }
+  }
   const targetConvId = currentConvId.value;
   if (loadingConvs.value.has(targetConvId)) return;
 
@@ -362,9 +375,14 @@ async function submitEditMsg(msg: Message) {
   const text = editingMsgText.value.trim();
   editingMsgId.value = '';
   if (!text || text === msg.content) return;
-  // 删掉这条及之后的所有消息，重新发送
   const idx = messages.value.findIndex(m => m.id === msg.id);
-  if (idx >= 0) messages.value.splice(idx);
+  if (idx >= 0) {
+    // 后端删除该消息及之后的
+    if (currentConvId.value && msg.id && !msg.id.startsWith('temp-')) {
+      try { await api.deleteMessagesFrom(currentConvId.value, msg.id); } catch {}
+    }
+    messages.value.splice(idx);
+  }
   query.value = text;
   await sendMessage();
 }

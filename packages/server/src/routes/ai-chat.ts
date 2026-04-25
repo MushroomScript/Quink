@@ -94,6 +94,22 @@ app.get('/conversations/:id/messages', async (c) => {
   return c.json({ data: messages });
 });
 
+// DELETE /conversations/:id/messages/:msgId — 删除该消息及之后的所有消息（编辑重发用）
+app.delete('/conversations/:id/messages/:msgId', async (c) => {
+  const userId = c.get('userId');
+  const { id, msgId } = c.req.param();
+  const conv = await db.select().from(schema.aiConversations)
+    .where(and(eq(schema.aiConversations.id, id), eq(schema.aiConversations.userId, userId))).get();
+  if (!conv) return c.json({ error: '对话不存在' }, 404);
+  const msg = await db.select().from(schema.aiMessages)
+    .where(and(eq(schema.aiMessages.id, msgId), eq(schema.aiMessages.conversationId, id))).get();
+  if (!msg) return c.json({ error: '消息不存在' }, 404);
+  await db.delete(schema.aiMessages).where(
+    and(eq(schema.aiMessages.conversationId, id), sql`${schema.aiMessages.createdAt} >= ${msg.createdAt}`)
+  );
+  return c.json({ message: '已删除' });
+});
+
 // POST /conversations/:id/messages — 发送消息 + Function Calling + SSE 流式回复
 app.post('/conversations/:id/messages', async (c) => {
   const userId = c.get('userId');
