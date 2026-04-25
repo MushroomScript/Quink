@@ -48,14 +48,16 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await api.getMe();
       user.value = res.data;
-      // 同步 token 给桌面端
       const token = localStorage.getItem('quink_token');
       syncTokenToDesktop(token);
       return res.data;
-    } catch {
+    } catch (err: any) {
       user.value = null;
-      setToken(null);
-      syncTokenToDesktop(null);
+      // 只在认证失败时清 token，网络错误/请求取消不清
+      if (err.message === '未登录' || err.message === '登录已过期') {
+        setToken(null);
+        syncTokenToDesktop(null);
+      }
       return null;
     } finally {
       loading.value = false;
