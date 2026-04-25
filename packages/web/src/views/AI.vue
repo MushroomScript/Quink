@@ -51,7 +51,7 @@ function restoreConvState(id: string) {
     findQuery.value = fs.query;
     if (fs.show && fs.query) {
       const savedCurrent = fs.current;
-      nextTick(() => { doFind(); findCurrent.value = savedCurrent; scrollToFindMatch(); });
+      nextTick(() => { doFind(); findCurrent.value = savedCurrent; scrollToFindMatch(false); });
     }
   } else {
     showFindBar.value = false;
@@ -521,14 +521,14 @@ function findPrev() {
   scrollToFindMatch();
 }
 
-function scrollToFindMatch() {
+function scrollToFindMatch(smooth = true) {
   if (!messagesEl.value) return;
   const marks = messagesEl.value.querySelectorAll('mark.find-hl');
   marks.forEach(m => m.classList.remove('find-hl-active'));
   const target = marks[findCurrent.value - 1];
   if (target) {
     target.classList.add('find-hl-active');
-    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    target.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'instant' });
   }
 }
 
