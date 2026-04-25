@@ -30,13 +30,13 @@ const findCurrent = ref(0);
 
 // 每个对话独立状态
 const convDrafts = new Map<string, string>();
-const convFindState = new Map<string, { show: boolean; query: string }>();
+const convFindState = new Map<string, { show: boolean; query: string; current: number }>();
 
 function saveConvState() {
   const id = currentConvId.value;
   if (!id) return;
   convDrafts.set(id, query.value);
-  convFindState.set(id, { show: showFindBar.value, query: findQuery.value });
+  convFindState.set(id, { show: showFindBar.value, query: findQuery.value, current: findCurrent.value });
   // 持久化
   const drafts: Record<string, string> = {};
   convDrafts.forEach((v, k) => { if (v) drafts[k] = v; });
@@ -49,7 +49,10 @@ function restoreConvState(id: string) {
   if (fs) {
     showFindBar.value = fs.show;
     findQuery.value = fs.query;
-    if (fs.show && fs.query) nextTick(() => doFind());
+    if (fs.show && fs.query) {
+      const savedCurrent = fs.current;
+      nextTick(() => { doFind(); findCurrent.value = savedCurrent; scrollToFindMatch(); });
+    }
   } else {
     showFindBar.value = false;
     findQuery.value = '';

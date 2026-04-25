@@ -28,8 +28,22 @@ async function load() {
   loading.value = false;
 }
 
-async function restore(id: string) {
+const confirmRestoreId = ref('');
+const confirmRestoreAll = ref(false);
+
+async function doRestore() {
+  const id = confirmRestoreId.value;
+  confirmRestoreId.value = '';
+  if (!id) return;
   try { await api.restoreNote(id); notes.value = notes.value.filter(n => n.id !== id); } catch {}
+}
+
+async function doRestoreAll() {
+  confirmRestoreAll.value = false;
+  try {
+    for (const n of notes.value) { await api.restoreNote(n.id); }
+    notes.value = [];
+  } catch {}
 }
 
 async function doPermanentDelete() {
@@ -57,9 +71,14 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
   <div class="px-4 md:px-8 py-6">
     <div class="flex items-center justify-between mb-6" v-if="notes.length > 0">
       <p class="text-xs text-gray-400">{{ notes.length }} 条已删除的笔记，30天后自动永久删除</p>
-      <button @click="confirmEmpty = true" class="px-3 py-1.5 text-xs rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
-        清空回收站
-      </button>
+      <div class="flex items-center gap-2">
+        <button @click="confirmRestoreAll = true" class="px-3 py-1.5 text-xs rounded-lg bg-primary-light text-primary-dark hover:opacity-80 transition-colors">
+          恢复所有
+        </button>
+        <button @click="confirmEmpty = true" class="px-3 py-1.5 text-xs rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+          清空回收站
+        </button>
+      </div>
     </div>
 
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
@@ -82,10 +101,10 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
           <div class="prose prose-sm max-w-none text-gray-500 line-clamp-4 note-content" v-html="rendered[n.id] || n.content" />
         </div>
         <div class="flex items-center gap-1 px-3 py-2 border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button @click="restore(n.id)" class="px-3 py-1 text-xs text-primary hover:bg-primary-light rounded-lg transition-colors">
+          <button @click="confirmRestoreId = n.id" class="px-3 py-1 text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
             恢复
           </button>
-          <button @click="confirmDeleteId = n.id" class="px-3 py-1 text-xs ml-auto rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+          <button @click="confirmDeleteId = n.id" class="px-3 py-1 text-xs ml-auto rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
             永久删除
           </button>
         </div>
@@ -118,6 +137,36 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
         <div class="flex gap-2 justify-center">
           <button @click="confirmEmpty = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
           <button @click="doEmptyAll" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">清空</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- 恢复确认弹窗 -->
+  <Teleport to="body">
+    <div v-if="confirmRestoreId" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/30" @click="confirmRestoreId = ''" />
+      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+        <p class="text-sm text-gray-700 mb-1">恢复笔记</p>
+        <p class="text-xs text-gray-400 mb-4">将从回收站恢复此笔记</p>
+        <div class="flex gap-2 justify-center">
+          <button @click="confirmRestoreId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+          <button @click="doRestore" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- 恢复所有确认弹窗 -->
+  <Teleport to="body">
+    <div v-if="confirmRestoreAll" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/30" @click="confirmRestoreAll = false" />
+      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+        <p class="text-sm text-gray-700 mb-1">恢复所有</p>
+        <p class="text-xs text-gray-400 mb-4">将恢复回收站中全部 {{ notes.length }} 条笔记</p>
+        <div class="flex gap-2 justify-center">
+          <button @click="confirmRestoreAll = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+          <button @click="doRestoreAll" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复所有</button>
         </div>
       </div>
     </div>
