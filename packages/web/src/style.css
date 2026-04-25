@@ -169,6 +169,7 @@
 [data-theme="lemon"] mark.find-hl { background: #c4b5fd; color: #3b0764; }
 [data-theme="lemon"] mark.find-hl-active { background: #7c3aed; color: white; box-shadow: 0 0 0 2px #c4b5fd; }
 
+[data-theme="dark"] { --heatmap-empty: rgba(255,255,255,0.06); }
 /* Dark: AI 对话 */
 [data-theme="dark"] .bg-black\/40,
 [data-theme="dark"] .bg-black\/30 { background: rgba(0,0,0,0.6) !important; }
@@ -186,6 +187,8 @@
 /* ── Editor Toolbar ── */
 .tbtn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 13px; color: #64748b; cursor: pointer; transition: all 0.1s; border: none; background: none; }
 .tbtn:hover { background: #f1f5f9; color: #1e293b; }
+[data-theme="dark"] .tbtn { color: #94a3b8; }
+[data-theme="dark"] .tbtn:hover { background: rgba(255,255,255,0.08); color: #e2e8f0; }
 .tbtn.active { background: rgb(var(--c-accent-light)); color: rgb(var(--c-accent-dark)); }
 .sep { width: 1px; height: 16px; background: #e2e8f0; margin: 0 4px; flex-shrink: 0; }
 .popup-input { padding: 4px 8px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 12px; outline: none; }
@@ -204,6 +207,7 @@
 .note-content th, .note-content td { border: 1px solid #e2e8f0; padding: 0.4em 0.6em; font-size: 13px; }
 .note-content th { background: #f8fafc; font-weight: 600; }
 .note-content blockquote { border-left: 3px solid #e2e8f0; padding-left: 1em; color: #64748b; margin: 0.5em 0; }
+[data-theme="dark"] .note-content blockquote { border-left-color: rgba(255,255,255,0.15); color: #94a3b8; }
 .note-content ul, .note-content ol { padding-left: 1.5em; }
 .note-content input[type="checkbox"] { margin-right: 0.5em; }
 

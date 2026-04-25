@@ -826,4 +826,12 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 .vditor-wrapper .vditor-hint, .vditor-wrapper .vditor-panel--arrow {
   z-index: 999 !important;
 }
+/* Dark mode */
+[data-theme="dark"] .vditor-wrapper .vditor-toolbar { border-bottom-color: rgba(255,255,255,0.06) !important; }
+[data-theme="dark"] .vditor-wrapper .vditor-toolbar__item button,
+[data-theme="dark"] .vditor-wrapper .vditor-toolbar__item > span { color: #94a3b8; }
+[data-theme="dark"] .vditor-wrapper .vditor-toolbar__item button:hover { color: #e2e8f0; background: rgba(255,255,255,0.08); }
+[data-theme="dark"] .vditor-wrapper .vditor-reset { color: #e2e8f0; }
+[data-theme="dark"] .vditor-wrapper .vditor-reset::before { color: rgba(255,255,255,0.25) !important; }
+[data-theme="dark"] .voice-play-btn { background: rgb(var(--c-accent)); }
 </style>

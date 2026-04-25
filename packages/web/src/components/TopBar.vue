@@ -38,7 +38,18 @@ watch(() => route.path, () => {
 });
 
 const detailTitle = inject<Ref<string>>('detailTitle', ref(''));
-const title = computed(() => detailTitle.value || (route.meta.title as string) || '');
+const pageCount = inject<Ref<number>>('pageCount', ref(-1));
+const title = computed(() => {
+  const base = detailTitle.value || (route.meta.title as string) || '';
+  if (pageCount.value >= 0) return base;
+  if (['inspiration', 'notes', 'todos'].includes(route.name as string) && store.total > 0) return base;
+  return base;
+});
+const titleCount = computed(() => {
+  if (pageCount.value >= 0) return pageCount.value;
+  if (['inspiration', 'notes', 'todos'].includes(route.name as string) && store.total > 0) return store.total;
+  return -1;
+});
 const hideSearch = computed(() => !!route.meta.hideSearch);
 const hideRefresh = computed(() => !!route.meta.hideRefresh);
 const hasFilters = computed(() => filterTags.value.length > 0 || filterDateFrom.value || store.filterCategory || filterTypes.value.length < 3);
@@ -183,12 +194,12 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <button @click="toggleMobileSidebar?.()" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 md:hidden" title="菜单">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
         </button>
-        <h1 class="text-sm md:text-base font-semibold text-gray-800 whitespace-nowrap">{{ title }}</h1>
         <button v-if="!hideRefresh" @click="refresh" class="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors hidden md:block" title="刷新">
           <svg class="w-3.5 h-3.5 transition-transform duration-500" :style="spinning ? 'transform: rotate(360deg)' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
         </button>
+        <h1 class="text-sm md:text-base font-semibold text-gray-800 whitespace-nowrap">{{ title }}<span v-if="titleCount >= 0" class="text-xs text-gray-400 font-normal tabular-nums">（{{ titleCount }}）</span></h1>
       </div>
 
       <!-- Right: search -->

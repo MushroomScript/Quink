@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, provide } from 'vue';
 import { api, isLoggedIn, type Note } from '@/api';
 import Vditor from 'vditor';
 import dayjs from 'dayjs';
@@ -10,6 +10,8 @@ dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
 
 const notes = ref<Note[]>([]);
+const pageCount = computed(() => notes.value.length);
+provide('pageCount', pageCount);
 const loading = ref(true);
 const confirmEmpty = ref(false);
 const confirmDeleteId = ref('');

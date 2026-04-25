@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, provide } from 'vue';
 import { api, isLoggedIn } from '@/api';
 
 interface FileItem {
@@ -13,6 +13,8 @@ interface FileItem {
 }
 
 const files = ref<FileItem[]>([]);
+const pageCount = computed(() => files.value.length);
+provide('pageCount', pageCount);
 const loading = ref(true);
 const filter = ref('all');
 const confirmDeleteId = ref('');

@@ -1,93 +1,98 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { api, isLoggedIn } from '@/api';
 
 const stats = ref<any>({ totalNotes: 0, totalTodos: 0, pendingTodos: 0, dailyCounts: [], categoryDist: [], typeDist: [] });
+const fileCount = ref(0);
+const tagCount = ref(0);
+const trashCount = ref(0);
 const loading = ref(true);
-const heatmapCanvas = ref<HTMLCanvasElement>();
 
-const cards = [
-  { key: 'totalNotes', label: '总笔记', icon: '📝', color: 'bg-blue-50 text-blue-600' },
-  { key: 'totalTodos', label: '总待办', icon: '✅', color: 'bg-amber-50 text-amber-600' },
-  { key: 'pendingTodos', label: '待完成', icon: '⏳', color: 'bg-red-50 text-red-600' },
-];
 const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '笔记', link: '链接' };
+
+function getTypeCount(type: string): number {
+  return (stats.value.typeDist || []).find((t: any) => t.type === type)?.count || 0;
+}
+
+const topCards = computed(() => [
+  { label: '灵感', count: getTypeCount('note'), icon: '💡', color: 'bg-blue-50 text-blue-600' },
+  { label: '笔记', count: getTypeCount('snippet'), icon: '📝', color: 'bg-emerald-50 text-emerald-600' },
+  { label: '待办', count: getTypeCount('todo'), icon: '✅', color: 'bg-amber-50 text-amber-600' },
+  { label: '资源', count: fileCount.value, icon: '📎', color: 'bg-purple-50 text-purple-600' },
+  { label: '标签', count: tagCount.value, icon: '🏷️', color: 'bg-sky-50 text-sky-600' },
+  { label: '回收站', count: trashCount.value, icon: '🗑️', color: 'bg-gray-100 text-gray-500' },
+]);
+
+const heatmapData = computed(() => {
+  const countMap = new Map<string, number>();
+  for (const d of stats.value.dailyCounts || []) countMap.set(d.date, d.count);
+  const today = new Date();
+  const weeks: { date: string; count: number; day: number }[][] = [];
+  for (let w = 51; w >= 0; w--) {
+    const week: { date: string; count: number; day: number }[] = [];
+    for (let d = 0; d < 7; d++) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - w * 7 - (today.getDay() - d));
+      const dateStr = date.toISOString().slice(0, 10);
+      week.push({ date: dateStr, count: countMap.get(dateStr) || 0, day: d });
+    }
+    weeks.push(week);
+  }
+  return weeks;
+});
+
+const PIE_COLORS = ['#748cfc', '#5eceac', '#fc9686', '#f0be50', '#a78bfa', '#8ca0b9', '#f472b6', '#38bdf8', '#fb923c', '#a3e635'];
+
+function pieSlices(data: { name: string; count: number }[]): { name: string; count: number; pct: number; color: string; offset: number }[] {
+  const total = data.reduce((s, d) => s + d.count, 0);
+  if (!total) return [];
+  let offset = 0;
+  return data.map((d, i) => {
+    const pct = d.count / total * 100;
+    const slice = { name: d.name, count: d.count, pct, color: PIE_COLORS[i % PIE_COLORS.length], offset };
+    offset += pct;
+    return slice;
+  });
+}
+
+function pieGradient(slices: { pct: number; color: string; offset: number }[]): string {
+  if (!slices.length) return 'var(--heatmap-empty, #f1f5f9)';
+  const stops = slices.map(s => `${s.color} ${s.offset}% ${s.offset + s.pct}%`);
+  return `conic-gradient(${stops.join(', ')})`;
+}
+
+const categorySlices = computed(() => {
+  const data = (stats.value.categoryDist || []).map((c: any) => ({ name: c.category, count: c.count }));
+  return pieSlices(data);
+});
+
+const tagSlices = computed(() => {
+  const typeDist = (stats.value.typeDist || []).map((t: any) => ({ name: typeLabels[t.type] || t.type, count: t.count }));
+  return pieSlices(typeDist);
+});
+
+function cellOpacity(count: number): string {
+  if (count === 0) return '';
+  const alpha = Math.min(0.25 + count * 0.2, 1);
+  return `rgba(var(--c-accent) / ${alpha})`;
+}
 
 async function load() {
   if (!isLoggedIn()) return;
   loading.value = true;
   try {
-    const res = await api.getStats();
-    stats.value = res.data;
-    await nextTick();
-    drawHeatmap();
+    const [statsRes, filesRes, tagsRes, trashRes] = await Promise.all([
+      api.getStats(),
+      api.getFiles().catch(() => ({ data: [] })),
+      api.getTags().catch(() => ({ data: [] })),
+      api.getTrash().catch(() => ({ data: [] })),
+    ]);
+    stats.value = statsRes.data;
+    fileCount.value = filesRes.data.length;
+    tagCount.value = tagsRes.data.length;
+    trashCount.value = trashRes.data.length;
   } catch {}
   loading.value = false;
-}
-
-function drawHeatmap() {
-  const canvas = heatmapCanvas.value;
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  const cellSize = 12;
-  const gap = 3;
-  const weeks = 52;
-  const days = 7;
-
-  canvas.width = (cellSize + gap) * weeks + 40;
-  canvas.height = (cellSize + gap) * days + 25;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  const countMap = new Map<string, number>();
-  for (const d of stats.value.dailyCounts || []) countMap.set(d.date, d.count);
-
-  const accent = getComputedStyle(document.documentElement).getPropertyValue('--c-accent').trim() || '116 143 252';
-  const [r, g, b] = accent.split(' ').map(Number);
-
-  const today = new Date();
-  const startDate = new Date(today);
-  startDate.setDate(startDate.getDate() - weeks * 7);
-
-  ctx.font = '10px system-ui';
-  let lastMonth = -1;
-
-  for (let w = 0; w < weeks; w++) {
-    for (let d = 0; d < days; d++) {
-      const date = new Date(startDate);
-      date.setDate(date.getDate() + w * 7 + d);
-      const dateStr = date.toISOString().slice(0, 10);
-      const count = countMap.get(dateStr) || 0;
-      const x = w * (cellSize + gap) + 30;
-      const y = d * (cellSize + gap);
-
-      if (d === 0 && date.getMonth() !== lastMonth) {
-        lastMonth = date.getMonth();
-        ctx.fillStyle = '#94a3b8';
-        ctx.fillText(`${date.getMonth() + 1}月`, x, canvas.height - 4);
-      }
-
-      if (count === 0) {
-        ctx.fillStyle = '#f1f5f9';
-      } else {
-        const alpha = Math.min(0.25 + count * 0.2, 1);
-        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
-      }
-
-      ctx.beginPath();
-      ctx.roundRect(x, y, cellSize, cellSize, 2);
-      ctx.fill();
-    }
-  }
-
-  // Day labels
-  const dayLabels = ['日', '一', '二', '三', '四', '五', '六'];
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '9px system-ui';
-  for (let d = 0; d < 7; d++) {
-    if (d % 2 === 1) ctx.fillText(dayLabels[d], 2, d * (cellSize + gap) + cellSize - 1);
-  }
 }
 
 function onRefresh() { load(); }
@@ -100,19 +105,30 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <template v-else>
-      <div class="grid grid-cols-3 gap-4 mb-6">
-        <div v-for="card in cards" :key="card.key" class="bg-white rounded-xl border border-gray-200 p-5">
-          <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg mb-3" :class="card.color">{{ card.icon }}</div>
-          <div class="text-2xl font-bold text-gray-800">{{ stats[card.key] }}</div>
-          <div class="text-xs text-gray-400 mt-1">{{ card.label }}</div>
+      <!-- 顶部卡片：灵感/笔记/待办 -->
+      <div class="grid grid-cols-6 gap-3 mb-6">
+        <div v-for="card in topCards" :key="card.label" class="bg-white rounded-xl border border-gray-200 p-3 flex flex-col items-center text-center">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-base mb-2" :class="card.color">{{ card.icon }}</div>
+          <div class="text-xl font-bold text-gray-800">{{ card.count }}</div>
+          <div class="text-[11px] text-gray-400 mt-0.5">{{ card.label }}</div>
         </div>
       </div>
 
-      <!-- Heatmap -->
+      <!-- 热力图 -->
       <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
         <h3 class="text-sm font-medium text-gray-800 mb-4">记录热力图</h3>
         <div class="overflow-x-auto">
-          <canvas ref="heatmapCanvas" class="block"></canvas>
+          <div class="grid gap-[3px]" style="grid-template-columns: repeat(52, minmax(0, 1fr))">
+            <template v-for="(week, wi) in heatmapData" :key="wi">
+              <div class="flex flex-col gap-[3px]">
+                <div v-for="cell in week" :key="cell.date"
+                  class="aspect-square"
+                  style="border-radius: 25%"
+                  :style="{ background: cellOpacity(cell.count) || 'var(--heatmap-empty, #f1f5f9)' }"
+                  :title="`${cell.date}: ${cell.count} 条`" />
+              </div>
+            </template>
+          </div>
         </div>
         <div class="flex items-center gap-1.5 mt-3 text-[10px] text-gray-400">
           <span>少</span>
@@ -124,37 +140,21 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
         </div>
       </div>
 
-      <!-- Distribution -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div class="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 class="text-sm font-medium text-gray-800 mb-4">分类分布</h3>
-          <div v-if="stats.categoryDist?.length" class="space-y-2.5">
-            <div v-for="cat in stats.categoryDist" :key="cat.category" class="flex items-center gap-3">
-              <span class="text-xs text-gray-600 w-16 truncate" :title="cat.category">{{ cat.category }}</span>
-              <div class="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
-                <div class="h-full rounded-full" style="background: rgb(var(--c-accent))"
-                  :style="{ width: `${Math.max(5, cat.count / stats.totalNotes * 100)}%` }"></div>
-              </div>
-              <span class="text-xs text-gray-400 w-6 text-right">{{ cat.count }}</span>
+      <!-- 分类分布饼图 -->
+      <div class="bg-white rounded-xl border border-gray-200 p-6">
+        <h3 class="text-sm font-medium text-gray-800 mb-4">分类分布</h3>
+        <div v-if="categorySlices.length" class="flex items-center gap-8 justify-center">
+          <div class="w-40 h-40 rounded-full shrink-0" :style="{ background: pieGradient(categorySlices) }" />
+          <div class="space-y-1.5">
+            <div v-for="s in categorySlices" :key="s.name" class="flex items-center gap-2 text-xs">
+              <span class="w-2.5 h-2.5 rounded-sm shrink-0" :style="{ background: s.color }" />
+              <span class="text-gray-600 truncate" style="max-width: 120px">{{ s.name }}</span>
+              <span class="text-gray-400">{{ s.count }}</span>
+              <span class="text-gray-300 w-10 text-right">{{ s.pct.toFixed(0) }}%</span>
             </div>
           </div>
-          <p v-else class="text-center py-4 text-gray-400 text-xs">暂无数据</p>
         </div>
-
-        <div class="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 class="text-sm font-medium text-gray-800 mb-4">类型分布</h3>
-          <div v-if="stats.typeDist?.length" class="space-y-2.5">
-            <div v-for="t in stats.typeDist" :key="t.type" class="flex items-center gap-3">
-              <span class="text-xs text-gray-600 w-16">{{ typeLabels[t.type] || t.type }}</span>
-              <div class="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
-                <div class="h-full rounded-full" style="background: rgb(var(--c-accent) / 0.7)"
-                  :style="{ width: `${Math.max(5, t.count / stats.totalNotes * 100)}%` }"></div>
-              </div>
-              <span class="text-xs text-gray-400 w-6 text-right">{{ t.count }}</span>
-            </div>
-          </div>
-          <p v-else class="text-center py-4 text-gray-400 text-xs">暂无数据</p>
-        </div>
+        <p v-else class="text-center py-4 text-gray-400 text-xs">暂无数据</p>
       </div>
     </template>
   </div>
