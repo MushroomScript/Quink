@@ -194,13 +194,14 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       <!-- Right: search -->
       <div v-if="!hideSearch" class="flex items-center gap-1.5">
         <!-- Desktop search -->
-        <div class="relative hidden md:flex items-center w-56 bg-gray-100/80 rounded-full border border-gray-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition">
+        <div class="relative hidden md:flex items-center w-56 bg-gray-100/80 rounded-full border border-gray-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition overflow-hidden">
           <svg class="ml-3 w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input ref="searchInput" v-model="searchText" @input="onSearch" @focus="onSearch" @blur="setTimeout(() => showTagSuggestions = false, 200)" type="text"
             placeholder="搜索...      Ctrl + F"
-            class="flex-1 min-w-0 px-2 py-1.5 bg-transparent border-0 text-sm outline-none placeholder-gray-400" />
+            class="flex-1 min-w-0 px-2 py-1.5 border-0 text-sm outline-none placeholder-gray-400"
+            style="background: transparent !important" />
           <!-- 清空搜索 -->
           <button v-if="searchText" @click="searchText = ''; store.searchQuery = ''; doSearch()" class="mr-2 text-gray-400 hover:text-gray-600 shrink-0">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

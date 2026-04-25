@@ -374,7 +374,7 @@ function startEditMsg(msg: Message) {
 async function submitEditMsg(msg: Message) {
   const text = editingMsgText.value.trim();
   editingMsgId.value = '';
-  if (!text || text === msg.content) return;
+  if (!text) return;
   const idx = messages.value.findIndex(m => m.id === msg.id);
   if (idx >= 0) {
     // 后端删除该消息及之后的
@@ -531,6 +531,24 @@ function scrollToFindMatch() {
 
 const currentConv = ref<Conversation | null>(null);
 watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c => c.id === id) || null; });
+
+const lastMsgNeedsRetry = ref(false);
+watch(messages, (msgs) => {
+  lastMsgNeedsRetry.value = msgs.length > 0 && msgs[msgs.length - 1].role === 'user' && !loadingConvs.value.has(currentConvId.value);
+}, { deep: true });
+
+async function retryLastMessage() {
+  const last = messages.value[messages.value.length - 1];
+  if (!last || last.role !== 'user') return;
+  // 删掉这条用户消息，重新发送
+  const text = last.content;
+  if (currentConvId.value && last.id && !last.id.startsWith('temp-')) {
+    try { await api.deleteMessagesFrom(currentConvId.value, last.id); } catch {}
+  }
+  messages.value.pop();
+  query.value = text;
+  await sendMessage();
+}
 </script>
 
 <template>
@@ -715,6 +733,14 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
             思考中
           </div>
         </div>
+
+        <!-- 重试按钮（最后一条是用户消息，AI 没回复） -->
+        <div v-if="lastMsgNeedsRetry" class="flex justify-center py-2">
+          <button @click="retryLastMessage" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            重新生成
+          </button>
+        </div>
       </div>
 
       <!-- 输入框 -->
@@ -722,8 +748,8 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
         <div class="flex gap-2 items-end">
           <div class="flex-1 min-w-0 bg-white border border-gray-200 rounded-xl overflow-hidden focus-within:border-primary transition-colors pt-1.5">
             <textarea ref="queryEl" v-model="query" @keydown="handleKeydown" @input="autoGrowTextarea" placeholder="问点什么..." rows="1"
-              class="w-full px-4 pt-1.5 pb-2.5 bg-transparent border-0 text-sm outline-none resize-none"
-              style="max-height: 33vh; overflow: hidden" />
+              class="w-full px-4 pt-1.5 pb-2.5 border-0 text-sm outline-none resize-none"
+              style="max-height: 33vh; overflow: hidden; background: transparent !important" />
           </div>
           <button v-if="loadingConvs.has(currentConvId)" @click="stopGeneration"
             class="p-2.5 rounded-xl border border-gray-200 text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors shrink-0" title="停止生成">
