@@ -52,17 +52,11 @@ function formatDate(iso: string): string {
 function isImage(f: FileItem) { return f.mimeType.startsWith('image/'); }
 function isAudio(f: FileItem) { return f.mimeType.startsWith('audio/'); }
 
-async function handleDelete(id: string) {
-  if (confirmDeleteId.value !== id) {
-    confirmDeleteId.value = id;
-    setTimeout(() => (confirmDeleteId.value = ''), 3000);
-    return;
-  }
-  try {
-    await api.deleteFile(id);
-    files.value = files.value.filter(f => f.id !== id);
-  } catch {}
+async function doDeleteFile() {
+  const id = confirmDeleteId.value;
   confirmDeleteId.value = '';
+  if (!id) return;
+  try { await api.deleteFile(id); files.value = files.value.filter(f => f.id !== id); } catch {}
 }
 
 function triggerUpload() {
@@ -147,13 +141,26 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
             class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-primary">
             下载
           </a>
-          <button @click="handleDelete(f.id)"
-            class="flex-1 text-center py-1.5 text-xs hover:bg-red-50"
-            :class="confirmDeleteId === f.id ? 'text-red-500 font-medium' : 'text-gray-500'">
-            {{ confirmDeleteId === f.id ? '确认删除' : '删除' }}
+          <button @click="confirmDeleteId = f.id"
+            class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-red-50 hover:text-red-500">
+            删除
           </button>
         </div>
       </div>
     </div>
   </div>
+
+  <Teleport to="body">
+    <div v-if="confirmDeleteId" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/30" @click="confirmDeleteId = ''" />
+      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+        <p class="text-sm text-gray-700 mb-1">删除文件</p>
+        <p class="text-xs text-gray-400 mb-4">删除后不可恢复</p>
+        <div class="flex gap-2 justify-center">
+          <button @click="confirmDeleteId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+          <button @click="doDeleteFile" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
