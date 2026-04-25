@@ -154,19 +154,22 @@ function extractRefId(el: HTMLElement): string | null {
   } catch { return null; }
 }
 
+function applyUserPreferences(user: any) {
+  if (!user) return;
+  const prefs = user.preferences || {};
+  const theme = prefs.theme || 'blueberry';
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('quink_theme', theme);
+  const fontSize = prefs.fontSize || 16;
+  document.documentElement.style.fontSize = fontSize + 'px';
+}
+
 onMounted(async () => {
   initAudioBubbleHandler();
   const user = await auth.fetchMe();
   appReady.value = true;
   if (!user) return;
-  const prefs = user.preferences || {};
-
-  const theme = prefs.theme || 'blueberry';
-  document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('quink_theme', theme);
-
-  const fontSize = prefs.fontSize || 16;
-  document.documentElement.style.fontSize = fontSize + 'px';
+  applyUserPreferences(user);
 
   // 全局拦截引用链接单击 → 弹预览(不走路由,不打开新标签)
   document.addEventListener('click', (e) => {
@@ -196,6 +199,13 @@ onMounted(async () => {
     return origOpen(url, target, features);
   } as typeof window.open;
 });
+
+watch(() => auth.user, (user) => {
+  if (user) {
+    appReady.value = true;
+    applyUserPreferences(user);
+  }
+}, { immediate: true });
 </script>
 
 <template>

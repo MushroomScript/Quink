@@ -9,6 +9,7 @@
   --c-accent: 116 143 252;
   --c-accent-light: 228 233 255;
   --c-accent-dark: 88 112 230;
+  --c-hl: #bfcbff; --c-hl-active: #748cfc; --c-hl-text: #2d3a8c;
   --c-sidebar: 240 242 255;
   --c-sidebar-light: 248 248 255;
   --c-topbar: rgba(240,242,255,0.85);
@@ -21,6 +22,7 @@
   --c-accent: 167 139 250;
   --c-accent-light: 240 235 255;
   --c-accent-dark: 139 107 228;
+  --c-hl: #d4c4fc; --c-hl-active: #a78bfa; --c-hl-text: #4c2e8a;
   --c-sidebar: 245 240 255;
   --c-sidebar-light: 250 248 255;
   --c-topbar: rgba(245,240,255,0.85);
@@ -33,6 +35,7 @@
   --c-accent: 94 206 172;
   --c-accent-light: 220 252 241;
   --c-accent-dark: 62 178 144;
+  --c-hl: #a3e8d0; --c-hl-active: #5eceac; --c-hl-text: #1a5c44;
   --c-sidebar: 238 252 247;
   --c-sidebar-light: 248 255 252;
   --c-topbar: rgba(238,252,247,0.85);
@@ -45,6 +48,7 @@
   --c-accent: 252 150 134;
   --c-accent-light: 255 235 231;
   --c-accent-dark: 235 120 100;
+  --c-hl: #fdbeae; --c-hl-active: #fc9686; --c-hl-text: #7a2a1a;
   --c-sidebar: 255 244 242;
   --c-sidebar-light: 255 250 249;
   --c-topbar: rgba(255,244,242,0.85);
@@ -57,6 +61,7 @@
   --c-accent: 240 190 80;
   --c-accent-light: 255 248 220;
   --c-accent-dark: 215 160 50;
+  --c-hl: #f5dfa0; --c-hl-active: #f0be50; --c-hl-text: #6b4e0a;
   --c-sidebar: 255 252 240;
   --c-sidebar-light: 255 254 248;
   --c-topbar: rgba(255,252,240,0.85);
@@ -69,6 +74,7 @@
   --c-accent: 140 160 185;
   --c-accent-light: 232 238 245;
   --c-accent-dark: 105 125 155;
+  --c-hl: #b8c8da; --c-hl-active: #8ca0b9; --c-hl-text: #2a3a50;
   --c-sidebar: 245 247 250;
   --c-sidebar-light: 250 251 253;
   --c-topbar: rgba(245,247,250,0.85);
@@ -81,6 +87,7 @@
   --c-accent: 130 160 255;
   --c-accent-light: 40 45 65;
   --c-accent-dark: 100 130 230;
+  --c-hl: #3a4570; --c-hl-active: #5570cc; --c-hl-text: #d0d8ff;
   --c-sidebar: 22 22 30;
   --c-sidebar-light: 30 30 42;
   --c-topbar: rgba(22,22,30,0.85);
@@ -88,6 +95,9 @@
   --c-body: #131318;
   --sb-text: rgba(255,255,255,0.88); --sb-dim: rgba(255,255,255,0.38); --sb-hover: rgba(255,255,255,0.06); --sb-active-bg: rgba(130,160,255,0.15); --sb-active-text: #a0bfff; --sb-border: rgba(255,255,255,0.08);
 }
+
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
 
 @layer base {
   html, body {
@@ -115,7 +125,8 @@
 [data-theme="dark"] .bg-gray-50,
 [data-theme="dark"] .bg-gray-100,
 [data-theme="dark"] .bg-gray-100\/80,
-[data-theme="dark"] .bg-gray-50\/80 { background: rgba(255,255,255,0.05) !important; }
+[data-theme="dark"] .bg-gray-50\/80,
+[data-theme="dark"] .bg-gray-50\/50 { background: rgba(255,255,255,0.05) !important; }
 /* Borders */
 [data-theme="dark"] .border-gray-200,
 [data-theme="dark"] .border-gray-100,
@@ -154,6 +165,18 @@
 /* Scrollbar dark */
 [data-theme="dark"] ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); }
 [data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+
+[data-theme="lemon"] mark.find-hl { background: #c4b5fd; color: #3b0764; }
+[data-theme="lemon"] mark.find-hl-active { background: #7c3aed; color: white; box-shadow: 0 0 0 2px #c4b5fd; }
+
+/* Dark: AI 对话 */
+[data-theme="dark"] .bg-black\/40,
+[data-theme="dark"] .bg-black\/30 { background: rgba(0,0,0,0.6) !important; }
+[data-theme="dark"] .border-t.border-gray-100,
+[data-theme="dark"] .border-b.border-gray-100,
+[data-theme="dark"] .border-r.border-gray-100 { border-color: rgba(255,255,255,0.08) !important; }
+[data-theme="dark"] mark.find-hl { background: #b45309; color: #fef3c7; }
+[data-theme="dark"] mark.find-hl-active { background: #f59e0b; color: #1e1e2a; box-shadow: 0 0 0 2px #f59e0b; }
 /* Scrollbar - subtle */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -360,3 +383,17 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
   border-radius: 2px;
 }
 
+/* AI 对话查找高亮 */
+mark.find-hl {
+  background: #fbbf24;
+  color: #78350f;
+  padding: 1px 3px;
+  border-radius: 3px;
+}
+mark.find-hl-active {
+  background: #d97706;
+  color: white;
+  padding: 2px 4px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px #fbbf24;
+}

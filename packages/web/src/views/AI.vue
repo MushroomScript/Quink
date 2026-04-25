@@ -22,6 +22,47 @@ const showMobileConvs = ref(false);
 const abortControllers = new Map<string, AbortController>();
 const editingMsgId = ref('');
 const editingMsgText = ref('');
+const queryEl = ref<HTMLTextAreaElement>();
+const showFindBar = ref(false);
+const findQuery = ref('');
+const findMatches = ref(0);
+const findCurrent = ref(0);
+
+// 每个对话独立状态
+const convDrafts = new Map<string, string>();
+const convFindState = new Map<string, { show: boolean; query: string }>();
+
+function saveConvState() {
+  const id = currentConvId.value;
+  if (!id) return;
+  convDrafts.set(id, query.value);
+  convFindState.set(id, { show: showFindBar.value, query: findQuery.value });
+  // 持久化
+  const drafts: Record<string, string> = {};
+  convDrafts.forEach((v, k) => { if (v) drafts[k] = v; });
+  sessionStorage.setItem('quink_ai_drafts', JSON.stringify(drafts));
+}
+
+function restoreConvState(id: string) {
+  query.value = convDrafts.get(id) || '';
+  const fs = convFindState.get(id);
+  if (fs) {
+    showFindBar.value = fs.show;
+    findQuery.value = fs.query;
+    if (fs.show && fs.query) nextTick(() => doFind());
+  } else {
+    showFindBar.value = false;
+    findQuery.value = '';
+    clearHighlights();
+  }
+  nextTick(autoGrowTextarea);
+}
+
+// 页面加载时从 sessionStorage 恢复草稿
+try {
+  const saved = JSON.parse(sessionStorage.getItem('quink_ai_drafts') || '{}');
+  Object.entries(saved).forEach(([k, v]) => convDrafts.set(k, v as string));
+} catch {}
 const messagesEl = ref<HTMLDivElement>();
 const editingTitle = ref('');
 const editingConvId = ref('');
@@ -46,9 +87,12 @@ onMounted(async () => {
   watch(messagesEl, (el) => {
     if (el) el.addEventListener('scroll', () => { savedScroll = el.scrollTop; }, { passive: true });
   }, { immediate: true });
+  window.addEventListener('quink-refresh', loadConversations);
+  document.addEventListener('keydown', onGlobalKeydown);
 });
 
 onDeactivated(() => {
+  saveConvState();
   if (messagesEl.value) messagesEl.value.style.visibility = 'hidden';
 });
 
@@ -78,24 +122,80 @@ async function newConversation() {
 
 const filteredConversations = ref<Conversation[]>([]);
 
-watch(searchConv, async (q) => {
-  if (!q.trim()) {
+let searchTimer: ReturnType<typeof setTimeout>;
+function onSearchInput() {
+  clearTimeout(searchTimer);
+  const q = searchConv.value.trim();
+  if (!q) {
     filteredConversations.value = conversations.value;
+    clearHighlights();
     return;
   }
-  try {
-    const res = await api.getConversations({ search: q.trim() });
-    filteredConversations.value = res.data;
-  } catch {
-    filteredConversations.value = conversations.value;
+  searchTimer = setTimeout(async () => {
+    try {
+      const res = await api.getConversations({ search: q });
+      filteredConversations.value = res.data;
+      if (!res.data.length) return;
+      // 当前对话在结果中 → 原地高亮跳转
+      const inCurrent = res.data.find(c => c.id === currentConvId.value);
+      if (inCurrent) {
+        nextTick(() => highlightAndJump(q));
+      } else {
+        // 打开第一个结果
+        await selectConversation(res.data[0].id);
+        nextTick(() => highlightAndJump(q));
+      }
+    } catch {
+      filteredConversations.value = conversations.value;
+    }
+  }, 300);
+}
+
+function highlightAndJump(keyword: string) {
+  clearHighlights();
+  if (!messagesEl.value || !keyword) return;
+  const walker = document.createTreeWalker(messagesEl.value, NodeFilter.SHOW_TEXT);
+  const kw = keyword.toLowerCase();
+  const nodes: { node: Text; index: number }[] = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    const text = node.textContent || '';
+    let idx = text.toLowerCase().indexOf(kw);
+    while (idx >= 0) {
+      nodes.push({ node, index: idx });
+      idx = text.toLowerCase().indexOf(kw, idx + keyword.length);
+    }
   }
-}, { immediate: true });
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const { node, index } = nodes[i];
+    const range = document.createRange();
+    range.setStart(node, index);
+    range.setEnd(node, index + keyword.length);
+    const mark = document.createElement('mark');
+    mark.className = 'find-hl';
+    range.surroundContents(mark);
+  }
+  // 跳到第一个匹配
+  const first = messagesEl.value.querySelector('mark.find-hl');
+  if (first) {
+    first.classList.add('find-hl-active');
+    first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+}
+
+async function clearSearchConv() {
+  searchConv.value = '';
+  clearHighlights();
+  await loadConversations();
+}
 
 watch(conversations, () => {
   if (!searchConv.value.trim()) filteredConversations.value = conversations.value;
 }, { immediate: true });
 
 async function selectConversation(id: string) {
+  saveConvState();
+  clearHighlights();
   currentConvId.value = id;
   sessionStorage.setItem('quink_ai_conv', id);
   showMobileConvs.value = false;
@@ -114,6 +214,12 @@ async function selectConversation(id: string) {
       messages.value.push({ ...msg, role: msg.role as 'user' | 'assistant', sources: msg.sources || [], html, thinkingHtml });
     }
     scrollToBottom();
+    // 恢复该对话的独立状态（输入框草稿 + 查找栏）
+    restoreConvState(id);
+    // 如果对话列表搜索有关键词，高亮跳转
+    if (searchConv.value.trim()) {
+      nextTick(() => highlightAndJump(searchConv.value.trim()));
+    }
   } catch {}
 }
 
@@ -157,6 +263,9 @@ async function sendMessage() {
 
   messages.value.push({ id: 'temp-user', role: 'user', content: text, sources: [] });
   query.value = '';
+  convDrafts.delete(targetConvId);
+  saveConvState();
+  nextTick(() => { if (queryEl.value) { queryEl.value.style.height = 'auto'; queryEl.value.style.overflow = 'hidden'; } });
   loadingConvs.value.add(targetConvId);
   streamingMap.value.set(targetConvId, '');
   scrollToBottom();
@@ -300,7 +409,106 @@ function scrollToBottom() {
 }
 
 function handleKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); return; }
+  nextTick(autoGrowTextarea);
+}
+
+let draftTimer: ReturnType<typeof setTimeout>;
+function autoGrowTextarea() {
+  const el = queryEl.value;
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.overflow = 'hidden';
+  const maxH = Math.floor(window.innerHeight / 3);
+  const h = Math.min(el.scrollHeight, maxH);
+  el.style.height = h + 'px';
+  if (el.scrollHeight > maxH) el.style.overflow = 'auto';
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(saveConvState, 1000);
+}
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.ctrlKey && e.key === 'f') {
+    e.preventDefault();
+    showFindBar.value = true;
+    nextTick(() => {
+      const el = document.querySelector('.ai-find-input') as HTMLInputElement;
+      el?.focus();
+    });
+  }
+  if (e.key === 'Escape' && showFindBar.value) {
+    closeFindBar();
+  }
+}
+
+function closeFindBar() {
+  showFindBar.value = false;
+  findQuery.value = '';
+  clearHighlights();
+}
+
+function clearHighlights() {
+  if (!messagesEl.value) return;
+  messagesEl.value.querySelectorAll('mark.find-hl').forEach(m => {
+    const parent = m.parentNode!;
+    parent.replaceChild(document.createTextNode(m.textContent || ''), m);
+    parent.normalize();
+  });
+  findMatches.value = 0;
+  findCurrent.value = 0;
+}
+
+function doFind() {
+  clearHighlights();
+  const q = findQuery.value.trim();
+  if (!q || !messagesEl.value) return;
+  const walker = document.createTreeWalker(messagesEl.value, NodeFilter.SHOW_TEXT);
+  const nodes: { node: Text; index: number }[] = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    const text = node.textContent || '';
+    let idx = text.toLowerCase().indexOf(q.toLowerCase());
+    while (idx >= 0) {
+      nodes.push({ node, index: idx });
+      idx = text.toLowerCase().indexOf(q.toLowerCase(), idx + q.length);
+    }
+  }
+  // 从后往前替换避免偏移
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const { node, index } = nodes[i];
+    const range = document.createRange();
+    range.setStart(node, index);
+    range.setEnd(node, index + q.length);
+    const mark = document.createElement('mark');
+    mark.className = 'find-hl';
+    range.surroundContents(mark);
+  }
+  findMatches.value = nodes.length;
+  findCurrent.value = nodes.length ? 1 : 0;
+  scrollToFindMatch();
+}
+
+function findNext() {
+  if (!findMatches.value) return;
+  findCurrent.value = findCurrent.value >= findMatches.value ? 1 : findCurrent.value + 1;
+  scrollToFindMatch();
+}
+
+function findPrev() {
+  if (!findMatches.value) return;
+  findCurrent.value = findCurrent.value <= 1 ? findMatches.value : findCurrent.value - 1;
+  scrollToFindMatch();
+}
+
+function scrollToFindMatch() {
+  if (!messagesEl.value) return;
+  const marks = messagesEl.value.querySelectorAll('mark.find-hl');
+  marks.forEach(m => m.classList.remove('find-hl-active'));
+  const target = marks[findCurrent.value - 1];
+  if (target) {
+    target.classList.add('find-hl-active');
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
 }
 
 const currentConv = ref<Conversation | null>(null);
@@ -315,7 +523,12 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
         <button @click="newConversation" class="w-full px-3 py-2 text-xs font-medium rounded-lg transition-colors text-white" style="background: rgb(var(--c-accent))">
           + 新对话
         </button>
-        <input v-model="searchConv" placeholder="搜索对话..." class="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/20 placeholder-gray-400" />
+        <div class="relative">
+          <input v-model="searchConv" @input="onSearchInput" placeholder="搜索对话..." class="w-full px-2.5 py-1.5 pr-7 bg-white border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/20 placeholder-gray-400" />
+          <button v-if="searchConv" @click="clearSearchConv" class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
       </div>
       <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
         <div v-for="conv in filteredConversations" :key="conv.id"
@@ -343,7 +556,12 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
       <div class="absolute left-0 top-0 bottom-0 w-64 bg-white shadow-2xl flex flex-col" @click.stop>
         <div class="p-3 space-y-2">
           <button @click="newConversation" class="w-full px-3 py-2 text-xs font-medium rounded-lg text-white" style="background: rgb(var(--c-accent))">+ 新对话</button>
-          <input v-model="searchConv" placeholder="搜索对话..." class="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs outline-none placeholder-gray-400" />
+          <div class="relative">
+            <input v-model="searchConv" @input="onSearchInput" placeholder="搜索对话..." class="w-full px-2.5 py-1.5 pr-7 bg-gray-50 border border-gray-200 rounded-lg text-xs outline-none placeholder-gray-400" />
+            <button v-if="searchConv" @click="clearSearchConv" class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
         </div>
         <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
           <div v-for="conv in filteredConversations" :key="conv.id"
@@ -367,6 +585,21 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
         </button>
         <span class="text-xs text-gray-500 truncate">{{ currentConv?.title || 'AI 对话' }}</span>
+      </div>
+      <!-- Ctrl+F 查找栏 -->
+      <div v-if="showFindBar" class="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 bg-gray-50/80">
+        <input v-model="findQuery" @input="doFind" @keydown.enter.prevent="findNext" @keydown.escape="closeFindBar"
+          class="ai-find-input flex-1 px-2.5 py-1 bg-white border border-gray-200 rounded text-xs outline-none focus:ring-2 focus:ring-primary/20" placeholder="在对话中查找..." />
+        <span v-if="findQuery" class="text-[10px] text-gray-400 shrink-0">{{ findCurrent }}/{{ findMatches }}</span>
+        <button @click="findPrev" class="p-1 text-gray-400 hover:text-gray-600" title="上一个">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
+        </button>
+        <button @click="findNext" class="p-1 text-gray-400 hover:text-gray-600" title="下一个">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <button @click="closeFindBar" class="p-1 text-gray-400 hover:text-gray-600">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
       </div>
       <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-4">
         <!-- 空状态 -->
@@ -396,7 +629,7 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
             </div>
             <!-- 用户消息：正常显示 -->
             <div v-else-if="msg.role === 'user'" class="relative">
-              <div class="px-4 py-3 rounded-2xl rounded-br-md text-sm bg-primary text-white">{{ msg.content }}</div>
+              <div class="px-4 py-3 rounded-2xl rounded-br-md text-sm bg-primary text-white whitespace-pre-wrap">{{ msg.content }}</div>
               <button @click="startEditMsg(msg)" class="absolute -left-8 top-1/2 -translate-y-1/2 p-1 rounded-md text-gray-300 hover:text-gray-500 hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity" title="编辑">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               </button>
@@ -469,8 +702,11 @@ watch(currentConvId, (id) => { currentConv.value = conversations.value.find(c =>
       <!-- 输入框 -->
       <div class="px-4 md:px-6 py-3 border-t border-gray-100">
         <div class="flex gap-2 items-end">
-          <textarea v-model="query" @keydown="handleKeydown" placeholder="问点什么..." rows="1"
-            class="flex-1 px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:border-primary resize-none" />
+          <div class="flex-1 min-w-0 bg-white border border-gray-200 rounded-xl overflow-hidden focus-within:border-primary transition-colors pt-1.5">
+            <textarea ref="queryEl" v-model="query" @keydown="handleKeydown" @input="autoGrowTextarea" placeholder="问点什么..." rows="1"
+              class="w-full px-4 pt-1.5 pb-2.5 bg-transparent border-0 text-sm outline-none resize-none"
+              style="max-height: 33vh; overflow: hidden" />
+          </div>
           <button v-if="loadingConvs.has(currentConvId)" @click="stopGeneration"
             class="p-2.5 rounded-xl border border-gray-200 text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors shrink-0" title="停止生成">
             <svg class="w-4 h-4" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>

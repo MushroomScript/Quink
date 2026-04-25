@@ -68,7 +68,7 @@ const router = createRouter({
       path: '/settings',
       name: 'settings',
       component: () => import('@/views/Settings.vue'),
-      meta: { title: '设置', hideSearch: true },
+      meta: { title: '设置', hideSearch: true, hideRefresh: true },
     },
     {
       path: '/capture',
