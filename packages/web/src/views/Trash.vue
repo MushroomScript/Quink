@@ -5,6 +5,7 @@ import Vditor from 'vditor';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
+import { PhTrash } from '@phosphor-icons/vue';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -86,7 +87,9 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <div v-else-if="notes.length === 0" class="text-center py-16">
-      <div class="text-4xl mb-3">🗑️</div>
+      <div class="mb-3 flex justify-center text-gray-300">
+        <PhTrash size="3rem" weight="fill" />
+      </div>
       <p class="text-gray-500 text-sm">回收站是空的</p>
       <p class="text-gray-400 text-xs mt-1">删除的笔记会在这里保留30天</p>
     </div>

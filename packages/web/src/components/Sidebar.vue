@@ -1,9 +1,24 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, markRaw } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useNotesStore } from '@/stores/notes';
 import { api, isLoggedIn, type Category } from '@/api';
+import {
+  PhLightbulb,
+  PhNotePencil,
+  PhCheckSquare,
+  PhSparkle,
+  PhChartBar,
+  PhFolder,
+  PhTag,
+  PhTrash,
+  PhFolderOpen,
+  PhFile,
+  PhCaretDown,
+  PhGear,
+  PhSignOut,
+} from '@phosphor-icons/vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -81,21 +96,18 @@ function filterByCategory(name: string) {
 }
 
 const mainNav = [
-  { path: '/', label: '灵感', icon: '💡' },
-  { path: '/notes', label: '笔记', icon: '📝' },
-  { path: '/todos', label: '待办', icon: '✅' },
-  { path: '/ai', label: 'AI', icon: '🤖' },
+  { path: '/', label: '灵感', icon: markRaw(PhLightbulb) },
+  { path: '/notes', label: '笔记', icon: markRaw(PhNotePencil) },
+  { path: '/todos', label: '待办', icon: markRaw(PhCheckSquare) },
+  { path: '/ai', label: 'AI', icon: markRaw(PhSparkle) },
 ];
 
 const moreNav = [
-  { path: '/stats', label: '统计', icon: '📊' },
-  { path: '/resources', label: '资源', icon: '📁' },
-  { path: '/tags', label: '标签', icon: '🏷️' },
-  { path: '/trash', label: '回收站', icon: '🗑️' },
+  { path: '/stats', label: '统计', icon: markRaw(PhChartBar) },
+  { path: '/resources', label: '资源', icon: markRaw(PhFolder) },
+  { path: '/tags', label: '标签', icon: markRaw(PhTag) },
+  { path: '/trash', label: '回收站', icon: markRaw(PhTrash) },
 ];
-
-const morePaths = moreNav.map(n => n.path);
-const showMore = ref(morePaths.includes(route.path));
 
 function isActive(path: string) { return route.path === path; }
 function toggleUserMenu() { showUserMenu.value = !showUserMenu.value; }
@@ -120,9 +132,7 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
           <div class="text-sm font-medium truncate" style="color: var(--sb-text)">{{ auth.nickname || '未设置' }}</div>
           <div class="text-xs truncate" style="color: var(--sb-dim)">@{{ auth.user?.username }}</div>
         </div>
-        <svg class="w-4 h-4 shrink-0 transition-transform" :class="{ 'rotate-180': showUserMenu }" style="color: var(--sb-dim)" viewBox="0 0 20 20" fill="currentColor">
-          <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-        </svg>
+        <PhCaretDown size="1rem" weight="fill" class="shrink-0 transition-transform" :class="{ 'rotate-180': showUserMenu }" style="color: var(--sb-dim)" />
       </button>
 
       <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
@@ -131,11 +141,11 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
         <div v-if="showUserMenu" class="absolute left-3 right-3 top-full mt-1 bg-sidebar-light rounded-xl shadow-xl z-50 py-1" style="border: 1px solid var(--sb-border)">
           <button @click="goSettings" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition-colors"
             style="color: var(--sb-text)" @mouseenter="$event.currentTarget.style.background = 'var(--sb-hover)'" @mouseleave="$event.currentTarget.style.background = 'transparent'">
-            <span>&#9881;</span><span>设置</span>
+            <PhGear size="1rem" weight="fill" /><span>设置</span>
           </button>
           <div style="border-top: 1px solid var(--sb-border); margin: 4px 0"></div>
           <button @click="handleLogout" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10">
-            <span>&#10151;</span><span>注销</span>
+            <PhSignOut size="1rem" weight="fill" /><span>注销</span>
           </button>
         </div>
       </Transition>
@@ -149,7 +159,7 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
         :style="isActive(item.path)
           ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)', fontWeight: 500 }
           : { color: 'var(--sb-dim)' }">
-        <span class="text-base">{{ item.icon }}</span>
+        <component :is="item.icon" size="1.125rem" weight="fill" />
         <span>{{ item.label }}</span>
         <span v-if="item.label === '待办' && stats.pendingTodos > 0"
           class="ml-auto bg-red-400/70 text-white text-xs leading-none w-5 h-5 flex items-center justify-center rounded-full font-semibold">
@@ -157,23 +167,15 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
         </span>
       </router-link>
 
-      <!-- More (collapsed) -->
-      <button @click="showMore = !showMore"
-        class="flex items-center gap-3 px-3 py-1.5 rounded-xl text-xs w-full transition-colors nav-item"
-        style="color: var(--sb-dim)">
-        <span class="text-base">{{ showMore ? '▾' : '▸' }}</span>
-        <span>更多</span>
-      </button>
-      <template v-if="showMore">
-        <router-link v-for="item in moreNav" :key="item.path" :to="item.path"
-          class="flex items-center gap-3 px-3 py-1.5 rounded-xl text-xs transition-all duration-150 nav-item"
-          :style="isActive(item.path)
-            ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)', fontWeight: 500 }
-            : { color: 'var(--sb-dim)' }">
-          <span class="text-sm">{{ item.icon }}</span>
-          <span>{{ item.label }}</span>
-        </router-link>
-      </template>
+      <!-- More (展开显示，样式与主导航一致) -->
+      <router-link v-for="item in moreNav" :key="item.path" :to="item.path"
+        class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-150 nav-item"
+        :style="isActive(item.path)
+          ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)', fontWeight: 500 }
+          : { color: 'var(--sb-dim)' }">
+        <component :is="item.icon" size="1.125rem" weight="fill" />
+        <span>{{ item.label }}</span>
+      </router-link>
     </nav>
 
     <!-- Categories -->
@@ -193,7 +195,7 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
           :style="activeCategory === cat.name
             ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)' }
             : { color: 'var(--sb-dim)' }">
-          <span>📂</span>
+          <PhFolderOpen size="0.875rem" weight="fill" />
           <span class="flex-1 truncate">{{ cat.name }}</span>
           <button @click.stop="confirmDelete(cat)" class="opacity-0 group-hover:opacity-100 text-[10px] hover:text-red-400" style="color: var(--sb-dim)">✕</button>
         </div>
@@ -204,7 +206,7 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
             :style="activeCategory === child.name
               ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)' }
               : { color: 'var(--sb-dim)' }">
-            <span>📄</span>
+            <PhFile size="0.875rem" weight="fill" />
             <span class="flex-1 truncate">{{ child.name }}</span>
             <button @click.stop="confirmDelete(child)" class="opacity-0 group-hover:opacity-100 text-[10px] hover:text-red-400" style="color: var(--sb-dim)">✕</button>
           </div>

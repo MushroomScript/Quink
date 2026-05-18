@@ -10,6 +10,8 @@ import Sidebar from '@/components/Sidebar.vue';
 import TopBar from '@/components/TopBar.vue';
 import NoteEditModal from '@/components/NoteEditModal.vue';
 import GlobalToast from '@/components/GlobalToast.vue';
+import { PhMinus, PhSquare, PhX, PhCaretLeft } from '@phosphor-icons/vue';
+import { REF_LINK_REGEX, renderRefLink } from '@/utils/refLink';
 
 const route = useRoute();
 const router = useRouter();
@@ -99,13 +101,7 @@ async function openRefPreview(noteId: string) {
     refPreviewHidden.value = false;
     const res = await api.getNote(noteId);
     let md = res.data.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
-    const processed = md.replace(
-      /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
-      (_: string, label: string, href: string) => {
-        const clean = label.replace(/[\n\r#*`\[\]!>~]/g, ' ').trim().slice(0, 30) || '引用笔记';
-        return `<span class="note-ref-link" data-ref="${href}">📌 ${clean}</span>`;
-      }
-    );
+    const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
     let html = await Vditor.md2html(processed, { cdn: '/vditor' });
     refPreviewStack.value.push({ note: res.data, html });
 
@@ -229,13 +225,13 @@ watch(() => auth.user, (user) => {
         <span class="text-xs font-semibold" style="color: var(--sb-text)">Quink - 一念</span>
         <div class="flex items-center" style="-webkit-app-region: no-drag">
           <button @click="desk?.minimize()" class="w-10 h-9 flex items-center justify-center hover:bg-black/10 transition-colors" style="color: var(--sb-dim)">
-            <svg width="12" height="1" viewBox="0 0 12 1"><rect width="12" height="1" fill="currentColor"/></svg>
+            <PhMinus size="1rem" weight="bold" />
           </button>
           <button @click="desk?.maximize()" class="w-10 h-9 flex items-center justify-center hover:bg-black/10 transition-colors" style="color: var(--sb-dim)">
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="0.5" width="9" height="9" rx="1"/></svg>
+            <PhSquare size="0.875rem" weight="bold" />
           </button>
           <button @click="desk?.close()" class="w-10 h-9 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors" style="color: var(--sb-dim)">
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+            <PhX size="1rem" weight="bold" />
           </button>
         </div>
       </div>
@@ -276,7 +272,7 @@ watch(() => auth.user, (user) => {
           <div class="flex items-center justify-between px-5 py-3 bg-gray-50/80 shrink-0">
             <div class="flex items-center gap-2">
               <button @click="goBackRefPreview" class="p-1 rounded-lg hover:bg-gray-200/60 text-gray-400">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+                <PhCaretLeft size="1rem" weight="fill" />
               </button>
               <span class="text-xs font-medium text-gray-500">引用预览{{ refPreviewStack.length > 1 ? ` (${refPreviewStack.length})` : '' }}</span>
             </div>
@@ -285,7 +281,7 @@ watch(() => auth.user, (user) => {
                 查看详情
               </button>
               <button @click="closeRefPreview" class="p-1 rounded-lg hover:bg-gray-200/60 text-gray-400">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                <PhX size="1rem" weight="fill" />
               </button>
             </div>
           </div>

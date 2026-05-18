@@ -6,6 +6,17 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { useNotesStore } from '@/stores/notes';
 import type { Note } from '@/api';
+import {
+  PhCheck,
+  PhDotsThreeVertical,
+  PhPushPin,
+  PhMapPin,
+  PhPencilSimple,
+  PhCheckSquare,
+  PhSquare,
+  PhTrash,
+} from '@phosphor-icons/vue';
+import { REF_LINK_REGEX, renderRefLink } from '@/utils/refLink';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -64,19 +75,16 @@ watchEffect(async () => {
     // 任务列表:* [X] → - [x] (Vditor md2html 只认 - 开头的任务列表)
     let md = content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
     // 引用链接:先在 Markdown 层面简化(旧数据可能有多行 label,Vditor 解析不了)
-    const processed = md.replace(
-      /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
-      (_: string, label: string, href: string) => {
-        const clean = label.replace(/[\n\r#*`\[\]!>~]/g, ' ').trim().slice(0, 20) || '引用笔记';
-        return `<span class="note-ref-link" data-ref="${href}">📌 ${clean}</span>`;
-      }
-    );
+    const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 20));
     let html = await Vditor.md2html(processed, { cdn: '/vditor' });
-    // 搜索关键词高亮
+    // 搜索关键词高亮（只在标签之间的文本上替换，避免破坏 a[href]、class 等 HTML 属性 → 进而破坏音频胶囊等 CSS 选择器）
     const q = store.searchQuery;
     if (q && q.trim()) {
       const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      html = html.replace(new RegExp(`(${escaped})`, 'gi'), '<mark class="search-highlight">$1</mark>');
+      const re = new RegExp(`(${escaped})`, 'gi');
+      html = html.replace(/(<[^>]+>)|([^<]+)/g, (_, tag, text) =>
+        tag ? tag : text.replace(re, '<mark class="search-highlight">$1</mark>')
+      );
     }
     renderedContent.value = html;
   } catch {
@@ -105,7 +113,7 @@ const typeColor: Record<string, string> = {
         <div v-if="store.selectMode"
           class="w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors"
           :class="store.selectedIds.has(note.id) ? 'bg-primary border-primary' : 'border-gray-300'">
-          <svg v-if="store.selectedIds.has(note.id)" class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
+          <PhCheck v-if="store.selectedIds.has(note.id)" size="0.625rem" weight="fill" class="text-white" />
         </div>
         <span class="text-[11px] px-2 py-0.5 rounded-full font-medium" :class="typeColor[note.type]">
           {{ typeLabels[note.type] }}
@@ -115,9 +123,7 @@ const typeColor: Record<string, string> = {
         <!-- 三点菜单 -->
         <button @click.stop="showMenu = !showMenu"
           class="p-0.5 rounded-md text-gray-300 hover:text-gray-500 hover:bg-gray-100 transition-colors">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>
-          </svg>
+          <PhDotsThreeVertical size="1.375rem" weight="bold" />
         </button>
       </div>
 
@@ -137,21 +143,27 @@ const typeColor: Record<string, string> = {
       <div v-if="showMenu" class="absolute right-3 top-10 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 min-w-[100px]">
         <button @click.stop="store.togglePin(note.id); showMenu = false"
           class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
-          {{ note.pinned ? '📌 取消置顶' : '📍 置顶' }}
+          <PhPushPin v-if="note.pinned" size="0.875rem" weight="fill" />
+          <PhMapPin v-else size="0.875rem" weight="fill" />
+          <span>{{ note.pinned ? '取消置顶' : '置顶' }}</span>
         </button>
         <button @click.stop="openEditModal?.(note); showMenu = false"
           class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
-          ✏️ 编辑
+          <PhPencilSimple size="0.875rem" weight="fill" />
+          <span>编辑</span>
         </button>
         <button v-if="note.type === 'todo'" @click.stop="store.toggleTodo(note.id); showMenu = false"
           class="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors"
           :class="note.todoStatus === 'done' ? 'text-green-600 hover:bg-green-50' : 'text-gray-600 hover:bg-gray-50'">
-          {{ note.todoStatus === 'done' ? '✅ 标记未完成' : '⬜ 标记完成' }}
+          <PhCheckSquare v-if="note.todoStatus === 'done'" size="0.875rem" weight="fill" />
+          <PhSquare v-else size="0.875rem" weight="fill" />
+          <span>{{ note.todoStatus === 'done' ? '标记未完成' : '标记完成' }}</span>
         </button>
         <div class="border-t border-gray-100 my-0.5"></div>
         <button @click.stop="askDelete()"
           class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-red-50 hover:text-red-500 transition-colors">
-          🗑️ 删除
+          <PhTrash size="0.875rem" weight="fill" />
+          <span>删除</span>
         </button>
       </div>
     </Transition>

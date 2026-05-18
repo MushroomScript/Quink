@@ -3,6 +3,7 @@ import { ref, nextTick, onMounted, onUnmounted } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { api, isLoggedIn } from '@/api';
 import Vditor from 'vditor';
+import { PhSparkle, PhStop, PhPaperPlaneTilt } from '@phosphor-icons/vue';
 
 const auth = useAuthStore();
 const query = ref('');
@@ -137,7 +138,10 @@ onUnmounted(() => { document.removeEventListener('keydown', onGlobalKeydown); })
   <div class="h-full flex flex-col select-none">
     <!-- Title bar -->
     <div class="flex items-center justify-between px-4 py-2 shrink-0" style="-webkit-app-region: drag; background: rgb(var(--c-sidebar))">
-      <span class="text-xs font-semibold" style="color: var(--sb-text)">🤖 AI 对话</span>
+      <span class="text-xs font-semibold inline-flex items-center gap-1.5" style="color: var(--sb-text)">
+        <PhSparkle size="0.875rem" weight="fill" />
+        <span>AI 对话</span>
+      </span>
       <div class="flex items-center gap-2" style="-webkit-app-region: no-drag">
         <button @click="newChat" class="text-[10px] px-2 py-0.5 rounded hover:bg-white/10" style="color: var(--sb-dim)">新对话</button>
         <span class="text-[10px]" style="color: var(--sb-dim)">Esc 关闭</span>
@@ -151,7 +155,9 @@ onUnmounted(() => { document.removeEventListener('keydown', onGlobalKeydown); })
     <template v-else>
       <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-white">
         <div v-if="messages.length === 0 && !streamingContent" class="text-center py-8">
-          <div class="text-3xl mb-2">🤖</div>
+          <div class="mb-2 flex justify-center text-gray-300">
+            <PhSparkle size="2rem" weight="fill" />
+          </div>
           <p class="text-gray-400 text-xs">问我任何问题</p>
         </div>
 
@@ -177,11 +183,11 @@ onUnmounted(() => { document.removeEventListener('keydown', onGlobalKeydown); })
           <input ref="inputEl" v-model="query" @keydown="handleInputKeydown" placeholder="问点什么..."
             class="flex-1 px-3 py-2 bg-gray-50 border-0 rounded-full text-sm outline-none focus:bg-white focus:ring-2 focus:ring-primary/30" />
           <button v-if="loading" @click="loading = false" class="p-2 rounded-full border border-gray-200 text-gray-500 hover:text-red-500 shrink-0">
-            <svg class="w-4 h-4" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+            <PhStop size="1rem" weight="fill" />
           </button>
           <button v-else @click="sendMessage" :disabled="!query.trim()"
             class="p-2 rounded-full text-white disabled:opacity-40 shrink-0" style="background: rgb(var(--c-accent))">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            <PhPaperPlaneTilt size="1rem" weight="fill" />
           </button>
         </div>
       </div>

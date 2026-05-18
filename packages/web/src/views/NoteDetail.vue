@@ -7,6 +7,8 @@ import Vditor from 'vditor';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
+import { PhNotePencil, PhCaretLeft, PhPencilSimple } from '@phosphor-icons/vue';
+import { REF_LINK_REGEX, renderRefLink } from '@/utils/refLink';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -32,13 +34,7 @@ async function loadNote() {
     if (detailTitle) detailTitle.value = typeLabels[res.data.type] + '详情';
     try {
       let md = res.data.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
-      const processed = md.replace(
-        /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
-        (_: string, label: string, href: string) => {
-          const clean = label.replace(/[\n\r#*`\[\]!>~]/g, ' ').trim().slice(0, 30) || '引用笔记';
-          return `<span class="note-ref-link" data-ref="${href}">📌 ${clean}</span>`;
-        }
-      );
+      const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
       let html = await Vditor.md2html(processed, { cdn: '/vditor' });
       rendered.value = html;
     } catch (e) {
@@ -61,13 +57,7 @@ watch(() => store.notes, () => {
     if (updated && updated.updatedAt !== note.value.updatedAt) {
       note.value = updated;
       let md = updated.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
-      md = md.replace(
-        /\[([\s\S]*?)\]\((\/?[?&]ref=[^)]+)\)/g,
-        (_: string, label: string, href: string) => {
-          const clean = label.replace(/[\n\r#*`\[\]!>~]/g, ' ').trim().slice(0, 30) || '引用笔记';
-          return `<span class="note-ref-link" data-ref="${href}">📌 ${clean}</span>`;
-        }
-      );
+      md = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
       Vditor.md2html(md, { cdn: '/vditor' }).then(html => { rendered.value = html; });
     }
   }
@@ -103,7 +93,9 @@ onUnmounted(() => {
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <div v-else-if="!note" class="text-center py-16">
-      <div class="text-4xl mb-3">📝</div>
+      <div class="mb-3 flex justify-center text-gray-300">
+        <PhNotePencil size="3rem" weight="fill" />
+      </div>
       <p class="text-gray-500 text-sm">笔记不存在或已被删除</p>
       <button @click="goBack" class="mt-4 text-xs text-primary hover:underline">返回</button>
     </div>
@@ -112,14 +104,17 @@ onUnmounted(() => {
       <!-- Header -->
       <div class="flex items-center gap-3 mb-6 flex-wrap">
         <button @click="goBack" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+          <PhCaretLeft size="1.25rem" weight="fill" />
         </button>
         <div class="flex items-center gap-2">
           <span class="text-xs px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark">{{ typeLabels[note.type] }}</span>
           <span v-if="note.category" class="text-xs text-gray-400">{{ note.category }}</span>
         </div>
         <span class="text-xs text-gray-400 ml-auto">{{ dayjs(note.createdAt).format('YYYY-MM-DD HH:mm') }}</span>
-        <button @click="openEditModal?.(note, true)" class="px-3 py-1 text-xs rounded-lg hover:bg-gray-100 text-gray-400">✏️ 编辑</button>
+        <button @click="openEditModal?.(note, true)" class="px-3 py-1 text-xs rounded-lg hover:bg-gray-100 text-gray-400 inline-flex items-center gap-1">
+          <PhPencilSimple size="0.875rem" weight="fill" />
+          <span>编辑</span>
+        </button>
       </div>
 
       <!-- Summary -->

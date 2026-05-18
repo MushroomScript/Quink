@@ -4,6 +4,7 @@ import { useNotesStore } from '@/stores/notes';
 import NoteInput from '@/components/NoteInput.vue';
 import MobileInput from '@/components/MobileInput.vue';
 import NoteCard from '@/components/NoteCard.vue';
+import { PhCheckSquare } from '@phosphor-icons/vue';
 
 defineOptions({ name: 'todos' });
 
@@ -49,7 +50,9 @@ onActivated(() => {
     </div>
 
     <div v-if="store.notes.length === 0 && !store.loading" class="text-center py-16">
-      <div class="text-4xl mb-3">✅</div>
+      <div class="mb-3 flex justify-center text-gray-300">
+        <PhCheckSquare size="3rem" weight="fill" />
+      </div>
       <p class="text-gray-500 text-sm">还没有待办事项</p>
       <p class="text-gray-400 text-xs mt-1">在上方输入框创建一个待办吧</p>
     </div>

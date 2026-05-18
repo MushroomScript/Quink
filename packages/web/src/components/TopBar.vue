@@ -3,6 +3,8 @@ import { ref, computed, onMounted, onUnmounted, watch, inject, type Ref } from '
 import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import { api, type Category } from '@/api';
+import { markRaw } from 'vue';
+import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhX, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen } from '@phosphor-icons/vue';
 
 const toggleMobileSidebar = inject<() => void>('toggleMobileSidebar');
 
@@ -10,8 +12,25 @@ const route = useRoute();
 const store = useNotesStore();
 const categories = ref<Category[]>([]);
 const showBatchMove = ref(false);
+const batchMoveBtn = ref<HTMLElement>();
+const batchMovePos = ref({ top: '0px', left: '0px' });
+
+function toggleBatchMove() {
+  showBatchMove.value = !showBatchMove.value;
+  if (showBatchMove.value) {
+    if (categories.value.length === 0) loadCategories();
+    if (batchMoveBtn.value) {
+      const r = batchMoveBtn.value.getBoundingClientRect();
+      const top = r.bottom + 4;
+      const left = r.right - 160;
+      batchMovePos.value = { top: top + 'px', left: left + 'px' };
+    }
+  }
+}
 const confirmBatchDelete = ref(false);
 const searchInput = ref<HTMLInputElement>();
+const searchBoxEl = ref<HTMLElement>();
+const tagSuggestPos = ref({ top: '0px', left: '0px', width: '0px' });
 const searchText = ref('');
 const showFilters = ref(false);
 const showMobileSearch = ref(false);
@@ -55,9 +74,9 @@ const hideRefresh = computed(() => !!route.meta.hideRefresh);
 const hasFilters = computed(() => filterTags.value.length > 0 || filterDateFrom.value || store.filterCategory || filterTypes.value.length < 3);
 
 const typeOptions = [
-  { value: 'note', label: '灵感', icon: '💡' },
-  { value: 'snippet', label: '笔记', icon: '📝' },
-  { value: 'todo', label: '待办', icon: '✅' },
+  { value: 'note', label: '灵感', icon: markRaw(PhLightbulb) },
+  { value: 'snippet', label: '笔记', icon: markRaw(PhNotePencil) },
+  { value: 'todo', label: '待办', icon: markRaw(PhCheckSquare) },
 ];
 
 function toggleType(t: string) {
@@ -92,12 +111,23 @@ function doSearch() {
   }, 300);
 }
 
+function updateTagSuggestPos() {
+  if (!searchBoxEl.value) return;
+  const r = searchBoxEl.value.getBoundingClientRect();
+  tagSuggestPos.value = {
+    top: `${r.bottom + 4}px`,
+    left: `${r.left}px`,
+    width: `${r.width}px`,
+  };
+}
+
 function onSearch() {
   // 加载标签列表(首次)
   if (allTags.value.length === 0) {
     api.getTags().then(res => { allTags.value = res.data; }).catch(() => {});
   }
   showTagSuggestions.value = true;
+  updateTagSuggestPos();
   doSearch();
 }
 
@@ -180,7 +210,18 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => { document.addEventListener('keydown', handleKeydown); });
+onMounted(() => {
+  document.addEventListener('keydown', handleKeydown);
+  window.addEventListener('quink-filter-tag', ((e: CustomEvent) => {
+    const tag = e.detail;
+    if (tag && !filterTags.value.includes(tag)) {
+      filterTags.value = [tag];
+      filterTypes.value = ['note', 'snippet', 'todo'];
+      showFilters.value = true;
+      doSearch();
+    }
+  }) as EventListener);
+});
 onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
 </script>
 
@@ -192,12 +233,10 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       <!-- Left: menu + title -->
       <div class="flex items-center gap-2 shrink-0">
         <button @click="toggleMobileSidebar?.()" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 md:hidden" title="菜单">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
+          <PhList size="1.25rem" weight="fill" />
         </button>
         <button v-if="!hideRefresh" @click="refresh" class="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors hidden md:block" title="刷新">
-          <svg class="w-3.5 h-3.5 transition-transform duration-500" :style="spinning ? 'transform: rotate(360deg)' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
+          <PhArrowsClockwise size="0.875rem" weight="fill" class="transition-transform duration-500" :style="spinning ? 'transform: rotate(360deg)' : ''" />
         </button>
         <h1 class="text-sm md:text-base font-semibold text-gray-800 whitespace-nowrap">{{ title }}<span v-if="titleCount >= 0" class="text-xs text-gray-400 font-normal tabular-nums">（{{ titleCount }}）</span></h1>
       </div>
@@ -205,43 +244,30 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       <!-- Right: search -->
       <div v-if="!hideSearch" class="flex items-center gap-1.5">
         <!-- Desktop search -->
-        <div class="relative hidden md:flex items-center w-56 bg-gray-100/80 rounded-full border border-gray-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition overflow-hidden">
-          <svg class="ml-3 w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input ref="searchInput" v-model="searchText" @input="onSearch" @focus="onSearch" @blur="setTimeout(() => showTagSuggestions = false, 200)" type="text"
-            placeholder="搜索...      Ctrl + F"
-            class="flex-1 min-w-0 px-2 py-1.5 border-0 text-sm outline-none placeholder-gray-400"
-            style="background: transparent !important" />
-          <!-- 清空搜索 -->
-          <button v-if="searchText" @click="searchText = ''; store.searchQuery = ''; doSearch()" class="mr-2 text-gray-400 hover:text-gray-600 shrink-0">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <!-- 标签建议下拉 -->
-          <div v-if="showTagSuggestions && tagSuggestions.length" class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[9999]">
-            <button v-for="t in tagSuggestions" :key="t" @mousedown.prevent="addTag(t)"
-              class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 flex items-center gap-1.5">
-              <span class="px-1.5 py-0.5 rounded-full text-[10px] bg-primary-light text-primary-dark">🏷️</span>
-              {{ t }}
+        <div ref="searchBoxEl" class="hidden md:block w-56">
+          <div class="flex items-center bg-gray-100/80 rounded-full border border-gray-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition overflow-hidden">
+            <PhMagnifyingGlass size="1rem" weight="fill" class="ml-3 text-gray-400 shrink-0" />
+            <input ref="searchInput" v-model="searchText" @input="onSearch" @focus="onSearch" @blur="setTimeout(() => showTagSuggestions = false, 200)" type="text"
+              placeholder="搜索...      Ctrl + F"
+              class="flex-1 min-w-0 px-2 py-1.5 border-0 text-sm outline-none placeholder-gray-400"
+              style="background: transparent !important" />
+            <!-- 清空搜索 -->
+            <button v-if="searchText" @click="searchText = ''; store.searchQuery = ''; doSearch()"
+              class="mr-2 w-4 h-4 rounded-full bg-gray-300 hover:bg-gray-500 text-white flex items-center justify-center shrink-0 transition-colors" title="清空">
+              <PhX size="0.625rem" weight="bold" />
             </button>
           </div>
         </div>
 
         <!-- Mobile search toggle -->
         <button @click="showMobileSearch = !showMobileSearch" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 md:hidden">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+          <PhMagnifyingGlass size="1.25rem" weight="fill" />
         </button>
 
         <!-- Filter toggle -->
         <button @click="toggleFilters" class="p-1.5 rounded-lg transition-colors hidden md:block"
           :class="showFilters || hasFilters ? 'bg-primary-light text-primary-dark' : 'hover:bg-gray-100 text-gray-400 hover:text-gray-600'">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-          </svg>
+          <PhFunnel size="1rem" weight="fill" />
         </button>
       </div>
     </div>
@@ -251,9 +277,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       <div class="relative">
         <input v-model="searchText" @input="onSearch" type="text" placeholder="搜索..."
           class="w-full pl-9 pr-3 py-2 bg-gray-100/80 border-0 rounded-full text-sm outline-none focus:bg-white focus:ring-2 focus:ring-primary/30 placeholder-gray-400" autofocus />
-        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
+        <PhMagnifyingGlass size="1rem" weight="fill" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
       </div>
     </div>
 
@@ -266,9 +290,10 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <span class="text-xs text-gray-400 w-8 shrink-0">类型</span>
           <div class="flex items-center gap-1">
             <button v-for="t in typeOptions" :key="t.value" @click="toggleType(t.value)"
-              class="px-2 py-0.5 rounded-full text-xs font-medium transition-colors"
+              class="px-2 py-0.5 rounded-full text-xs font-medium transition-colors inline-flex items-center gap-1"
               :class="filterTypes.includes(t.value) ? 'bg-primary-light text-primary-dark' : 'bg-gray-100 text-gray-400'">
-              {{ t.icon }} {{ t.label }}
+              <component :is="t.icon" size="0.75rem" weight="fill" />
+              {{ t.label }}
             </button>
           </div>
           <span class="text-gray-200">|</span>
@@ -287,11 +312,12 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <span class="text-xs text-gray-400 w-8 shrink-0">筛选</span>
           <span v-if="store.filterCategory" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium"
             style="background: #FFE0CC; color: #D46B27">
-            <span class="truncate max-w-[120px]">📂 {{ store.filterCategory }}</span>
+            <span class="truncate max-w-[120px] inline-flex items-center gap-1"><PhFolderOpen size="0.75rem" weight="fill" />{{ store.filterCategory }}</span>
             <button @click="clearCategory()" class="hover:opacity-60 shrink-0">×</button>
           </span>
           <span v-for="t in filterTags" :key="t" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-primary-light text-primary-dark">
-            🏷️ {{ t }}
+            <PhTag size="0.75rem" weight="fill" />
+            <span>{{ t }}</span>
             <button @click="removeTag(t)" class="hover:opacity-60">×</button>
           </span>
           <span v-if="!store.filterCategory && !filterTags.length" class="text-xs text-gray-300">无（侧边栏选分类，搜索栏输入匹配标签）</span>
@@ -307,17 +333,9 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       <button @click="store.toggleSelectMode()" class="text-xs text-gray-400 hover:underline">退出选择</button>
       <div class="ml-auto flex items-center gap-2">
         <div class="relative">
-          <button @click="showBatchMove = !showBatchMove" class="px-3 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100">
+          <button ref="batchMoveBtn" @click="toggleBatchMove" class="px-3 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100">
             移动分类
           </button>
-          <div v-if="showBatchMove" class="absolute right-0 bottom-full mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-40 z-50">
-            <button v-for="cat in categories" :key="cat.id"
-              @click="store.batchMove(cat.name); showBatchMove = false"
-              class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50">
-              📂 {{ cat.name }}
-            </button>
-            <div v-if="categories.length === 0" class="px-3 py-2 text-xs text-gray-400">无分类</div>
-          </div>
         </div>
         <button @click="confirmBatchDelete = true"
           class="px-3 py-1 text-xs rounded-lg border border-gray-200 text-red-500 hover:bg-red-50 transition-colors">
@@ -326,6 +344,35 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       </div>
     </div>
   </header>
+
+  <!-- 标签建议下拉（Teleport 到 body，避开主区编辑器层级） -->
+  <Teleport to="body">
+    <div v-if="showTagSuggestions && tagSuggestions.length"
+      class="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[9999]"
+      :style="tagSuggestPos">
+      <button v-for="t in tagSuggestions" :key="t" @mousedown.prevent="addTag(t)"
+        class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 flex items-center gap-1.5">
+        <span class="px-1.5 py-0.5 rounded-full bg-primary-light text-primary-dark inline-flex items-center"><PhTag size="0.625rem" weight="fill" /></span>
+        {{ t }}
+      </button>
+    </div>
+  </Teleport>
+
+  <!-- 移动分类下拉 -->
+  <Teleport to="body">
+    <div v-if="showBatchMove" class="fixed z-[9999]" :style="batchMovePos">
+      <div class="bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-40 max-h-48 overflow-y-auto">
+        <button v-for="cat in categories" :key="cat.id"
+          @click="store.batchMove(cat.name); showBatchMove = false"
+          class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 truncate inline-flex items-center gap-1.5 w-full" :title="cat.name">
+          <PhFolderOpen size="0.75rem" weight="fill" />
+          <span class="truncate">{{ cat.name }}</span>
+        </button>
+        <div v-if="categories.length === 0" class="px-3 py-2 text-xs text-gray-400">无分类</div>
+      </div>
+    </div>
+    <div v-if="showBatchMove" class="fixed inset-0 z-[9998]" @click="showBatchMove = false" />
+  </Teleport>
 
   <!-- 批量删除确认弹窗 -->
   <Teleport to="body">

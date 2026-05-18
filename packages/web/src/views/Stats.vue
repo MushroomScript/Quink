@@ -1,6 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, markRaw } from 'vue';
 import { api, isLoggedIn } from '@/api';
+import {
+  PhLightbulb,
+  PhNotePencil,
+  PhCheckSquare,
+  PhPaperclip,
+  PhTag,
+  PhTrash,
+} from '@phosphor-icons/vue';
 
 const stats = ref<any>({ totalNotes: 0, totalTodos: 0, pendingTodos: 0, dailyCounts: [], categoryDist: [], typeDist: [] });
 const fileCount = ref(0);
@@ -15,12 +23,12 @@ function getTypeCount(type: string): number {
 }
 
 const topCards = computed(() => [
-  { label: '灵感', count: getTypeCount('note'), icon: '💡', color: 'bg-blue-50 text-blue-600' },
-  { label: '笔记', count: getTypeCount('snippet'), icon: '📝', color: 'bg-emerald-50 text-emerald-600' },
-  { label: '待办', count: getTypeCount('todo'), icon: '✅', color: 'bg-amber-50 text-amber-600' },
-  { label: '资源', count: fileCount.value, icon: '📎', color: 'bg-purple-50 text-purple-600' },
-  { label: '标签', count: tagCount.value, icon: '🏷️', color: 'bg-sky-50 text-sky-600' },
-  { label: '回收站', count: trashCount.value, icon: '🗑️', color: 'bg-gray-100 text-gray-500' },
+  { label: '灵感', count: getTypeCount('note'), icon: markRaw(PhLightbulb), color: 'bg-blue-50 text-blue-600' },
+  { label: '笔记', count: getTypeCount('snippet'), icon: markRaw(PhNotePencil), color: 'bg-emerald-50 text-emerald-600' },
+  { label: '待办', count: getTypeCount('todo'), icon: markRaw(PhCheckSquare), color: 'bg-amber-50 text-amber-600' },
+  { label: '资源', count: fileCount.value, icon: markRaw(PhPaperclip), color: 'bg-purple-50 text-purple-600' },
+  { label: '标签', count: tagCount.value, icon: markRaw(PhTag), color: 'bg-sky-50 text-sky-600' },
+  { label: '回收站', count: trashCount.value, icon: markRaw(PhTrash), color: 'bg-gray-100 text-gray-500' },
 ]);
 
 const heatmapData = computed(() => {
@@ -108,7 +116,9 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
       <!-- 顶部卡片：灵感/笔记/待办 -->
       <div class="grid grid-cols-6 gap-3 mb-6">
         <div v-for="card in topCards" :key="card.label" class="bg-white rounded-xl border border-gray-200 p-3 flex flex-col items-center text-center">
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-base mb-2" :class="card.color">{{ card.icon }}</div>
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center mb-2" :class="card.color">
+            <component :is="card.icon" size="1.125rem" weight="fill" />
+          </div>
           <div class="text-xl font-bold text-gray-800">{{ card.count }}</div>
           <div class="text-[11px] text-gray-400 mt-0.5">{{ card.label }}</div>
         </div>

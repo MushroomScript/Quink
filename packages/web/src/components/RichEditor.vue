@@ -1,8 +1,23 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, markRaw } from 'vue';
 import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import { api } from '@/api';
+import {
+  PhLightbulb,
+  PhNotePencil,
+  PhCheckSquare,
+  PhSparkle,
+  PhBookOpen,
+  PhPenNib,
+  PhTag,
+  PhPushPin,
+  PhMicrophone,
+  PhWaveform,
+  PhRecord,
+  PhArrowsOut,
+  PhArrowsIn,
+} from '@phosphor-icons/vue';
 
 const props = withDefaults(defineProps<{
   initialContent?: string;
@@ -42,9 +57,9 @@ const emit = defineEmits<{
 }>();
 
 const noteTypes = [
-  { value: 'note', label: '灵感', icon: '💡' },
-  { value: 'snippet', label: '笔记', icon: '📝' },
-  { value: 'todo', label: '待办', icon: '✅' },
+  { value: 'note', label: '灵感', icon: markRaw(PhLightbulb) },
+  { value: 'snippet', label: '笔记', icon: markRaw(PhNotePencil) },
+  { value: 'todo', label: '待办', icon: markRaw(PhCheckSquare) },
 ];
 
 const noteType = ref(props.initialType);
@@ -82,10 +97,14 @@ const aiResult = ref('');
 const aiError = ref('');
 
 const aiFeatureOptions = [
-  { value: 'polish' as const, label: '润色', icon: '✨' },
-  { value: 'expand' as const, label: '扩充', icon: '📖' },
-  { value: 'write' as const, label: '写文', icon: '✍️' },
+  { value: 'polish' as const, label: '润色', icon: markRaw(PhSparkle) },
+  { value: 'expand' as const, label: '扩充', icon: markRaw(PhBookOpen) },
+  { value: 'write' as const, label: '写文', icon: markRaw(PhPenNib) },
 ];
+
+const currentAiFeatureIcon = computed(() =>
+  aiFeatureOptions.find(f => f.value === aiFeature.value)?.icon
+);
 
 const editorRef = ref<HTMLDivElement>();
 let vditor: Vditor | null = null;
@@ -273,7 +292,7 @@ async function searchRefs() {
 function insertRef(note: any) {
   const firstLine = (note.content || '').split('\n').find((l: string) => l.trim()) || '';
   const label = firstLine.replace(/[#*`\[\]!>~]/g, '').trim().slice(0, 20) || '引用笔记';
-  vditor?.insertValue(`[📌 ${label}](/?ref=${note.id})`);
+  vditor?.insertValue(`[${label}](/?ref=${note.id})`);
   showRefSearch.value = false; refQuery.value = ''; refResults.value = [];
 }
 
@@ -563,9 +582,10 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         <!-- Type selector -->
         <div v-if="showTypeSelector" class="flex gap-0.5">
           <button v-for="t in noteTypes" :key="t.value" @click="noteType = t.value"
-            class="px-2 py-1 rounded-md text-xs transition-colors"
+            class="px-2 py-1 rounded-md text-xs transition-colors inline-flex items-center gap-1"
             :class="noteType === t.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'">
-            {{ t.icon }} {{ t.label }}
+            <component :is="t.icon" size="0.875rem" weight="fill" />
+            {{ t.label }}
           </button>
         </div>
         <span v-if="showTypeSelector" class="sep"></span>
@@ -575,9 +595,10 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
           <div class="flex gap-0.5">
             <button v-for="f in aiFeatureOptions" :key="f.value"
               @click="aiFeature === f.value && showAiPanel ? closeAiPanel() : openAiPanel(f.value)"
-              class="px-2 py-1 rounded-md text-xs transition-colors"
+              class="px-2 py-1 rounded-md text-xs transition-colors inline-flex items-center gap-1"
               :class="showAiPanel && aiFeature === f.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'">
-              {{ f.icon }} {{ f.label }}
+              <component :is="f.icon" size="0.875rem" weight="fill" />
+              {{ f.label }}
             </button>
           </div>
           <span class="sep"></span>
@@ -585,19 +606,19 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 
         <!-- Tags -->
         <div class="relative">
-          <button ref="tagBtnEl" @click.stop="showTagInput = !showTagInput" class="tbtn text-gray-400" title="添加标签">🏷️</button>
+          <button ref="tagBtnEl" @click.stop="showTagInput = !showTagInput" class="tbtn text-gray-400" title="添加标签"><PhTag size="0.875rem" weight="fill" /></button>
         </div>
         <!-- Reference -->
         <div class="relative">
-          <button ref="refBtnEl" @click.stop="showRefSearch = !showRefSearch" class="tbtn text-gray-400" title="引用笔记">📌</button>
+          <button ref="refBtnEl" @click.stop="showRefSearch = !showRefSearch" class="tbtn text-gray-400" title="引用笔记"><PhPushPin size="0.875rem" weight="fill" /></button>
         </div>
         <!-- 录音 -->
         <button @click="toggleRecording"
           class="tbtn transition-colors"
           :class="isRecording ? 'text-red-500 bg-red-100 rounded-md' : 'text-gray-400'"
           :title="isRecording ? '' : '语音输入'">
-          <svg v-if="isRecording" class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="#ef4444"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
-          <span v-else>🎙️</span>
+          <PhRecord v-if="isRecording" size="0.875rem" weight="fill" class="text-red-500" />
+          <PhMicrophone v-else size="0.875rem" weight="fill" />
         </button>
         <span v-if="isRecording" class="text-[11px] text-red-500 font-medium tabular-nums select-none">
           {{ recordingTime }}s
@@ -608,9 +629,9 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
           :class="isVoiceRecording ? 'rounded-md' : voiceUploading ? 'text-gray-300' : 'text-gray-400'"
           :style="isVoiceRecording ? 'color: white; background: rgb(var(--c-accent))' : ''"
           :title="isVoiceRecording ? '' : voiceUploading ? '上传中...' : '录音保存'">
-          <svg v-if="isVoiceRecording" class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="white"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
-          <span v-else-if="voiceUploading" class="animate-pulse">🎤</span>
-          <span v-else>🎤</span>
+          <PhRecord v-if="isVoiceRecording" size="0.875rem" weight="fill" class="text-white" />
+          <PhWaveform v-else-if="voiceUploading" size="0.875rem" weight="fill" class="animate-pulse" />
+          <PhWaveform v-else size="0.875rem" weight="fill" />
         </button>
         <span v-if="isVoiceRecording" class="text-[11px] font-medium tabular-nums select-none" style="color: rgb(var(--c-accent))">
           {{ voiceRecordTime }}s
@@ -623,12 +644,8 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         <button v-if="showFullscreenBtn" @click="toggleFullscreen"
           class="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
           :title="isFullscreen ? '退出全屏 (Esc)' : '全屏编辑'">
-          <svg v-if="!isFullscreen" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
-          </svg>
-          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
-          </svg>
+          <PhArrowsOut v-if="!isFullscreen" size="0.875rem" weight="fill" />
+          <PhArrowsIn v-else size="0.875rem" weight="fill" />
         </button>
         <slot name="submit-button">
           <button @click="handleSubmit"
@@ -642,7 +659,10 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
     <!-- AI Panel -->
     <div v-if="showAi && showAiPanel" class="border-t border-gray-100 bg-gray-50/80">
       <div class="flex items-center px-3 pt-2">
-        <span class="text-xs font-medium text-gray-500">{{ aiFeatureOptions.find(f => f.value === aiFeature)?.icon }} {{ aiFeatureOptions.find(f => f.value === aiFeature)?.label }}</span>
+        <span class="text-xs font-medium text-gray-500 inline-flex items-center gap-1">
+          <component :is="currentAiFeatureIcon" size="0.875rem" weight="fill" />
+          {{ aiFeatureOptions.find(f => f.value === aiFeature)?.label }}
+        </span>
         <button @click="closeAiPanel" class="ml-auto p-1 text-gray-400 hover:text-gray-600 text-xs">✕</button>
       </div>
       <div class="px-3 py-2">

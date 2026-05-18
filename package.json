@@ -6,9 +6,11 @@
   "scripts": {
     "dev:server": "pnpm --filter @quink/server dev",
     "dev:web": "pnpm --filter @quink/web dev",
+    "dev:desktop": "pnpm --filter @quink/desktop dev",
     "dev": "pnpm run dev:server & pnpm run dev:web",
     "build:server": "pnpm --filter @quink/server build",
-    "build:web": "pnpm --filter @quink/web build"
+    "build:web": "pnpm --filter @quink/web build",
+    "build:desktop": "pnpm --filter @quink/desktop build"
   },
   "engines": {
     "node": ">=20.0.0"

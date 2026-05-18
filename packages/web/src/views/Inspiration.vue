@@ -1,16 +1,27 @@
 <script setup lang="ts">
 import { onActivated, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import NoteInput from '@/components/NoteInput.vue';
 import MobileInput from '@/components/MobileInput.vue';
 import NoteCard from '@/components/NoteCard.vue';
+import { PhLightbulb } from '@phosphor-icons/vue';
 
 defineOptions({ name: 'inspiration' });
 
 const store = useNotesStore();
+const route = useRoute();
 const isMobile = ref(window.innerWidth < 768);
 
 onActivated(() => {
+  const tagQuery = route.query.tag as string;
+  if (tagQuery) {
+    store.filterType = '';
+    store.searchQuery = '';
+    store.fetchNotes({ tags: tagQuery });
+    window.dispatchEvent(new CustomEvent('quink-filter-tag', { detail: tagQuery }));
+    return;
+  }
   const needRefresh = store.filterType !== 'note';
   store.filterType = 'note';
   if (needRefresh) {
@@ -30,7 +41,9 @@ onActivated(() => {
     <div v-if="store.loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <div v-else-if="store.notes.length === 0" class="text-center py-16">
-      <div class="text-4xl mb-3">💡</div>
+      <div class="mb-3 flex justify-center text-gray-300">
+        <PhLightbulb size="3rem" weight="fill" />
+      </div>
       <p class="text-gray-500 text-sm">还没有记录任何灵感</p>
       <p class="text-gray-400 text-xs mt-1">在上方输入框写下你的第一个闪念吧</p>
     </div>

@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, provide } from 'vue';
 import { api, isLoggedIn } from '@/api';
+import {
+  PhFolder,
+  PhMusicNote,
+  PhFilePdf,
+  PhFileText,
+  PhFileZip,
+  PhFile,
+} from '@phosphor-icons/vue';
 
 interface FileItem {
   id: string;
@@ -101,7 +109,9 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <div v-else-if="filtered.length === 0" class="text-center py-16">
-      <div class="text-4xl mb-3">📁</div>
+      <div class="mb-3 flex justify-center text-gray-300">
+        <PhFolder size="3rem" weight="fill" />
+      </div>
       <p class="text-gray-500 text-sm">暂无文件</p>
       <p class="text-gray-400 text-xs mt-1">在灵感编辑器中上传文件，或点击上方按钮</p>
     </div>
@@ -116,13 +126,18 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
           <img v-if="isImage(f)" :src="f.url" :alt="f.filename" class="w-full h-full object-cover" />
           <!-- Audio player -->
           <div v-else-if="isAudio(f)" class="px-3 w-full">
-            <div class="text-2xl text-center mb-2">🎵</div>
+            <div class="flex justify-center mb-2 text-gray-400">
+              <PhMusicNote size="1.75rem" weight="fill" />
+            </div>
             <audio :src="f.url" controls class="w-full h-8" style="min-width: 0;" />
           </div>
           <!-- Document icon -->
           <div v-else class="text-center">
-            <div class="text-3xl mb-1">
-              {{ f.mimeType.includes('pdf') ? '📄' : f.mimeType.includes('json') ? '📋' : f.mimeType.includes('zip') ? '📦' : '📄' }}
+            <div class="flex justify-center mb-1 text-gray-400">
+              <PhFilePdf v-if="f.mimeType.includes('pdf')" size="2.25rem" weight="fill" />
+              <PhFileText v-else-if="f.mimeType.includes('json')" size="2.25rem" weight="fill" />
+              <PhFileZip v-else-if="f.mimeType.includes('zip')" size="2.25rem" weight="fill" />
+              <PhFile v-else size="2.25rem" weight="fill" />
             </div>
             <div class="text-xs text-gray-400">{{ f.mimeType.split('/')[1] }}</div>
           </div>

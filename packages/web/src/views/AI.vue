@@ -4,6 +4,19 @@ import { ref, onMounted, onActivated, onDeactivated, nextTick, watch } from 'vue
 import { api } from '@/api';
 import Vditor from 'vditor';
 import { useRouter, useRoute } from 'vue-router';
+import {
+  PhX,
+  PhList,
+  PhCaretUp,
+  PhCaretDown,
+  PhPencilSimple,
+  PhCircleNotch,
+  PhArrowsClockwise,
+  PhStop,
+  PhPaperPlaneTilt,
+  PhSparkle,
+  PhPaperclip,
+} from '@phosphor-icons/vue';
 
 interface Conversation { id: string; title: string; createdAt: string; updatedAt: string; }
 interface Message { id: string; role: 'user' | 'assistant'; content: string; sources: string[]; html?: string; thinkingHtml?: string; }
@@ -565,7 +578,7 @@ async function retryLastMessage() {
         <div class="relative">
           <input v-model="searchConv" @input="onSearchInput" placeholder="搜索对话..." class="w-full px-2.5 py-1.5 pr-7 bg-white border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/20 placeholder-gray-400" />
           <button v-if="searchConv" @click="clearSearchConv" class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            <PhX size="0.875rem" weight="fill" />
           </button>
         </div>
       </div>
@@ -582,7 +595,7 @@ async function retryLastMessage() {
             <div class="text-[10px] text-gray-400 mt-0.5">{{ conv.updatedAt?.slice(5, 16).replace('T', ' ') }}</div>
           </div>
           <button @click.stop="askDeleteConv(conv.id)" class="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-red-400 shrink-0 transition-opacity">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            <PhX size="0.75rem" weight="fill" />
           </button>
         </div>
         <div v-if="filteredConversations.length === 0" class="text-center py-8 text-xs text-gray-400">{{ searchConv ? '无匹配' : '暂无对话' }}</div>
@@ -598,7 +611,7 @@ async function retryLastMessage() {
           <div class="relative">
             <input v-model="searchConv" @input="onSearchInput" placeholder="搜索对话..." class="w-full px-2.5 py-1.5 pr-7 bg-gray-50 border border-gray-200 rounded-lg text-xs outline-none placeholder-gray-400" />
             <button v-if="searchConv" @click="clearSearchConv" class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              <PhX size="0.875rem" weight="fill" />
             </button>
           </div>
         </div>
@@ -609,7 +622,7 @@ async function retryLastMessage() {
             :class="currentConvId === conv.id ? 'bg-primary-light font-medium text-primary-dark' : 'text-gray-600'">
             <div class="flex-1 min-w-0 truncate">{{ conv.title }}</div>
             <button @click.stop="askDeleteConv(conv.id)" class="p-0.5 text-gray-400 shrink-0">
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              <PhX size="0.75rem" weight="fill" />
             </button>
           </div>
         </div>
@@ -621,7 +634,7 @@ async function retryLastMessage() {
       <!-- 手机端顶部：对话列表按钮 -->
       <div class="md:hidden flex items-center gap-2 px-3 py-2 border-b border-gray-100">
         <button @click="showMobileConvs = true" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
+          <PhList size="1.25rem" weight="fill" />
         </button>
         <span class="text-xs text-gray-500 truncate">{{ currentConv?.title || 'AI 对话' }}</span>
       </div>
@@ -631,19 +644,21 @@ async function retryLastMessage() {
           class="ai-find-input flex-1 px-2.5 py-1 bg-white border border-gray-200 rounded text-xs outline-none focus:ring-2 focus:ring-primary/20" placeholder="在对话中查找..." />
         <span v-if="findQuery" class="text-[10px] text-gray-400 shrink-0">{{ findCurrent }}/{{ findMatches }}</span>
         <button @click="findPrev" class="p-1 text-gray-400 hover:text-gray-600" title="上一个">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
+          <PhCaretUp size="0.875rem" weight="fill" />
         </button>
         <button @click="findNext" class="p-1 text-gray-400 hover:text-gray-600" title="下一个">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          <PhCaretDown size="0.875rem" weight="fill" />
         </button>
         <button @click="closeFindBar" class="p-1 text-gray-400 hover:text-gray-600">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          <PhX size="0.875rem" weight="fill" />
         </button>
       </div>
       <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-4">
         <!-- 空状态 -->
         <div v-if="!currentConvId || messages.length === 0" class="text-center py-16">
-          <div class="text-4xl mb-3">🤖</div>
+          <div class="mb-3 flex justify-center text-gray-300">
+            <PhSparkle size="3rem" weight="fill" />
+          </div>
           <p class="text-gray-500 text-sm">问我任何问题，可以关于你的笔记，也可以聊别的</p>
           <div class="flex flex-wrap justify-center gap-2 mt-3">
             <button v-for="q in ['我之前记过什么？', '总结一下我的待办', '帮我解释一下量子计算']" :key="q"
@@ -670,7 +685,7 @@ async function retryLastMessage() {
             <div v-else-if="msg.role === 'user'" class="relative">
               <div class="px-4 py-3 rounded-2xl rounded-br-md text-sm bg-primary text-white whitespace-pre-wrap">{{ msg.content }}</div>
               <button @click="startEditMsg(msg)" class="absolute -left-8 top-1/2 -translate-y-1/2 p-1 rounded-md text-gray-300 hover:text-gray-500 hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity" title="编辑">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                <PhPencilSimple size="0.875rem" weight="fill" />
               </button>
             </div>
             <!-- AI 消息 -->
@@ -685,9 +700,11 @@ async function retryLastMessage() {
             </div>
             <!-- 来源标注 -->
             <div v-if="msg.role === 'assistant' && msg.sources?.length" class="mt-1.5 ml-1">
-              <button @click="toggleSources(msg.id, msg.sources)" class="text-[11px] text-gray-400 hover:text-gray-600 transition-colors">
-                📎 参考了 {{ msg.sources.length }} 条笔记
-                <span class="text-[10px]">{{ showSources[msg.id] ? '▲' : '▼' }}</span>
+              <button @click="toggleSources(msg.id, msg.sources)" class="text-[11px] text-gray-400 hover:text-gray-600 transition-colors inline-flex items-center gap-1">
+                <PhPaperclip size="0.75rem" weight="fill" />
+                <span>参考了 {{ msg.sources.length }} 条笔记</span>
+                <PhCaretUp v-if="showSources[msg.id]" size="0.625rem" weight="fill" />
+                <PhCaretDown v-else size="0.625rem" weight="fill" />
               </button>
               <div v-show="showSources[msg.id] && sourceNotes[msg.id]" class="mt-1 space-y-1 max-h-60 overflow-y-auto">
                 <div v-for="note in sourceNotes[msg.id]" :key="note.id"
@@ -703,7 +720,7 @@ async function retryLastMessage() {
         <!-- 工具调用状态 -->
         <div v-if="toolCallStatus.get(currentConvId)" class="flex justify-start">
           <div class="bg-white border border-gray-100 text-gray-400 px-4 py-3 rounded-2xl rounded-bl-md text-sm shadow-sm flex items-center gap-2">
-            <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            <PhCircleNotch size="0.875rem" weight="fill" class="animate-spin" />
             正在{{ toolCallStatus.get(currentConvId) }}...
           </div>
         </div>
@@ -714,7 +731,7 @@ async function retryLastMessage() {
             <!-- 思考过程 -->
             <div v-if="parseThinking(streamingMap.get(currentConvId) || '').thinking" class="mb-2 px-3 py-2 bg-gray-50 rounded-lg text-xs text-gray-400 italic">
               <div class="font-medium text-gray-500 mb-1 flex items-center gap-1">
-                <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <PhCircleNotch size="0.75rem" weight="fill" class="animate-spin" />
                 思考中...
               </div>
               <div class="whitespace-pre-wrap max-h-32 overflow-y-auto">{{ parseThinking(streamingMap.get(currentConvId) || '').thinking }}</div>
@@ -740,7 +757,7 @@ async function retryLastMessage() {
         <!-- 重试按钮（最后一条是用户消息，AI 没回复） -->
         <div v-if="lastMsgNeedsRetry" class="flex justify-center py-2">
           <button @click="retryLastMessage" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            <PhArrowsClockwise size="0.875rem" weight="fill" />
             重新生成
           </button>
         </div>
@@ -756,12 +773,12 @@ async function retryLastMessage() {
           </div>
           <button v-if="loadingConvs.has(currentConvId)" @click="stopGeneration"
             class="p-2.5 rounded-xl border border-gray-200 text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors shrink-0" title="停止生成">
-            <svg class="w-4 h-4" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+            <PhStop size="1rem" weight="fill" />
           </button>
           <button v-else @click="sendMessage" :disabled="!query.trim()"
             class="p-2.5 rounded-xl text-white disabled:opacity-40 transition-colors shrink-0"
             style="background: rgb(var(--c-accent))" title="发送">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            <PhPaperPlaneTilt size="1rem" weight="fill" />
           </button>
         </div>
       </div>

@@ -265,6 +265,11 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
 .note-ref-link:hover {
   opacity: 0.75;
 }
+/* 引用块里 SVG 不响应鼠标事件，确保点击命中外层 span */
+.note-ref-link svg,
+.note-ref-link svg * {
+  pointer-events: none;
+}
 
 /* ── 语音气泡（微信风格，CSS 属性选择器直接作用于 <a> 标签） ── */
 .note-content a[href$=".webm"],

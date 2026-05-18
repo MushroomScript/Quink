@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import { api } from '@/api';
+import { PhNotePencil } from '@phosphor-icons/vue';
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -826,8 +827,8 @@ function goBack() {
     <div v-if="activeTab === 'about'">
       <div class="bg-white rounded-xl border border-gray-200 p-8 max-w-md mx-auto">
         <div class="text-center mb-6">
-          <div class="w-16 h-16 rounded-2xl mx-auto mb-3 flex items-center justify-center text-3xl" style="background: rgb(var(--c-accent-light))">
-            📝
+          <div class="w-16 h-16 rounded-2xl mx-auto mb-3 flex items-center justify-center" style="background: rgb(var(--c-accent-light)); color: rgb(var(--c-accent-dark))">
+            <PhNotePencil size="2.25rem" weight="fill" />
           </div>
           <h3 class="text-2xl font-bold" style="color: rgb(var(--c-accent-dark))">Quink</h3>
           <p class="text-gray-500 text-sm mt-1">一念 · Quick Think</p>

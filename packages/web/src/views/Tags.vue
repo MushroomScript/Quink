@@ -3,6 +3,7 @@ import { ref, computed, onMounted, provide } from 'vue';
 import { api, isLoggedIn } from '@/api';
 import { useNotesStore } from '@/stores/notes';
 import { useRouter } from 'vue-router';
+import { PhTag, PhPencilSimple, PhX } from '@phosphor-icons/vue';
 
 const store = useNotesStore();
 const router = useRouter();
@@ -22,10 +23,7 @@ async function load() {
 }
 
 function filterByTag(tag: string) {
-  store.searchQuery = '';
-  store.filterType = '';
-  router.push('/');
-  setTimeout(() => { store.fetchNotes({ tag }); }, 100);
+  router.push({ path: '/', query: { tag } });
 }
 
 async function renameTag() {
@@ -66,7 +64,9 @@ onMounted(load);
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <div v-else-if="allTags.length === 0" class="text-center py-16">
-      <div class="text-4xl mb-3">🏷️</div>
+      <div class="mb-3 flex justify-center text-gray-300">
+        <PhTag size="3rem" weight="fill" />
+      </div>
       <p class="text-gray-500 text-sm">还没有任何标签</p>
       <p class="text-gray-400 text-xs mt-1">笔记保存后 AI 会自动生成标签</p>
     </div>
@@ -78,10 +78,10 @@ onMounted(load);
         <span class="text-sm cursor-pointer hover:opacity-70" @click="filterByTag(tag)">#{{ tag }}</span>
         <div class="flex gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
           <button @click="editingTag = tag; newName = tag" class="p-1 rounded-full hover:bg-white/50" title="重命名">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            <PhPencilSimple size="0.75rem" weight="fill" />
           </button>
           <button @click="confirmDeleteTag = tag" class="p-1 rounded-full hover:bg-red-100 hover:text-red-500" title="删除">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"><path d="M6 18L18 6M6 6l12 12"/></svg>
+            <PhX size="0.75rem" weight="fill" />
           </button>
         </div>
       </div>

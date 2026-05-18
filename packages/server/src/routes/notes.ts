@@ -144,7 +144,7 @@ app.delete('/trash', async (c) => {
 app.get('/tags', async (c) => {
   const userId = c.get('userId');
   const notes = await db.select({ tags: schema.notes.tags })
-    .from(schema.notes).where(eq(schema.notes.userId, userId)).all();
+    .from(schema.notes).where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NULL`)).all();
   const tagSet = new Set<string>();
   for (const n of notes) {
     const t = (n.tags as string[]) || [];
