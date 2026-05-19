@@ -10,8 +10,8 @@ import Sidebar from '@/components/Sidebar.vue';
 import TopBar from '@/components/TopBar.vue';
 import NoteEditModal from '@/components/NoteEditModal.vue';
 import GlobalToast from '@/components/GlobalToast.vue';
-import { PhMinus, PhSquare, PhX, PhCaretLeft } from '@phosphor-icons/vue';
-import { REF_LINK_REGEX, renderRefLink } from '@/utils/refLink';
+import { PhMinus, PhSquare, PhX, PhXCircle, PhCaretLeft } from '@phosphor-icons/vue';
+import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 
 const route = useRoute();
 const router = useRouter();
@@ -103,6 +103,7 @@ async function openRefPreview(noteId: string) {
     let md = res.data.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
     const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
     let html = await Vditor.md2html(processed, { cdn: '/vditor' });
+    html = injectRefLinkIcons(html);
     refPreviewStack.value.push({ note: res.data, html });
 
     if (!refPreviewEscHandler) {
@@ -160,6 +161,11 @@ function applyUserPreferences(user: any) {
   document.documentElement.style.fontSize = fontSize + 'px';
 }
 
+// HMR 友好：模块级保存上次挂的副作用，重 mount 时先清理旧的，避免 capture 阶段旧 handler
+// 抢先 stopImmediatePropagation 调用旧闭包里的 openRefPreview（操作旧响应式状态，新 UI 看不到预览）。
+let prevRefClickHandler: ((e: MouseEvent) => void) | null = null;
+let prevWindowOpen: typeof window.open | null = null;
+
 onMounted(async () => {
   initAudioBubbleHandler();
   const user = await auth.fetchMe();
@@ -167,8 +173,12 @@ onMounted(async () => {
   if (!user) return;
   applyUserPreferences(user);
 
+  // 清理 HMR 残留
+  if (prevRefClickHandler) document.removeEventListener('click', prevRefClickHandler, true);
+  if (prevWindowOpen) window.open = prevWindowOpen;
+
   // 全局拦截引用链接单击 → 弹预览(不走路由,不打开新标签)
-  document.addEventListener('click', (e) => {
+  const handler = (e: MouseEvent) => {
     if ((e.target as HTMLElement).closest?.('.voice-bubble')) return;
     const el = (e.target as HTMLElement).closest?.('a, .note-ref-link') as HTMLElement | null;
     if (!el) return;
@@ -178,10 +188,13 @@ onMounted(async () => {
       e.stopImmediatePropagation();
       openRefPreview(refId);
     }
-  }, true);
+  };
+  document.addEventListener('click', handler, true);
+  prevRefClickHandler = handler;
 
   // 拦截 window.open(兜底:Vditor 可能用 window.open 打开链接)
   const origOpen = window.open.bind(window);
+  prevWindowOpen = origOpen;
   window.open = function(url?: string | URL, target?: string, features?: string) {
     if (url && typeof url === 'string') {
       try {
@@ -281,7 +294,7 @@ watch(() => auth.user, (user) => {
                 查看详情
               </button>
               <button @click="closeRefPreview" class="p-1 rounded-lg hover:bg-gray-200/60 text-gray-400">
-                <PhX size="1rem" weight="fill" />
+                <PhXCircle size="1rem" weight="fill" />
               </button>
             </div>
           </div>

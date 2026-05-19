@@ -13,7 +13,7 @@ Quink（一念）是一款带 AI 自动打标签、自动分类、写作辅助�
 ## 开发命令
 
 ```bash
-# 启动后端（端口 38999）
+# 启动后端（端口 38999，tsx watch，改代码自动重启）
 pnpm run dev:server
 
 # 启动前端（端口 24888）
@@ -55,6 +55,10 @@ pnpm run dev:desktop
 - **思考模型**：支持 `<think>...</think>` 标签解析（DeepSeek-R1、QwQ 等），前端折叠展示。
 - **自动处理**：创建笔记后异步触发 `processNoteWithAi()`（不阻塞）生成标签、分类、摘要。
 - **AI 客户端**（`server/src/ai/client.ts`）：统一调用 OpenAI/Anthropic/Ollama，自动识别 URL 格式。
+- **弱模型 / 量化模型适配**：本地 Ollama 上 qwen2.5-coder q4 这类小模型对 OpenAI Function Calling 协议支持差，第一轮 native FC 经常返回空 `tool_calls` + 直接编内容（"买菜/完成报告"这种训练样本）。`callAiWithToolLoop` 在 round 0 检测到 `toolCalls.length === 0 && !content.includes('<tool>')` 时强制降级到提示词模式重试，把 `TOOLS_PROMPT` 拼进 system 引导输出 `<tool>...</tool>`。
+- **弱模型不会数数**：列表类工具（如 `get_todos`）必须在返回字符串开头直接拼好数量（"共 X 条（已完成 Y / 未完成 Z）："），不要指望 AI 自己 count。chat prompt 也明说"数量直接读开头那行，别重新数"。
+- **chat prompt 三大块**：`prompts.ts` 的 chat 段定义了【强制规则】（询问待办/笔记/标签必须先调工具）、【工具返回的笔记数据格式】（ID/refId 不发给用户、引用 label 怎么读）、【汇总/分析处理方式】（置顶要标⭐、临近截止要提醒、末尾给观察）。改 chat 行为先动这里。
+- **引用 label 透传给 AI**：`tools.ts` 的 `cleanContent` 把笔记里的引用块 `[label](?ref=xxx)` 转成 `「label」(refId:xxx)`，AI 直接看到被引笔记 ID，可调 `get_note(id=xxx)` 拿详情；prompt 里 refId 禁止发给用户。`search_notes` 同时 OR 搜 content + summary + tags，避免 label 只在 summary/tags 时漏检。
 
 ### 主题系统
 `style.css` 中的 CSS 变量定义了 7 套主题（blueberry、lavender、mint、peach、lemon、cloud、dark）。通过 `<html>` 上的 `data-theme` 属性切换。Tailwind 颜色引用这些变量：
@@ -100,20 +104,29 @@ SQLite + 启动时自动迁移（`db/index.ts` 中 `CREATE TABLE IF NOT EXISTS` 
 ## 图标系统
 
 - **统一用 `@phosphor-icons/vue`**，禁止再用 emoji 当图标、禁止手写 inline SVG。极少数 v-html 字符串里嵌入图标的场景用 inline phosphor SVG path（见 `utils/refLink.ts`）。
+- **`PhXCircle` vs `PhX` 用法**：所有"软关闭/删除"位置（搜索框清空、列表项删除、对话删除、弹窗关闭、查找栏关闭等）一律 `PhXCircle`（圆圈包 X，视觉柔和）。**`PhX` 只用于"窗口级关闭"**：Electron 标题栏 X、图片预览全屏 X（本身有圆形容器或系统级语义）。
 - **weight 默认 `fill`**（实心）。两种例外允许局部用 `bold`：
   - 三点菜单（`PhDotsThreeVertical`）— fill 像红绿灯
   - Electron 标题栏 3 按钮（最小化/最大化/关闭）— fill 显得是黑块，bold 更像 Win11 线条按钮
 - **size 用 rem 字符串**：`size="1rem"` / `size="0.875rem"`（=14px @ 16px html font-size）。**禁止用数字 px**（`:size="14"`），因为图标不会跟着用户的字体大小设置（设置 → 字体）缩放。
   - 数字 px 到 rem 的换算就是 N / 16
 - **v-html 内嵌图标**：组件 `<PhXxx />` 不能用在 v-html 渲染的字符串里（Vue 不解析字符串里的组件标签）。必须直接写 inline SVG 字符串。SVG 必须加 `pointer-events: none`（否则会拦截父元素的 click 事件，导致 closest('.xxx') 失败）。`utils/refLink.ts` 是引用块的范例。
+- **Phosphor 图标的视觉中心 ≠ 几何中心**：`flex items-center` 居中后某些图标看着"高 / 低"，文字 + 图标的同一行尤其明显。常见偏移：`PhBookOpen` 视觉重心偏下（书脊上窄、书页向下展开） / `PhPenNib` 重心偏上（笔尖突出右上） / `PhPencilSimple`、`PhTrash`、`PhCheck`、`PhArrowCounterClockwise` 都重心偏上 / `PhSparkle`、`PhPushPin`、`PhMapPin` 对称良好无需 nudge。修法：inline style `margin-top: ±1~2px` 单独微调，或用 Tailwind 任意选择器 `[&_svg]:mt-px` 给容器内所有 svg 统一加 nudge（再用 inline style 个别 override）。**字号越小、padding 越紧凑时偏移越显眼**（11px 小字下 1px 都明显）。范例：`NoteCard` 三点菜单（菜单内全员 `mt-px`，编辑/删除/标记完成 inline override 到 2px）、`RichEditor` AI 按钮组（润色/扩充/写文 各自 nudge）。
 
 ## 渲染坑
 
 - **`html.replace(regex, '<mark>$1</mark>')` 这种字符串级别的搜索高亮会破坏 HTML 属性**（比如 `<a href="x.mp3">` 里的 mp3 被替换 → CSS 选择器 `a[href$=".mp3"]` 不匹配 → 音频胶囊样式失效）。正确做法：用 `(<[^>]+>)|([^<]+)` regex 拆"标签 vs 文本"，只在文本上替换。范例：`NoteCard.vue` 的搜索高亮。AI.vue 用 TreeWalker + range.surroundContents，天然安全。
 - **下拉/popover 在编辑器旁边总被盖住**：编辑器（Vditor 等）经常创建 stacking context，子组件的 z-[9999] 不起作用。解决方案：**默认走 `<Teleport to="body">` + `position: fixed` + 动态算位置**。范例：TopBar 的标签建议下拉、batchMove 下拉。
+- **"下拉 + 遮罩"成对组件不能"半个 Teleport"**：典型是"点外面关菜单"模式——菜单 `absolute z-50` + 全屏透明遮罩 `fixed z-40`。如果只 Teleport 其中一个，遇到祖先有 stacking context（`opacity != 1` / `transform` / `filter` / `will-change` 等）时本地那个 z-index 会被困在局部 context、对外失效（等同 z-auto），Teleport 出去的反而盖住它，**点击全落到遮罩上、菜单按钮看着在那但全部失效**。修法：要么都 Teleport，要么都不。范例：NoteCard 三点菜单+关闭遮罩 在 Todos 已完成区 `.notes-masonry opacity-60` 内被坑过（编辑/置顶/撤销完成/删除全点不动）。
 - **圆角裁切 + absolute 定位锚点不要混在同一个 div 上**：父级 `overflow-hidden` 会裁掉绝对定位的子下拉。修法：外层套一个仅做 `relative` 的容器，内层做 `overflow-hidden` 圆角裁切。
+- **"拖动 + 单击关闭"并存要防"拖完误关"**：`mousedown → 拖 → mouseup` 后浏览器自然会再触发一次 `click`，如果这个元素的 click 绑了关闭/导航，手刚松开就误触发。修法：`mousemove` 时记录 `dragMoved = true`（带 ~3px 阈值避免抖动误判），`click` handler 检测 `dragMoved` 真就 `return`、否则关闭。同时 `mousemove` / `mouseup` 监听必须挂 `window`（不是元素本身），否则鼠标快速移出元素时拖动状态会卡住；`<img>` 加 `draggable="false"` 防止 HTML5 原生拖图弹出半透明鬼影。范例：`Resources` 图片预览（放大后可拖、单击关闭，两者共存）。
 - **markdown 内嵌 emoji + 渲染端 regex 自动加 emoji = 双图标 bug**：写入端就别塞 emoji，渲染端用 `replace(/^📌\s*/, '')` 剥老数据的前缀。范例：`utils/refLink.ts`。
 - **Windows bat 文件编码**：永远用 PowerShell `[System.IO.File]::WriteAllBytes` 写 **GBK + CRLF** 的 bat 文件，**不要**用 Write 工具（UTF-8 + LF），cmd 默认 cp936 会把 UTF-8 中文字节当命令分隔符乱读。`chcp 65001` 救不了，因为 cmd 逐行读，那一行本身就被拆了。
+- **Vditor (lute) 解析器会破坏 markdown 内嵌的 inline `<svg>` / HTML span**：把 SVG 字符串拼进 markdown 字符串里 → `md2html` 后 span 的 class/data-* 一并被剥掉，全局 click 监听找不到锚点（典型症状：引用预览不弹了）。**分两步**：markdown 阶段只生成不带 SVG 的纯 span，md2html 之后再用 `injectXxxIcons(html)` 用 string.replace 把 SVG 注入进去。范例：`utils/refLink.ts` 的 `renderRefLink` + `injectRefLinkIcons` 双阶段。三个调用点 `NoteCard.vue` / `App.vue` / `NoteDetail.vue` 都要走这个流程。
+- **`onMounted` 给 `document`/`window` 挂全局副作用 HMR 不友好**：开发期 HMR 重 mount 后旧 handler 还在 document 上，capture 阶段先于新 handler 触发并 `stopImmediatePropagation`，调用旧闭包里的函数（操作旧响应式状态，新 UI 完全没反应；典型症状："改完代码 X 功能失效，F5 就好"）。**`onBeforeUnmount` 不够用**——HMR 卸载顺序不可靠。修法：组件文件顶部用模块级 `let prevXxxHandler = null` 缓存上次挂的对象，下次 `onMounted` 入口先 `removeEventListener` / 还原原函数再挂新的。范例：`App.vue` 顶部 `prevRefClickHandler` + `prevWindowOpen` 的模块级清理逻辑。
+- **流式 markdown 渲染用"单调递增版本号 + GT 比较"**：每个 SSE delta 都触发一次 `Vditor.md2html(snapshot)`（异步、多个 in-flight、完成顺序乱）。错误做法是给每个 delta 分 `myVer` 然后完成时检查 `myVer === currentVer`（"还是最新版才覆盖"），结果连续 delta 时 myVer 永远被超越 → 永远不更新 → 看着"全部出完才渲染"。**正解**：维护 `lastRenderVer`，完成时 `myVer > lastRender` 才覆盖（内容单调向新）。范例：`AI.vue` 的 `streamingVersion` + `streamingLastRenderVer`。
+- **TransitionGroup 列表删除"左飞 + 高度收缩"动画**：用 `<TransitionGroup name="xxx" tag="div">` 包 v-for；CSS `.leave-active` **必须** `overflow: hidden`，否则 max-height 不生效；`.leave-to` 同时设 `max-height: 0`、`opacity: 0`、`transform: translateX(-110%)`，并把 `margin/padding-y` 都 `!important` 归零（否则空间不收缩、相邻项不会自然上移）；`.leave-from` 显式给个 max-height（如 5rem）作为起点。范例：`AI.vue` 末尾的 `.conv-list-leave-*`。
+- **`prompts.ts` 模板字符串里别嵌反引号写示例**：在 `` `...` `` 模板字符串内再写 `` ` `` 会让 tsx 解析器把模板字符串提前闭合 → server 起不来 → 没有红色编辑器警告，只有运行时崩溃。**用 「」 或 '...' 包代码/字段示例**。范例：`prompts.ts` chat prompt 里 `「label」(refId:xxx)` 写法（不要再变成 `` `「label」(refId:xxx)` ``）。
 
 ## 编码规范
 

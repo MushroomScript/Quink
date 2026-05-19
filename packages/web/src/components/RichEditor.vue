@@ -57,9 +57,9 @@ const emit = defineEmits<{
 }>();
 
 const noteTypes = [
-  { value: 'note', label: '灵感', icon: markRaw(PhLightbulb) },
-  { value: 'snippet', label: '笔记', icon: markRaw(PhNotePencil) },
-  { value: 'todo', label: '待办', icon: markRaw(PhCheckSquare) },
+  { value: 'note', label: '灵感', icon: markRaw(PhLightbulb), iconStyle: '' },
+  { value: 'snippet', label: '笔记', icon: markRaw(PhNotePencil), iconStyle: '' },
+  { value: 'todo', label: '待办', icon: markRaw(PhCheckSquare), iconStyle: '' },
 ];
 
 const noteType = ref(props.initialType);
@@ -96,10 +96,12 @@ const aiProcessing = ref(false);
 const aiResult = ref('');
 const aiError = ref('');
 
+// 三个图标都比文字基线整体下移 1px（蘑菇视觉偏好），并按各自重心偏差再细调对齐：
+// PhBookOpen 顶部空白 -1，PhPenNib 重心偏上 +1，PhSparkle 居中为 0
 const aiFeatureOptions = [
-  { value: 'polish' as const, label: '润色', icon: markRaw(PhSparkle) },
-  { value: 'expand' as const, label: '扩充', icon: markRaw(PhBookOpen) },
-  { value: 'write' as const, label: '写文', icon: markRaw(PhPenNib) },
+  { value: 'polish' as const, label: '润色', icon: markRaw(PhSparkle), iconStyle: 'margin-top: 1px' },
+  { value: 'expand' as const, label: '扩充', icon: markRaw(PhBookOpen), iconStyle: 'margin-top: 0px' },
+  { value: 'write' as const, label: '写文', icon: markRaw(PhPenNib), iconStyle: 'margin-top: 2px' },
 ];
 
 const currentAiFeatureIcon = computed(() =>
@@ -584,7 +586,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
           <button v-for="t in noteTypes" :key="t.value" @click="noteType = t.value"
             class="px-2 py-1 rounded-md text-xs transition-colors inline-flex items-center gap-1"
             :class="noteType === t.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'">
-            <component :is="t.icon" size="0.875rem" weight="fill" />
+            <component :is="t.icon" size="0.875rem" weight="fill" :style="t.iconStyle" />
             {{ t.label }}
           </button>
         </div>
@@ -597,7 +599,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
               @click="aiFeature === f.value && showAiPanel ? closeAiPanel() : openAiPanel(f.value)"
               class="px-2 py-1 rounded-md text-xs transition-colors inline-flex items-center gap-1"
               :class="showAiPanel && aiFeature === f.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'">
-              <component :is="f.icon" size="0.875rem" weight="fill" />
+              <component :is="f.icon" size="0.875rem" weight="fill" :style="f.iconStyle" />
               {{ f.label }}
             </button>
           </div>

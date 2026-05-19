@@ -5,7 +5,7 @@ import { api } from '@/api';
 import Vditor from 'vditor';
 import { useRouter, useRoute } from 'vue-router';
 import {
-  PhX,
+  PhXCircle,
   PhList,
   PhCaretUp,
   PhCaretDown,
@@ -29,6 +29,12 @@ const messages = ref<Message[]>([]);
 const query = ref('');
 const loadingConvs = ref(new Set<string>());
 const streamingMap = ref(new Map<string, string>());
+// 流式期间增量渲染的 HTML，避免输出过程中只显示 ### 等 markdown 原文
+const streamingHtmlMap = ref(new Map<string, string>());
+// 版本号：每个 delta 自增，md2html 完成后只有"比上次成功渲染的版本新"才覆盖 HTML，
+// 保证内容单调向前，又允许多个 in-flight md2html 都有机会更新
+const streamingVersion = new Map<string, number>();
+const streamingLastRenderVer = new Map<string, number>();
 const confirmDeleteId = ref('');
 const searchConv = ref('');
 const showMobileConvs = ref(false);
@@ -83,7 +89,14 @@ const messagesEl = ref<HTMLDivElement>();
 const editingTitle = ref('');
 const editingConvId = ref('');
 const showSources = ref<Record<string, boolean>>({});
-const sourceNotes = ref<Record<string, { id: string; summary: string; content: string }[]>>({});
+const sourceNotes = ref<Record<string, { id: string; summary: string; content: string; type: string }[]>>({});
+const SOURCE_TYPE_LABELS: Record<string, string> = { note: '灵感', todo: '待办', snippet: '笔记', link: '链接' };
+const SOURCE_TYPE_COLORS: Record<string, string> = {
+  note: 'bg-primary-light text-primary-dark',
+  todo: 'bg-amber-100 text-amber-600',
+  snippet: 'bg-emerald-100 text-emerald-600',
+  link: 'bg-sky-100 text-sky-600',
+};
 const toolCallStatus = ref(new Map<string, string>());
 const TOOL_LABELS: Record<string, string> = {
   search_notes: '搜索笔记', get_note: '查看笔记', get_todos: '获取待办',
@@ -344,6 +357,22 @@ async function sendMessage() {
             fullContent += data.content;
             streamingMap.value.set(targetConvId, fullContent);
             if (currentConvId.value === targetConvId) scrollToBottom();
+            // 每个 delta 都立即触发 md → html 渲染（流式打字机效果）。
+            // 完成时只要 myVer > 上次成功渲染的 ver 就覆盖：保证内容单调向新，又不会被旧 in-flight 抢占。
+            const myVer = (streamingVersion.get(targetConvId) || 0) + 1;
+            streamingVersion.set(targetConvId, myVer);
+            const snapshot = fullContent;
+            (async () => {
+              const { answer } = parseThinking(snapshot);
+              const content = stripOuterCodeFence(answer || snapshot);
+              try {
+                const h = await Vditor.md2html(content, { cdn: '/vditor' });
+                if (myVer > (streamingLastRenderVer.get(targetConvId) || 0) && streamingMap.value.has(targetConvId)) {
+                  streamingLastRenderVer.set(targetConvId, myVer);
+                  streamingHtmlMap.value.set(targetConvId, h);
+                }
+              } catch {}
+            })();
           } else if (data.type === 'done') {
             aiSources = data.sources || [];
             aiMsgId = data.messageId || '';
@@ -372,6 +401,9 @@ async function sendMessage() {
     abortControllers.delete(targetConvId);
     loadingConvs.value.delete(targetConvId);
     streamingMap.value.delete(targetConvId);
+    streamingHtmlMap.value.delete(targetConvId);
+    streamingVersion.delete(targetConvId);
+    streamingLastRenderVer.delete(targetConvId);
     toolCallStatus.value.delete(targetConvId);
     if (currentConvId.value === targetConvId) scrollToBottom();
   }
@@ -418,7 +450,7 @@ async function toggleSources(msgId: string, noteIds: string[]) {
     for (const nid of noteIds) {
       try {
         const res = await api.getNote(nid);
-        notes.push({ id: nid, summary: res.data.summary || '', content: res.data.content.slice(0, 100) });
+        notes.push({ id: nid, summary: res.data.summary || '', content: res.data.content.slice(0, 100), type: res.data.type });
       } catch {}
     }
     sourceNotes.value[msgId] = notes;
@@ -578,26 +610,28 @@ async function retryLastMessage() {
         <div class="relative">
           <input v-model="searchConv" @input="onSearchInput" placeholder="搜索对话..." class="w-full px-2.5 py-1.5 pr-7 bg-white border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/20 placeholder-gray-400" />
           <button v-if="searchConv" @click="clearSearchConv" class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-            <PhX size="0.875rem" weight="fill" />
+            <PhXCircle size="0.875rem" weight="fill" />
           </button>
         </div>
       </div>
-      <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
-        <div v-for="conv in filteredConversations" :key="conv.id"
-          @click="selectConversation(conv.id)"
-          class="group flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer text-xs transition-colors"
-          :class="currentConvId === conv.id ? 'bg-white shadow-sm font-medium text-gray-800' : 'text-gray-500 hover:bg-white/60'">
-          <div class="flex-1 min-w-0">
-            <div v-if="editingConvId === conv.id" class="flex">
-              <input v-model="editingTitle" @blur="saveTitle" @keydown.enter="saveTitle" class="w-full px-1 py-0.5 border border-gray-200 rounded text-xs outline-none" autofocus @click.stop />
+      <div class="flex-1 overflow-y-auto px-2 pb-2">
+        <TransitionGroup name="conv-list" tag="div" class="space-y-0.5">
+          <div v-for="conv in filteredConversations" :key="conv.id"
+            @click="selectConversation(conv.id)"
+            class="group flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer text-xs transition-colors"
+            :class="currentConvId === conv.id ? 'bg-white shadow-sm font-medium text-gray-800' : 'text-gray-500 hover:bg-white/60'">
+            <div class="flex-1 min-w-0">
+              <div v-if="editingConvId === conv.id" class="flex">
+                <input v-model="editingTitle" @blur="saveTitle" @keydown.enter="saveTitle" class="w-full px-1 py-0.5 border border-gray-200 rounded text-xs outline-none" autofocus @click.stop />
+              </div>
+              <div v-else @dblclick.stop="startEditTitle(conv)" class="truncate">{{ conv.title }}</div>
+              <div class="text-[10px] text-gray-400 mt-0.5">{{ conv.updatedAt?.slice(5, 16).replace('T', ' ') }}</div>
             </div>
-            <div v-else @dblclick.stop="startEditTitle(conv)" class="truncate">{{ conv.title }}</div>
-            <div class="text-[10px] text-gray-400 mt-0.5">{{ conv.updatedAt?.slice(5, 16).replace('T', ' ') }}</div>
+            <button @click.stop="askDeleteConv(conv.id)" class="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-red-400 shrink-0 transition-opacity">
+              <PhXCircle size="0.875rem" weight="fill" />
+            </button>
           </div>
-          <button @click.stop="askDeleteConv(conv.id)" class="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-red-400 shrink-0 transition-opacity">
-            <PhX size="0.75rem" weight="fill" />
-          </button>
-        </div>
+        </TransitionGroup>
         <div v-if="filteredConversations.length === 0" class="text-center py-8 text-xs text-gray-400">{{ searchConv ? '无匹配' : '暂无对话' }}</div>
       </div>
     </div>
@@ -611,20 +645,22 @@ async function retryLastMessage() {
           <div class="relative">
             <input v-model="searchConv" @input="onSearchInput" placeholder="搜索对话..." class="w-full px-2.5 py-1.5 pr-7 bg-gray-50 border border-gray-200 rounded-lg text-xs outline-none placeholder-gray-400" />
             <button v-if="searchConv" @click="clearSearchConv" class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <PhX size="0.875rem" weight="fill" />
+              <PhXCircle size="0.875rem" weight="fill" />
             </button>
           </div>
         </div>
-        <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
-          <div v-for="conv in filteredConversations" :key="conv.id"
-            @click="selectConversation(conv.id)"
-            class="flex items-center gap-1 px-3 py-2.5 rounded-lg cursor-pointer text-xs"
-            :class="currentConvId === conv.id ? 'bg-primary-light font-medium text-primary-dark' : 'text-gray-600'">
-            <div class="flex-1 min-w-0 truncate">{{ conv.title }}</div>
-            <button @click.stop="askDeleteConv(conv.id)" class="p-0.5 text-gray-400 shrink-0">
-              <PhX size="0.75rem" weight="fill" />
-            </button>
-          </div>
+        <div class="flex-1 overflow-y-auto px-2 pb-2">
+          <TransitionGroup name="conv-list" tag="div" class="space-y-0.5">
+            <div v-for="conv in filteredConversations" :key="conv.id"
+              @click="selectConversation(conv.id)"
+              class="flex items-center gap-1 px-3 py-2.5 rounded-lg cursor-pointer text-xs"
+              :class="currentConvId === conv.id ? 'bg-primary-light font-medium text-primary-dark' : 'text-gray-600'">
+              <div class="flex-1 min-w-0 truncate">{{ conv.title }}</div>
+              <button @click.stop="askDeleteConv(conv.id)" class="p-0.5 text-gray-400 shrink-0">
+                <PhXCircle size="0.875rem" weight="fill" />
+              </button>
+            </div>
+          </TransitionGroup>
         </div>
       </div>
     </div>
@@ -650,7 +686,7 @@ async function retryLastMessage() {
           <PhCaretDown size="0.875rem" weight="fill" />
         </button>
         <button @click="closeFindBar" class="p-1 text-gray-400 hover:text-gray-600">
-          <PhX size="0.875rem" weight="fill" />
+          <PhXCircle size="0.875rem" weight="fill" />
         </button>
       </div>
       <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-4">
@@ -702,15 +738,18 @@ async function retryLastMessage() {
             <div v-if="msg.role === 'assistant' && msg.sources?.length" class="mt-1.5 ml-1">
               <button @click="toggleSources(msg.id, msg.sources)" class="text-[11px] text-gray-400 hover:text-gray-600 transition-colors inline-flex items-center gap-1">
                 <PhPaperclip size="0.75rem" weight="fill" />
-                <span>参考了 {{ msg.sources.length }} 条笔记</span>
+                <span>参考了 {{ msg.sources.length }} 项</span>
                 <PhCaretUp v-if="showSources[msg.id]" size="0.625rem" weight="fill" />
                 <PhCaretDown v-else size="0.625rem" weight="fill" />
               </button>
               <div v-show="showSources[msg.id] && sourceNotes[msg.id]" class="mt-1 space-y-1 max-h-60 overflow-y-auto">
                 <div v-for="note in sourceNotes[msg.id]" :key="note.id"
                   @click="goToNote(note.id)"
-                  class="px-3 py-1.5 bg-gray-50 rounded-lg text-xs text-gray-500 cursor-pointer hover:bg-gray-100 transition-colors truncate">
-                  {{ note.summary || note.content }}
+                  class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg text-xs text-gray-500 cursor-pointer hover:bg-gray-100 transition-colors">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0" :class="SOURCE_TYPE_COLORS[note.type] || 'bg-gray-200 text-gray-600'">
+                    {{ SOURCE_TYPE_LABELS[note.type] || note.type }}
+                  </span>
+                  <span class="truncate">{{ note.summary || note.content }}</span>
                 </div>
               </div>
             </div>
@@ -736,9 +775,12 @@ async function retryLastMessage() {
               </div>
               <div class="whitespace-pre-wrap max-h-32 overflow-y-auto">{{ parseThinking(streamingMap.get(currentConvId) || '').thinking }}</div>
             </div>
-            <!-- 正式回答 -->
-            <div v-if="parseThinking(streamingMap.get(currentConvId) || '').answer" class="note-content prose prose-sm max-w-none whitespace-pre-wrap">{{ parseThinking(streamingMap.get(currentConvId) || '').answer }}<span class="animate-pulse">▊</span></div>
-            <div v-else-if="!parseThinking(streamingMap.get(currentConvId) || '').thinking" class="note-content prose prose-sm max-w-none whitespace-pre-wrap">{{ streamingMap.get(currentConvId) }}<span class="animate-pulse">▊</span></div>
+            <!-- 正式回答：v-html 增量渲染 markdown，首 60ms 内 fallback 纯文本 -->
+            <template v-if="parseThinking(streamingMap.get(currentConvId) || '').answer || !parseThinking(streamingMap.get(currentConvId) || '').thinking">
+              <div v-if="streamingHtmlMap.get(currentConvId)" class="note-content prose prose-sm max-w-none" v-html="streamingHtmlMap.get(currentConvId)" />
+              <div v-else class="note-content prose prose-sm max-w-none whitespace-pre-wrap">{{ parseThinking(streamingMap.get(currentConvId) || '').answer || streamingMap.get(currentConvId) }}</div>
+              <span class="animate-pulse">▊</span>
+            </template>
           </div>
         </div>
 
@@ -800,3 +842,22 @@ async function retryLastMessage() {
     </div>
   </Teleport>
 </template>
+
+<style>
+/* 对话列表项删除时左滑飞走 + 高度收缩，相邻项自然上移 */
+.conv-list-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+.conv-list-leave-to {
+  opacity: 0;
+  transform: translateX(-110%);
+  max-height: 0 !important;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+.conv-list-leave-from {
+  max-height: 5rem;
+}
+</style>

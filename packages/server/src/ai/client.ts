@@ -324,6 +324,20 @@ export async function callAiWithToolLoop(
     }
     console.log(`[AI] round ${round}: model responded in ${Date.now() - t0}ms, toolCalls=${response.toolCalls.length}`);
 
+    // 第一轮：原生 FC 模式下模型既没生成 tool_calls、也没用 <tool> 标签，
+    // 大概率是弱模型（如 qwen2.5-coder 量化版）不会用 OpenAI FC 协议。强制降级 prompt 模式重试一次，
+    // 引导模型读 TOOLS_PROMPT 后输出 <tool>...</tool>，避免它凭训练数据编造笔记内容。
+    if (round === 0 && supportsTools && response.toolCalls.length === 0 && response.content && !response.content.includes('<tool>')) {
+      console.log(`[AI] round 0: native FC returned 0 tool calls, forcing prompt-mode retry`);
+      supportsTools = false;
+      const sysIdx = msgsCopy.findIndex(m => m.role === 'system');
+      if (sysIdx >= 0 && typeof msgsCopy[sysIdx].content === 'string' && !(msgsCopy[sysIdx].content as string).includes('可用工具')) {
+        msgsCopy[sysIdx] = { ...msgsCopy[sysIdx], content: (msgsCopy[sysIdx].content as string) + '\n\n' + TOOLS_PROMPT };
+      }
+      response = await callAiNonStream(config, msgsCopy);
+      console.log(`[AI] round 0: prompt-mode retry, toolCalls=${response.toolCalls.length}, hasToolTag=${response.content?.includes('<tool>')}`);
+    }
+
     // 原生工具调用
     if (response.toolCalls.length > 0) {
       msgsCopy.push({ role: 'assistant', content: response.content || '' });

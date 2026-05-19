@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import { useNotesStore } from '@/stores/notes';
 import RichEditor from './RichEditor.vue';
 import type { Note } from '@/api';
-import { PhX } from '@phosphor-icons/vue';
+import { PhXCircle } from '@phosphor-icons/vue';
 
 const props = defineProps<{ note: Note; initialFullscreen?: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -68,7 +68,7 @@ function onKeydown(e: KeyboardEvent) {
               <kbd class="px-1.5 py-0.5 bg-gray-200/60 rounded text-[10px] ml-1">Ctrl+Enter</kbd> 保存
             </span>
             <button @click="tryClose" class="p-1 rounded-lg hover:bg-gray-200/60 text-gray-400 transition-colors">
-              <PhX size="1rem" weight="fill" />
+              <PhXCircle size="1rem" weight="fill" />
             </button>
           </div>
         </div>

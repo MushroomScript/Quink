@@ -3,7 +3,7 @@ import { ref, computed, onMounted, provide } from 'vue';
 import { api, isLoggedIn } from '@/api';
 import { useNotesStore } from '@/stores/notes';
 import { useRouter } from 'vue-router';
-import { PhTag, PhPencilSimple, PhX } from '@phosphor-icons/vue';
+import { PhTag, PhPencilSimple, PhXCircle } from '@phosphor-icons/vue';
 
 const store = useNotesStore();
 const router = useRouter();
@@ -81,7 +81,7 @@ onMounted(load);
             <PhPencilSimple size="0.75rem" weight="fill" />
           </button>
           <button @click="confirmDeleteTag = tag" class="p-1 rounded-full hover:bg-red-100 hover:text-red-500" title="删除">
-            <PhX size="0.75rem" weight="fill" />
+            <PhXCircle size="0.75rem" weight="fill" />
           </button>
         </div>
       </div>

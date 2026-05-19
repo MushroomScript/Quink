@@ -8,7 +8,7 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { PhNotePencil, PhCaretLeft, PhPencilSimple } from '@phosphor-icons/vue';
-import { REF_LINK_REGEX, renderRefLink } from '@/utils/refLink';
+import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -36,6 +36,7 @@ async function loadNote() {
       let md = res.data.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
       const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
       let html = await Vditor.md2html(processed, { cdn: '/vditor' });
+      html = injectRefLinkIcons(html);
       rendered.value = html;
     } catch (e) {
       console.error('[NoteDetail] Vditor render failed:', e);
@@ -58,7 +59,7 @@ watch(() => store.notes, () => {
       note.value = updated;
       let md = updated.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
       md = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
-      Vditor.md2html(md, { cdn: '/vditor' }).then(html => { rendered.value = html; });
+      Vditor.md2html(md, { cdn: '/vditor' }).then(html => { rendered.value = injectRefLinkIcons(html); });
     }
   }
 }, { deep: true });

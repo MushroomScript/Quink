@@ -12,11 +12,10 @@ import {
   PhPushPin,
   PhMapPin,
   PhPencilSimple,
-  PhCheckSquare,
-  PhSquare,
+  PhArrowCounterClockwise,
   PhTrash,
 } from '@phosphor-icons/vue';
-import { REF_LINK_REGEX, renderRefLink } from '@/utils/refLink';
+import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -53,6 +52,24 @@ function handleClick(e: MouseEvent) {
 }
 const showMenu = ref(false);
 const confirmDelete = ref(false);
+const menuBtn = ref<HTMLElement>();
+const menuPos = ref<{ top: string; right: string }>({ top: '0px', right: '0px' });
+
+// Teleport+fixed 可跨 main 的 overflow，但不能跨 viewport 物理边界（窗口外不能渲染）；
+// 下方空间不够菜单（估 ~160px）就向按钮上方弹
+function toggleMenu() {
+  if (showMenu.value) { showMenu.value = false; return; }
+  if (menuBtn.value) {
+    const r = menuBtn.value.getBoundingClientRect();
+    const estMenuH = 160;
+    const flipUp = r.bottom + 4 + estMenuH > window.innerHeight;
+    menuPos.value = {
+      top: flipUp ? `${r.top - estMenuH - 4}px` : `${r.bottom + 4}px`,
+      right: `${window.innerWidth - r.right}px`,
+    };
+  }
+  showMenu.value = true;
+}
 
 function askDelete() {
   showMenu.value = false;
@@ -77,6 +94,7 @@ watchEffect(async () => {
     // 引用链接:先在 Markdown 层面简化(旧数据可能有多行 label,Vditor 解析不了)
     const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 20));
     let html = await Vditor.md2html(processed, { cdn: '/vditor' });
+    html = injectRefLinkIcons(html);
     // 搜索关键词高亮（只在标签之间的文本上替换，避免破坏 a[href]、class 等 HTML 属性 → 进而破坏音频胶囊等 CSS 选择器）
     const q = store.searchQuery;
     if (q && q.trim()) {
@@ -121,7 +139,7 @@ const typeColor: Record<string, string> = {
         <span v-if="note.category" class="text-xs text-gray-400">{{ note.category }}</span>
         <span class="ml-auto text-[11px] text-gray-400" :title="fullTime">{{ timeAgo }}</span>
         <!-- 三点菜单 -->
-        <button @click.stop="showMenu = !showMenu"
+        <button ref="menuBtn" @click.stop="toggleMenu"
           class="p-0.5 rounded-md text-gray-300 hover:text-gray-500 hover:bg-gray-100 transition-colors">
           <PhDotsThreeVertical size="1.375rem" weight="bold" />
         </button>
@@ -137,36 +155,40 @@ const typeColor: Record<string, string> = {
       </div>
     </div>
 
-    <!-- 下拉菜单 -->
-    <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
-      leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
-      <div v-if="showMenu" class="absolute right-3 top-10 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 min-w-[100px]">
-        <button @click.stop="store.togglePin(note.id); showMenu = false"
-          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
-          <PhPushPin v-if="note.pinned" size="0.875rem" weight="fill" />
-          <PhMapPin v-else size="0.875rem" weight="fill" />
-          <span>{{ note.pinned ? '取消置顶' : '置顶' }}</span>
-        </button>
-        <button @click.stop="openEditModal?.(note); showMenu = false"
-          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
-          <PhPencilSimple size="0.875rem" weight="fill" />
-          <span>编辑</span>
-        </button>
-        <button v-if="note.type === 'todo'" @click.stop="store.toggleTodo(note.id); showMenu = false"
-          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors"
-          :class="note.todoStatus === 'done' ? 'text-green-600 hover:bg-green-50' : 'text-gray-600 hover:bg-gray-50'">
-          <PhCheckSquare v-if="note.todoStatus === 'done'" size="0.875rem" weight="fill" />
-          <PhSquare v-else size="0.875rem" weight="fill" />
-          <span>{{ note.todoStatus === 'done' ? '标记未完成' : '标记完成' }}</span>
-        </button>
-        <div class="border-t border-gray-100 my-0.5"></div>
-        <button @click.stop="askDelete()"
-          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-red-50 hover:text-red-500 transition-colors">
-          <PhTrash size="0.875rem" weight="fill" />
-          <span>删除</span>
-        </button>
-      </div>
-    </Transition>
+    <!-- 下拉菜单：Teleport 到 body 避免被祖先 overflow 截断（卡片靠底部时菜单消失）；
+         遮罩必须一起 Teleport，否则就是 CLAUDE.md 警告的"半个 Teleport"——会被 stacking context 撕裂 -->
+    <Teleport to="body">
+      <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
+        leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
+        <div v-if="showMenu" class="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[9999] min-w-[110px] [&_svg]:mt-px"
+          :style="menuPos">
+          <button @click.stop="store.togglePin(note.id); showMenu = false"
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+            <PhPushPin v-if="note.pinned" size="0.875rem" weight="fill" />
+            <PhMapPin v-else size="0.875rem" weight="fill" />
+            <span>{{ note.pinned ? '取消置顶' : '置顶' }}</span>
+          </button>
+          <button @click.stop="openEditModal?.(note); showMenu = false"
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+            <PhPencilSimple size="0.875rem" weight="fill" style="margin-top: 2px" />
+            <span>编辑</span>
+          </button>
+          <button v-if="note.type === 'todo'" @click.stop="store.toggleTodo(note.id); showMenu = false"
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+            <PhArrowCounterClockwise v-if="note.todoStatus === 'done'" size="0.875rem" weight="fill" style="margin-top: 2px" />
+            <PhCheck v-else size="0.875rem" weight="fill" style="margin-top: 2px" />
+            <span>{{ note.todoStatus === 'done' ? '撤销完成' : '标记完成' }}</span>
+          </button>
+          <div class="border-t border-gray-100 my-0.5"></div>
+          <button @click.stop="askDelete()"
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-red-50 hover:text-red-500 transition-colors">
+            <PhTrash size="0.875rem" weight="fill" style="margin-top: 2px" />
+            <span>删除</span>
+          </button>
+        </div>
+      </Transition>
+      <div v-if="showMenu" class="fixed inset-0 z-[9998]" @click="showMenu = false" />
+    </Teleport>
 
     <!-- 删除确认弹窗 -->
     <Teleport to="body">
@@ -183,11 +205,6 @@ const typeColor: Record<string, string> = {
           </div>
         </div>
       </div>
-    </Teleport>
-
-    <!-- 菜单外部点击关闭 -->
-    <Teleport to="body">
-      <div v-if="showMenu" class="fixed inset-0 z-40" @click="showMenu = false" />
     </Teleport>
   </div>
 </template>

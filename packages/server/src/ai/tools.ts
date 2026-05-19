@@ -1,5 +1,5 @@
 import { db, schema } from '../db/index.js';
-import { eq, and, like, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, or, like, desc, sql, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 
@@ -147,7 +147,12 @@ export const TOOL_DEFINITIONS = [
 
 function cleanContent(content: string): string {
   return content
-    .replace(/\[[\s\S]*?\]\(\/?[?&]ref=[^)]+\)/g, '')
+    // 引用链接：保留 label 文本 + 笔记 ID，让 AI 能直接 get_note(id) 拿详情
+    .replace(/\[([\s\S]*?)\]\(\/?[?&]ref=([^)]+)\)/g, (_, label, rawRefId) => {
+      const clean = (label as string).replace(/^📌\s*/, '').trim();
+      const refId = rawRefId.split('&')[0]; // 去掉额外 query params
+      return clean ? `「${clean}」(refId:${refId})` : `(refId:${refId})`;
+    })
     .replace(/\[语音备忘\s*\d+s\]\([^)]+\)/g, '[语音]')
     .replace(/!\[[^\]]*\]\([^)]+\)/g, '[图片]')
     .replace(/\n{3,}/g, '\n\n')
@@ -155,13 +160,18 @@ function cleanContent(content: string): string {
 }
 
 function formatNote(note: any): string {
-  const meta = [`ID:${note.id}`];
+  const meta = [`ID:${note.id}`, `类型:${note.type}`];
   if (note.todoStatus) meta.push(`状态:${note.todoStatus === 'done' ? '已完成' : '未完成'}`);
   if (note.category) meta.push(`分类:${note.category}`);
   if (note.tags?.length) meta.push(`标签:${(note.tags as string[]).join(',')}`);
+  if (note.todoDue) meta.push(`截止:${note.todoDue}`);
   if (note.pinned) meta.push('置顶');
-  meta.push(note.createdAt?.slice(0, 10));
-  return `[${meta.join(' | ')}]\n${cleanContent(note.content)}`;
+  meta.push(`创建:${note.createdAt?.slice(0, 10)}`);
+  if (note.updatedAt && note.updatedAt !== note.createdAt) meta.push(`更新:${note.updatedAt.slice(0, 10)}`);
+  const parts = [`[${meta.join(' | ')}]`];
+  if (note.summary) parts.push(`摘要：${note.summary}`);
+  parts.push(`内容：${cleanContent(note.content) || '(无正文)'}`);
+  return parts.join('\n');
 }
 
 export async function executeTool(userId: string, name: string, args: any): Promise<{ result: string; noteIds: string[] }> {
@@ -170,7 +180,15 @@ export async function executeTool(userId: string, name: string, args: any): Prom
   switch (name) {
     case 'search_notes': {
       const conditions: any[] = [eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NULL`];
-      if (args.query) conditions.push(like(schema.notes.content, `%${args.query}%`));
+      if (args.query) {
+        const q = `%${args.query}%`;
+        // 同时搜 content / summary / tags，避免 label 在标题/摘要里但内容里没有的情况漏检
+        conditions.push(or(
+          like(schema.notes.content, q),
+          like(schema.notes.summary, q),
+          like(schema.notes.tags, q),
+        )!);
+      }
       if (args.type) conditions.push(eq(schema.notes.type, args.type));
       if (args.category) conditions.push(like(schema.notes.category, `%${args.category}%`));
       if (args.tags) {
@@ -210,7 +228,15 @@ export async function executeTool(userId: string, name: string, args: any): Prom
         .all();
       todos.forEach(n => noteIds.push(n.id));
       if (!todos.length) return { result: '没有找到待办事项。', noteIds };
-      return { result: `共 ${todos.length} 条待办：\n\n${todos.map(formatNote).join('\n\n---\n\n')}`, noteIds };
+      // 直接算好数量塞进返回，弱模型不擅长数数
+      const doneCount = todos.filter(t => t.todoStatus === 'done').length;
+      const pendingCount = todos.length - doneCount;
+      const header = args.status === 'pending'
+        ? `共 ${todos.length} 条未完成待办：`
+        : args.status === 'done'
+        ? `共 ${todos.length} 条已完成待办：`
+        : `共 ${todos.length} 条待办（已完成 ${doneCount} 条 / 未完成 ${pendingCount} 条）：`;
+      return { result: `${header}\n\n${todos.map(formatNote).join('\n\n---\n\n')}`, noteIds };
     }
 
     case 'get_recent_notes': {

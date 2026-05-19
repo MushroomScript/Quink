@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, reactive, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
@@ -19,14 +19,20 @@ const avatarPreview = ref('');
 const uploadingAvatar = ref(false);
 
 // ── Preferences ──
-const theme = ref('blueberry');
-const fontSize = ref('14');
-const autoSummary = ref(true);
-const autoSummaryMinLen = ref(50);
-const autoTranscribeVoice = ref(false);
-const aiChatMaxTokens = ref(8192);
-const aiPersona = ref('concise');
-const aiPersonaCustom = ref('');
+// 偏好统一在一个 reactive 对象，新加字段只需在这里加默认值 + 在模板里加 UI，
+// load / save / watch 通过遍历 prefs 字段自动覆盖
+const prefs = reactive({
+  theme: 'blueberry',
+  fontSize: 14,
+  autoSummary: true,
+  autoSummaryMinLen: 50,
+  autoTranscribeVoice: false,
+  showTodoBadge: true,
+  aiChatMaxTokens: 8192,
+  aiPersona: 'concise',
+  aiPersonaCustom: '',
+  xfyun: { appId: '', apiKey: '', apiSecret: '' },
+});
 const personas: Record<string, { label: string; description: string }> = {
   concise: { label: '简洁高效', description: '极简回复，一句话说清' },
   friendly: { label: '亲切友好', description: '温暖有礼，像朋友聊天' },
@@ -34,9 +40,6 @@ const personas: Record<string, { label: string; description: string }> = {
   humorous: { label: '幽默轻松', description: '风趣幽默，带点调侃' },
   custom: { label: '自定义', description: '自己写人格提示词' },
 };
-const xfAppId = ref('');
-const xfApiKey = ref('');
-const xfApiSecret = ref('');
 
 // ── Shortcuts ──
 const shortcuts = ref({
@@ -186,22 +189,16 @@ onMounted(() => {
   if (auth.user) {
     nickname.value = auth.user.nickname;
     avatarPreview.value = auth.user.avatar || '';
-    const prefs = auth.user.preferences || {};
-    theme.value = prefs.theme || 'blueberry';
-    fontSize.value = String(prefs.fontSize || 14);
-    if (typeof prefs.autoSummary === 'boolean') autoSummary.value = prefs.autoSummary;
-    if (prefs.autoSummaryMinLen) autoSummaryMinLen.value = prefs.autoSummaryMinLen;
-    if (typeof prefs.autoTranscribeVoice === 'boolean') autoTranscribeVoice.value = prefs.autoTranscribeVoice;
-    if (prefs.aiChatMaxTokens) aiChatMaxTokens.value = prefs.aiChatMaxTokens;
-    if (prefs.aiPersona) aiPersona.value = prefs.aiPersona;
-    if (prefs.aiPersonaCustom) aiPersonaCustom.value = prefs.aiPersonaCustom;
-    if (prefs.xfyun) {
-      xfAppId.value = prefs.xfyun.appId || '';
-      xfApiKey.value = prefs.xfyun.apiKey || '';
-      xfApiSecret.value = prefs.xfyun.apiSecret || '';
+    const userPrefs = auth.user.preferences || {};
+    // 白名单：只把 prefs 已声明的字段从 userPrefs 拷过来；xfyun 嵌套对象单独合并避免覆盖默认结构
+    for (const k of Object.keys(prefs) as Array<keyof typeof prefs>) {
+      const v = (userPrefs as any)[k];
+      if (v === undefined) continue;
+      if (k === 'xfyun') Object.assign(prefs.xfyun, v);
+      else (prefs as any)[k] = v;
     }
-    if (prefs.shortcuts) {
-      shortcuts.value = { ...shortcuts.value, ...prefs.shortcuts };
+    if (userPrefs.shortcuts) {
+      shortcuts.value = { ...shortcuts.value, ...userPrefs.shortcuts };
     }
   }
   loadAiData();
@@ -287,27 +284,19 @@ async function saveProfile() {
 
 let prefsLoaded = false;
 
+// 拼一份完整 preferences：保留 userPrefs 中未托管的字段（aiBindings、shortcuts 等），prefs 顶层覆盖之
+function buildPrefs() {
+  return { ...(auth.user?.preferences || {}), ...prefs };
+}
+
 async function savePreferences(silent = false) {
   saving.value = true;
   try {
-    await auth.updateProfile({
-      preferences: {
-        ...(auth.user?.preferences || {}),
-        theme: theme.value,
-        fontSize: parseInt(fontSize.value),
-        autoSummary: autoSummary.value,
-        autoSummaryMinLen: autoSummaryMinLen.value,
-        autoTranscribeVoice: autoTranscribeVoice.value,
-        aiChatMaxTokens: aiChatMaxTokens.value,
-        aiPersona: aiPersona.value,
-        aiPersonaCustom: aiPersonaCustom.value,
-        xfyun: { appId: xfAppId.value, apiKey: xfApiKey.value, apiSecret: xfApiSecret.value },
-      },
-    });
-    document.documentElement.setAttribute('data-theme', theme.value);
-    localStorage.setItem('quink_theme', theme.value);
-    try { (window as any).quinkDesktop?.syncTheme?.(theme.value); } catch {}
-    document.documentElement.style.fontSize = fontSize.value + 'px';
+    await auth.updateProfile({ preferences: buildPrefs() });
+    document.documentElement.setAttribute('data-theme', prefs.theme);
+    localStorage.setItem('quink_theme', prefs.theme);
+    try { (window as any).quinkDesktop?.syncTheme?.(prefs.theme); } catch {}
+    document.documentElement.style.fontSize = prefs.fontSize + 'px';
     if (!silent) showMsg('已保存');
   } catch (err: any) {
     showMsg('保存失败: ' + err.message, 'error');
@@ -316,10 +305,12 @@ async function savePreferences(silent = false) {
   }
 }
 
-// 主题、字号、划词开关 变化时自动静默保存
+// 任一字段变化：先乐观更新 auth.user.preferences 让其他组件立即响应，再防抖保存到后端
+// watch(reactive对象) 默认 deep，xfyun 等嵌套字段也会触发
 let savePrefsTimer: ReturnType<typeof setTimeout> | null = null;
-watch([theme, fontSize, autoSummary, autoSummaryMinLen, autoTranscribeVoice, aiChatMaxTokens, aiPersona, aiPersonaCustom, xfAppId, xfApiKey, xfApiSecret], () => {
+watch(prefs, () => {
   if (!prefsLoaded) return;
+  if (auth.user) auth.user.preferences = buildPrefs();
   if (savePrefsTimer) clearTimeout(savePrefsTimer);
   savePrefsTimer = setTimeout(() => savePreferences(true).then(() => toast.show('已保存')), 300);
 });
@@ -503,9 +494,9 @@ function goBack() {
               { value: 'lemon', label: '柠檬', color: '#f0be50' },
               { value: 'cloud', label: '云雾', color: '#8ca0b9' },
               { value: 'dark', label: '深色', color: '#1e1e2a' },
-            ]" :key="t.value" @click="theme = t.value; applyTheme(t.value)"
+            ]" :key="t.value" @click="prefs.theme = t.value; applyTheme(t.value)"
               class="flex flex-col items-center gap-1.5 p-2 rounded-xl border-2 transition-all"
-              :class="theme === t.value ? 'border-gray-800 bg-gray-50' : 'border-transparent hover:bg-gray-50'">
+              :class="prefs.theme === t.value ? 'border-gray-800 bg-gray-50' : 'border-transparent hover:bg-gray-50'">
               <div class="w-8 h-8 rounded-full shadow-sm border" :style="{ background: t.color, borderColor: t.value === 'dark' ? '#333' : t.color }"></div>
               <span class="text-[11px] text-gray-600">{{ t.label }}</span>
             </button>
@@ -513,7 +504,7 @@ function goBack() {
         </div>
         <div>
           <label class="block text-xs font-medium text-gray-500 mb-1">字体大小</label>
-          <select v-model="fontSize" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none">
+          <select v-model.number="prefs.fontSize" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none">
             <option value="12">12px</option>
             <option value="13">13px</option>
             <option value="14">14px</option>
@@ -525,22 +516,35 @@ function goBack() {
             <option value="22">22px</option>
           </select>
         </div>
+        <!-- 待办未完成数字提示 -->
+        <div class="flex items-center justify-between pt-2 border-t border-gray-100">
+          <div>
+            <div class="text-sm text-gray-700 font-medium">待办未完成数字提示</div>
+            <div class="text-xs text-gray-400 mt-0.5">侧边栏「待办」后显示未完成数量的红色徽标</div>
+          </div>
+          <button @click="prefs.showTodoBadge = !prefs.showTodoBadge"
+            class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4"
+            :class="prefs.showTodoBadge ? 'bg-primary' : 'bg-gray-300'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
+              :class="prefs.showTodoBadge ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
+        </div>
         <!-- 自动摘要 -->
         <div class="flex items-center justify-between pt-2 border-t border-gray-100">
           <div>
             <div class="text-sm text-gray-700 font-medium">自动摘要</div>
             <div class="text-xs text-gray-400 mt-0.5">新建笔记后 AI 自动生成内容摘要</div>
           </div>
-          <button @click="autoSummary = !autoSummary"
+          <button @click="prefs.autoSummary = !prefs.autoSummary"
             class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4"
-            :class="autoSummary ? 'bg-primary' : 'bg-gray-300'">
+            :class="prefs.autoSummary ? 'bg-primary' : 'bg-gray-300'">
             <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
-              :class="autoSummary ? 'translate-x-6' : 'translate-x-1'" />
+              :class="prefs.autoSummary ? 'translate-x-6' : 'translate-x-1'" />
           </button>
         </div>
-        <div v-if="autoSummary" class="flex items-center gap-2">
+        <div v-if="prefs.autoSummary" class="flex items-center gap-2">
           <span class="text-xs text-gray-400 shrink-0">最少字符数</span>
-          <input v-model.number="autoSummaryMinLen" type="number" min="10" max="500" step="10"
+          <input v-model.number="prefs.autoSummaryMinLen" type="number" min="10" max="500" step="10"
             class="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs outline-none bg-white text-center" />
           <span class="text-xs text-gray-300">少于此长度不生成摘要</span>
         </div>
@@ -551,15 +555,15 @@ function goBack() {
           <div class="space-y-1.5">
             <div class="flex items-center gap-2">
               <span class="text-xs text-gray-500 w-16 shrink-0">APPID</span>
-              <input v-model="xfAppId" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+              <input v-model="prefs.xfyun.appId" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
             <div class="flex items-center gap-2">
               <span class="text-xs text-gray-500 w-16 shrink-0">APIKey</span>
-              <input v-model="xfApiKey" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+              <input v-model="prefs.xfyun.apiKey" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
             <div class="flex items-center gap-2">
               <span class="text-xs text-gray-500 w-16 shrink-0">APISecret</span>
-              <input v-model="xfApiSecret" type="password" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+              <input v-model="prefs.xfyun.apiSecret" type="password" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
           </div>
           <!-- 自动转写 -->
@@ -568,11 +572,11 @@ function goBack() {
               <div class="text-xs text-gray-600">录音时自动转写文字</div>
               <div class="text-[11px] text-gray-400">开启后录音保存时自动调讯飞转写，AI 对话可引用语音内容</div>
             </div>
-            <button @click="autoTranscribeVoice = !autoTranscribeVoice"
+            <button @click="prefs.autoTranscribeVoice = !prefs.autoTranscribeVoice"
               class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4"
-              :class="autoTranscribeVoice ? 'bg-primary' : 'bg-gray-300'">
+              :class="prefs.autoTranscribeVoice ? 'bg-primary' : 'bg-gray-300'">
               <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
-                :class="autoTranscribeVoice ? 'translate-x-6' : 'translate-x-1'" />
+                :class="prefs.autoTranscribeVoice ? 'translate-x-6' : 'translate-x-1'" />
             </button>
           </div>
         </div>
@@ -584,14 +588,14 @@ function goBack() {
           <div>
             <div class="text-xs text-gray-600 mb-1.5">AI 人格风格</div>
             <div class="grid grid-cols-2 gap-1.5">
-              <button v-for="(p, key) in personas" :key="key" @click="aiPersona = key"
+              <button v-for="(p, key) in personas" :key="key" @click="prefs.aiPersona = key"
                 class="px-3 py-2 rounded-lg text-left text-xs transition-colors border"
-                :class="aiPersona === key ? 'border-primary bg-primary-light text-primary-dark font-medium' : 'border-gray-200 text-gray-500 hover:bg-gray-50'">
+                :class="prefs.aiPersona === key ? 'border-primary bg-primary-light text-primary-dark font-medium' : 'border-gray-200 text-gray-500 hover:bg-gray-50'">
                 <div class="font-medium">{{ p.label }}</div>
                 <div class="text-[11px] mt-0.5 opacity-70">{{ p.description }}</div>
               </button>
             </div>
-            <textarea v-if="aiPersona === 'custom'" v-model="aiPersonaCustom" rows="3" placeholder="输入自定义人格提示词..."
+            <textarea v-if="prefs.aiPersona === 'custom'" v-model="prefs.aiPersonaCustom" rows="3" placeholder="输入自定义人格提示词..."
               class="w-full mt-2 px-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
           </div>
           <!-- Token 上限 -->
@@ -600,7 +604,7 @@ function goBack() {
               <div class="text-xs text-gray-600">上下文 Token 上限</div>
               <div class="text-[11px] text-gray-400">越大记住越多对话历史，但消耗更多 Token</div>
             </div>
-            <select v-model.number="aiChatMaxTokens" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30">
+            <select v-model.number="prefs.aiChatMaxTokens" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30">
               <option :value="4096">4K</option>
               <option :value="8192">8K</option>
               <option :value="16384">16K</option>

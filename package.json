@@ -4,7 +4,7 @@
   "private": true,
   "description": "Quick Think - Capture your fleeting thoughts instantly",
   "scripts": {
-    "dev:server": "pnpm --filter @quink/server dev",
+    "dev:server": "pnpm --filter @quink/server dev:watch",
     "dev:web": "pnpm --filter @quink/web dev",
     "dev:desktop": "pnpm --filter @quink/desktop dev",
     "dev": "pnpm run dev:server & pnpm run dev:web",

@@ -161,9 +161,9 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
           : { color: 'var(--sb-dim)' }">
         <component :is="item.icon" size="1.125rem" weight="fill" />
         <span>{{ item.label }}</span>
-        <span v-if="item.label === '待办' && stats.pendingTodos > 0"
-          class="ml-auto bg-red-400/70 text-white text-xs leading-none w-5 h-5 flex items-center justify-center rounded-full font-semibold">
-          {{ stats.pendingTodos }}
+        <span v-if="item.label === '待办' && stats.pendingTodos > 0 && auth.user?.preferences?.showTodoBadge !== false"
+          class="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full">
+          {{ stats.pendingTodos > 99 ? '99+' : stats.pendingTodos }}
         </span>
       </router-link>
 

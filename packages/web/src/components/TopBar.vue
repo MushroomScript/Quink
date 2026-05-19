@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import { api, type Category } from '@/api';
 import { markRaw } from 'vue';
-import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhX, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen } from '@phosphor-icons/vue';
+import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen } from '@phosphor-icons/vue';
 
 const toggleMobileSidebar = inject<() => void>('toggleMobileSidebar');
 
@@ -86,7 +86,7 @@ function toggleType(t: string) {
   } else {
     filterTypes.value.push(t);
   }
-  doSearch();
+  doSearch(true);
 }
 
 const tagSuggestions = computed(() => {
@@ -95,9 +95,10 @@ const tagSuggestions = computed(() => {
   return allTags.value.filter(t => t.includes(q) && !filterTags.value.includes(t)).slice(0, 6);
 });
 
-function doSearch() {
+// immediate=true 时跳过 300ms 防抖立即查询，给"清除筛选/选标签/改日期"等明确操作用
+function doSearch(immediate = false) {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
+  const run = () => {
     store.searchQuery = searchText.value;
     // types 筛选激活时覆盖页面级 filterType
     const useTypes = filterTypes.value.length < 3;
@@ -108,7 +109,9 @@ function doSearch() {
       dateFrom: filterDateFrom.value || undefined,
       dateTo: filterDateFrom.value ? (filterDateTo.value || undefined) : undefined,
     });
-  }, 300);
+  };
+  if (immediate) run();
+  else searchTimer = setTimeout(run, 300);
 }
 
 function updateTagSuggestPos() {
@@ -136,18 +139,18 @@ function addTag(t: string) {
   searchText.value = '';
   showTagSuggestions.value = false;
   showFilters.value = true;
-  doSearch();
+  doSearch(true);
 }
 
 function removeTag(t: string) {
   filterTags.value = filterTags.value.filter(x => x !== t);
-  doSearch();
+  doSearch(true);
 }
 
 // 分类/标签变化时自动展开筛选面板
 watch(() => store.filterCategory, (v) => { if (v) showFilters.value = true; });
 watch(filterTags, (v) => { if (v.length) showFilters.value = true; }, { deep: true });
-function applyFilters() { doSearch(); }
+function applyFilters() { doSearch(true); }
 
 function clearFilters() {
   store.filterCategory = '';
@@ -155,17 +158,17 @@ function clearFilters() {
   filterTypes.value = ['note', 'snippet', 'todo'];
   filterDateFrom.value = '';
   filterDateTo.value = new Date().toISOString().slice(0, 10);
-  doSearch();
+  doSearch(true);
 }
 
 function clearCategory() {
   store.filterCategory = '';
-  doSearch();
+  doSearch(true);
 }
 
 function clearTag() {
   filterTags.value = [];
-  doSearch();
+  doSearch(true);
 }
 
 function clearAll() {
@@ -218,7 +221,7 @@ onMounted(() => {
       filterTags.value = [tag];
       filterTypes.value = ['note', 'snippet', 'todo'];
       showFilters.value = true;
-      doSearch();
+      doSearch(true);
     }
   }) as EventListener);
 });
@@ -252,9 +255,9 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
               class="flex-1 min-w-0 px-2 py-1.5 border-0 text-sm outline-none placeholder-gray-400"
               style="background: transparent !important" />
             <!-- 清空搜索 -->
-            <button v-if="searchText" @click="searchText = ''; store.searchQuery = ''; doSearch()"
-              class="mr-2 w-4 h-4 rounded-full bg-gray-300 hover:bg-gray-500 text-white flex items-center justify-center shrink-0 transition-colors" title="清空">
-              <PhX size="0.625rem" weight="bold" />
+            <button v-if="searchText" @click="searchText = ''; store.searchQuery = ''; doSearch(true)"
+              class="mr-2 p-0 text-gray-400 hover:text-gray-600 shrink-0 transition-colors flex items-center" title="清空">
+              <PhXCircle size="1rem" weight="fill" />
             </button>
           </div>
         </div>
@@ -307,20 +310,22 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
             清除全部筛选
           </button>
         </div>
-        <!-- 分类 + 标签 -->
-        <div class="flex items-center gap-1.5 flex-wrap h-7">
+        <!-- 分类 + 标签：外层 gap-3 与类型行对齐，内层 gap-1.5 让 chip 之间紧凑 -->
+        <div class="flex items-center gap-3 h-7">
           <span class="text-xs text-gray-400 w-8 shrink-0">筛选</span>
-          <span v-if="store.filterCategory" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium"
-            style="background: #FFE0CC; color: #D46B27">
-            <span class="truncate max-w-[120px] inline-flex items-center gap-1"><PhFolderOpen size="0.75rem" weight="fill" />{{ store.filterCategory }}</span>
-            <button @click="clearCategory()" class="hover:opacity-60 shrink-0">×</button>
-          </span>
-          <span v-for="t in filterTags" :key="t" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-primary-light text-primary-dark">
-            <PhTag size="0.75rem" weight="fill" />
-            <span>{{ t }}</span>
-            <button @click="removeTag(t)" class="hover:opacity-60">×</button>
-          </span>
-          <span v-if="!store.filterCategory && !filterTags.length" class="text-xs text-gray-300">无（侧边栏选分类，搜索栏输入匹配标签）</span>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span v-if="store.filterCategory" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium"
+              style="background: #FFE0CC; color: #D46B27">
+              <span class="truncate max-w-[120px] inline-flex items-center gap-1"><PhFolderOpen size="0.75rem" weight="fill" />{{ store.filterCategory }}</span>
+              <button @click="clearCategory()" class="hover:opacity-60 shrink-0">×</button>
+            </span>
+            <span v-for="t in filterTags" :key="t" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-primary-light text-primary-dark">
+              <PhTag size="0.75rem" weight="fill" />
+              <span>{{ t }}</span>
+              <button @click="removeTag(t)" class="hover:opacity-60">×</button>
+            </span>
+            <span v-if="!store.filterCategory && !filterTags.length" class="text-xs text-gray-300">无（侧边栏选分类，搜索栏输入匹配标签）</span>
+          </div>
         </div>
       </div>
     </Transition>
