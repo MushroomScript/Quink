@@ -4,17 +4,24 @@
 
 ## CLAUDE.md 维护规则
 
-仓库里有多个分层 CLAUDE.md，按以下规则维护，避免根目录膨胀：
+仓库里有多个分层文件，按以下规则维护，避免根目录膨胀：
 
-- **根 `CLAUDE.md`**：跨包通用、全局约定、多文件共享的经验（命名规范、UI 交互、图标体系、跨 view 的动画通用知识、渲染坑等）
-- **子目录 `CLAUDE.md`**：只该目录或少数关联文件用到的，别处用不到的专属内容
-- **同一主题规则数量大、自成体系**：拆到独立文件（推荐用 `CLAUDE.md` 命名放到对应代码目录，方便 Claude 在该目录工作时自动加载），根目录留一行指针引导
+- **根 `CLAUDE.md`**：跨包通用、全局约定、多文件共享的高频经验（命名规范、UI 交互、跨 view 的动画通用知识、渲染坑等）。Claude Code 启动时自动加载
+- **子目录 `CLAUDE.md`**：只该目录或少数关联文件用到的专属内容。Claude 在该目录工作时自动加载
+- **同一主题规则数量大、自成体系** → 拆到独立 `CLAUDE.md`（推荐放对应代码目录），根目录留一行指针
+- **使用频率低的规则**（如图标系统：写完后改动少）→ 拆到根目录普通 `.md` 文件（**不带 CLAUDE 前缀**），不自动加载，根 `CLAUDE.md` 留指针让 Claude 在需要时主动读。代价是 Claude 需要根 `CLAUDE.md` 的提示才知道去读 → 好处是启动时不占 context
 
-当前拆分：
-- `packages/desktop/CLAUDE.md` — Electron 主进程相关坑（OS 窗口动画、快捷窗口防闪烁、IPC 契约等）
-- `packages/web/src/utils/CLAUDE.md` — 笔记卡片列表 leave 动画体系（`cardLeave.ts` + TransitionGroup 多个坑）
+**当前文件清单：**
+- 根 `CLAUDE.md`（本文件）— 全局指引、高频规则
+- 根 `ICONS.md` — 图标系统约定（不自动加载，改图标时来读）
+- `packages/desktop/CLAUDE.md` — Electron 主进程坑（OS 窗口动画、快捷窗口防闪烁、IPC 契约等）
+- `packages/web/src/utils/CLAUDE.md` — 卡片列表 leave 动画体系（`cardLeave.ts` + TransitionGroup 多个坑）
 
-新增规则时先想：哪些文件会用到这条规则？只有 1-3 个相关文件 → 考虑放对应子目录；多个分散文件 → 留根目录。同一主题积累 ~10 行以上 → 考虑独立成 CLAUDE.md。
+**新增规则时的判断流程：**
+1. **多文件高频用** → 根 `CLAUDE.md`
+2. **少数文件专属** → 对应子目录 `CLAUDE.md`
+3. **同一主题积累 ~10 行以上** → 考虑独立成 `CLAUDE.md`
+4. **写完后改动少 / 低频** → 根目录普通 `.md` 文件，根 `CLAUDE.md` 留指针
 
 ## 项目概览
 
@@ -127,15 +134,7 @@ SQLite + 启动时自动迁移（`db/index.ts` 中 `CREATE TABLE IF NOT EXISTS` 
 
 ## 图标系统
 
-- **统一用 `@phosphor-icons/vue`**，禁止再用 emoji 当图标、禁止手写 inline SVG。极少数 v-html 字符串里嵌入图标的场景用 inline phosphor SVG path（见 `utils/refLink.ts`）。
-- **`PhXCircle` vs `PhX` 用法**：所有"软关闭/删除"位置（搜索框清空、列表项删除、对话删除、弹窗关闭、查找栏关闭等）一律 `PhXCircle`（圆圈包 X，视觉柔和）。**`PhX` 只用于"窗口级关闭"**：Electron 标题栏 X、图片预览全屏 X（本身有圆形容器或系统级语义）。
-- **weight 默认 `fill`**（实心）。两种例外允许局部用 `bold`：
-  - 三点菜单（`PhDotsThreeVertical`）— fill 像红绿灯
-  - Electron 标题栏 3 按钮（最小化/最大化/关闭）— fill 显得是黑块，bold 更像 Win11 线条按钮
-- **size 用 rem 字符串**：`size="1rem"` / `size="0.875rem"`（=14px @ 16px html font-size）。**禁止用数字 px**（`:size="14"`），因为图标不会跟着用户的字体大小设置（设置 → 字体）缩放。
-  - 数字 px 到 rem 的换算就是 N / 16
-- **v-html 内嵌图标**：组件 `<PhXxx />` 不能用在 v-html 渲染的字符串里（Vue 不解析字符串里的组件标签）。必须直接写 inline SVG 字符串。SVG 必须加 `pointer-events: none`（否则会拦截父元素的 click 事件，导致 closest('.xxx') 失败）。`utils/refLink.ts` 是引用块的范例。
-- **Phosphor 图标的视觉中心 ≠ 几何中心**：`flex items-center` 居中后某些图标看着"高 / 低"，文字 + 图标的同一行尤其明显。常见偏移：`PhBookOpen` 视觉重心偏下（书脊上窄、书页向下展开） / `PhPenNib` 重心偏上（笔尖突出右上） / `PhPencilSimple`、`PhTrash`、`PhCheck`、`PhArrowCounterClockwise` 都重心偏上 / `PhSparkle`、`PhPushPin`、`PhMapPin` 对称良好无需 nudge。修法：inline style `margin-top: ±1~2px` 单独微调，或用 Tailwind 任意选择器 `[&_svg]:mt-px` 给容器内所有 svg 统一加 nudge（再用 inline style 个别 override）。**字号越小、padding 越紧凑时偏移越显眼**（11px 小字下 1px 都明显）。范例：`NoteCard` 三点菜单（菜单内全员 `mt-px`，编辑/删除/标记完成 inline override 到 2px）、`RichEditor` AI 按钮组（润色/扩充/写文 各自 nudge）。
+全软件图标约定（统一用 `@phosphor-icons/vue`、PhXCircle vs PhX、weight/size 规则、v-html 内嵌、视觉中心偏移 nudge 等）—— 详见根目录 **`ICONS.md`**。改图标相关代码（新增图标、调整 size/weight、加 nudge）前先读那里。
 
 ## 渲染坑
 
