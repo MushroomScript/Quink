@@ -2,6 +2,20 @@
 
 本文件为 Claude Code（claude.ai/code）在本仓库工作时提供指引。
 
+## CLAUDE.md 维护规则
+
+仓库里有多个分层 CLAUDE.md，按以下规则维护，避免根目录膨胀：
+
+- **根 `CLAUDE.md`**：跨包通用、全局约定、多文件共享的经验（命名规范、UI 交互、图标体系、跨 view 的动画通用知识、渲染坑等）
+- **子目录 `CLAUDE.md`**：只该目录或少数关联文件用到的，别处用不到的专属内容
+- **同一主题规则数量大、自成体系**：拆到独立文件（推荐用 `CLAUDE.md` 命名放到对应代码目录，方便 Claude 在该目录工作时自动加载），根目录留一行指针引导
+
+当前拆分：
+- `packages/desktop/CLAUDE.md` — Electron 主进程相关坑（OS 窗口动画、快捷窗口防闪烁、IPC 契约等）
+- `packages/web/src/utils/CLAUDE.md` — 笔记卡片列表 leave 动画体系（`cardLeave.ts` + TransitionGroup 多个坑）
+
+新增规则时先想：哪些文件会用到这条规则？只有 1-3 个相关文件 → 考虑放对应子目录；多个分散文件 → 留根目录。同一主题积累 ~10 行以上 → 考虑独立成 CLAUDE.md。
+
 ## 项目概览
 
 Quink（一念）是一款带 AI 自动打标签、自动分类、写作辅助的个人笔记应用。pnpm monorepo，三个 package：
@@ -136,20 +150,7 @@ SQLite + 启动时自动迁移（`db/index.ts` 中 `CREATE TABLE IF NOT EXISTS` 
 - **`onMounted` 给 `document`/`window` 挂全局副作用 HMR 不友好**：开发期 HMR 重 mount 后旧 handler 还在 document 上，capture 阶段先于新 handler 触发并 `stopImmediatePropagation`，调用旧闭包里的函数（操作旧响应式状态，新 UI 完全没反应；典型症状："改完代码 X 功能失效，F5 就好"）。**`onBeforeUnmount` 不够用**——HMR 卸载顺序不可靠。修法：组件文件顶部用模块级 `let prevXxxHandler = null` 缓存上次挂的对象，下次 `onMounted` 入口先 `removeEventListener` / 还原原函数再挂新的。范例：`App.vue` 顶部 `prevRefClickHandler` + `prevWindowOpen` 的模块级清理逻辑。
 - **流式 markdown 渲染用"单调递增版本号 + GT 比较"**：每个 SSE delta 都触发一次 `Vditor.md2html(snapshot)`（异步、多个 in-flight、完成顺序乱）。错误做法是给每个 delta 分 `myVer` 然后完成时检查 `myVer === currentVer`（"还是最新版才覆盖"），结果连续 delta 时 myVer 永远被超越 → 永远不更新 → 看着"全部出完才渲染"。**正解**：维护 `lastRenderVer`，完成时 `myVer > lastRender` 才覆盖（内容单调向新）。范例：`AI.vue` 的 `streamingVersion` + `streamingLastRenderVer`。
 - **TransitionGroup 列表删除"左飞 + 高度收缩"动画**：用 `<TransitionGroup name="xxx" tag="div">` 包 v-for；CSS `.leave-active` **必须** `overflow: hidden`，否则 max-height 不生效；`.leave-to` 同时设 `max-height: 0`、`opacity: 0`、`transform: translateX(-110%)`，并把 `margin/padding-y` 都 `!important` 归零（否则空间不收缩、相邻项不会自然上移）；`.leave-from` 显式给个 max-height（如 5rem）作为起点。范例：`AI.vue` 末尾的 `.conv-list-leave-*`。
-- **TransitionGroup + JS `@leave` 钩子做"飞行/淡出"卡片动画的多个坑**（`utils/cardLeave.ts` 是封装好的 helper，含 `fadeOutLeave` / `fadeInEnter` / `flyToNavLeave`；三个 view `Trash.vue` / `Inspiration.vue` / `Todos.vue` 都用它）：
-  - **坑 1：leave 钩子拿到的是 v-if 切换后的错位坐标**。Vue 的 patch 顺序里，v-if 切换（顶部工具栏 `v-if="notes.length > 0"` 消失、空提示 `v-if="notes.length === 0"` 出现）会先于 TransitionGroup 的 leave 钩子执行。leave 钩子里 `getBoundingClientRect()` 拿到的是容器被推位移**后**的坐标，所有 leaving 元素"瞬移"。修法：view 里加 `watch(() => list.length, () => snapshotCards(), { flush: 'sync' })`，在 reactive 变化的**同一同步上下文**里主动 snapshot 所有卡片当前位置（DOM 还没 patch，位置准确），leave 钩子直接读 WeakMap 缓存。
-  - **坑 2：onLeave 同步设 `transition: transform` 会被 Vue FLIP 清空 transitionDuration 导致瞬间到位**。Vue TransitionGroup 在 `onUpdated`（leave 钩子之后**同步**执行）里跑 FLIP move：`hasCSSTransform` 检查"元素有没有 transform transition"——它**克隆元素**并复制 inline style，看到我设的 `transition: transform 0.5s` 后返回 true → 给所有 leaving 元素加 `v-move` class **并清空 `style.transitionDuration = ''`** → RAF 后设的 transform 瞬间到位（典型症状："全没了 没动画"）。修法：**两层 RAF 推迟 inline transition 设置**到 onUpdated 之后。第一层 RAF 设 `transition`，第二层 RAF 设 `transform` 触发动画。这样 hasCSSTransform 检查 clone 时 inline 没有 transition: transform，返回 false → 跳过 FLIP → 不清空 duration。
-  - **坑 3：staying 元素"平滑对齐"动画依赖 class 上的 `transition-transform`**。Vue FLIP 给 staying（没被删的）元素设 transform 做位置补偿，紧接着 `addTransitionClass(v-move)`——但 `v-move` CSS 没定义，所以 transform 变化没过渡，**剩余卡片瞬间补位**。`NoteCard.vue` 因为有 `transition-all duration-200`（本来给 hover 阴影用）顺带让 FLIP move 生效，所以待办/灵感页删除时剩余卡片有平滑对齐动画。新列表组件想要这个效果必须主动加 `transition-transform duration-300`。范例：`Trash.vue` 的卡片 div。
-  - **坑 4：批量 leave 时不能在 onLeave 内部第一次遍历兄弟元素 snapshot**——浏览器会在第一次 `position:fixed` + 第二次读 BCR 之间 flush layout，剩余卡片被 column-count 重排到 column 1 顶部，所有后续 leave 钩子拿到的都是 column 1 顶部坐标 → 全 fixed 到一处重叠。所以 snapshot 必须在数据变更**前**完成（靠 watch flush:'sync'）。
-  - `:css="false"` 只跳过 enter/leave 的 CSS class 操作，**不阻止 FLIP move**（FLIP 是 Vue 内部逻辑，照常跑）。要绕开 FLIP 要么用上面坑 2 的推迟方案，要么把 leaving 元素 detach 出 TransitionGroup 容器（更激进但 Vue removeChild 时会报错）。
-- **列表删除动画 helper 选型 cheat sheet**（`utils/cardLeave.ts`）—— 选哪个 leave 函数完全看**容器布局**：
-  - **`column-count` masonry / CSS `grid` / `flex flex-wrap`** → `fadeOutLeave`：leaving 项 `position: fixed` 脱流，剩余项靠布局自然重排。范例：`Inspiration.vue` / `Notes.vue` / `Todos.vue` / `Resources.vue`（grid） / `Tags.vue`（flex-wrap）。
-  - **垂直列表**（`space-y-*` / `flex flex-col`）→ `collapseLeave`：leaving 项 max-height 从当前高度渐变到 0 + opacity 0 + margin/padding 归零，**留在 flow 中"挤扁"**，外层容器高度跟着自然平滑减小。**用错 `fadeOutLeave` 会让外层容器瞬间塌缩**（leaving 项 position:fixed 一瞬间脱流，layout 立刻重计算）—— 典型症状："白底框收缩太快没动画"。范例：`Settings.vue` 的 AI 配置列表。
-  - **回收站恢复** → `flyToNavLeave`：飞向 sidebar 上 type 对应的导航菜单项（内部已 lockToScreen，不论容器布局都能用）。
-  - **staying 元素"对齐/补位"动画要在 v-for 子元素 class 上加 `transition-all duration-300`**（或 `transition-transform`），让 Vue FLIP 给 staying 元素设的 transform 变化能过渡。否则被删项淡出后剩余项瞬间补位（看着"砰一下"补上去）。`NoteCard` 因为本身有 `transition-all duration-200`（hover 阴影用）顺带让 FLIP 生效，其他列表组件必须主动加。
-  - **`snapshotCards` 调用时机**：`fadeOutLeave` / `flyToNavLeave` 必须配合 `watch(() => list.length, () => snapshotCards(), { flush: 'sync' })`（在数据变更前 snapshot 位置，避免 onLeave 钩子拿到 v-if 切换后的错位坐标）；`collapseLeave` **不需要 snapshot**（不脱流，不锁位置）。
-  - **批量操作要用乐观更新**：`恢复所有` / `清空回收站` / 批量删除 AI 配置等，必须先改 UI 触发动画再 await API（否则 Promise.all reject 会让 `notes.value = []` 不执行，动画不触发）。范例：`Trash.vue` 的 `doRestoreAll` / `Tags.vue` 的 `doDeleteTag` / `Settings.vue` 的 `deleteConfig`。
-  - **容器要加 `data-animated-list` 属性**（grid / flex-wrap / 垂直列表的 TransitionGroup 容器都加），让 `snapshotCards()` 默认 selector 能匹配到。`.notes-masonry` 容器不用加（默认 selector 已包含）。
+- **笔记卡片列表 leave 动画体系**（`utils/cardLeave.ts` 含 `fadeOutLeave` / `collapseLeave` / `flyToNavLeave` / `fadeInEnter`）—— 涉及 TransitionGroup + Vue FLIP 干扰、`watch flush:'sync'` snapshot、helper 按容器布局选型、staying 对齐动画依赖等多个坑，详见 **`packages/web/src/utils/CLAUDE.md`**。改这些 helper 或在 view 里用它们前先读那里。
 - **`prompts.ts` 模板字符串里别嵌反引号写示例**：在 `` `...` `` 模板字符串内再写 `` ` `` 会让 tsx 解析器把模板字符串提前闭合 → server 起不来 → 没有红色编辑器警告，只有运行时崩溃。**用 「」 或 '...' 包代码/字段示例**。范例：`prompts.ts` chat prompt 里 `「label」(refId:xxx)` 写法（不要再变成 `` `「label」(refId:xxx)` ``）。
 
 ## Electron 快捷窗口（Capture / AiChat）
