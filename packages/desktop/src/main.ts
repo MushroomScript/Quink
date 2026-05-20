@@ -35,6 +35,18 @@ let currentShortcuts = { ...DEFAULT_SHORTCUTS };
 let nativeModuleRef: any = null;
 let currentTheme = 'blueberry';
 
+// 每个主题的 body 背景色（跟 style.css 的 --c-body 一致），用于快捷窗口的原生背景色
+// 让 OS 显示窗口的瞬间，背景色已经跟即将渲染的内容一致，避免"主题切换后首次显示闪烁"
+const THEME_BG: Record<string, string> = {
+  blueberry: '#f4f5fc',
+  lavender: '#f6f4fc',
+  mint: '#f2fbf7',
+  peach: '#fdf5f3',
+  lemon: '#fcfaf0',
+  cloud: '#f5f6f8',
+  dark: '#131318',
+};
+
 // 每个主题的 accent-dark RGB(跟 style.css 一致),用于 toast 背景
 const THEME_ACCENT_DARK: Record<string, string> = {
   blueberry: 'rgb(88,112,230)',
@@ -337,7 +349,7 @@ function createCaptureWindow() {
     skipTaskbar: true,
     show: false,
     transparent: false,
-    backgroundColor: '#ffffff',
+    backgroundColor: THEME_BG[currentTheme] || '#ffffff',
     roundedCorners: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -364,25 +376,36 @@ function createCaptureWindow() {
   });
 }
 
-function toggleCaptureWindow() {
+async function toggleCaptureWindow() {
   if (!captureWindow) {
+    await ensureCurrentTheme(); // 创建前同步主题，保证 backgroundColor 用最新值
     createCaptureWindow();
-    captureWindow!.once('ready-to-show', () => {
-      captureWindow!.show();
-      captureWindow!.focus();
-    });
+    // 等内容（Vditor）加载完再 show，避免用户看到布局跳变
+    // 带 1500ms 超时兜底，防止 'content-ready' 未触发时窗口一直不显示
+    let shown = false;
+    const showOnce = () => {
+      if (shown || !captureWindow || captureWindow.isDestroyed()) return;
+      shown = true;
+      captureWindow.show();
+      captureWindow.focus();
+    };
+    ipcMain.once('content-ready', showOnce);
+    // 超时兜底放长（dev 模式 Vite 首次编译 + Vditor 资源下载可能 > 1.5s）
+    setTimeout(() => { showOnce(); ipcMain.removeListener('content-ready', showOnce); }, 3000);
     return;
   }
 
   if (captureWindow.isVisible()) {
     hideCaptureWindow();
   } else {
-    // 实验：完全跟 AiChat 一致的 show 路径，不调用 setOpacity
+    // show 之前 await 同步主题，避免 sync-theme IPC 还没到时用户看到旧主题闪烁
+    try {
+      await captureWindow.webContents.executeJavaScript(
+        `document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry')`
+      );
+    } catch {}
     captureWindow.show();
     captureWindow.focus();
-    captureWindow.webContents.executeJavaScript(
-      `document.documentElement.setAttribute('data-theme',localStorage.getItem('quink_theme')||'blueberry')`
-    ).catch(() => {});
     captureWindow.webContents.send('window-shown');
   }
 }
@@ -511,11 +534,37 @@ ipcMain.on('sync-token', (_event, token: string | null) => {
 });
 
 ipcMain.on('sync-theme', (_event, theme: string) => {
-  const js = `document.documentElement.setAttribute('data-theme','${theme}')`;
-  [captureWindow, aiChatWindow, floatWindow].forEach(w => {
-    if (w && !w.isDestroyed()) w.webContents.executeJavaScript(js).catch(() => {});
-  });
+  currentTheme = theme;
+  // 销毁快捷窗口：下次按快捷键时重新创建，新窗口直接用新主题色，
+  // 彻底避免 hidden 窗口 GPU paint cache 残留旧主题导致的闪烁
+  if (captureWindow && !captureWindow.isDestroyed()) {
+    captureWindow.destroy();
+    captureWindow = null;
+  }
+  if (aiChatWindow && !aiChatWindow.isDestroyed()) {
+    aiChatWindow.destroy();
+    aiChatWindow = null;
+  }
+  // floatWindow 不受影响（生命周期不同），仍同步主题
+  if (floatWindow && !floatWindow.isDestroyed()) {
+    floatWindow.webContents.executeJavaScript(
+      `document.documentElement.setAttribute('data-theme','${theme}')`
+    ).catch(() => {});
+    floatWindow.setBackgroundColor(THEME_BG[theme] || '#ffffff');
+  }
 });
+
+// 从主窗口的 localStorage 同步最新主题到主进程缓存（在创建快捷窗口前调用，
+// 确保 captureWindow/aiChatWindow 的 backgroundColor 用最新主题色）
+async function ensureCurrentTheme() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    const t = await mainWindow.webContents.executeJavaScript(
+      `localStorage.getItem('quink_theme')`
+    );
+    if (t && typeof t === 'string') currentTheme = t;
+  } catch {}
+}
 
 ipcMain.on('reload-shortcuts', () => {
   loadUserShortcuts().then(() => {
@@ -544,7 +593,9 @@ if (!gotLock) {
 
 app.whenReady().then(() => {
   createMainWindow();
-  createCaptureWindow();
+  // 不在启动时预创建 captureWindow：那时 currentTheme 还是默认值（mainWindow 还没 fetchMe），
+  // 预创建会让窗口 backgroundColor 用错误主题，导致首次按快捷键时 OS 显示几帧"上次主题色"
+  // 等用户首次按 Shift+Space 时再创建，那时 currentTheme 已经被 sync-theme IPC 更新到正确值
   createTray();
 
   // 启动底层键盘钩子并注册默认快捷键
@@ -579,7 +630,7 @@ function createAiChatWindow() {
     skipTaskbar: true,
     show: false,
     transparent: false,
-    backgroundColor: '#ffffff',
+    backgroundColor: THEME_BG[currentTheme] || '#ffffff',
     roundedCorners: true,
     minWidth: 400,
     minHeight: 400,
@@ -604,8 +655,9 @@ function createAiChatWindow() {
   aiChatWindow.on('closed', () => { aiChatWindow = null; });
 }
 
-function toggleAiChatWindow() {
+async function toggleAiChatWindow() {
   if (!aiChatWindow) {
+    await ensureCurrentTheme(); // 创建前同步主题，保证 backgroundColor 用最新值
     createAiChatWindow();
     aiChatWindow!.once('ready-to-show', () => {
       aiChatWindow!.show();
@@ -616,6 +668,12 @@ function toggleAiChatWindow() {
   if (aiChatWindow.isVisible()) {
     hideAiChatWindow();
   } else {
+    // show 之前 await 同步主题，避免 sync-theme IPC 还没到时用户看到旧主题闪烁
+    try {
+      await aiChatWindow.webContents.executeJavaScript(
+        `document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry')`
+      );
+    } catch {}
     aiChatWindow.show();
     aiChatWindow.focus();
   }

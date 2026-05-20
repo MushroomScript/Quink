@@ -54,6 +54,7 @@ function toggleFullscreen() { isFullscreen.value = !isFullscreen.value; }
 
 const emit = defineEmits<{
   (e: 'submit', data: { html: string; type: string; tags: string[] }): void;
+  (e: 'ready'): void;
 }>();
 
 const noteTypes = [
@@ -155,6 +156,7 @@ onMounted(() => {
     after: () => {
       vditor?.focus();
       setupAudioButtons();
+      emit('ready');
     },
     input: () => {
       dirty.value = true;
@@ -569,8 +571,10 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
       ? 'fixed inset-0 z-[200] bg-white flex flex-col'
       : 'flex flex-col'">
     <!-- Vditor editor -->
+    <!-- minHeight 占位：Vditor 异步加载完前 wrapper 是空 div，会让下面工具栏贴到顶部，
+         给一个等于 Vditor 加载完预期高度的占位（工具栏 ~36px + content minHeight）避免布局跳变 -->
     <div ref="editorRef" class="vditor-wrapper"
-      :style="isFullscreen ? { flex: '1 1 auto', minHeight: 0 } : { '--editor-max': maxHeight + 'px' }"></div>
+      :style="isFullscreen ? { flex: '1 1 auto', minHeight: 0 } : { '--editor-max': maxHeight + 'px', minHeight: (minHeight + 36) + 'px' }"></div>
 
     <!-- 语音识别实时预览 -->
     <div v-if="isRecording || iatLiveText" class="flex items-center gap-2 px-3 py-1.5" style="background: rgba(var(--c-accent), 0.06)">

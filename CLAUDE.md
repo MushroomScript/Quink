@@ -152,6 +152,52 @@ SQLite + 启动时自动迁移（`db/index.ts` 中 `CREATE TABLE IF NOT EXISTS` 
   - **容器要加 `data-animated-list` 属性**（grid / flex-wrap / 垂直列表的 TransitionGroup 容器都加），让 `snapshotCards()` 默认 selector 能匹配到。`.notes-masonry` 容器不用加（默认 selector 已包含）。
 - **`prompts.ts` 模板字符串里别嵌反引号写示例**：在 `` `...` `` 模板字符串内再写 `` ` `` 会让 tsx 解析器把模板字符串提前闭合 → server 起不来 → 没有红色编辑器警告，只有运行时崩溃。**用 「」 或 '...' 包代码/字段示例**。范例：`prompts.ts` chat prompt 里 `「label」(refId:xxx)` 写法（不要再变成 `` `「label」(refId:xxx)` ``）。
 
+## Electron 快捷窗口（Capture / AiChat）
+
+### Win11 OS 窗口动画的触发条件
+默认所有标准 `BrowserWindow` 在 Win11 上有 fade in/out + 微缩放的窗口动画（OS 级别免费送）。两种情况 OS 会**跳过整个生命周期的动画**（包括关闭）：
+- 调用过 `setOpacity()`：OS 判定 opacity 由应用自管，不再做动画
+- `backgroundColor: '#00000000'`（alpha=0）：OS 视为非常规窗口
+
+**结论**：要 OS 自带动画就**不要调用 `setOpacity()`**，背景色用纯色（推荐跟主题走，见下文）。
+
+### 快捷窗口主题闪烁的 4 层防御
+打开快捷窗口时的"白闪 / 旧主题色闪"有 4 个独立来源，每层都要做防御：
+
+1. **Electron 窗口 `backgroundColor`**（OS 显示窗口边缘的填充色，在 webContents paint 之前可见几帧）
+   - `THEME_BG[currentTheme]` 映射（main.ts，跟 style.css 的 `--c-body` 一致）
+   - `sync-theme` IPC 时调 `setBackgroundColor(...)` 更新已存在窗口（影响下次 paint）
+
+2. **HTML body 背景**（CSS 加载之前浏览器用默认白色 paint）
+   - `index.html` 第一个 inline script 同步设 `<html>` 的 inline `background`，不依赖 CSS 加载
+
+3. **webContents GPU paint cache**（hidden 窗口 Chromium 不 repaint，切主题后 cache 仍是旧主题）
+   - `sync-theme` IPC 时**销毁** captureWindow/aiChatWindow，下次按快捷键重建。新窗口直接用新主题色创建，无 cache 残留
+   - 同主题下仍是持久窗口（hide/show），保留响应速度
+
+4. **Vditor 等异步组件加载导致的布局跳变**（`after` callback 触发前 `.vditor-wrapper` 是空 div，下面工具栏贴顶部）
+   - `RichEditor` 暴露 `@ready` 事件（Vditor `after` callback 内 emit）
+   - Capture.vue 收到 ready → 调 `quink.notifyContentReady()` (preload) → IPC `'content-ready'`
+   - 主进程 `ipcMain.once('content-ready', show)` 之前不 show 窗口（带 3 秒超时兜底）
+   - 代价：首次按快捷键等 ~300ms（Vditor 加载），但出现时整个界面已完整布局
+   - 另外给 `.vditor-wrapper` 设 `min-height: (minHeight + 36) + 'px'` 兜底占位（万一 ready 信号没发，至少占位不塌缩）
+
+### 启动时机：不要在 `app.whenReady` 预创建快捷窗口
+**坑**：`app.whenReady` 里立即 `createCaptureWindow()`（为了加快首次响应）→ 但那时主窗口还没 fetchMe，`currentTheme` 还是默认 `'blueberry'` → captureWindow 用错误主题色创建 → 首次按快捷键时背景闪 "blueberry 色"几帧。
+
+**正解**：**懒加载**。`toggleCaptureWindow` 在 `captureWindow` 不存在时才创建。那时主窗口已经 sync-theme IPC 把 `currentTheme` 设到用户实际主题，新窗口直接用对的颜色。代价：首次按快捷键多等 ~300ms，跟切换主题后第一次打开体验一致。
+
+### `currentTheme` 主进程缓存机制（3 个同步源）
+- `let currentTheme = 'blueberry'` 默认值
+- `loadUserShortcuts`：启动时从 server preferences 同步（异步，可能晚）
+- `sync-theme` IPC：用户切主题时 web 端调 `quinkDesktop.syncTheme()` → 更新 `currentTheme` + `setBackgroundColor` + destroy 快捷窗口
+- `ensureCurrentTheme()`：创建快捷窗口前从主窗口 localStorage **主动**读最新值（防 race，确保 backgroundColor 不会用过期值）
+
+### 持久窗口 vs 销毁重建的混合策略
+- **同主题下**：持久窗口 `hide()` / `show()` 切换，响应 < 10ms
+- **切换主题时**：sync-theme IPC 触发 `destroy()` 销毁快捷窗口；下次按快捷键走完整 create → ensureCurrentTheme → 等 content-ready → show 路径 (~300ms)，用新主题完整渲染
+- 平衡了**速度**（同主题下快）和**正确性**（切换后不闪）
+
 ## 编码规范
 
 ### 命名规范

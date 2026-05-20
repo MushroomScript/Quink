@@ -5,6 +5,9 @@ import { api, isLoggedIn } from '@/api';
 import Vditor from 'vditor';
 import { PhSparkle, PhStop, PhPaperPlaneTilt } from '@phosphor-icons/vue';
 
+// setup 顶层同步设主题（在 Vue 第一次 render 前），让窗口 show 时就是正确主题色
+document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry');
+
 const auth = useAuthStore();
 const query = ref('');
 const messages = ref<{ id: string; role: 'user' | 'assistant'; content: string; html?: string }[]>([]);

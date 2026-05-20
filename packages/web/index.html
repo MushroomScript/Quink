@@ -11,7 +11,18 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   </head>
   <body class="text-gray-900 min-h-screen" spellcheck="false">
-    <script>document.documentElement.setAttribute('data-theme',localStorage.getItem('quink_theme')||'blueberry')</script>
+    <script>
+      // 同步设主题 + 同步设 html 背景色：
+      // data-theme 让 CSS 变量在加载后立即对应主题，
+      // 但 CSS 加载本身要几十毫秒，期间会用浏览器默认白色 paint → 暗色主题用户首次启动看到白闪
+      // 解决：在 inline script 里直接给 <html> 设 inline background（跟 style.css 的 --c-body 一致），不依赖 CSS 加载
+      (function() {
+        var theme = localStorage.getItem('quink_theme') || 'blueberry';
+        document.documentElement.setAttribute('data-theme', theme);
+        var BG = {blueberry:'#f4f5fc',lavender:'#f6f4fc',mint:'#f2fbf7',peach:'#fdf5f3',lemon:'#fcfaf0',cloud:'#f5f6f8',dark:'#131318'};
+        document.documentElement.style.background = BG[theme] || '#f4f5fc';
+      })();
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

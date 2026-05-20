@@ -4,6 +4,10 @@ import { useNotesStore } from '@/stores/notes';
 import { useAuthStore } from '@/stores/auth';
 import RichEditor from '@/components/RichEditor.vue';
 
+// setup 顶层同步设主题（在 Vue 第一次 render 前），让窗口 show 时就是正确主题色，
+// 避免暗色主题用户首次打开看到白色闪烁
+document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry');
+
 const store = useNotesStore();
 const auth = useAuthStore();
 const editorRef = ref<InstanceType<typeof RichEditor>>();
@@ -36,6 +40,11 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     try { (window as any).quink?.hideWindow(); } catch {}
   }
+}
+
+// Vditor 加载完成时通知主进程，让它延迟到此刻才 show 窗口
+function onEditorReady() {
+  try { (window as any).quink?.notifyContentReady?.(); } catch {}
 }
 
 const notLoggedIn = ref(false);
@@ -76,7 +85,7 @@ onUnmounted(() => {
 
     <!-- Editor -->
     <div v-else class="flex-1 overflow-hidden bg-white rounded-xl shadow-2xl">
-      <RichEditor ref="editorRef" @submit="onSubmit" :show-ai="false" :show-fullscreen-btn="false" :max-height="80" :min-height="60" hint-text="Esc 关闭 | Ctrl+Enter 保存" placeholder="快速记录你的想法..." />
+      <RichEditor ref="editorRef" @submit="onSubmit" @ready="onEditorReady" :show-ai="false" :show-fullscreen-btn="false" :max-height="80" :min-height="60" hint-text="Esc 关闭 | Ctrl+Enter 保存" placeholder="快速记录你的想法..." />
     </div>
 
     <!-- Toast -->
