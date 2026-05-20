@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, provide } from 'vue';
+import { ref, computed, onMounted, onUnmounted, provide, watch } from 'vue';
 import { api, isLoggedIn } from '@/api';
+import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
 import {
   PhFolder,
   PhMusicNote,
@@ -125,6 +126,9 @@ const filtered = computed(() => {
   return files.value.filter(f => f.category === filter.value);
 });
 
+// 数据变更前主动 snapshot 所有卡片位置，避免 onLeave 钩子里拿到的是 v-if 切换后的错位坐标
+watch(() => filtered.value.length, () => snapshotCards(), { flush: 'sync' });
+
 async function load() {
   if (!isLoggedIn()) return;
   loading.value = true;
@@ -201,18 +205,19 @@ onUnmounted(() => {
 
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
-    <div v-else-if="filtered.length === 0" class="text-center py-16">
-      <div class="mb-3 flex justify-center text-gray-300">
-        <PhFolder size="3rem" weight="fill" />
+    <template v-else>
+      <div v-if="filtered.length === 0" class="text-center py-16">
+        <div class="mb-3 flex justify-center text-gray-300">
+          <PhFolder size="3rem" weight="fill" />
+        </div>
+        <p class="text-gray-500 text-sm">暂无文件</p>
+        <p class="text-gray-400 text-xs mt-1">在编辑器中上传文件，或点击右上角上传文件按钮</p>
       </div>
-      <p class="text-gray-500 text-sm">暂无文件</p>
-      <p class="text-gray-400 text-xs mt-1">在编辑器中上传文件，或点击右上角上传文件按钮</p>
-    </div>
 
-    <!-- File grid -->
-    <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-      <div v-for="f in filtered" :key="f.id"
-        class="bg-white rounded-xl border border-gray-200 overflow-hidden group hover:shadow-md transition-shadow">
+      <!-- File grid -->
+      <TransitionGroup tag="div" data-animated-list class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" :css="false" @leave="fadeOutLeave">
+        <div v-for="f in filtered" :key="f.id"
+          class="bg-white rounded-xl border border-gray-200 overflow-hidden group hover:shadow-md transition-all duration-300">
         <!-- Preview area -->
         <div class="h-32 bg-gray-50 flex items-center justify-center overflow-hidden">
           <!-- Image preview -->
@@ -257,8 +262,9 @@ onUnmounted(() => {
             删除
           </button>
         </div>
-      </div>
-    </div>
+        </div>
+      </TransitionGroup>
+    </template>
   </div>
 
   <!-- 图片预览弹窗 -->
@@ -308,16 +314,18 @@ onUnmounted(() => {
   </Teleport>
 
   <Teleport to="body">
-    <div v-if="confirmDeleteId" class="fixed inset-0 z-[200] flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/30" @click="confirmDeleteId = ''" />
-      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-        <p class="text-sm text-gray-700 mb-1">删除文件</p>
-        <p class="text-xs text-gray-400 mb-4">删除后不可恢复</p>
-        <div class="flex gap-2 justify-center">
-          <button @click="confirmDeleteId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-          <button @click="doDeleteFile" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+    <Transition name="modal">
+      <div v-if="confirmDeleteId" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="confirmDeleteId = ''" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">删除文件</p>
+          <p class="text-xs text-gray-400 mb-4">删除后不可恢复</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="confirmDeleteId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doDeleteFile" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>

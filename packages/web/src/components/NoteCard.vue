@@ -93,7 +93,7 @@ watchEffect(async () => {
     let md = content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
     // 引用链接:先在 Markdown 层面简化(旧数据可能有多行 label,Vditor 解析不了)
     const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 20));
-    let html = await Vditor.md2html(processed, { cdn: '/vditor' });
+    let html = await Vditor.md2html(processed, { cdn: '/vditor' } as any);
     html = injectRefLinkIcons(html);
     // 搜索关键词高亮（只在标签之间的文本上替换，避免破坏 a[href]、class 等 HTML 属性 → 进而破坏音频胶囊等 CSS 选择器）
     const q = store.searchQuery;
@@ -192,19 +192,21 @@ const typeColor: Record<string, string> = {
 
     <!-- 删除确认弹窗 -->
     <Teleport to="body">
-      <div v-if="confirmDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
-        <div class="absolute inset-0 bg-black/30" @click="confirmDelete = false" />
-        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-          <p class="text-sm text-gray-700 mb-1">确认删除</p>
-          <p class="text-xs text-gray-400 mb-4">删除后将移入回收站</p>
-          <div class="flex gap-2 justify-center">
-            <button @click="confirmDelete = false"
-              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doDelete()"
-              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+      <Transition name="modal">
+        <div v-if="confirmDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
+          <div class="absolute inset-0 bg-black/30" @click="confirmDelete = false" />
+          <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+            <p class="text-sm text-gray-700 mb-1">确认删除</p>
+            <p class="text-xs text-gray-400 mb-4">删除后将移入回收站</p>
+            <div class="flex gap-2 justify-center">
+              <button @click="confirmDelete = false"
+                class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+              <button @click="doDelete()"
+                class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+            </div>
           </div>
         </div>
-      </div>
+      </Transition>
     </Teleport>
   </div>
 </template>

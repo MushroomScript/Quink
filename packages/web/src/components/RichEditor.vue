@@ -193,7 +193,7 @@ function setupAudioButtons() {
     btn.setAttribute('data-src', href);
     btn.innerHTML = '▶';
     btn.title = '播放语音';
-    parent.style.position = 'relative';
+    (parent as HTMLElement).style.position = 'relative';
     parent.appendChild(btn);
 
     btn.addEventListener('mousedown', (e) => {

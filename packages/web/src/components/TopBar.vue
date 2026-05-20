@@ -95,6 +95,11 @@ const tagSuggestions = computed(() => {
   return allTags.value.filter(t => t.includes(q) && !filterTags.value.includes(t)).slice(0, 6);
 });
 
+// 输入框失焦时延迟关闭标签建议下拉（让点击建议项的事件能先触发）
+function hideTagSuggestionsDelayed() {
+  window.setTimeout(() => { showTagSuggestions.value = false; }, 200);
+}
+
 // immediate=true 时跳过 300ms 防抖立即查询，给"清除筛选/选标签/改日期"等明确操作用
 function doSearch(immediate = false) {
   clearTimeout(searchTimer);
@@ -250,7 +255,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <div ref="searchBoxEl" class="hidden md:block w-56">
           <div class="flex items-center bg-gray-100/80 rounded-full border border-gray-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition overflow-hidden">
             <PhMagnifyingGlass size="1rem" weight="fill" class="ml-3 text-gray-400 shrink-0" />
-            <input ref="searchInput" v-model="searchText" @input="onSearch" @focus="onSearch" @blur="setTimeout(() => showTagSuggestions = false, 200)" type="text"
+            <input ref="searchInput" v-model="searchText" @input="onSearch" @focus="onSearch" @blur="hideTagSuggestionsDelayed" type="text"
               placeholder="搜索...      Ctrl + F"
               class="flex-1 min-w-0 px-2 py-1.5 border-0 text-sm outline-none placeholder-gray-400"
               style="background: transparent !important" />
@@ -381,16 +386,18 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
 
   <!-- 批量删除确认弹窗 -->
   <Teleport to="body">
-    <div v-if="confirmBatchDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/30" @click="confirmBatchDelete = false" />
-      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-        <p class="text-sm text-gray-700 mb-1">删除笔记</p>
-        <p class="text-xs text-gray-400 mb-4">确认删除选中的 {{ store.selectedIds.size }} 条笔记？</p>
-        <div class="flex gap-2 justify-center">
-          <button @click="confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-          <button @click="store.batchDelete(); confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+    <Transition name="modal">
+      <div v-if="confirmBatchDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="confirmBatchDelete = false" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">删除笔记</p>
+          <p class="text-xs text-gray-400 mb-4">确认删除选中的 {{ store.selectedIds.size }} 条笔记？</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="store.batchDelete(); confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted, nextTick } from 'vue';
 import { useNotesStore } from '@/stores/notes';
 import RichEditor from './RichEditor.vue';
 import type { Note } from '@/api';
@@ -13,6 +13,11 @@ const saving = ref(false);
 const editorRef = ref<InstanceType<typeof RichEditor>>();
 const showConfirm = ref(false);
 
+// 内部 v-if，配合 Transition 实现 enter/leave 动画。
+// mount 后下一帧设 true 触发 enter；关闭时先设 false 触发 leave，等 @after-leave 再真 emit close
+const showInner = ref(false);
+onMounted(() => { nextTick(() => { showInner.value = true; }); });
+
 async function onSubmit(data: { html: string; type: string; tags: string[] }) {
   if (saving.value) return;
   saving.value = true;
@@ -22,7 +27,7 @@ async function onSubmit(data: { html: string; type: string; tags: string[] }) {
       type: data.type as any,
       tags: data.tags,
     });
-    emit('close');
+    showInner.value = false;
   } finally { saving.value = false; }
 }
 
@@ -30,12 +35,16 @@ function tryClose() {
   if (editorRef.value?.isDirty) {
     showConfirm.value = true;
   } else {
-    emit('close');
+    showInner.value = false;
   }
 }
 
 function confirmDiscard() {
   showConfirm.value = false;
+  showInner.value = false;
+}
+
+function onAfterLeave() {
   emit('close');
 }
 
@@ -53,7 +62,8 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-[100] flex items-center justify-center" @keydown="onKeydown">
+    <Transition name="modal" @after-leave="onAfterLeave">
+    <div v-if="showInner" class="fixed inset-0 z-[100] flex items-center justify-center" @keydown="onKeydown">
       <!-- Backdrop: 毛玻璃 -->
       <div class="absolute inset-0 bg-black/40 backdrop-blur-md" @click="tryClose" />
 
@@ -112,5 +122,6 @@ function onKeydown(e: KeyboardEvent) {
         </div>
       </Transition>
     </div>
+    </Transition>
   </Teleport>
 </template>

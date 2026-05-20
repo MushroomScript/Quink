@@ -102,7 +102,7 @@ async function openRefPreview(noteId: string) {
     const res = await api.getNote(noteId);
     let md = res.data.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
     const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
-    let html = await Vditor.md2html(processed, { cdn: '/vditor' });
+    let html = await Vditor.md2html(processed, { cdn: '/vditor' } as any);
     html = injectRefLinkIcons(html);
     refPreviewStack.value.push({ note: res.data, html });
 
@@ -279,6 +279,7 @@ watch(() => auth.user, (user) => {
 
     <!-- 引用预览 Modal(z-150 覆盖编辑 modal z-100) -->
     <Teleport to="body">
+      <Transition name="modal">
       <div v-if="refPreviewNote && !refPreviewHidden" class="fixed inset-0 z-[150] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30 backdrop-blur-sm" @click="goBackRefPreview" />
         <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 max-h-[70vh] flex flex-col overflow-hidden ring-1 ring-black/5">
@@ -307,6 +308,7 @@ watch(() => auth.user, (user) => {
           </div>
         </div>
       </div>
+      </Transition>
     </Teleport>
   </template>
 

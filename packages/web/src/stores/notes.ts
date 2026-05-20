@@ -33,7 +33,7 @@ export const useNotesStore = defineStore('notes', () => {
     return groups;
   });
 
-  async function fetchNotes(extra?: { tag?: string; dateFrom?: string; dateTo?: string }) {
+  async function fetchNotes(extra?: { tag?: string; tags?: string; types?: string; dateFrom?: string; dateTo?: string }) {
     loading.value = true;
     try {
       const params: Record<string, string> = {

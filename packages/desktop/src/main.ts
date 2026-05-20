@@ -327,15 +327,17 @@ function createCaptureWindow() {
     height: 155,
     minWidth: 650,
     minHeight: 155,
+    maxWidth: 650,
+    maxHeight: 155,
     x: Math.round(screenWidth / 2 - 325),
     y: Math.round(screenHeight / 2 - 78),
     frame: false,
-    resizable: false,
+    resizable: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
     transparent: false,
-    backgroundColor: '#00000000',
+    backgroundColor: '#ffffff',
     roundedCorners: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -375,18 +377,13 @@ function toggleCaptureWindow() {
   if (captureWindow.isVisible()) {
     hideCaptureWindow();
   } else {
-    // 先透明 show,等主题重绘后再显示
-    captureWindow.setOpacity(0);
+    // 实验：完全跟 AiChat 一致的 show 路径，不调用 setOpacity
     captureWindow.show();
+    captureWindow.focus();
     captureWindow.webContents.executeJavaScript(
       `document.documentElement.setAttribute('data-theme',localStorage.getItem('quink_theme')||'blueberry')`
-    ).finally(() => {
-      setTimeout(() => {
-        captureWindow?.setOpacity(1);
-        captureWindow?.focus();
-        captureWindow?.webContents.send('window-shown');
-      }, 30);
-    });
+    ).catch(() => {});
+    captureWindow.webContents.send('window-shown');
   }
 }
 

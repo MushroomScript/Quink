@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import { api } from '@/api';
 import { PhNotePencil } from '@phosphor-icons/vue';
+import { collapseLeave, snapshotCards } from '@/utils/cardLeave';
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -133,8 +134,18 @@ async function saveConfig() {
 }
 
 async function deleteConfig(id: string) {
-  try { await api.deleteAiConfig(id); await loadAiData(); } catch {}
+  // 乐观更新：立即从 UI 移除触发淡出动画
+  aiConfigs.value = aiConfigs.value.filter(c => c.id !== id);
+  try {
+    await api.deleteAiConfig(id);
+  } catch (err) {
+    console.error('[Settings] 删除 AI 配置失败', err);
+    await loadAiData();
+  }
 }
+
+// 数据变更前主动 snapshot AI 配置项位置，避免 onLeave 钩子里拿到的是 v-if 切换后的错位坐标
+watch(() => aiConfigs.value.length, () => snapshotCards(), { flush: 'sync' });
 
 async function testConfig(id: string) {
   testingId.value = id; testResult.value = '';
@@ -701,8 +712,8 @@ function goBack() {
           还没有 AI 配置，点击上方按钮创建
         </div>
 
-        <div v-else class="space-y-2">
-          <div v-for="cfg in aiConfigs" :key="cfg.id" class="flex items-center gap-3 p-3 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors">
+        <TransitionGroup tag="div" data-animated-list class="space-y-2" :css="false" @leave="collapseLeave">
+          <div v-for="cfg in aiConfigs" :key="cfg.id" class="flex items-center gap-3 p-3 rounded-lg border border-gray-100 hover:border-gray-200 transition-all duration-300">
             <div class="w-2 h-2 rounded-full shrink-0" :class="cfg.isDefault ? 'bg-green-500' : 'bg-gray-300'"></div>
             <div class="flex-1 min-w-0">
               <div class="text-sm font-medium text-gray-700 truncate">{{ cfg.name }}</div>
@@ -714,7 +725,7 @@ function goBack() {
             <button @click="startEditConfig(cfg)" class="text-xs text-gray-400 hover:text-gray-600">编辑</button>
             <button @click="deleteConfig(cfg.id)" class="text-xs text-gray-400 hover:text-red-500">删除</button>
           </div>
-        </div>
+        </TransitionGroup>
 
         <!-- Edit/Create form -->
         <div v-if="editingConfig" class="mt-4 p-4 rounded-lg border border-gray-200 bg-gray-50 space-y-3">

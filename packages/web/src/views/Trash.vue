@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, provide } from 'vue';
+import { ref, computed, onMounted, onUnmounted, provide, watch } from 'vue';
 import { api, isLoggedIn, type Note } from '@/api';
 import Vditor from 'vditor';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { PhTrash } from '@phosphor-icons/vue';
+import { fadeOutLeave, flyToNavLeave, snapshotCards } from '@/utils/cardLeave';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -25,7 +26,7 @@ async function load() {
     const res = await api.getTrash();
     notes.value = res.data;
     for (const n of res.data) {
-      try { rendered.value[n.id] = await Vditor.md2html(n.content, { cdn: '/vditor' }); } catch { rendered.value[n.id] = n.content; }
+      try { rendered.value[n.id] = await Vditor.md2html(n.content, { cdn: '/vditor' } as any); } catch { rendered.value[n.id] = n.content; }
     }
   } catch {}
   loading.value = false;
@@ -38,27 +39,39 @@ async function doRestore() {
   const id = confirmRestoreId.value;
   confirmRestoreId.value = '';
   if (!id) return;
+  leaveMode = 'restore';
   try { await api.restoreNote(id); notes.value = notes.value.filter(n => n.id !== id); } catch {}
 }
 
 async function doRestoreAll() {
   confirmRestoreAll.value = false;
+  leaveMode = 'restore';
+  const restoringIds = notes.value.map(n => n.id);
+  notes.value = [];
   try {
-    for (const n of notes.value) { await api.restoreNote(n.id); }
-    notes.value = [];
-  } catch {}
+    await Promise.all(restoringIds.map(id => api.restoreNote(id)));
+  } catch (err) {
+    console.error('[Trash] 恢复所有部分失败', err);
+  }
 }
 
 async function doPermanentDelete() {
   const id = confirmDeleteId.value;
   confirmDeleteId.value = '';
   if (!id) return;
+  leaveMode = 'delete';
   try { await api.permanentDeleteNote(id); notes.value = notes.value.filter(n => n.id !== id); } catch {}
 }
 
 async function doEmptyAll() {
   confirmEmpty.value = false;
-  try { await api.emptyTrash(); notes.value = []; } catch {}
+  leaveMode = 'delete';
+  notes.value = [];
+  try {
+    await api.emptyTrash();
+  } catch (err) {
+    console.error('[Trash] 清空回收站失败', err);
+  }
 }
 
 function deletedAgo(n: any) {
@@ -68,6 +81,16 @@ function deletedAgo(n: any) {
 function onRefresh() { load(); }
 onMounted(() => { load(); window.addEventListener('quink-refresh', onRefresh); });
 onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
+
+// 数据变更前主动 snapshot 所有卡片位置，避免 onLeave 钩子里拿到的是 v-if 切换后的错位坐标
+watch(() => notes.value.length, () => snapshotCards(), { flush: 'sync' });
+
+// leave 动画的触发上下文：'delete' 用纯淡出；'restore' 用 macOS 风的向上飞
+let leaveMode: 'delete' | 'restore' = 'delete';
+function onLeave(el: Element, done: () => void) {
+  if (leaveMode === 'restore') flyToNavLeave(el, done);
+  else fadeOutLeave(el, done);
+}
 </script>
 
 <template>
@@ -86,95 +109,105 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
 
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
-    <div v-else-if="notes.length === 0" class="text-center py-16">
-      <div class="mb-3 flex justify-center text-gray-300">
-        <PhTrash size="3rem" weight="fill" />
+    <template v-else>
+      <div v-if="notes.length === 0" class="text-center py-16">
+        <div class="mb-3 flex justify-center text-gray-300">
+          <PhTrash size="3rem" weight="fill" />
+        </div>
+        <p class="text-gray-500 text-sm">回收站是空的</p>
+        <p class="text-gray-400 text-xs mt-1">删除的笔记会在这里保留30天</p>
       </div>
-      <p class="text-gray-500 text-sm">回收站是空的</p>
-      <p class="text-gray-400 text-xs mt-1">删除的笔记会在这里保留30天</p>
-    </div>
 
-    <div v-else class="notes-masonry">
-      <div v-for="n in notes" :key="n.id" class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden group">
-        <div class="px-4 py-3">
-          <div class="flex items-center gap-2 mb-2">
-            <span class="text-xs text-gray-400">{{ deletedAgo(n) }}</span>
-            <span v-if="n.tags?.length" class="text-xs text-gray-300">
-              {{ (n.tags as string[]).map(t => '#' + t).join(' ') }}
-            </span>
+      <TransitionGroup tag="div" class="notes-masonry" :css="false" @leave="onLeave">
+        <div v-for="n in notes" :key="n.id" :data-note-type="n.type" class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden group transition-transform duration-300">
+          <div class="px-4 py-3">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-xs text-gray-400">{{ deletedAgo(n) }}</span>
+              <span v-if="n.tags?.length" class="text-xs text-gray-300">
+                {{ (n.tags as string[]).map(t => '#' + t).join(' ') }}
+              </span>
+            </div>
+            <div class="prose prose-sm max-w-none text-gray-500 line-clamp-4 note-content" v-html="rendered[n.id] || n.content" />
           </div>
-          <div class="prose prose-sm max-w-none text-gray-500 line-clamp-4 note-content" v-html="rendered[n.id] || n.content" />
+          <div class="flex items-center gap-1 px-3 py-2 border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button @click="confirmRestoreId = n.id" class="px-3 py-1 text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
+              恢复
+            </button>
+            <button @click="confirmDeleteId = n.id" class="px-3 py-1 text-xs ml-auto rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+              永久删除
+            </button>
+          </div>
         </div>
-        <div class="flex items-center gap-1 px-3 py-2 border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button @click="confirmRestoreId = n.id" class="px-3 py-1 text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
-            恢复
-          </button>
-          <button @click="confirmDeleteId = n.id" class="px-3 py-1 text-xs ml-auto rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
-            永久删除
-          </button>
-        </div>
-      </div>
-    </div>
+      </TransitionGroup>
+    </template>
   </div>
 
   <!-- 永久删除确认弹窗 -->
   <Teleport to="body">
-    <div v-if="confirmDeleteId" class="fixed inset-0 z-[200] flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/30" @click="confirmDeleteId = ''" />
-      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-        <p class="text-sm text-gray-700 mb-1">永久删除</p>
-        <p class="text-xs text-gray-400 mb-4">此操作不可恢复</p>
-        <div class="flex gap-2 justify-center">
-          <button @click="confirmDeleteId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-          <button @click="doPermanentDelete" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">永久删除</button>
+    <Transition name="modal">
+      <div v-if="confirmDeleteId" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="confirmDeleteId = ''" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">永久删除</p>
+          <p class="text-xs text-gray-400 mb-4">此操作不可恢复</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="confirmDeleteId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doPermanentDelete" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">永久删除</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 
   <!-- 清空回收站确认弹窗 -->
   <Teleport to="body">
-    <div v-if="confirmEmpty" class="fixed inset-0 z-[200] flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/30" @click="confirmEmpty = false" />
-      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-        <p class="text-sm text-gray-700 mb-1">清空回收站</p>
-        <p class="text-xs text-gray-400 mb-4">将永久删除所有 {{ notes.length }} 条笔记，不可恢复</p>
-        <div class="flex gap-2 justify-center">
-          <button @click="confirmEmpty = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-          <button @click="doEmptyAll" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">清空</button>
+    <Transition name="modal">
+      <div v-if="confirmEmpty" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="confirmEmpty = false" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">清空回收站</p>
+          <p class="text-xs text-gray-400 mb-4">将永久删除所有 {{ notes.length }} 条笔记，不可恢复</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="confirmEmpty = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doEmptyAll" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">清空</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 
   <!-- 恢复确认弹窗 -->
   <Teleport to="body">
-    <div v-if="confirmRestoreId" class="fixed inset-0 z-[200] flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/30" @click="confirmRestoreId = ''" />
-      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-        <p class="text-sm text-gray-700 mb-1">恢复笔记</p>
-        <p class="text-xs text-gray-400 mb-4">将从回收站恢复此笔记</p>
-        <div class="flex gap-2 justify-center">
-          <button @click="confirmRestoreId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-          <button @click="doRestore" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复</button>
+    <Transition name="modal">
+      <div v-if="confirmRestoreId" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="confirmRestoreId = ''" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">恢复笔记</p>
+          <p class="text-xs text-gray-400 mb-4">将从回收站恢复此笔记</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="confirmRestoreId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doRestore" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 
   <!-- 恢复所有确认弹窗 -->
   <Teleport to="body">
-    <div v-if="confirmRestoreAll" class="fixed inset-0 z-[200] flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/30" @click="confirmRestoreAll = false" />
-      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-        <p class="text-sm text-gray-700 mb-1">恢复所有</p>
-        <p class="text-xs text-gray-400 mb-4">将恢复回收站中全部 {{ notes.length }} 条笔记</p>
-        <div class="flex gap-2 justify-center">
-          <button @click="confirmRestoreAll = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-          <button @click="doRestoreAll" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复所有</button>
+    <Transition name="modal">
+      <div v-if="confirmRestoreAll" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="confirmRestoreAll = false" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">恢复所有</p>
+          <p class="text-xs text-gray-400 mb-4">将恢复回收站中全部 {{ notes.length }} 条笔记</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="confirmRestoreAll = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doRestoreAll" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复所有</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -186,3 +219,4 @@ onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
   overflow: hidden;
 }
 </style>
+

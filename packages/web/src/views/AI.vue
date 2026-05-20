@@ -242,7 +242,7 @@ async function selectConversation(id: string) {
       if (msg.role === 'assistant') {
         const { answer } = parseThinking(msg.content);
         const renderContent = stripOuterCodeFence(answer || msg.content);
-        try { html = await Vditor.md2html(renderContent, { cdn: '/vditor' }); } catch {}
+        try { html = await Vditor.md2html(renderContent, { cdn: '/vditor' } as any); } catch {}
       }
       messages.value.push({ ...msg, role: msg.role as 'user' | 'assistant', sources: msg.sources || [], html, thinkingHtml });
     }
@@ -366,7 +366,7 @@ async function sendMessage() {
               const { answer } = parseThinking(snapshot);
               const content = stripOuterCodeFence(answer || snapshot);
               try {
-                const h = await Vditor.md2html(content, { cdn: '/vditor' });
+                const h = await Vditor.md2html(content, { cdn: '/vditor' } as any);
                 if (myVer > (streamingLastRenderVer.get(targetConvId) || 0) && streamingMap.value.has(targetConvId)) {
                   streamingLastRenderVer.set(targetConvId, myVer);
                   streamingHtmlMap.value.set(targetConvId, h);
@@ -389,7 +389,7 @@ async function sendMessage() {
     let html: string | undefined;
     const { answer: answerText } = parseThinking(fullContent);
     const renderText = stripOuterCodeFence(answerText || fullContent);
-    try { html = await Vditor.md2html(renderText, { cdn: '/vditor' }); } catch {}
+    try { html = await Vditor.md2html(renderText, { cdn: '/vditor' } as any); } catch {}
     if (currentConvId.value === targetConvId) {
       messages.value.push({ id: aiMsgId || 'ai-resp', role: 'assistant', content: fullContent, sources: aiSources, html });
     }
@@ -446,7 +446,7 @@ function stripOuterCodeFence(text: string): string {
 async function toggleSources(msgId: string, noteIds: string[]) {
   showSources.value[msgId] = !showSources.value[msgId];
   if (showSources.value[msgId] && !sourceNotes.value[msgId]) {
-    const notes: { id: string; summary: string; content: string }[] = [];
+    const notes: { id: string; summary: string; content: string; type: string }[] = [];
     for (const nid of noteIds) {
       try {
         const res = await api.getNote(nid);
@@ -829,17 +829,19 @@ async function retryLastMessage() {
 
   <!-- 删除确认弹窗 -->
   <Teleport to="body">
-    <div v-if="confirmDeleteId" class="fixed inset-0 z-[200] flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/30" @click="confirmDeleteId = ''" />
-      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-        <p class="text-sm text-gray-700 mb-1">删除对话</p>
-        <p class="text-xs text-gray-400 mb-4">删除后无法恢复</p>
-        <div class="flex gap-2 justify-center">
-          <button @click="confirmDeleteId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-          <button @click="deleteConversation(confirmDeleteId)" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+    <Transition name="modal">
+      <div v-if="confirmDeleteId" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="confirmDeleteId = ''" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">删除对话</p>
+          <p class="text-xs text-gray-400 mb-4">删除后无法恢复</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="confirmDeleteId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="deleteConversation(confirmDeleteId)" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
 

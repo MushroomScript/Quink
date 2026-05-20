@@ -89,7 +89,7 @@ async function sendMessage() {
 
     let html: string | undefined;
     const renderText = stripOuterCodeFence(parseThinking(fullContent).answer || fullContent);
-    try { html = await Vditor.md2html(renderText, { cdn: '/vditor' }); } catch {}
+    try { html = await Vditor.md2html(renderText, { cdn: '/vditor' } as any); } catch {}
     messages.value.push({ id: aiMsgId || 'ai', role: 'assistant', content: fullContent, html });
     streamingContent.value = '';
   } catch (err: any) {

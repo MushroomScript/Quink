@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { onActivated, computed, ref } from 'vue';
+import { onActivated, computed, ref, nextTick, watch } from 'vue';
 import { useNotesStore } from '@/stores/notes';
 import NoteInput from '@/components/NoteInput.vue';
 import MobileInput from '@/components/MobileInput.vue';
 import NoteCard from '@/components/NoteCard.vue';
 import { PhCheckSquare } from '@phosphor-icons/vue';
+import { fadeOutLeave, fadeInEnter, snapshotCards } from '@/utils/cardLeave';
 
 defineOptions({ name: 'todos' });
 
 const store = useNotesStore();
 const isMobile = ref(window.innerWidth < 768);
+
+// 数据变更前主动 snapshot 所有卡片位置，避免 onLeave 钩子里拿到的是 v-if 切换后的错位坐标
+watch(() => store.notes.length, () => snapshotCards(), { flush: 'sync' });
 
 const pendingTodos = computed(() =>
   store.notes.filter((n) => n.type === 'todo' && n.todoStatus !== 'done')
@@ -18,13 +22,23 @@ const doneTodos = computed(() =>
   store.notes.filter((n) => n.type === 'todo' && n.todoStatus === 'done')
 );
 
-onActivated(() => {
+// 屏蔽掉初次加载（fetchNotes 完成后）触发的全员 enter，只让用户操作触发的 enter 走动画
+const animateEnter = ref(false);
+function onEnter(el: Element, done: () => void) {
+  if (!animateEnter.value) { done(); return; }
+  fadeInEnter(el, done);
+}
+
+onActivated(async () => {
+  animateEnter.value = false;
   const needRefresh = store.filterType !== 'todo';
   store.filterType = 'todo';
   if (needRefresh) {
     store.searchQuery = '';
-    store.fetchNotes();
+    await store.fetchNotes();
   }
+  await nextTick();
+  animateEnter.value = true;
 });
 </script>
 
@@ -35,18 +49,18 @@ onActivated(() => {
       <NoteInput v-else default-type="todo" />
     </div>
 
-    <div v-if="pendingTodos.length > 0" class="mb-6 md:mb-8">
-      <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">未完成 ({{ pendingTodos.length }})</h3>
-      <div class="notes-masonry">
+    <div :class="pendingTodos.length > 0 ? 'mb-6 md:mb-8' : ''">
+      <h3 v-if="pendingTodos.length > 0" class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">未完成 ({{ pendingTodos.length }})</h3>
+      <TransitionGroup tag="div" class="notes-masonry" :css="false" @leave="fadeOutLeave" @enter="onEnter">
         <NoteCard v-for="note in pendingTodos" :key="note.id" :note="note" />
-      </div>
+      </TransitionGroup>
     </div>
 
-    <div v-if="doneTodos.length > 0">
-      <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">已完成 ({{ doneTodos.length }})</h3>
-      <div class="notes-masonry opacity-60">
+    <div>
+      <h3 v-if="doneTodos.length > 0" class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">已完成 ({{ doneTodos.length }})</h3>
+      <TransitionGroup tag="div" class="notes-masonry opacity-60" :css="false" @leave="fadeOutLeave" @enter="onEnter">
         <NoteCard v-for="note in doneTodos" :key="note.id" :note="note" />
-      </div>
+      </TransitionGroup>
     </div>
 
     <div v-if="store.notes.length === 0 && !store.loading" class="text-center py-16">

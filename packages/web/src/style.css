@@ -248,6 +248,26 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
   page-break-inside: avoid;
 }
 
+/* 全屏遮罩弹窗的统一进出动画
+   用法：<Teleport to="body"><Transition name="modal"><div v-if="..." class="fixed inset-0 ...">...</div></Transition></Teleport>
+   外层 fade + 内层卡片（直接子元素中带 .relative class 的那个）scale 0.95 → 1 */
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.18s ease-out;
+}
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+.modal-enter-active > .relative,
+.modal-leave-active > .relative {
+  transition: transform 0.18s ease-out;
+}
+.modal-enter-from > .relative,
+.modal-leave-to > .relative {
+  transform: scale(0.95);
+}
+
 /* 引用笔记链接:紧凑标签样式 */
 .note-ref-link {
   display: inline-flex;

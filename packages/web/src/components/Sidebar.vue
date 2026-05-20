@@ -123,7 +123,7 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
     <div class="relative px-3 py-4" style="border-bottom: 1px solid var(--sb-border)">
       <button @click="toggleUserMenu"
         class="flex items-center gap-3 w-full rounded-xl px-3 py-2.5 transition-colors text-left"
-        style="color: var(--sb-text)" @mouseenter="$event.currentTarget.style.background = 'var(--sb-hover)'" @mouseleave="$event.currentTarget.style.background = 'transparent'">
+        style="color: var(--sb-text)" @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--sb-hover)'" @mouseleave="($event.currentTarget as HTMLElement).style.background = 'transparent'">
         <div v-if="auth.avatar" class="w-9 h-9 rounded-full bg-cover bg-center shrink-0" :style="{ backgroundImage: `url(${auth.avatar})` }" />
         <div v-else class="w-9 h-9 rounded-full bg-primary/30 text-primary flex items-center justify-center text-sm font-bold shrink-0">
           {{ getInitial(auth.nickname) }}
@@ -140,7 +140,7 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
         leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
         <div v-if="showUserMenu" class="absolute left-3 right-3 top-full mt-1 bg-sidebar-light rounded-xl shadow-xl z-50 py-1" style="border: 1px solid var(--sb-border)">
           <button @click="goSettings" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition-colors"
-            style="color: var(--sb-text)" @mouseenter="$event.currentTarget.style.background = 'var(--sb-hover)'" @mouseleave="$event.currentTarget.style.background = 'transparent'">
+            style="color: var(--sb-text)" @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--sb-hover)'" @mouseleave="($event.currentTarget as HTMLElement).style.background = 'transparent'">
             <PhGear size="1rem" weight="fill" /><span>设置</span>
           </button>
           <div style="border-top: 1px solid var(--sb-border); margin: 4px 0"></div>
@@ -155,6 +155,7 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
     <nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
       <!-- Main nav -->
       <router-link v-for="item in mainNav" :key="item.path" :to="item.path"
+        :data-nav-path="item.path"
         class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-150 nav-item"
         :style="isActive(item.path)
           ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)', fontWeight: 500 }
@@ -220,36 +221,40 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
     <div v-if="showUserMenu" class="fixed inset-0 z-40" @click="closeUserMenu" />
 
     <!-- 添加分类弹窗 -->
-    <div v-if="showAddCategory" class="fixed inset-0 z-[200] flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/30" @click="showAddCategory = false" />
-      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72">
-        <p class="text-sm font-medium text-gray-700 mb-3">新增分类</p>
-        <input v-model="newCategoryName" @keydown.enter="addCategory" placeholder="输入分类名称" autofocus
-          class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
-        <div class="flex gap-2 mt-4 justify-end">
-          <button @click="showAddCategory = false; newCategoryName = ''"
-            class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-          <button @click="addCategory"
-            class="px-4 py-1.5 text-xs rounded-lg text-white font-medium"
-            style="background: rgb(var(--c-accent-dark))">添加</button>
+    <Transition name="modal">
+      <div v-if="showAddCategory" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="showAddCategory = false" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72">
+          <p class="text-sm font-medium text-gray-700 mb-3">新增分类</p>
+          <input v-model="newCategoryName" @keydown.enter="addCategory" placeholder="输入分类名称" autofocus
+            class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
+          <div class="flex gap-2 mt-4 justify-end">
+            <button @click="showAddCategory = false; newCategoryName = ''"
+              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="addCategory"
+              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium"
+              style="background: rgb(var(--c-accent-dark))">添加</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
 
     <!-- 删除分类确认弹窗 -->
-    <div v-if="showDeleteConfirm" class="fixed inset-0 z-[200] flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/30" @click="showDeleteConfirm = false" />
-      <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-        <p class="text-sm text-gray-700 mb-1">确认删除分类</p>
-        <p class="text-xs text-gray-400 mb-4">「{{ deletingCategoryName }}」及关联笔记的分类将被清除</p>
-        <div class="flex gap-2 justify-center">
-          <button @click="showDeleteConfirm = false"
-            class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-          <button @click="deleteCategory(deletingCategoryId!)"
-            class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+    <Transition name="modal">
+      <div v-if="showDeleteConfirm" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="showDeleteConfirm = false" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">确认删除分类</p>
+          <p class="text-xs text-gray-400 mb-4">「{{ deletingCategoryName }}」及关联笔记的分类将被清除</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="showDeleteConfirm = false"
+              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="deleteCategory(deletingCategoryId!)"
+              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
 

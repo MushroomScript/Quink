@@ -35,7 +35,7 @@ async function loadNote() {
     try {
       let md = res.data.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
       const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
-      let html = await Vditor.md2html(processed, { cdn: '/vditor' });
+      let html = await Vditor.md2html(processed, { cdn: '/vditor' } as any);
       html = injectRefLinkIcons(html);
       rendered.value = html;
     } catch (e) {
@@ -59,7 +59,7 @@ watch(() => store.notes, () => {
       note.value = updated;
       let md = updated.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
       md = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
-      Vditor.md2html(md, { cdn: '/vditor' }).then(html => { rendered.value = injectRefLinkIcons(html); });
+      Vditor.md2html(md, { cdn: '/vditor' } as any).then(html => { rendered.value = injectRefLinkIcons(html); });
     }
   }
 }, { deep: true });
