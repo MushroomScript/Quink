@@ -90,7 +90,8 @@ watchEffect(async () => {
   const content = props.note.content;
   try {
     // 任务列表:* [X] → - [x] (Vditor md2html 只认 - 开头的任务列表)
-    let md = content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
+    // 历史污染清理:旧版 RichEditor 的播放按钮 ▶/⏸ 被 Vditor 序列化进了 markdown,这里剥掉
+    let md = content.replace(/[▶⏸]/g, '').replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
     // 引用链接:先在 Markdown 层面简化(旧数据可能有多行 label,Vditor 解析不了)
     const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 20));
     let html = await Vditor.md2html(processed, { cdn: '/vditor' } as any);

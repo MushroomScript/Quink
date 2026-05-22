@@ -127,6 +127,8 @@
 [data-theme="dark"] .bg-gray-100\/80,
 [data-theme="dark"] .bg-gray-50\/80,
 [data-theme="dark"] .bg-gray-50\/50 { background: rgba(255,255,255,0.05) !important; }
+/* Settings 主题色选择器: dark 主题下选中态需要更亮的背景,否则选中按钮跟周围非选中按钮的 5% 白雾几乎一样,加上 dark 图标的 squircle 也是深色 → 整个按钮溶进页面背景看不清 */
+[data-theme="dark"] .theme-pick-selected { background: rgba(255,255,255,0.22) !important; }
 /* Borders */
 [data-theme="dark"] .border-gray-200,
 [data-theme="dark"] .border-gray-100,
@@ -361,9 +363,22 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
 }
 
 /* 播放中动画 */
-.note-content a.voice-playing,
-.vditor-reset a.voice-playing {
+/* 加载中(audio 还在下载/缓冲) → 脉冲 */
+.note-content a.voice-loading,
+.vditor-reset a.voice-loading {
   animation: voice-pulse 1s ease-in-out infinite;
+}
+/* 播放中 / 暂停 → 背景按进度填充,--progress 由 audio.ts 的 rAF 60Hz 更新.
+   特异性用 a.voice-X[data-audio-state="X"] (0,0,3,1) 提升,稳过原 attribute selector (0,0,2,1) */
+.note-content a.voice-playing[data-audio-state="playing"],
+.vditor-reset a.voice-playing[data-audio-state="playing"],
+.note-content a.voice-paused[data-audio-state="paused"],
+.vditor-reset a.voice-paused[data-audio-state="paused"] {
+  background: linear-gradient(to right,
+    rgb(var(--c-accent-dark)) 0%,
+    rgb(var(--c-accent-dark)) var(--progress, 0%),
+    rgb(var(--c-accent)) var(--progress, 0%),
+    rgb(var(--c-accent)) 100%) !important;
 }
 @keyframes voice-pulse {
   0%, 100% { opacity: 1; }

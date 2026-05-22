@@ -155,12 +155,10 @@ onMounted(() => {
     },
     after: () => {
       vditor?.focus();
-      setupAudioButtons();
       emit('ready');
     },
     input: () => {
       dirty.value = true;
-      requestAnimationFrame(setupAudioButtons);
     },
   });
 });
@@ -169,79 +167,6 @@ onBeforeUnmount(() => {
   vditor?.destroy();
   vditor = null;
 });
-
-// ── 编辑器内音频链接：插入播放按钮 ──
-let editorAudio: HTMLAudioElement | null = null;
-let editorPlayingBtn: HTMLElement | null = null;
-
-function setupAudioButtons() {
-  if (!editorRef.value) return;
-  const links = editorRef.value.querySelectorAll<HTMLElement>('span.vditor-ir__marker--link, a[href]');
-  links.forEach(el => {
-    let href = '';
-    if (el.tagName === 'A') {
-      href = el.getAttribute('href') || '';
-    } else {
-      href = el.textContent || '';
-    }
-    if (!/\.(webm|mp3|wav|ogg|m4a)$/i.test(href)) return;
-
-    const parent = el.closest('.vditor-ir__node') || el.parentElement;
-    if (!parent || parent.querySelector('.voice-play-btn')) return;
-
-    const btn = document.createElement('span');
-    btn.className = 'voice-play-btn';
-    btn.contentEditable = 'false';
-    btn.setAttribute('data-src', href);
-    btn.innerHTML = '▶';
-    btn.title = '播放语音';
-    (parent as HTMLElement).style.position = 'relative';
-    parent.appendChild(btn);
-
-    btn.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      const src = btn.getAttribute('data-src') || '';
-      if (!src) return;
-
-      if (editorPlayingBtn === btn && editorAudio && !editorAudio.paused) {
-        editorAudio.pause();
-        editorAudio.currentTime = 0;
-        btn.innerHTML = '▶';
-        btn.classList.remove('voice-play-btn--playing');
-        editorAudio = null;
-        editorPlayingBtn = null;
-        return;
-      }
-
-      if (editorAudio) {
-        editorAudio.pause();
-        editorAudio.currentTime = 0;
-        if (editorPlayingBtn) {
-          editorPlayingBtn.innerHTML = '▶';
-          editorPlayingBtn.classList.remove('voice-play-btn--playing');
-        }
-      }
-
-      const audio = new Audio(src);
-      editorAudio = audio;
-      editorPlayingBtn = btn;
-      btn.innerHTML = '⏸';
-      btn.classList.add('voice-play-btn--playing');
-
-      audio.addEventListener('ended', () => {
-        btn.innerHTML = '▶';
-        btn.classList.remove('voice-play-btn--playing');
-        editorAudio = null;
-        editorPlayingBtn = null;
-      });
-      audio.play().catch(() => {
-        btn.innerHTML = '▶';
-        btn.classList.remove('voice-play-btn--playing');
-      });
-    });
-  });
-}
 
 // ── Tab key to switch type ──
 function onKeydown(e: KeyboardEvent) {
@@ -497,10 +422,25 @@ async function toggleVoiceRecord() {
   }
 }
 
+// 选最佳录音格式: m4a (AAC) > ogg > webm. m4a 在 Win/Mac/iOS/Android 默认播放器都能播,微信能发
+function pickAudioMimeType(): { mime: string; baseMime: string; ext: string } {
+  const candidates = [
+    { mime: 'audio/mp4;codecs=mp4a.40.2', baseMime: 'audio/mp4',  ext: 'm4a'  },
+    { mime: 'audio/mp4',                  baseMime: 'audio/mp4',  ext: 'm4a'  },
+    { mime: 'audio/ogg;codecs=opus',      baseMime: 'audio/ogg',  ext: 'ogg'  },
+    { mime: 'audio/webm;codecs=opus',     baseMime: 'audio/webm', ext: 'webm' },
+  ];
+  for (const c of candidates) {
+    if (MediaRecorder.isTypeSupported(c.mime)) return c;
+  }
+  return { mime: '', baseMime: 'audio/webm', ext: 'webm' }; // 兜底:让浏览器自选
+}
+
 async function startVoiceRecord() {
   try {
     voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(voiceStream, { mimeType: 'audio/webm;codecs=opus' });
+    const picked = pickAudioMimeType();
+    mediaRecorder = new MediaRecorder(voiceStream, picked.mime ? { mimeType: picked.mime } : undefined);
     voiceChunks = [];
 
     mediaRecorder.ondataavailable = (e) => {
@@ -512,11 +452,11 @@ async function startVoiceRecord() {
       cleanupVoiceRecord();
       if (!voiceChunks.length) return;
 
-      const blob = new Blob(voiceChunks, { type: 'audio/webm' });
+      const blob = new Blob(voiceChunks, { type: picked.baseMime });
       voiceChunks = [];
       voiceUploading.value = true;
       try {
-        const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
+        const file = new File([blob], `voice-${Date.now()}.${picked.ext}`, { type: picked.baseMime });
         const res = await api.uploadFile(file, 'file');
         if (res.data?.url && vditor) {
           vditor.focus();
@@ -730,25 +670,6 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 <style>
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
-/* 编辑器内音频播放按钮 */
-.voice-play-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: rgb(var(--c-accent));
-  color: white;
-  font-size: 10px;
-  cursor: pointer;
-  user-select: none;
-  vertical-align: middle;
-  margin-left: 4px;
-  line-height: 1;
-}
-.voice-play-btn:hover { opacity: 0.8; }
-.voice-play-btn--playing { animation: voice-pulse 1s ease-in-out infinite; }
 /* Vditor theme overrides —— Vditor 把 .vditor class 合并到 .vditor-wrapper 上 */
 .vditor-wrapper {
   border: none !important;
@@ -859,5 +780,4 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 [data-theme="dark"] .vditor-wrapper .vditor-toolbar__item button:hover { color: #e2e8f0; background: rgba(255,255,255,0.08); }
 [data-theme="dark"] .vditor-wrapper .vditor-reset { color: #e2e8f0; }
 [data-theme="dark"] .vditor-wrapper .vditor-reset::before { color: rgba(255,255,255,0.25) !important; }
-[data-theme="dark"] .voice-play-btn { background: rgb(var(--c-accent)); }
 </style>

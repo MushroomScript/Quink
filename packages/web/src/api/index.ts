@@ -287,7 +287,11 @@ export const api = {
 
   async transcribe(audioBlob: Blob): Promise<{ data: { text: string } }> {
     const formData = new FormData();
-    formData.append('file', audioBlob, 'audio.webm');
+    // 推断后缀,让 Whisper API 拿到正确格式提示(server 端会用 blob.type 决定 Whisper 上传的 ext)
+    const ext = audioBlob.type.includes('mp4') ? 'm4a'
+              : audioBlob.type.includes('ogg') ? 'ogg'
+              : 'webm';
+    formData.append('file', audioBlob, `audio.${ext}`);
     const token = getToken();
     const res = await fetch('/api/ai/transcribe', {
       method: 'POST',

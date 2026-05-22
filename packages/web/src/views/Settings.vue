@@ -4,12 +4,13 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import { api } from '@/api';
-import { PhNotePencil } from '@phosphor-icons/vue';
 import { collapseLeave, snapshotCards } from '@/utils/cardLeave';
+import { useTheme } from '@/composables/useTheme';
 
 const router = useRouter();
 const auth = useAuthStore();
 const toast = useToast();
+const currentTheme = useTheme();
 
 const activeTab = ref('profile');
 const saving = ref(false);
@@ -308,6 +309,7 @@ async function savePreferences(silent = false) {
     localStorage.setItem('quink_theme', prefs.theme);
     try { (window as any).quinkDesktop?.syncTheme?.(prefs.theme); } catch {}
     document.documentElement.style.fontSize = prefs.fontSize + 'px';
+    localStorage.setItem('quink_font_size', String(prefs.fontSize));
     if (!silent) showMsg('已保存');
   } catch (err: any) {
     showMsg('保存失败: ' + err.message, 'error');
@@ -407,7 +409,7 @@ function goBack() {
 </script>
 
 <template>
-  <div class="px-4 md:px-8 py-8" @keydown="handleShortcutKeydown">
+  <div class="px-4 md:px-8 py-8 select-none" @keydown="handleShortcutKeydown">
     <!-- Tabs -->
     <div class="flex flex-wrap gap-1 border-b border-gray-200 mb-6">
       <button
@@ -506,9 +508,9 @@ function goBack() {
               { value: 'cloud', label: '云雾', color: '#8ca0b9' },
               { value: 'dark', label: '深色', color: '#1e1e2a' },
             ]" :key="t.value" @click="prefs.theme = t.value; applyTheme(t.value)"
-              class="flex flex-col items-center gap-1.5 p-2 rounded-xl border-2 transition-all"
-              :class="prefs.theme === t.value ? 'border-gray-800 bg-gray-50' : 'border-transparent hover:bg-gray-50'">
-              <div class="w-8 h-8 rounded-full shadow-sm border" :style="{ background: t.color, borderColor: t.value === 'dark' ? '#333' : t.color }"></div>
+              class="flex flex-col items-center gap-1.5 p-2 rounded-xl border-2 transition-all theme-pick-btn"
+              :class="prefs.theme === t.value ? 'theme-pick-selected border-gray-800 bg-gray-50 ring-2 ring-gray-300 ring-offset-1' : 'border-transparent hover:bg-gray-50'">
+              <img :src="`/quink-${t.value}-192.png`" :alt="t.label" class="w-8 h-8" draggable="false" />
               <span class="text-[11px] text-gray-600">{{ t.label }}</span>
             </button>
           </div>
@@ -842,9 +844,7 @@ function goBack() {
     <div v-if="activeTab === 'about'">
       <div class="bg-white rounded-xl border border-gray-200 p-8 max-w-md mx-auto">
         <div class="text-center mb-6">
-          <div class="w-16 h-16 rounded-2xl mx-auto mb-3 flex items-center justify-center" style="background: rgb(var(--c-accent-light)); color: rgb(var(--c-accent-dark))">
-            <PhNotePencil size="2.25rem" weight="fill" />
-          </div>
+          <img :src="`/quink-${currentTheme}-192.png`" alt="Quink" class="w-16 h-16 mx-auto mb-3" />
           <h3 class="text-2xl font-bold" style="color: rgb(var(--c-accent-dark))">Quink</h3>
           <p class="text-gray-500 text-sm mt-1">一念 · Quick Think</p>
           <p class="text-xs text-gray-400 mt-1">v0.1.0</p>

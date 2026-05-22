@@ -12,6 +12,10 @@ import NoteEditModal from '@/components/NoteEditModal.vue';
 import GlobalToast from '@/components/GlobalToast.vue';
 import { PhMinus, PhSquare, PhX, PhXCircle, PhCaretLeft } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
+import { useTheme } from '@/composables/useTheme';
+import { useImagePreview } from '@/composables/useImagePreview';
+import ImagePreview from '@/components/ImagePreview.vue';
+import MediaContextMenu from '@/components/MediaContextMenu.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -23,6 +27,16 @@ const isElectron = !!(window as any).quinkDesktop?.isElectron;
 const desk = (window as any).quinkDesktop;
 const showMobileSidebar = ref(false);
 const appReady = ref(false);
+const currentTheme = useTheme();
+
+// 主题切换时同步换 favicon（含 .ico 和 .png 两条 link）
+watch(currentTheme, (t) => {
+  const links = document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]');
+  links.forEach((link) => {
+    if (link.type === 'image/png') link.href = `/quink-${t}-192.png`;
+    else link.href = `/favicon-${t}.ico`;
+  });
+}, { immediate: true });
 
 const editingNote = ref<Note | null>(null);
 const editFullscreen = ref(false);
@@ -154,17 +168,26 @@ function extractRefId(el: HTMLElement): string | null {
 function applyUserPreferences(user: any) {
   if (!user) return;
   const prefs = user.preferences || {};
-  const theme = prefs.theme || 'blueberry';
-  document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('quink_theme', theme);
-  const fontSize = prefs.fontSize || 16;
-  document.documentElement.style.fontSize = fontSize + 'px';
+  // 服务端可能返回不完整 preferences（慢启动 / 数据迁移等边缘 case），
+  // hard fallback 'blueberry' / 16 会覆盖 localStorage 里的正确值 → 用户感受"变默认"。
+  // 只在拿到明确值时才覆盖，缺失时保留 inline script 已经应用的本地缓存值。
+  if (prefs.theme) {
+    document.documentElement.setAttribute('data-theme', prefs.theme);
+    localStorage.setItem('quink_theme', prefs.theme);
+  }
+  if (prefs.fontSize) {
+    document.documentElement.style.fontSize = prefs.fontSize + 'px';
+    localStorage.setItem('quink_font_size', String(prefs.fontSize));
+  }
 }
 
 // HMR 友好：模块级保存上次挂的副作用，重 mount 时先清理旧的，避免 capture 阶段旧 handler
 // 抢先 stopImmediatePropagation 调用旧闭包里的 openRefPreview（操作旧响应式状态，新 UI 看不到预览）。
 let prevRefClickHandler: ((e: MouseEvent) => void) | null = null;
+let prevImgClickHandler: ((e: MouseEvent) => void) | null = null;
 let prevWindowOpen: typeof window.open | null = null;
+
+const { open: openImagePreview } = useImagePreview();
 
 onMounted(async () => {
   initAudioBubbleHandler();
@@ -175,7 +198,29 @@ onMounted(async () => {
 
   // 清理 HMR 残留
   if (prevRefClickHandler) document.removeEventListener('click', prevRefClickHandler, true);
+  if (prevImgClickHandler) document.removeEventListener('click', prevImgClickHandler, true);
   if (prevWindowOpen) window.open = prevWindowOpen;
+
+  // 全局拦截 note-content 内 img 单击 → 弹图片预览(同一笔记的所有图作为一组,可左右切换)
+  // 必须 capture + stopPropagation:否则 NoteCard 的 click handler 也会收到,误触发"进入详情"
+  const imgHandler = (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.tagName !== 'IMG') return;
+    const container = target.closest('.note-content');
+    if (!container) return;
+    const img = target as HTMLImageElement;
+    e.preventDefault();
+    e.stopPropagation();
+    const allImgs = Array.from(container.querySelectorAll('img')) as HTMLImageElement[];
+    const idx = allImgs.indexOf(img);
+    const images = allImgs.map(i => ({
+      url: i.src,
+      filename: i.alt || (i.src.split('/').pop() || 'image').split('?')[0],
+    }));
+    openImagePreview(images, idx);
+  };
+  document.addEventListener('click', imgHandler, true);
+  prevImgClickHandler = imgHandler;
 
   // 全局拦截引用链接单击 → 弹预览(不走路由,不打开新标签)
   const handler = (e: MouseEvent) => {
@@ -233,9 +278,12 @@ watch(() => auth.user, (user) => {
   <template v-else>
     <div class="flex flex-col h-full overflow-hidden">
       <!-- 自定义标题栏(仅 Electron) -->
-      <div v-if="isElectron" class="flex items-center justify-between h-9 px-4 shrink-0"
+      <div v-if="isElectron" class="flex items-center justify-between h-9 pl-3 pr-2 shrink-0"
         style="-webkit-app-region: drag; background: rgb(var(--c-sidebar))">
-        <span class="text-xs font-semibold" style="color: var(--sb-text)">Quink - 一念</span>
+        <div class="flex items-center gap-2">
+          <img :src="`/quink-${currentTheme}-192.png`" alt="" class="w-4 h-4" draggable="false" />
+          <span class="text-xs font-semibold" style="color: var(--sb-text)">Quink - 一念</span>
+        </div>
         <div class="flex items-center" style="-webkit-app-region: no-drag">
           <button @click="desk?.minimize()" class="w-10 h-9 flex items-center justify-center hover:bg-black/10 transition-colors" style="color: var(--sb-dim)">
             <PhMinus size="1rem" weight="bold" />
@@ -314,4 +362,10 @@ watch(() => auth.user, (user) => {
 
   <!-- 全局 Toast -->
   <GlobalToast />
+
+  <!-- 全局图片预览(单例,各 view 通过 useImagePreview composable open / close) -->
+  <ImagePreview />
+
+  <!-- 全局右键菜单:.note-content 内的图片 / 音频 a 标签右键下载 -->
+  <MediaContextMenu />
 </template>

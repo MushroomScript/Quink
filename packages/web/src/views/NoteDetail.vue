@@ -33,7 +33,8 @@ async function loadNote() {
     note.value = res.data;
     if (detailTitle) detailTitle.value = typeLabels[res.data.type] + '详情';
     try {
-      let md = res.data.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
+      // 历史污染清理: 旧版 RichEditor 的播放按钮 ▶/⏸ 被 Vditor 序列化进了 markdown,这里剥掉
+      let md = res.data.content.replace(/[▶⏸]/g, '').replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
       const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
       let html = await Vditor.md2html(processed, { cdn: '/vditor' } as any);
       html = injectRefLinkIcons(html);
@@ -57,7 +58,7 @@ watch(() => store.notes, () => {
     const updated = store.notes.find(n => n.id === note.value!.id);
     if (updated && updated.updatedAt !== note.value.updatedAt) {
       note.value = updated;
-      let md = updated.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
+      let md = updated.content.replace(/[▶⏸]/g, '').replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
       md = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
       Vditor.md2html(md, { cdn: '/vditor' } as any).then(html => { rendered.value = injectRefLinkIcons(html); });
     }

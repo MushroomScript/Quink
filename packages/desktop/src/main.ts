@@ -10,6 +10,7 @@ import {
   clipboard,
 } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { createTrayIcon } from './tray-icon';
 import { registerShortcut, unregisterAll, startHook, stopHook, onKeydown } from './shortcuts';
 
@@ -33,7 +34,21 @@ const DEFAULT_SHORTCUTS = {
 
 let currentShortcuts = { ...DEFAULT_SHORTCUTS };
 let nativeModuleRef: any = null;
+// 主题持久化到 userData/theme-cache.json,让启动时立即用上次主题创建 tray + mainWindow icon,
+// 否则要等 web 端 fetchMe + sync-theme IPC,首屏会看到默认 blueberry 闪一下再切到正确主题
 let currentTheme = 'blueberry';
+
+const themeCachePath = () => path.join(app.getPath('userData'), 'theme-cache.json');
+function readCachedTheme(): string {
+  try {
+    const obj = JSON.parse(fs.readFileSync(themeCachePath(), 'utf8'));
+    if (typeof obj?.theme === 'string') return obj.theme;
+  } catch {}
+  return 'blueberry';
+}
+function writeCachedTheme(theme: string) {
+  try { fs.writeFileSync(themeCachePath(), JSON.stringify({ theme })); } catch {}
+}
 
 // 每个主题的 body 背景色（跟 style.css 的 --c-body 一致），用于快捷窗口的原生背景色
 // 让 OS 显示窗口的瞬间，背景色已经跟即将渲染的内容一致，避免"主题切换后首次显示闪烁"
@@ -197,6 +212,7 @@ function createMainWindow() {
     minWidth: 1166,
     minHeight: 860,
     title: 'Quink - 一念',
+    icon: createTrayIcon(currentTheme),
     frame: false,
     show: false,
     webPreferences: {
@@ -421,7 +437,9 @@ function hideCaptureWindow() {
 //  系统托盘
 // ──────────────────────────────────
 function createTray() {
-  const icon = createTrayIcon();
+  // reload-shortcuts 会重新调 createTray 刷新快捷键标签，要先销毁旧的，否则托盘项堆积
+  if (tray && !tray.isDestroyed()) tray.destroy();
+  const icon = createTrayIcon(currentTheme);
   tray = new Tray(icon);
   tray.setToolTip('Quink - 一念');
 
@@ -535,6 +553,7 @@ ipcMain.on('sync-token', (_event, token: string | null) => {
 
 ipcMain.on('sync-theme', (_event, theme: string) => {
   currentTheme = theme;
+  writeCachedTheme(theme);
   // 销毁快捷窗口：下次按快捷键时重新创建，新窗口直接用新主题色，
   // 彻底避免 hidden 窗口 GPU paint cache 残留旧主题导致的闪烁
   if (captureWindow && !captureWindow.isDestroyed()) {
@@ -552,6 +571,14 @@ ipcMain.on('sync-theme', (_event, theme: string) => {
     ).catch(() => {});
     floatWindow.setBackgroundColor(THEME_BG[theme] || '#ffffff');
   }
+  // 主窗口任务栏图标用 setIcon（窗口不会重复注册，setIcon 在 Win11 上安全）
+  const themedIcon = createTrayIcon(theme);
+  if (!themedIcon.isEmpty() && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setIcon(themedIcon);
+  }
+  // 托盘：Win11 下 setImage 在某些场景会触发 NIM_DELETE+NIM_ADD 而非 NIM_MODIFY,
+  // 表现为每切一次主题托盘项 +1 → 直接销毁重建,createTray 内部已 destroy 旧 tray
+  createTray();
 });
 
 // 从主窗口的 localStorage 同步最新主题到主进程缓存（在创建快捷窗口前调用，
@@ -592,6 +619,8 @@ if (!gotLock) {
 }
 
 app.whenReady().then(() => {
+  // 必须在 createMainWindow / createTray 之前,这俩都用 currentTheme 决定图标
+  currentTheme = readCachedTheme();
   createMainWindow();
   // 不在启动时预创建 captureWindow：那时 currentTheme 还是默认值（mainWindow 还没 fetchMe），
   // 预创建会让窗口 backgroundColor 用错误主题，导致首次按快捷键时 OS 显示几帧"上次主题色"
@@ -611,6 +640,8 @@ app.whenReady().then(() => {
 app.on('will-quit', () => {
   stopHook();
   tryStopSelectionMonitor();
+  // 显式销毁托盘，避免某些 Windows 环境下应用退出后图标残留
+  if (tray && !tray.isDestroyed()) tray.destroy();
 });
 
 // ──────────────────────────────────

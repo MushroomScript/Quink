@@ -2,9 +2,11 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import { useTheme } from '@/composables/useTheme';
 
 const router = useRouter();
 const auth = useAuthStore();
+const currentTheme = useTheme();
 
 const isRegister = ref(false);
 const username = ref(localStorage.getItem('quink_last_username') || '');
@@ -41,7 +43,8 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
     <div class="absolute top-1/4 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none" style="background: rgb(var(--c-accent) / 0.15)"></div>
 
     <div class="w-full max-w-sm relative z-10">
-      <div class="text-center mb-8">
+      <div class="text-center mb-8 select-none">
+        <img :src="`/quink-${currentTheme}-192.png`" alt="Quink" class="w-20 h-20 mx-auto mb-4" draggable="false" />
         <h1 class="text-4xl font-bold tracking-tight" style="color: rgb(var(--c-accent))">Quink</h1>
         <p class="text-sm mt-2" style="color: var(--sb-dim)">一念 - 记录你的每一个闪念</p>
       </div>

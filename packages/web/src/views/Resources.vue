@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, provide, watch } from 'vue';
 import { api, isLoggedIn } from '@/api';
 import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
+import { useImagePreview } from '@/composables/useImagePreview';
 import {
   PhFolder,
   PhMusicNote,
@@ -9,10 +10,6 @@ import {
   PhFileText,
   PhFileZip,
   PhFile,
-  PhX,
-  PhDownloadSimple,
-  PhCaretLeft,
-  PhCaretRight,
 } from '@phosphor-icons/vue';
 
 interface FileItem {
@@ -31,87 +28,14 @@ provide('pageCount', pageCount);
 const loading = ref(true);
 const filter = ref('all');
 const confirmDeleteId = ref('');
-const previewImage = ref<FileItem | null>(null);
-const zoom = ref(1);
-const offset = ref({ x: 0, y: 0 });
-const dragging = ref(false);
 const imageFiles = computed(() => filtered.value.filter(isImage));
-// 用于区分"点击关闭"和"拖动后释放"：拖动过就别误关
-let dragStartX = 0;
-let dragStartY = 0;
-let dragMoved = false;
+const { open: openImagePreview } = useImagePreview();
 
-function resetView() { zoom.value = 1; offset.value = { x: 0, y: 0 }; }
-
-function openPreview(f: FileItem) {
-  previewImage.value = f;
-  resetView();
-}
-
-function closePreview() {
-  previewImage.value = null;
-  resetView();
-}
-
-function navigateImage(delta: number) {
-  if (!previewImage.value || imageFiles.value.length === 0) return;
-  const id = previewImage.value.id;
-  const idx = imageFiles.value.findIndex(x => x.id === id);
-  if (idx < 0) return;
-  const n = imageFiles.value.length;
-  // 取模兼容负数：往左到 -1 自动跳到末尾
-  const newIdx = ((idx + delta) % n + n) % n;
-  previewImage.value = imageFiles.value[newIdx];
-  resetView();
-}
-
-function handleWheel(e: WheelEvent) {
-  if (!previewImage.value) return;
-  e.preventDefault();
-  const step = 0.2;
-  const newZoom = Math.max(0.5, Math.min(4, zoom.value + (-Math.sign(e.deltaY) * step)));
-  // 缩小到 1x 及以下时重置平移，避免图片飞到边角
-  if (newZoom <= 1) offset.value = { x: 0, y: 0 };
-  zoom.value = newZoom;
-}
-
-function handleImageMouseDown(e: MouseEvent) {
-  if (zoom.value <= 1) return; // 只在放大态下启用拖动
-  e.preventDefault();
-  dragging.value = true;
-  dragMoved = false;
-  dragStartX = e.clientX - offset.value.x;
-  dragStartY = e.clientY - offset.value.y;
-  window.addEventListener('mousemove', handleImageMouseMove);
-  window.addEventListener('mouseup', handleImageMouseUp);
-}
-
-function handleImageMouseMove(e: MouseEvent) {
-  if (!dragging.value) return;
-  const nx = e.clientX - dragStartX;
-  const ny = e.clientY - dragStartY;
-  // 3px 阈值才算"拖动"：避免抖动误判
-  if (Math.abs(nx - offset.value.x) > 3 || Math.abs(ny - offset.value.y) > 3) dragMoved = true;
-  offset.value = { x: nx, y: ny };
-}
-
-function handleImageMouseUp() {
-  dragging.value = false;
-  window.removeEventListener('mousemove', handleImageMouseMove);
-  window.removeEventListener('mouseup', handleImageMouseUp);
-}
-
-function handleImageClick() {
-  // 刚拖完的释放也会触发 click：吞掉这次
-  if (dragMoved) { dragMoved = false; return; }
-  closePreview();
-}
-
-function handlePreviewKeydown(e: KeyboardEvent) {
-  if (!previewImage.value) return;
-  if (e.key === 'Escape') closePreview();
-  else if (e.key === 'ArrowLeft') navigateImage(-1);
-  else if (e.key === 'ArrowRight') navigateImage(1);
+// 点击 grid 内某张图 → 打开全屏预览（缩放 / 拖动 / 上下张切换 / 下载 / Esc 关闭 都由 ImagePreview 组件统一处理）
+function onImageClick(f: FileItem) {
+  const imgs = imageFiles.value.map(x => ({ url: x.url, filename: x.filename }));
+  const idx = imageFiles.value.findIndex(x => x.id === f.id);
+  openImagePreview(imgs, Math.max(0, idx));
 }
 
 const filters = [
@@ -178,11 +102,9 @@ function onRefresh() { load(); }
 onMounted(() => {
   load();
   window.addEventListener('quink-refresh', onRefresh);
-  window.addEventListener('keydown', handlePreviewKeydown);
 });
 onUnmounted(() => {
   window.removeEventListener('quink-refresh', onRefresh);
-  window.removeEventListener('keydown', handlePreviewKeydown);
 });
 </script>
 
@@ -221,7 +143,7 @@ onUnmounted(() => {
         <!-- Preview area -->
         <div class="h-32 bg-gray-50 flex items-center justify-center overflow-hidden">
           <!-- Image preview -->
-          <img v-if="isImage(f)" :src="f.url" :alt="f.filename" @click="openPreview(f)"
+          <img v-if="isImage(f)" :src="f.url" :alt="f.filename" @click="onImageClick(f)"
             class="w-full h-full object-cover cursor-zoom-in" />
           <!-- Audio player -->
           <div v-else-if="isAudio(f)" class="px-3 w-full">
@@ -266,52 +188,6 @@ onUnmounted(() => {
       </TransitionGroup>
     </template>
   </div>
-
-  <!-- 图片预览弹窗 -->
-  <Teleport to="body">
-    <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="opacity-0"
-      leave-active-class="transition duration-100 ease-in" leave-to-class="opacity-0">
-      <div v-if="previewImage" class="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 cursor-zoom-out"
-        @click="closePreview" @wheel="handleWheel">
-        <img :src="previewImage.url" :alt="previewImage.filename" draggable="false"
-          @mousedown="handleImageMouseDown" @click.stop="handleImageClick"
-          :style="{
-            transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
-            transition: dragging ? 'none' : 'transform 0.15s ease',
-            cursor: dragging ? 'grabbing' : (zoom > 1 ? 'grab' : 'zoom-out'),
-          }"
-          class="max-w-[92vw] max-h-[88vh] object-contain rounded-md shadow-2xl select-none" />
-        <!-- 上一张/下一张（只在图片 > 1 张时显示） -->
-        <button v-if="imageFiles.length > 1" @click.stop="navigateImage(-1)"
-          class="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
-          title="上一张 (←)">
-          <PhCaretLeft size="1.25rem" weight="bold" />
-        </button>
-        <button v-if="imageFiles.length > 1" @click.stop="navigateImage(1)"
-          class="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
-          title="下一张 (→)">
-          <PhCaretRight size="1.25rem" weight="bold" />
-        </button>
-        <!-- 关闭 -->
-        <button @click.stop="closePreview"
-          class="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
-          title="关闭 (Esc)">
-          <PhX size="1.125rem" weight="bold" />
-        </button>
-        <!-- 下载 -->
-        <a :href="previewImage.url" target="_blank" download @click.stop
-          class="absolute top-4 right-16 w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
-          title="下载">
-          <PhDownloadSimple size="1.125rem" weight="fill" />
-        </a>
-        <!-- 底部：文件名 + 缩放比例 -->
-        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 text-white text-xs bg-black/40 px-3 py-1 rounded-full max-w-[80vw] truncate inline-flex items-center gap-2">
-          <span class="truncate">{{ previewImage.filename }}</span>
-          <span v-if="zoom !== 1" class="opacity-70 tabular-nums shrink-0">{{ Math.round(zoom * 100) }}%</span>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
 
   <Teleport to="body">
     <Transition name="modal">

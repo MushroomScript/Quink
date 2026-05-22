@@ -4,7 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Quink - 一念</title>
-    <link rel="icon" type="image/svg+xml" href="/quink.svg" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/quink-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#748ffc" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -21,6 +23,15 @@
         document.documentElement.setAttribute('data-theme', theme);
         var BG = {blueberry:'#f4f5fc',lavender:'#f6f4fc',mint:'#f2fbf7',peach:'#fdf5f3',lemon:'#fcfaf0',cloud:'#f5f6f8',dark:'#131318'};
         document.documentElement.style.background = BG[theme] || '#f4f5fc';
+        // 字体大小同步走 localStorage，避免服务端断开 / preferences 不完整时 fontSize 变回 16px
+        var fontSize = localStorage.getItem('quink_font_size');
+        if (fontSize) document.documentElement.style.fontSize = fontSize + 'px';
+        // favicon 同步切到当前主题，避免启动瞬间标签页图标是默认 blueberry
+        var links = document.querySelectorAll('link[rel="icon"]');
+        links.forEach(function(link) {
+          if (link.type === 'image/png') link.href = '/quink-' + theme + '-192.png';
+          else link.href = '/favicon-' + theme + '.ico';
+        });
       })();
     </script>
     <div id="app"></div>
