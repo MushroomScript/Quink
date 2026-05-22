@@ -7,6 +7,9 @@ export const useNotesStore = defineStore('notes', () => {
   const loading = ref(false);
   const total = ref(0);
   const currentPage = ref(1);
+  // 每页拉多少条 = columnCount * 10 (view 通过 watch columnCount 同步过来)
+  // 默认 30 对应 3 列(最常见的桌面端 900-1400px)
+  const pageSize = ref(30);
   const searchQuery = ref('');
   const filterCategory = ref('');
   const filterType = ref('');
@@ -33,12 +36,23 @@ export const useNotesStore = defineStore('notes', () => {
     return groups;
   });
 
-  async function fetchNotes(extra?: { tag?: string; tags?: string; types?: string; dateFrom?: string; dateTo?: string }) {
+  // 记住上次 fetchNotes 的 extra 参数,loadMore 时复用(否则 tag 过滤后翻页会丢失过滤条件)
+  let lastExtra: { tag?: string; tags?: string; types?: string; dateFrom?: string; dateTo?: string } | undefined = undefined;
+
+  async function fetchNotes(
+    extra?: { tag?: string; tags?: string; types?: string; dateFrom?: string; dateTo?: string },
+    opts: { append?: boolean } = {}
+  ) {
+    // 非 append (首次/换 filter/换 view) → 重置到第 1 页
+    if (!opts.append) {
+      currentPage.value = 1;
+      lastExtra = extra;
+    }
     loading.value = true;
     try {
       const params: Record<string, string> = {
         page: String(currentPage.value),
-        limit: '50',
+        limit: String(pageSize.value),
       };
       if (searchQuery.value) params.search = searchQuery.value;
       if (filterCategory.value) params.category = filterCategory.value;
@@ -50,11 +64,26 @@ export const useNotesStore = defineStore('notes', () => {
       if (extra?.dateTo) params.dateTo = extra.dateTo;
 
       const res = await api.getNotes(params);
-      notes.value = res.data;
+      if (opts.append) {
+        // 去重:服务端分页边界可能有重叠,id 已存在的跳过
+        const existing = new Set(notes.value.map(n => n.id));
+        const newOnes = res.data.filter(n => !existing.has(n.id));
+        // 用 push() 追加到现有数组,不替换 ref —— 否则 TransitionGroup 把整个数组视为新引用,
+        // 重建所有 DOM 节点导致容器短暂塌缩,滚动位置回到顶部
+        notes.value.push(...newOnes);
+      } else {
+        notes.value = res.data;
+      }
       total.value = res.pagination.total;
     } finally {
       loading.value = false;
     }
+  }
+
+  async function loadMore() {
+    if (loading.value || notes.value.length >= total.value) return;
+    currentPage.value++;
+    await fetchNotes(lastExtra, { append: true });
   }
 
   async function createNote(content: string, type: string = 'note', tags?: string[]) {
@@ -143,6 +172,8 @@ export const useNotesStore = defineStore('notes', () => {
     loading,
     total,
     currentPage,
+    pageSize,
+    loadMore,
     searchQuery,
     filterCategory,
     filterType,

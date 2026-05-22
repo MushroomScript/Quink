@@ -6,11 +6,16 @@ import MobileInput from '@/components/MobileInput.vue';
 import NoteCard from '@/components/NoteCard.vue';
 import { PhNotePencil } from '@phosphor-icons/vue';
 import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
+import { useInfiniteScroll } from '@/composables/useInfiniteScroll';
+import { useMasonry } from '@/composables/useMasonry';
 
 defineOptions({ name: 'notes' });
 
 const store = useNotesStore();
 const isMobile = ref(window.innerWidth < 768);
+const sentinel = useInfiniteScroll(() => store.loadMore());
+const { columns, columnCount } = useMasonry(() => store.notes);
+watch(columnCount, (n) => { store.pageSize = n * 10; }, { immediate: true });
 
 onActivated(() => {
   const needRefresh = store.filterType !== 'snippet';
@@ -33,7 +38,8 @@ watch(() => store.notes.length, () => snapshotCards(), { flush: 'sync' });
       <NoteInput v-else default-type="snippet" />
     </div>
 
-    <div v-if="store.loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
+    <!-- 同 Inspiration.vue: 仅首次加载才整体显示 loading,避免 loadMore 时整列表 unmount → scrollTop 回顶 -->
+    <div v-if="store.loading && store.notes.length === 0" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <template v-else>
       <div v-if="store.notes.length === 0" class="text-center py-16">
@@ -43,9 +49,16 @@ watch(() => store.notes.length, () => snapshotCards(), { flush: 'sync' });
         <p class="text-gray-500 text-sm">暂无笔记</p>
       </div>
 
-      <TransitionGroup tag="div" class="notes-masonry" :css="false" @leave="fadeOutLeave">
-        <NoteCard v-for="note in store.notes" :key="note.id" :note="note" />
-      </TransitionGroup>
+      <div class="notes-masonry">
+        <TransitionGroup v-for="(col, ci) in columns" :key="ci" tag="div"
+          data-animated-list class="masonry-col" :css="false" @leave="fadeOutLeave">
+          <NoteCard v-for="note in col" :key="note.id" :note="note" />
+        </TransitionGroup>
+      </div>
+
+      <div ref="sentinel" v-if="store.notes.length < store.total" class="text-center py-6 text-xs text-gray-400">
+        {{ store.loading ? '加载中...' : '滚动加载更多' }}
+      </div>
     </template>
   </div>
 </template>
