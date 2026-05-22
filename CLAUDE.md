@@ -16,6 +16,7 @@
 - 根 `ICONS.md` — 图标系统约定（不自动加载，改图标时来读）
 - `packages/desktop/CLAUDE.md` — Electron 主进程坑（OS 窗口动画、快捷窗口防闪烁、IPC 契约等）
 - `packages/web/src/utils/CLAUDE.md` — 卡片列表 leave 动画体系（`cardLeave.ts` + TransitionGroup 多个坑）
+- `packages/web/src/composables/CLAUDE.md` — 瀑布流 + 无限滚动体系（`useMasonry` + `useInfiniteScroll`），含 column-count / computed-vs-ref / v-if-loading-unmount / scrollTop 调试 等坑
 
 **新增规则时的判断流程：**
 1. **多文件高频用** → 根 `CLAUDE.md`

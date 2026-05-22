@@ -1,13 +1,10 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 
-// vanilla 版 react-masonry-css 风格瀑布流:
-// - round-robin: 第 i 张 → i % N 列
-// - 第一行 [0, 1, 2] = 最新 3 张(按行排序,靠上越新)
-// - 列内 vertical stack(紧凑无空隙)
+// 瀑布流: N 个列,新卡片放到"当前累计估算高度最矮"的列,长期保持列高平衡.
+// (跟 react-masonry-css 的 i%N round-robin 不同,后者末尾列高差可达一屏)
 //
-// 关键: columns 用 ref + 增量 push,不用 computed!
-// 因为 computed 每次重算返回全新数组引用,TransitionGroup 把它当作"整体替换",
-// FLIP 算法跑一遍,滚动位置跳. 用 ref + 直接 mutation 让 Vue 只 diff 新增节点.
+// 配合 CSS: .notes-masonry { display: flex } + .masonry-col { flex-direction: column }
+// 跟 useInfiniteScroll + view 的 push 模式一起用,scrollTop 不跳.
 function getColumnCount(): number {
   const w = window.innerWidth;
   if (w >= 1800) return 5;
@@ -17,16 +14,47 @@ function getColumnCount(): number {
   return 1;
 }
 
+// 估算卡片渲染高度(像素).Note 类型字段假设: { content?, tags?, summary? }.
+// 不带类型约束让 useMasonry<T> 保持通用,这里对缺失字段按 0 处理.
+function estimateHeight(item: any): number {
+  const charsPerLine = 40; // 标准字号每行约 40 中文字符
+  const contentLen = (item?.content?.length || 0);
+  const lines = Math.min(Math.ceil(contentLen / charsPerLine), 4); // line-clamp-4
+  let h = 80;                              // 卡片框 + padding + 时间/类型行
+  h += lines * 22;                         // 内容文字
+  if (item?.summary) h += 28;              // summary 单独占一行
+  if (item?.tags?.length) h += 28;         // tags 一行
+  // 音频/图片等富媒体没估算进去,差异容忍范围内
+  return h;
+}
+
+function pickShortestCol(heights: number[]): number {
+  let minIdx = 0;
+  for (let i = 1; i < heights.length; i++) {
+    if (heights[i] < heights[minIdx]) minIdx = i;
+  }
+  return minIdx;
+}
+
 export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
   const columnCount = ref(getColumnCount());
   const columns = ref<T[][]>(Array.from({ length: columnCount.value }, () => []));
+  // 每列累计估算高度,用于选最矮列.普通数组(非 ref),仅在 watch 内 mutation,不需要响应式
+  const colHeights: number[] = new Array(columnCount.value).fill(0);
 
-  // 全量重建(首次 / 切 view / search / 屏幕宽度变化)
+  function resetColHeights(n: number) {
+    colHeights.length = 0;
+    for (let i = 0; i < n; i++) colHeights.push(0);
+  }
+
   function rebuild() {
     const n = columnCount.value;
     const cols: T[][] = Array.from({ length: n }, () => []);
-    getItems().forEach((item, i) => {
-      cols[i % n].push(item);
+    resetColHeights(n);
+    getItems().forEach((item) => {
+      const idx = pickShortestCol(colHeights);
+      cols[idx].push(item);
+      colHeights[idx] += estimateHeight(item);
     });
     columns.value = cols;
   }
@@ -45,7 +73,6 @@ export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
   });
   onBeforeUnmount(() => window.removeEventListener('resize', onResize));
 
-  // 跟踪上次状态用于区分"增量 append" vs "整体替换"
   let lastLength = 0;
   let lastFirstId: string | undefined;
 
@@ -53,20 +80,19 @@ export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
     const firstId = newItems[0]?.id;
     const shrunk = newItems.length < lastLength;
     const firstChanged = firstId !== lastFirstId;
-    // 数据缩了(删除/清空)或第一条变了(新建插入头/切 view) → 全量重建
     if (shrunk || firstChanged) {
+      // 全量重建(数据缩了/换 view/搜索)
       rebuild();
     } else if (newItems.length > lastLength) {
-      // loadMore 增量 append:push 到对应列(mutation,不替换 columns.value 引用,TransitionGroup 只 diff 新增节点)
-      const n = columnCount.value;
+      // loadMore 增量 append: 新卡片各自找最矮列,push 到 columns.value[col] mutation
       for (let i = lastLength; i < newItems.length; i++) {
-        const col = i % n;
-        if (columns.value[col]) {
-          (columns.value[col] as T[]).push(newItems[i]);
+        const idx = pickShortestCol(colHeights);
+        if (columns.value[idx]) {
+          (columns.value[idx] as T[]).push(newItems[i]);
+          colHeights[idx] += estimateHeight(newItems[i]);
         }
       }
     }
-    // length 不变 + first 不变 → 中间编辑,不动 columns
     lastLength = newItems.length;
     lastFirstId = firstId;
   }, { deep: true, immediate: true });
