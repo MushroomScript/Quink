@@ -63,7 +63,7 @@ echo       编译完成
 
 REM ---------- 4/4 启动 Electron ----------
 echo [4/4] 启动 Electron...
-start "Quink Desktop" cmd /c "cd /d %~dp0 && pnpm --filter @quink/desktop exec electron ."
+start "Quink Desktop" cmd /c "cd /d %~dp0 && pnpm --filter @quink/desktop exec electron . --remote-debugging-port=9222"
 
 echo.
 echo ============================================

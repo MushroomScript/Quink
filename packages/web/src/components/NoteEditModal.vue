@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useNotesStore } from '@/stores/notes';
 import RichEditor from './RichEditor.vue';
 import type { Note } from '@/api';
@@ -11,6 +11,7 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 const store = useNotesStore();
 const saving = ref(false);
 const editorRef = ref<InstanceType<typeof RichEditor>>();
+const modalCardRef = ref<HTMLElement>();
 const showConfirm = ref(false);
 
 // 内部 v-if，配合 Transition 实现 enter/leave 动画。
@@ -31,17 +32,41 @@ async function onSubmit(data: { html: string; type: string; tags: string[] }) {
   } finally { saving.value = false; }
 }
 
+function startClose() {
+  // 关闭瞬间用 cloneNode 把 vditor-wrapper 替换成静态 HTML 副本。
+  // 用 chrome-devtools-mcp + MutationObserver 实测的 root cause:
+  //   按 Esc 后 ~3ms 内 vditor.destroy() 就被触发(Vue Transition leave 期间 RichEditor
+  //   并没有像预期那样保留到动画完成,destroy 把 toolbar + content 两个子节点直接从
+  //   wrapper 里移除,然后剩下的 175ms 用户看到的就是 "空 wrapper + bottom bar 上移补位"
+  //   一起 fade out。lock height / visibility / GPU layer 都被 vditor 内部 setAttribute 覆盖。
+  // 偷天换日: clone 原 wrapper 当前 DOM 状态(含所有 style/class/子节点),replaceChild 让
+  // staticCopy 占据 DOM 位置,原 wrapper 变游离节点。vditor 内部 destroy 操作的是游离节点
+  // (不在 DOM 树),DOM 里的 staticCopy 是静态 HTML,modal fade 期间视觉完全稳定。
+  if (modalCardRef.value) {
+    const wrapper = modalCardRef.value.querySelector('.vditor-wrapper') as HTMLElement | null;
+    if (wrapper && wrapper.parentElement) {
+      const r = wrapper.getBoundingClientRect();
+      const staticCopy = wrapper.cloneNode(true) as HTMLElement;
+      staticCopy.style.height = r.height + 'px';
+      staticCopy.style.width = r.width + 'px';
+      staticCopy.style.flex = 'none';
+      wrapper.parentElement.replaceChild(staticCopy, wrapper);
+    }
+  }
+  showInner.value = false;
+}
+
 function tryClose() {
   if (editorRef.value?.isDirty) {
     showConfirm.value = true;
   } else {
-    showInner.value = false;
+    startClose();
   }
 }
 
 function confirmDiscard() {
   showConfirm.value = false;
-  showInner.value = false;
+  startClose();
 }
 
 function onAfterLeave() {
@@ -49,26 +74,36 @@ function onAfterLeave() {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    e.preventDefault();
-    if (showConfirm.value) {
-      showConfirm.value = false;
-    } else {
-      tryClose();
-    }
+  if (e.key !== 'Escape') return;
+  e.preventDefault();
+  // stopImmediatePropagation 拦截所有后续 listener(包括 document 上 NoteDetail / 列表页等
+  // 监听 Esc 做"退回上一层"的逻辑)。否则在详情页编辑时按 Esc,modal 关了又退到列表。
+  e.stopImmediatePropagation();
+  if (showConfirm.value) {
+    showConfirm.value = false;
+  } else {
+    tryClose();
   }
 }
+
+// document level + capture 阶段挂载: 比 NoteDetail.onKeydown 的 bubble 阶段更早执行,
+// 而且不依赖 focus 在 modal 内(focus 在 body 时事件也能被拦截)
+onMounted(() => { document.addEventListener('keydown', onKeydown, true); });
+onBeforeUnmount(() => { document.removeEventListener('keydown', onKeydown, true); });
 </script>
 
 <template>
   <Teleport to="body">
-    <Transition name="modal" @after-leave="onAfterLeave">
-    <div v-if="showInner" class="fixed inset-0 z-[100] flex items-center justify-center" @keydown="onKeydown">
+    <!-- 全屏打开走 modal-fade(无 scale): scale 动画期间 transform 会让内部 RichEditor 的
+         fixed inset-0 被困在小窗口尺寸里(transform 祖先成为 containing block),
+         看着像"小窗一闪过"。非全屏走 modal(有 scale,正常体验)。 -->
+    <Transition :name="initialFullscreen ? 'modal-fade' : 'modal'" @after-leave="onAfterLeave">
+    <div v-if="showInner" class="fixed inset-0 z-[100] flex items-center justify-center">
       <!-- Backdrop: 毛玻璃 -->
       <div class="absolute inset-0 bg-black/40 backdrop-blur-md" @click="tryClose" />
 
       <!-- Modal -->
-      <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col overflow-hidden ring-1 ring-black/5">
+      <div ref="modalCardRef" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col overflow-hidden ring-1 ring-black/5">
         <!-- Header -->
         <div class="flex items-center justify-between px-5 py-3 bg-gray-50/80">
           <span class="text-xs font-medium text-gray-500">编辑笔记</span>

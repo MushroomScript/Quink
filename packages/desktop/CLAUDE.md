@@ -78,4 +78,14 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 | `font-size-changed` | main → renderer (send) | 通知 Capture / AiChat renderer 更新 document fontSize（用户在主窗口改了字体） |
 | `open-attachment` | renderer → main (invoke) | 用系统默认应用打开附件 URL（fetch 到 OS 临时目录 → `shell.openPath`）。原因：直接让浏览器跟随 `<a href="/api/uploads/xxx.md">` 跳走时，Electron 内嵌 chromium 对 `text/markdown` 等 mime 显示空白页 |
 
+## chrome-devtools-mcp 调试 Electron
+
+Electron 启动时加 `--remote-debugging-port=9222`，Chrome DevTools Protocol 暴露在 `http://127.0.0.1:9222`。配合 `chrome-devtools-mcp` MCP server 可以让 Claude 直接操作 Electron 内的页面（evaluate_script / click / press_key / take_screenshot / 注入 MutationObserver 等）。
+
+**启动配置**：
+- `start-desktop.bat` 第 66 行的 electron 命令带 `--remote-debugging-port=9222`
+- `packages/desktop/package.json` 的 `dev` 脚本也带（备用，给走 `pnpm run dev:desktop` 的场景）
+
+**典型用途**：肉眼录屏看不清的视觉/layout 闪烁 bug（毫秒级 setAttribute / childList 变化）。流程是 evaluate_script 注入 MutationObserver 到目标元素 + 父级容器全树 → 触发动作 → 读 mutation log，精确到 1ms 看哪个元素什么属性被改了。范例：定位 `NoteEditModal` 关闭闪烁 root cause（vditor.destroy 在 leave 动画期间 3ms 内就触发完成）。详见 `RENDERING-PITFALLS.md` "动画" 段的对应坑。
+
 改 IPC 时三处都要同步：`main.ts` 的 `ipcMain.on/once`、`preload.ts` 的 `exposeInMainWorld`、web 端调用 `(window as any).quink?.xxx`。

@@ -272,14 +272,26 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
 .modal-leave-to {
   opacity: 0;
 }
-.modal-enter-active > .relative,
-.modal-leave-active > .relative {
+/* enter 用 scale 0.95 → 1(小到大,打开时柔和入场)。
+   leave 不带 scale: 期间 transform 会让 fixed 子元素 containing block 变成 .relative,
+   困住 fixed 全屏元素(NoteEditModal 全屏编辑那个 bug) */
+.modal-enter-active > .relative {
   transition: transform 0.18s ease-out;
 }
-.modal-enter-from > .relative,
-.modal-leave-to > .relative {
+.modal-enter-from > .relative {
   transform: scale(0.95);
 }
+
+
+/* 编辑模态全屏打开时用的过渡: 只 fade,不 scale。
+   原因: scale 动画期间 .relative 容器一直有 transform,导致内部 RichEditor 的
+   fixed inset-0 不再相对 viewport(CSS 规范: transform 祖先成为 fixed 子元素的
+   containing block),fixed 被困在小窗口尺寸里,产生"小窗一闪而过"的视觉 bug。
+   非全屏场景不受影响(本来就在小窗口内,scale 动画正常)。 */
+.modal-fade-enter-active,
+.modal-fade-leave-active { transition: opacity 0.18s ease-out; }
+.modal-fade-enter-from,
+.modal-fade-leave-to { opacity: 0; }
 
 /* 引用笔记链接:紧凑标签样式 */
 .note-ref-link {
