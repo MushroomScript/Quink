@@ -13,6 +13,7 @@ import GlobalToast from '@/components/GlobalToast.vue';
 import { PhMinus, PhSquare, PhX, PhXCircle, PhCaretLeft } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { useTheme } from '@/composables/useTheme';
+import { useToast } from '@/composables/useToast';
 import { useImagePreview } from '@/composables/useImagePreview';
 import ImagePreview from '@/components/ImagePreview.vue';
 import MediaContextMenu from '@/components/MediaContextMenu.vue';
@@ -28,6 +29,24 @@ const desk = (window as any).quinkDesktop;
 const showMobileSidebar = ref(false);
 const appReady = ref(false);
 const currentTheme = useTheme();
+const { show: showToast } = useToast();
+
+// 附件下载进度: main 进程推送 progress 时用 URL 匹配当前下载的附件,更新 toast 文案
+let currentAttachment: { url: string; filename: string } | null = null;
+function formatBytes(b: number): string {
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
+  return (b / 1024 / 1024).toFixed(1) + ' MB';
+}
+desk?.onAttachmentProgress?.((data) => {
+  if (!currentAttachment || data.url !== currentAttachment.url) return;
+  const recv = formatBytes(data.received);
+  const tail = data.total
+    ? `${Math.round(data.received / data.total * 100)}% (${recv} / ${formatBytes(data.total)})`
+    : recv;
+  // 30s duration 兜底,实际由后续 progress / 成功 / 失败 toast 覆盖
+  showToast(`正在打开 ${currentAttachment.filename}... ${tail}`, 'default', 30000);
+});
 
 // 主题切换时同步换 favicon（含 .ico 和 .png 两条 link）
 watch(currentTheme, (t) => {
@@ -223,7 +242,9 @@ onMounted(async () => {
   prevImgClickHandler = imgHandler;
 
   // 全局拦截引用链接单击 → 弹预览(不走路由,不打开新标签)
-  const handler = (e: MouseEvent) => {
+  // 同时拦截 /api/uploads/* 附件链接 → 桌面端调系统默认应用打开,web 端走浏览器下载。
+  // 否则浏览器跟随 a.href 跳走,Electron 内嵌 chromium 对 text/markdown 等 mime 显示空白页。
+  const handler = async (e: MouseEvent) => {
     if ((e.target as HTMLElement).closest?.('.voice-bubble')) return;
     const el = (e.target as HTMLElement).closest?.('a, .note-ref-link') as HTMLElement | null;
     if (!el) return;
@@ -232,6 +253,36 @@ onMounted(async () => {
       e.preventDefault();
       e.stopImmediatePropagation();
       openRefPreview(refId);
+      return;
+    }
+    // 附件链接: 图片/音频已有专门处理(imgHandler / voice-bubble),这里只接其他文件类型
+    const href = el.getAttribute('href') || '';
+    if (href.includes('/api/uploads/') && !/\.(png|jpg|jpeg|gif|webp|svg|webm|mp3|wav|ogg|m4a)$/i.test(href)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const fullUrl = new URL(href, location.origin).toString();
+      const filename = decodeURIComponent(href.split('/').pop() || '附件');
+      if (desk?.openAttachment) {
+        // currentAttachment 让上面的 progress 监听知道当前显示哪个附件的进度
+        // main 进程会推 attachment-progress 事件,每 100ms 一次,自动更新 toast 文案
+        currentAttachment = { url: fullUrl, filename };
+        showToast(`正在打开 ${filename}...`, 'default', 30000);
+        const result = await desk.openAttachment(fullUrl);
+        currentAttachment = null;
+        if (result?.success) {
+          showToast(`已打开 ${filename}`, 'success', 1200);
+        } else {
+          showToast(`打开失败: ${result?.error || '未知错误'}`, 'error', 3000);
+        }
+      } else {
+        // Web 端 fallback: 用 a.download 触发浏览器原生下载
+        const link = document.createElement('a');
+        link.href = href;
+        link.download = '';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
     }
   };
   document.addEventListener('click', handler, true);

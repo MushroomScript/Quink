@@ -11,6 +11,7 @@ import {
 } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { createTrayIcon } from './tray-icon';
 import { registerShortcut, unregisterAll, startHook, stopHook, onKeydown } from './shortcuts';
 
@@ -508,6 +509,88 @@ ipcMain.handle('save-note', async (_event, content: string, type: string) => {
   } catch (err: any) {
     return { success: false, error: err.message };
   }
+});
+
+// 点击笔记里的附件链接(/api/uploads/xxx.md 等)时,fetch 文件到 OS 临时目录 +
+// shell.openPath 用系统默认应用打开。原始的"a.href 浏览器跳转"在 Electron 内嵌
+// chromium 下对 text/markdown 等 mime 显示空白页,所以 web 端拦截后转发到这里。
+//
+// 两层去重: inflight map(同一 URL 并发只跑一次 fetch) + cache map(下载过的二次点击秒开)
+const attachmentInflight = new Map<string, Promise<{ success: boolean; error?: string }>>();
+const attachmentCache = new Map<string, string>(); // URL → 本地临时路径
+
+// 15 秒没新 chunk 视为下载停滞,abort fetch 让用户看到错误而非永远转圈
+const ATTACHMENT_STALL_MS = 15000;
+// 推送进度的最小间隔(throttle),避免每个 chunk 都 IPC + 触发 Vue reactive 造成 toast 闪烁
+const PROGRESS_THROTTLE_MS = 100;
+
+ipcMain.handle('open-attachment', async (event, url: string) => {
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
+  if (attachmentInflight.has(fullUrl)) return attachmentInflight.get(fullUrl)!;
+
+  const task = (async () => {
+    let stallChecker: NodeJS.Timeout | null = null;
+    const sender = event.sender;
+    try {
+      // 缓存命中: 文件还在临时目录就直接 openPath, 跳过 fetch
+      const cached = attachmentCache.get(fullUrl);
+      if (cached && fs.existsSync(cached)) {
+        const err = await shell.openPath(cached);
+        if (err) throw new Error(err);
+        return { success: true };
+      }
+
+      const controller = new AbortController();
+      let lastProgressAt = Date.now();
+      let lastEmitAt = 0;
+      stallChecker = setInterval(() => {
+        if (Date.now() - lastProgressAt > ATTACHMENT_STALL_MS) controller.abort();
+      }, 1000);
+
+      const res = await fetch(fullUrl, { signal: controller.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const total = parseInt(res.headers.get('content-length') || '0', 10) || 0;
+      const reader = res.body!.getReader();
+      const chunks: Uint8Array[] = [];
+      let received = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        lastProgressAt = Date.now();
+        if (lastProgressAt - lastEmitAt > PROGRESS_THROTTLE_MS && !sender.isDestroyed()) {
+          lastEmitAt = lastProgressAt;
+          sender.send('attachment-progress', { url: fullUrl, received, total });
+        }
+      }
+      // 最终 100% 状态推一次(throttle 可能丢了最后一帧)
+      if (!sender.isDestroyed()) {
+        sender.send('attachment-progress', { url: fullUrl, received, total: total || received });
+      }
+
+      const buffer = Buffer.concat(chunks);
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'quink-attachment-'));
+      const filename = decodeURIComponent(path.basename(new URL(fullUrl).pathname));
+      const filePath = path.join(tmpDir, filename);
+      fs.writeFileSync(filePath, buffer);
+      attachmentCache.set(fullUrl, filePath);
+      const err = await shell.openPath(filePath);
+      if (err) throw new Error(err);
+      return { success: true };
+    } catch (e: any) {
+      // AbortError → stall 超时,转成友好提示
+      if (e?.name === 'AbortError' || /abort/i.test(e?.message || '')) {
+        return { success: false, error: `下载停滞(${ATTACHMENT_STALL_MS / 1000} 秒无响应)` };
+      }
+      return { success: false, error: e?.message || String(e) };
+    } finally {
+      if (stallChecker) clearInterval(stallChecker);
+      attachmentInflight.delete(fullUrl);
+    }
+  })();
+  attachmentInflight.set(fullUrl, task);
+  return task;
 });
 
 ipcMain.on('hide-window', (_event) => {

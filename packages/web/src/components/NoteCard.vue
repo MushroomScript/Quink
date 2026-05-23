@@ -25,8 +25,26 @@ const store = useNotesStore();
 const router = useRouter();
 const openEditModal = inject<(note: Note) => void>('openEditModal');
 
+// 拖动检测: mousedown 时记录起点和时间, click 触发时跟 e.clientX/Y 比较
+// 距离 > 5px 或 按住 > 500ms → 拖动(选字 / 长按), 跳过进详情
+const DRAG_DISTANCE_THRESHOLD = 5;
+const DRAG_TIME_THRESHOLD = 500;
+let mouseDownX = 0;
+let mouseDownY = 0;
+let mouseDownAt = 0;
+function onMouseDown(e: MouseEvent) {
+  mouseDownX = e.clientX;
+  mouseDownY = e.clientY;
+  mouseDownAt = Date.now();
+}
+
 function handleClick(e: MouseEvent) {
   if ((e.target as HTMLElement).closest?.('.voice-bubble')) return;
+  // 拖动/长按检测放最前: 这种 click 直接 return, 不走任何分支(包括 Ctrl+点击)
+  const dx = Math.abs(e.clientX - mouseDownX);
+  const dy = Math.abs(e.clientY - mouseDownY);
+  const dt = Date.now() - mouseDownAt;
+  if (dx > DRAG_DISTANCE_THRESHOLD || dy > DRAG_DISTANCE_THRESHOLD || dt > DRAG_TIME_THRESHOLD) return;
   if (e.ctrlKey || e.metaKey) {
     // Ctrl+点击引用标签 → 跳转详情
     const ref = (e.target as HTMLElement).closest('.note-ref-link');
@@ -48,6 +66,8 @@ function handleClick(e: MouseEvent) {
     store.toggleSelect(props.note.id);
     return;
   }
+  // 点击卡片内的 a 标签 → 走链接自身处理(引用预览 / 附件打开 / 外部网址),不进详情
+  if ((e.target as HTMLElement).closest?.('a')) return;
   router.push(`/note/${props.note.id}`);
 }
 const showMenu = ref(false);
@@ -126,7 +146,7 @@ const typeColor: Record<string, string> = {
 <template>
   <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group relative"
     :class="{ 'ring-2 ring-primary/50': note.pinned, 'ring-2 ring-primary': store.selectedIds.has(note.id) }">
-    <div class="px-3 py-2.5 md:px-4 md:py-3 cursor-pointer" @click="handleClick">
+    <div class="px-3 py-2.5 md:px-4 md:py-3 cursor-pointer" @click="handleClick" @mousedown="onMouseDown">
       <div class="flex items-center gap-2 mb-2">
         <!-- Checkbox (visible in select mode or when selected) -->
         <div v-if="store.selectMode"

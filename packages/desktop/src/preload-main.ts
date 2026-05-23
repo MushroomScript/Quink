@@ -9,5 +9,13 @@ contextBridge.exposeInMainWorld('quinkDesktop', {
   minimize: () => ipcRenderer.send('win-minimize'),
   maximize: () => ipcRenderer.send('win-maximize'),
   close: () => ipcRenderer.send('win-close'),
+  // 用系统默认应用打开附件 URL(fetch 到临时目录 → shell.openPath)
+  openAttachment: (url: string) => ipcRenderer.invoke('open-attachment', url),
+  // 订阅附件下载进度: main 流式 fetch 时每 100ms 推一次 { url, received, total }
+  // removeAllListeners 防止 HMR 重 mount 时累积 listener
+  onAttachmentProgress: (cb: (data: { url: string; received: number; total: number }) => void) => {
+    ipcRenderer.removeAllListeners('attachment-progress');
+    ipcRenderer.on('attachment-progress', (_e, data) => cb(data));
+  },
   isElectron: true,
 });

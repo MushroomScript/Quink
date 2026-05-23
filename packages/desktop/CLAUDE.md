@@ -76,5 +76,6 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 | `window-shown` | main → renderer (send) | 通知 renderer 窗口刚显示（用于聚焦输入框、同步主题等） |
 | `window-hidden` | main → renderer (send) | 通知 renderer 窗口被隐藏 |
 | `font-size-changed` | main → renderer (send) | 通知 Capture / AiChat renderer 更新 document fontSize（用户在主窗口改了字体） |
+| `open-attachment` | renderer → main (invoke) | 用系统默认应用打开附件 URL（fetch 到 OS 临时目录 → `shell.openPath`）。原因：直接让浏览器跟随 `<a href="/api/uploads/xxx.md">` 跳走时，Electron 内嵌 chromium 对 `text/markdown` 等 mime 显示空白页 |
 
 改 IPC 时三处都要同步：`main.ts` 的 `ipcMain.on/once`、`preload.ts` 的 `exposeInMainWorld`、web 端调用 `(window as any).quink?.xxx`。
