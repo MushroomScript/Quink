@@ -137,6 +137,10 @@ onUnmounted(() => {
   align-items: center !important;
   justify-content: center !important;
   line-height: 1 !important;
+  /* 跟 type 按钮(灵感/笔记/待办)同高: type 是 padding 0.25rem*2 + line-height 1rem = 1.5rem,
+     保存按钮 line-height: 1 让 line-box = font-size 0.8125rem 小一些,
+     用 min-height 1.5rem 拉高对齐,flex 仍然让字符居中 */
+  min-height: 1.5rem !important;
 }
 .capture-drag .bg-gray-50.border-t .rounded-md {
   padding-top: 0.25rem !important;
@@ -155,11 +159,15 @@ onUnmounted(() => {
   align-items: center !important;
   justify-content: center !important;
   line-height: 1 !important;
+  /* 同保存按钮:跟 type 按钮同高 */
+  min-height: 1.5rem !important;
 }
-/* 12px 字号下中文字形视觉重心偏下明显(其他字号下抗锯齿能掩盖),
-   单独给 root[data-font-size="12"] 范围内的"保存/停止"按钮加上下不对称 padding 让字符上移 1px */
+/* 12px / 16px 字号下中文字形视觉重心偏下明显(其他字号下抗锯齿能掩盖),
+   单独加上下不对称 padding 让字符上移 1px */
 [data-font-size="12"] .capture-drag .bg-gray-50.border-t .bg-primary,
-[data-font-size="12"] .capture-drag .voice-stop-btn {
+[data-font-size="12"] .capture-drag .voice-stop-btn,
+[data-font-size="16"] .capture-drag .bg-gray-50.border-t .bg-primary,
+[data-font-size="16"] .capture-drag .voice-stop-btn {
   padding-top: calc(0.25rem - 1px) !important;
   padding-bottom: calc(0.25rem + 1px) !important;
 }
