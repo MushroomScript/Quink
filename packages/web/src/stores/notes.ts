@@ -95,8 +95,12 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function updateNote(id: string, data: Partial<Note>) {
     const res = await api.updateNote(id, data);
-    const idx = notes.value.findIndex((n) => n.id === id);
-    if (idx !== -1) notes.value[idx] = res.data;
+    // mutate 字段而非替换引用: useMasonry 的 columns 里存的是 notes 元素引用,
+    // 用 notes.value[idx] = newObj 替换数组元素,columns 里的旧引用还指向旧对象,
+    // NoteCard.props.note 不会感知到内容变化(典型症状: 三点菜单"编辑"保存后列表不刷新)。
+    // Object.assign 保持引用同时更新字段,columns / NoteDetail / 任何持有该 ref 的地方都收到响应式更新。
+    const note = notes.value.find((n) => n.id === id);
+    if (note) Object.assign(note, res.data);
     return res.data;
   }
 

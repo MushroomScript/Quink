@@ -91,6 +91,7 @@ function onKeydown(e: KeyboardEvent) {
             :initial-type="note.type"
             :initial-tags="note.tags || []"
             :initial-fullscreen="initialFullscreen"
+            :focus-end="true"
             :max-height="450"
             submit-label="保存"
             :z-index="110"

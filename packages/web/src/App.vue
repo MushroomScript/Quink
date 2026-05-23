@@ -57,11 +57,18 @@ watch(currentTheme, (t) => {
   });
 }, { immediate: true });
 
+// 编辑模态: 列表三点菜单 / 详情页编辑按钮 / 引用预览编辑 都走这个统一入口
+// fullscreen 偏好持久化到 localStorage(由 RichEditor 的 toggleFullscreen 写入),
+// 下次打开默认沿用上次状态。调用方不传 fullscreen 参数就走 localStorage 偏好。
 const editingNote = ref<Note | null>(null);
 const editFullscreen = ref(false);
-function openEditModal(note: Note, fullscreen = false) {
+function openEditModal(note: Note, fullscreen?: boolean) {
   editingNote.value = note;
-  editFullscreen.value = fullscreen;
+  if (fullscreen !== undefined) {
+    editFullscreen.value = fullscreen;
+  } else {
+    editFullscreen.value = localStorage.getItem('quink_edit_fullscreen') === '1';
+  }
 }
 function closeEditModal() { editingNote.value = null; editFullscreen.value = false; }
 provide('openEditModal', openEditModal);

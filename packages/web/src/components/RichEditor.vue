@@ -25,6 +25,7 @@ const props = withDefaults(defineProps<{
   initialType?: string;
   initialTags?: string[];
   initialFullscreen?: boolean;
+  focusEnd?: boolean;
   placeholder?: string;
   showTypeSelector?: boolean;
   submitLabel?: string;
@@ -39,6 +40,7 @@ const props = withDefaults(defineProps<{
   initialType: 'note',
   initialTags: () => [],
   initialFullscreen: false,
+  focusEnd: false,
   placeholder: '写下你的想法...',
   showTypeSelector: true,
   submitLabel: '保存',
@@ -51,7 +53,11 @@ const props = withDefaults(defineProps<{
 });
 
 const isFullscreen = ref(props.initialFullscreen);
-function toggleFullscreen() { isFullscreen.value = !isFullscreen.value; }
+function toggleFullscreen() {
+  isFullscreen.value = !isFullscreen.value;
+  // 持久化偏好,让 NoteEditModal 下次从列表/详情页打开时默认用这个状态
+  try { localStorage.setItem('quink_edit_fullscreen', isFullscreen.value ? '1' : '0'); } catch {}
+}
 
 const emit = defineEmits<{
   (e: 'submit', data: { html: string; type: string; tags: string[] }): void;
@@ -195,6 +201,22 @@ onMounted(() => {
     },
     after: () => {
       vditor?.focus();
+      // focusEnd: 再次编辑场景(NoteEditModal),光标定位到末尾让用户接着写
+      // 用 Range.selectNodeContents + collapse(false) 直接操作 DOM range,
+      // Vditor 内部 selection 跟 DOM selection 共用,会自动 sync
+      if (props.focusEnd) {
+        setTimeout(() => {
+          const contentEl = editorRef.value?.querySelector('.vditor-ir .vditor-reset') as HTMLElement | null;
+          if (!contentEl) return;
+          const range = document.createRange();
+          range.selectNodeContents(contentEl);
+          range.collapse(false);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+          contentEl.scrollTop = contentEl.scrollHeight;
+        }, 50);
+      }
       emit('ready');
       // Vditor 加载完后才有 toolbar DOM,这时给 wrapper 绑事件委托
       // (mouseover bubble 上来,closest 找 .vditor-tooltipped 按钮)

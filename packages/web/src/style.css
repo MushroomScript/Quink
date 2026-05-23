@@ -223,6 +223,15 @@
 [data-theme="dark"] .note-content blockquote { border-left-color: rgba(255,255,255,0.15); color: #94a3b8; }
 .note-content ul, .note-content ol { padding-left: 1.5em; }
 .note-content input[type="checkbox"] { margin-right: 0.5em; }
+/* Tailwind preflight 把 ol/ul 的 list-style 重置成 none。vditor.css 给 .vditor-reset ul 补了 disc 但漏了 ol。
+   .note-content 同理(只设了 padding,没 list-style-type)。这里两边都补上,显示数字 / 圆点。 */
+.note-content ol, .vditor-reset ol { list-style-type: decimal; }
+.note-content ul, .vditor-reset ul { list-style-type: disc; }
+/* 任务列表(.vditor-task)单独覆盖回 none,跟 vditor.css 第 1083 行的 !important 保持一致 */
+.vditor-reset ul.vditor-task { list-style: none; }
+/* 详情页 task checkbox 可点击 toggle: hover 时边框加深告诉用户可点 */
+.note-detail-content .vditor-task input[type="checkbox"] { cursor: pointer; }
+.note-detail-content .vditor-task input[type="checkbox"]:hover { border-color: rgb(var(--c-accent-dark)); transform: scale(1.1); transition: all 0.15s ease; }
 
 /* Prevent text selection on UI elements */
 button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webkit-user-select: none; }
@@ -403,13 +412,20 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
   margin-right: 4px;
   flex-shrink: 0;
 }
+/* :checked 在 Vue v-html 注入的 static input[checked] 上有时不触发(:checked 走 DOM 状态,
+   而 v-html 注入的 input 的 DOM checked 属性可能没被浏览器正确同步)。
+   补 [checked] attribute selector 作为 backup,确保 markdown 任务列表的对勾稳定显示。 */
 .vditor-reset input[type="checkbox"]:checked,
-.note-content input[type="checkbox"]:checked {
+.vditor-reset input[type="checkbox"][checked],
+.note-content input[type="checkbox"]:checked,
+.note-content input[type="checkbox"][checked] {
   background: rgb(var(--c-accent));
   border-color: rgb(var(--c-accent));
 }
 .vditor-reset input[type="checkbox"]:checked::after,
-.note-content input[type="checkbox"]:checked::after {
+.vditor-reset input[type="checkbox"][checked]::after,
+.note-content input[type="checkbox"]:checked::after,
+.note-content input[type="checkbox"][checked]::after {
   content: '';
   position: absolute;
   left: 3px;
