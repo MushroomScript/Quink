@@ -556,13 +556,8 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
     <div ref="editorRef" class="vditor-wrapper"
       :style="isFullscreen ? { flex: '1 1 auto', minHeight: 0 } : { '--editor-max': maxHeight + 'px', minHeight: minHeight + 'px' }"></div>
 
-    <!-- 语音识别实时预览 -->
-    <div v-if="isRecording || iatLiveText" class="flex items-center gap-2 px-3 py-1.5" style="background: rgba(var(--c-accent), 0.06)">
-      <span class="w-1.5 h-1.5 rounded-full animate-pulse shrink-0" style="background: rgb(var(--c-accent))"></span>
-      <span ref="liveTextEl" class="text-sm flex-1 min-w-0 overflow-x-auto whitespace-nowrap scrollbar-hide" style="color: rgb(var(--c-accent-dark))">{{ iatLiveText || '正在聆听...' }}</span>
-    </div>
-
-    <!-- AI buttons + bottom bar -->
+    <!-- AI buttons + bottom bar (录音时 absolute overlay 浮层覆盖此行,不占额外高度) -->
+    <div class="relative">
     <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-t border-gray-100 select-none">
       <div class="flex items-center gap-2">
         <!-- Type selector -->
@@ -640,6 +635,20 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
           </button>
         </slot>
       </div>
+    </div>
+
+    <!-- 录音中浮层覆盖按钮 row,absolute inset-0 不占额外高度 -->
+    <!-- voice-overlay / voice-time / voice-stop-btn class 给 Capture.vue 压缩用 -->
+    <div v-if="isRecording || iatLiveText"
+         class="voice-overlay absolute inset-0 flex items-center gap-2 px-3 py-2 border-t border-gray-100"
+         style="background: rgb(var(--c-accent-light))">
+      <span class="w-1.5 h-1.5 rounded-full animate-pulse shrink-0" style="background: rgb(var(--c-accent))"></span>
+      <span ref="liveTextEl" class="voice-live-text text-sm flex-1 min-w-0 overflow-x-auto whitespace-nowrap scrollbar-hide" style="color: rgb(var(--c-accent-dark))">{{ iatLiveText || '正在聆听...' }}</span>
+      <span class="voice-time text-xs font-medium tabular-nums select-none shrink-0" style="color: rgb(var(--c-accent-dark))">{{ recordingTime }}s</span>
+      <button @click="toggleRecording" class="voice-stop-btn px-4 py-1.5 bg-red-100 text-red-600 text-xs font-medium rounded-lg hover:bg-red-200 shrink-0 transition-colors" title="停止录音">
+        停止
+      </button>
+    </div>
     </div>
 
     <!-- AI Panel -->

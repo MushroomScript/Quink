@@ -7,6 +7,9 @@ import { PhSparkle, PhStop, PhPaperPlaneTilt } from '@phosphor-icons/vue';
 
 // setup 顶层同步设主题（在 Vue 第一次 render 前），让窗口 show 时就是正确主题色
 document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry');
+// 同步用户字体大小,让 rem 单位元素跟主窗口一致
+const savedFontSize = localStorage.getItem('quink_font_size');
+if (savedFontSize) document.documentElement.style.fontSize = savedFontSize + 'px';
 
 const auth = useAuthStore();
 const query = ref('');
@@ -132,6 +135,12 @@ onMounted(async () => {
   document.documentElement.setAttribute('data-theme', theme);
   document.addEventListener('keydown', onGlobalKeydown);
   setTimeout(() => inputEl.value?.focus(), 500);
+  // 用户在主窗口改字体后实时同步(AiChat 窗口尺寸不动,只调 html font-size)
+  try {
+    (window as any).quink?.onFontSizeChanged?.((size: number) => {
+      document.documentElement.style.fontSize = size + 'px';
+    });
+  } catch {}
 });
 
 onUnmounted(() => { document.removeEventListener('keydown', onGlobalKeydown); });

@@ -310,6 +310,8 @@ async function savePreferences(silent = false) {
     try { (window as any).quinkDesktop?.syncTheme?.(prefs.theme); } catch {}
     document.documentElement.style.fontSize = prefs.fontSize + 'px';
     localStorage.setItem('quink_font_size', String(prefs.fontSize));
+    // 通知 Electron 主进程: 调整 Capture 窗口高度 + 转发到 capture/aichat renderer 同步字体
+    try { (window as any).quinkDesktop?.syncFontSize?.(prefs.fontSize); } catch {}
     if (!silent) showMsg('已保存');
   } catch (err: any) {
     showMsg('保存失败: ' + err.message, 'error');

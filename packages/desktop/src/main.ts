@@ -37,6 +37,8 @@ let nativeModuleRef: any = null;
 // 主题持久化到 userData/theme-cache.json,让启动时立即用上次主题创建 tray + mainWindow icon,
 // 否则要等 web 端 fetchMe + sync-theme IPC,首屏会看到默认 blueberry 闪一下再切到正确主题
 let currentTheme = 'blueberry';
+// 当前用户字体大小(默认 16 跟 Settings.vue prefs 一致),用于 Capture 窗口高度按比例缩放
+let currentFontSize = 16;
 
 const themeCachePath = () => path.join(app.getPath('userData'), 'theme-cache.json');
 function readCachedTheme(): string {
@@ -349,16 +351,17 @@ function showMainWindow() {
 // ──────────────────────────────────
 function createCaptureWindow() {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+  const { width, height } = getCaptureSize(currentFontSize);
 
   captureWindow = new BrowserWindow({
-    width: 650,
-    height: 155,
-    minWidth: 650,
-    minHeight: 155,
-    maxWidth: 650,
-    maxHeight: 155,
-    x: Math.round(screenWidth / 2 - 325),
-    y: Math.round(screenHeight / 2 - 78),
+    width,
+    height,
+    minWidth: width,
+    minHeight: height,
+    maxWidth: width,
+    maxHeight: height,
+    x: Math.round(screenWidth / 2 - width / 2),
+    y: Math.round(screenHeight / 2 - height / 2),
     frame: false,
     resizable: true,
     alwaysOnTop: true,
@@ -395,6 +398,7 @@ function createCaptureWindow() {
 async function toggleCaptureWindow() {
   if (!captureWindow) {
     await ensureCurrentTheme(); // 创建前同步主题，保证 backgroundColor 用最新值
+    await ensureCurrentFontSize(); // 同步字体大小,保证窗口初始 height 正确
     createCaptureWindow();
     // 等内容（Vditor）加载完再 show，避免用户看到布局跳变
     // 带 1500ms 超时兜底，防止 'content-ready' 未触发时窗口一直不显示
@@ -551,6 +555,30 @@ ipcMain.on('sync-token', (_event, token: string | null) => {
   }
 });
 
+// 用户改字体大小: 调整 currentFontSize + Capture 窗口尺寸 (宽+高) + 通知所有快捷窗口同步 html font-size
+ipcMain.on('sync-font-size', (_event, size: number) => {
+  if (!size || size < 12 || size > 22) return;
+  currentFontSize = size;
+  if (captureWindow && !captureWindow.isDestroyed()) {
+    const { width: w, height: h } = getCaptureSize(size);
+    const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+    // 先放开 min/max 限制再 setBounds,否则锁死的尺寸不让改
+    captureWindow.setMinimumSize(w, h);
+    captureWindow.setMaximumSize(w, h);
+    captureWindow.setBounds({
+      x: Math.round(screenWidth / 2 - w / 2),
+      y: Math.round(screenHeight / 2 - h / 2),
+      width: w,
+      height: h,
+    });
+    captureWindow.webContents.send('font-size-changed', size);
+  }
+  // AiChat 用户可自由 resize,只同步字号不改窗口尺寸
+  if (aiChatWindow && !aiChatWindow.isDestroyed()) {
+    aiChatWindow.webContents.send('font-size-changed', size);
+  }
+});
+
 ipcMain.on('sync-theme', (_event, theme: string) => {
   currentTheme = theme;
   writeCachedTheme(theme);
@@ -591,6 +619,26 @@ async function ensureCurrentTheme() {
     );
     if (t && typeof t === 'string') currentTheme = t;
   } catch {}
+}
+
+// 从主窗口 localStorage 同步用户字体大小,创建 Capture 前调用
+async function ensureCurrentFontSize() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    const s = await mainWindow.webContents.executeJavaScript(
+      `localStorage.getItem('quink_font_size')`
+    );
+    const n = Number(s);
+    if (n && n >= 12 && n <= 22) currentFontSize = n;
+  } catch {}
+}
+
+// Capture 窗口尺寸按字体比例缩放: 650×155 是默认 16px 字体时的基准。
+// 宽度也得跟着缩,否则字号 22 时 toolbar 按钮宽超过窗口宽 → 工具栏换行。
+// 12 → 487×116, 16 → 650×155, 22 → 894×213。
+function getCaptureSize(fontSize: number): { width: number; height: number } {
+  const factor = fontSize / 16;
+  return { width: Math.round(650 * factor), height: Math.round(155 * factor) };
 }
 
 ipcMain.on('reload-shortcuts', () => {

@@ -12,4 +12,8 @@ contextBridge.exposeInMainWorld('quink', {
   onWindowHidden: (callback: () => void) => {
     ipcRenderer.on('window-hidden', () => callback());
   },
+  // 主窗口改字体后,主进程通过此通道通知快捷窗口 (Capture / AiChat) 同步 html font-size
+  onFontSizeChanged: (callback: (size: number) => void) => {
+    ipcRenderer.on('font-size-changed', (_event, size: number) => callback(size));
+  },
 });

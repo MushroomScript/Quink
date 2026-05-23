@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('quinkDesktop', {
   syncToken: (token: string | null) => ipcRenderer.send('sync-token', token),
   reloadShortcuts: () => ipcRenderer.send('reload-shortcuts'),
   syncTheme: (theme: string) => ipcRenderer.send('sync-theme', theme),
+  syncFontSize: (size: number) => ipcRenderer.send('sync-font-size', size),
   minimize: () => ipcRenderer.send('win-minimize'),
   maximize: () => ipcRenderer.send('win-maximize'),
   close: () => ipcRenderer.send('win-close'),
