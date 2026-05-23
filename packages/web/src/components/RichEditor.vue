@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, markRaw } f
 import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import { api } from '@/api';
+import RenameModal from './RenameModal.vue';
 import {
   PhLightbulb,
   PhNotePencil,
@@ -136,6 +137,7 @@ onMounted(() => {
     upload: {
       url: '/api/upload/file',
       fieldName: 'file',
+      max: 100 * 1024 * 1024, // 100MB,与后端 MAX_SIZE 对齐(Vditor 默认 10MB)
       headers: { Authorization: `Bearer ${localStorage.getItem('quink_token') || ''}` },
       format(files: File[], responseText: string) {
         try {
@@ -146,7 +148,14 @@ onMounted(() => {
               return JSON.stringify({ msg: '', code: 0, data: { errFiles: [], succMap: { [file.name]: res.data.url } } });
             }
             // Non-image: insert as link
-            vditor?.insertValue(`[📎 ${file.name}](${res.data.url})`);
+            // 必须先 focus 拉回光标!上传是异步的,期间用户可能点了别处,
+            // 全局 selection 跑出 editor,直接 insertValue 会通过 range.insertNode
+            // 把 markdown 文本插到 selection 所在的 DOM 节点 (TopBar / Sidebar 等),
+            // 切换路由不消失,F5 才能刷掉 (偶发 bug,看用户点击时机)。
+            vditor?.focus();
+            setTimeout(() => {
+              vditor?.insertValue(`[📎 ${file.name}](${res.data.url})`);
+            }, 80);
             return JSON.stringify({ msg: '', code: 0, data: { errFiles: [], succMap: {} } });
           }
         } catch {}
@@ -221,7 +230,12 @@ async function searchRefs() {
 function insertRef(note: any) {
   const firstLine = (note.content || '').split('\n').find((l: string) => l.trim()) || '';
   const label = firstLine.replace(/[#*`\[\]!>~]/g, '').trim().slice(0, 20) || '引用笔记';
-  vditor?.insertValue(`[${label}](/?ref=${note.id})`);
+  // 同 upload format 回调:用户点选时 selection 在 popup 输入框,不在 editor。
+  // 直接 insertValue 可能 range.insertNode 到 popup DOM。先 focus 拉回再插。
+  vditor?.focus();
+  setTimeout(() => {
+    vditor?.insertValue(`[${label}](/?ref=${note.id})`);
+  }, 80);
   showRefSearch.value = false; refQuery.value = ''; refResults.value = [];
 }
 
@@ -414,6 +428,13 @@ let voiceChunks: Blob[] = [];
 let voiceStream: MediaStream | null = null;
 const voiceUploading = ref(false);
 
+// 录音命名弹窗:onstop 把 blob 暂存这里,等用户命名 confirm 后才上传
+const voiceNameModalOpen = ref(false);
+const pendingVoiceBlob = ref<Blob | null>(null);
+const pendingVoiceDur = ref(0);
+const pendingVoiceExt = ref('m4a');
+const pendingVoiceMime = ref('audio/mp4');
+
 async function toggleVoiceRecord() {
   if (isVoiceRecording.value) {
     stopVoiceRecord();
@@ -447,36 +468,20 @@ async function startVoiceRecord() {
       if (e.data.size > 0) voiceChunks.push(e.data);
     };
 
-    mediaRecorder.onstop = async () => {
+    mediaRecorder.onstop = () => {
       const dur = voiceRecordTime.value;
       cleanupVoiceRecord();
       if (!voiceChunks.length) return;
 
-      const blob = new Blob(voiceChunks, { type: picked.baseMime });
+      // 暂存 blob,弹窗让用户命名后才上传
+      // voiceUploading 在此覆盖"命名中+上传中"整个等待阶段,防止用户期间再按录音
+      pendingVoiceBlob.value = new Blob(voiceChunks, { type: picked.baseMime });
+      pendingVoiceDur.value = dur;
+      pendingVoiceExt.value = picked.ext;
+      pendingVoiceMime.value = picked.baseMime;
       voiceChunks = [];
       voiceUploading.value = true;
-      try {
-        const file = new File([blob], `voice-${Date.now()}.${picked.ext}`, { type: picked.baseMime });
-        const res = await api.uploadFile(file, 'file');
-        if (res.data?.url && vditor) {
-          vditor.focus();
-          setTimeout(() => {
-            vditor?.insertValue(`[语音备忘 ${dur}s](${res.data.url})`);
-          }, 80);
-          // 自动转写（如果开启）
-          try {
-            const me = await api.getMe();
-            const prefs = me.data?.preferences || {};
-            if (prefs.autoTranscribeVoice) {
-              api.transcribeAsync(res.data.url).catch(() => {});
-            }
-          } catch {}
-        }
-      } catch (err: any) {
-        console.error('[录音保存] 上传失败:', err.message);
-      } finally {
-        voiceUploading.value = false;
-      }
+      voiceNameModalOpen.value = true;
     };
 
     mediaRecorder.start(1000);
@@ -501,6 +506,38 @@ function cleanupVoiceRecord() {
   if (voiceRecordTimer) { clearInterval(voiceRecordTimer); voiceRecordTimer = null; }
 }
 
+// 用户在命名弹窗输入完确认 (或取消 = 用默认名),真正上传暂存的录音
+async function uploadPendingVoice(name: string) {
+  const blob = pendingVoiceBlob.value;
+  const dur = pendingVoiceDur.value;
+  const ext = pendingVoiceExt.value;
+  const mime = pendingVoiceMime.value;
+  pendingVoiceBlob.value = null;
+  if (!blob) return;
+  voiceUploading.value = true;
+  try {
+    const file = new File([blob], `voice.${ext}`, { type: mime });
+    const res = await api.uploadFile(file, 'file', { displayName: name });
+    if (res.data?.url && vditor) {
+      vditor.focus();
+      setTimeout(() => {
+        vditor?.insertValue(`[语音备忘 ${dur}s](${res.data.url})`);
+      }, 80);
+      try {
+        const me = await api.getMe();
+        const prefs = me.data?.preferences || {};
+        if (prefs.autoTranscribeVoice) {
+          api.transcribeAsync(res.data.url).catch(() => {});
+        }
+      } catch {}
+    }
+  } catch (err: any) {
+    console.error('[录音保存] 上传失败:', err.message);
+  } finally {
+    voiceUploading.value = false;
+  }
+}
+
 defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 </script>
 
@@ -511,10 +548,13 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
       ? 'fixed inset-0 z-[200] bg-white flex flex-col'
       : 'flex flex-col'">
     <!-- Vditor editor -->
-    <!-- minHeight 占位：Vditor 异步加载完前 wrapper 是空 div，会让下面工具栏贴到顶部，
-         给一个等于 Vditor 加载完预期高度的占位（工具栏 ~36px + content minHeight）避免布局跳变 -->
+    <!-- minHeight 占位精确等于 Vditor 加载完会设置的值 (Vditor 源码会执行
+         element.style.minHeight = options.minHeight + 'px',直接写到 wrapper 上)。
+         保持一致后:加载前/加载后/Vue patchStyle 重设时三个值都一样,避免高度抖动。
+         (历史版本写 +36 想多占工具栏空间,但 Vditor 加载后会覆盖回 props.minHeight,
+         导致加载前比加载后高 36px,而且每次 Vue update 会把 Vditor 设的覆盖掉变高。) -->
     <div ref="editorRef" class="vditor-wrapper"
-      :style="isFullscreen ? { flex: '1 1 auto', minHeight: 0 } : { '--editor-max': maxHeight + 'px', minHeight: (minHeight + 36) + 'px' }"></div>
+      :style="isFullscreen ? { flex: '1 1 auto', minHeight: 0 } : { '--editor-max': maxHeight + 'px', minHeight: minHeight + 'px' }"></div>
 
     <!-- 语音识别实时预览 -->
     <div v-if="isRecording || iatLiveText" class="flex items-center gap-2 px-3 py-1.5" style="background: rgba(var(--c-accent), 0.06)">
@@ -665,6 +705,16 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
       <input v-model="refQuery" @input="searchRefs" @click.stop placeholder="搜索笔记..." class="popup-input w-full shrink-0" />
     </div>
   </Teleport>
+
+  <!-- 录音命名弹窗 -->
+  <RenameModal
+    v-model:open="voiceNameModalOpen"
+    default-name="语音备忘"
+    :ext="pendingVoiceExt"
+    title="给录音命名"
+    @confirm="uploadPendingVoice"
+    @cancel="uploadPendingVoice('语音备忘')"
+  />
 </template>
 
 <style>
@@ -691,18 +741,33 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
   padding: 0 !important;
   margin: 0 1px !important;
 }
+/* upload 项是 <div>(Vditor 源码硬编码 s = name==="upload" ? "div" : "button"),其他工具项才是 button。
+   所有针对 button 的样式都要把 [data-type="upload"] 接上,否则尺寸 / 颜色 / hover 灰底全失效。 */
+/* 所有工具栏项 (button + upload div) 统一 inline-flex 居中,
+   保证 hover 灰底位置一致 + svg 在灰底中央。
+   button 默认 inline-block + svg baseline 排版会让位置略偏,统一 flex 后所有图标视觉对齐。
+   transform translateY(3px) 让整行按钮 (连带 hover 灰底) 视觉下移,
+   抵消 flex 居中相对 baseline 位置整体偏高的差值。transform 不影响 toolbar 实际高度。 */
 .vditor-wrapper .vditor-toolbar__item button,
-.vditor-wrapper .vditor-toolbar__item > span {
+.vditor-wrapper .vditor-toolbar__item > span,
+.vditor-wrapper .vditor-toolbar__item [data-type="upload"] {
   color: #64748b;
   height: 28px !important;
   width: 28px !important;
   padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transform: translateY(3px);
 }
-.vditor-wrapper .vditor-toolbar__item button svg {
+.vditor-wrapper .vditor-toolbar__item button svg,
+.vditor-wrapper .vditor-toolbar__item [data-type="upload"] svg {
   height: 14px !important;
   width: 14px !important;
 }
-.vditor-wrapper .vditor-toolbar__item button:hover {
+.vditor-wrapper .vditor-toolbar__item button:hover,
+.vditor-wrapper .vditor-toolbar__item [data-type="upload"]:hover {
   color: #1e293b;
   background: #f1f5f9;
   border-radius: 6px;

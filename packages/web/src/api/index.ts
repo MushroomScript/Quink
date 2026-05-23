@@ -223,9 +223,14 @@ export const api = {
     return this.uploadFile(file, 'avatar');
   },
 
-  async uploadFile(file: File, endpoint: 'avatar' | 'file' = 'file'): Promise<{ data: { url: string; filename?: string; type?: string; category?: string; size?: number } }> {
+  async uploadFile(
+    file: File,
+    endpoint: 'avatar' | 'file' = 'file',
+    options?: { displayName?: string }
+  ): Promise<{ data: { url: string; filename?: string; type?: string; category?: string; size?: number } }> {
     const formData = new FormData();
     formData.append('file', file);
+    if (options?.displayName) formData.append('displayName', options.displayName);
 
     const token = getToken();
     const res = await fetch(`${BASE}/upload/${endpoint}`, {

@@ -17,49 +17,78 @@ const app = new Hono();
 
 app.use('*', authMiddleware);
 
-const ALLOWED_TYPES: Record<string, string[]> = {
-  image: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'],
-  audio: ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm', 'audio/mp4'],
-  document: [
-    'application/pdf',
-    'text/plain', 'text/markdown', 'text/csv',
-    'application/json',
-    'application/zip',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.ms-excel',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  ],
+const MAX_SIZE = 100 * 1024 * 1024; // 100MB
+const AVATAR_MAX_SIZE = 2 * 1024 * 1024; // 2MB
+
+// 头像仍然限制图片类型
+const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+// MIME → 扩展名 fallback（仅在 file.name 无扩展名时用）
+const MIME_EXT_MAP: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
+  'image/webp': 'webp', 'image/svg+xml': 'svg',
+  'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/ogg': 'ogg',
+  'audio/webm': 'webm', 'audio/mp4': 'm4a',
+  'application/pdf': 'pdf', 'text/plain': 'txt', 'text/markdown': 'md',
+  'text/csv': 'csv', 'application/json': 'json', 'application/zip': 'zip',
 };
 
-const ALL_ALLOWED = Object.values(ALLOWED_TYPES).flat();
-const MAX_SIZE = 20 * 1024 * 1024; // 20MB
-
-function getExtFromType(type: string, originalName?: string): string {
-  // Try to get ext from original filename first
+function getExt(type: string, originalName?: string): string {
   if (originalName) {
-    const parts = originalName.split('.');
-    if (parts.length > 1) return parts.pop()!;
+    const lastDot = originalName.lastIndexOf('.');
+    if (lastDot > 0 && lastDot < originalName.length - 1) {
+      return originalName.slice(lastDot + 1).toLowerCase();
+    }
   }
-  const map: Record<string, string> = {
-    'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
-    'image/webp': 'webp', 'image/svg+xml': 'svg',
-    'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/ogg': 'ogg',
-    'audio/webm': 'webm', 'audio/mp4': 'm4a',
-    'application/pdf': 'pdf', 'text/plain': 'txt', 'text/markdown': 'md',
-    'text/csv': 'csv', 'application/json': 'json', 'application/zip': 'zip',
-  };
-  return map[type] || 'bin';
+  return MIME_EXT_MAP[type] || 'bin';
 }
 
 function getFileCategory(type: string): string {
-  for (const [cat, types] of Object.entries(ALLOWED_TYPES)) {
-    if (types.includes(type)) return cat;
-  }
+  if (type.startsWith('image/')) return 'image';
+  if (type.startsWith('audio/')) return 'audio';
+  if (type.startsWith('video/')) return 'video';
+  if (
+    type.startsWith('text/') ||
+    type === 'application/pdf' ||
+    type === 'application/json' ||
+    /^application\/(msword|vnd\.openxmlformats|vnd\.ms-)/.test(type)
+  ) return 'document';
   return 'other';
 }
 
-// POST /api/upload/avatar — upload avatar image (kept for backwards compat)
+// 清理用户输入：Windows/POSIX 非法字符 + 控制符 + 路径穿越
+function sanitizeName(name: string): string {
+  let s = name.trim()
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+    .replace(/\.+/g, '.')
+    .replace(/^[.\s]+|[.\s]+$/g, '');
+  if (!s) s = '未命名';
+  if (s.length > 100) s = s.slice(0, 100);
+  return s;
+}
+
+// 拼磁盘文件名 + 冲突检测（同秒多次上传时追加 _2/_3）
+function buildFilename(displayName: string, ext: string): { filename: string; displayFilename: string } {
+  const safe = sanitizeName(displayName);
+  const datePrefix = dayjs().format('YYYY-MM-DD_HHmmss');
+  const base = `${datePrefix}_${safe}`;
+  let filename = `${base}.${ext}`;
+  let counter = 2;
+  while (existsSync(resolve(UPLOAD_DIR, filename))) {
+    filename = `${base}_${counter}.${ext}`;
+    counter++;
+  }
+  return { filename, displayFilename: `${safe}.${ext}` };
+}
+
+function nameFromOriginal(originalName: string): string {
+  if (!originalName) return 'file';
+  const lastDot = originalName.lastIndexOf('.');
+  const base = lastDot > 0 ? originalName.slice(0, lastDot) : originalName;
+  return base || 'file';
+}
+
+// POST /api/upload/avatar — upload avatar image
 app.post('/avatar', async (c) => {
   const body = await c.req.parseBody();
   const file = body['file'];
@@ -68,40 +97,43 @@ app.post('/avatar', async (c) => {
     return c.json({ error: '请选择图片文件' }, 400);
   }
 
-  if (!ALLOWED_TYPES.image.includes(file.type)) {
+  if (!AVATAR_TYPES.includes(file.type)) {
     return c.json({ error: '仅支持 JPG/PNG/GIF/WebP 格式' }, 400);
   }
 
-  if (file.size > 2 * 1024 * 1024) {
-    return c.json({ error: '图片大小不能超过 2MB' }, 400);
+  if (file.size > AVATAR_MAX_SIZE) {
+    return c.json({ error: '头像大小不能超过 2MB' }, 400);
   }
 
-  const ext = getExtFromType(file.type, file.name);
-  const filename = `${nanoid(12)}.${ext}`;
+  const ext = getExt(file.type, file.name);
+  const { filename } = buildFilename('avatar', ext);
   writeFileSync(resolve(UPLOAD_DIR, filename), Buffer.from(await file.arrayBuffer()));
 
   return c.json({ data: { url: `/api/uploads/${filename}` } }, 201);
 });
 
-// POST /api/upload/file — general file upload
+// POST /api/upload/file — general file upload (任意类型，最大 100MB)
 app.post('/file', async (c) => {
   const body = await c.req.parseBody();
   const file = body['file'];
+  const displayNameField = body['displayName'];
 
   if (!file || typeof file === 'string') {
     return c.json({ error: '请选择文件' }, 400);
   }
 
-  if (!ALL_ALLOWED.includes(file.type)) {
-    return c.json({ error: `不支持的文件类型: ${file.type}` }, 400);
-  }
-
   if (file.size > MAX_SIZE) {
-    return c.json({ error: '文件大小不能超过 20MB' }, 400);
+    return c.json({ error: '文件大小不能超过 100MB' }, 400);
   }
 
-  const ext = getExtFromType(file.type, file.name);
-  const filename = `${nanoid(12)}.${ext}`;
+  const ext = getExt(file.type, file.name);
+
+  // displayName 优先（录音弹窗输入），否则用 file.name 去扩展名（粘贴/拖拽）
+  const rawName = typeof displayNameField === 'string' && displayNameField.trim()
+    ? displayNameField
+    : nameFromOriginal(file.name);
+
+  const { filename, displayFilename } = buildFilename(rawName, ext);
   writeFileSync(resolve(UPLOAD_DIR, filename), Buffer.from(await file.arrayBuffer()));
 
   const url = `/api/uploads/${filename}`;
@@ -109,13 +141,12 @@ app.post('/file', async (c) => {
   const userId = c.get('userId');
   const id = nanoid(12);
 
-  // Save file record to database
   await db.insert(schema.files).values({
     id,
     userId,
-    filename: file.name || filename,
+    filename: displayFilename,
     url,
-    mimeType: file.type,
+    mimeType: file.type || 'application/octet-stream',
     category,
     size: file.size,
     createdAt: dayjs().toISOString(),
@@ -125,7 +156,7 @@ app.post('/file', async (c) => {
     data: {
       id,
       url,
-      filename: file.name || filename,
+      filename: displayFilename,
       type: file.type,
       category,
       size: file.size,

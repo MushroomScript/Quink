@@ -187,7 +187,7 @@
 ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
 
 /* ── Editor Toolbar ── */
-.tbtn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 13px; color: #64748b; cursor: pointer; transition: all 0.1s; border: none; background: none; }
+.tbtn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 13px; color: #64748b; cursor: pointer; transition: all 0.1s; border: none; background: none; transform: translateY(1px); }
 .tbtn:hover { background: #f1f5f9; color: #1e293b; }
 [data-theme="dark"] .tbtn { color: #94a3b8; }
 [data-theme="dark"] .tbtn:hover { background: rgba(255,255,255,0.08); color: #e2e8f0; }
