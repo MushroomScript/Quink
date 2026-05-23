@@ -349,7 +349,9 @@ watch(() => auth.user, (user) => {
           </div>
           <div class="flex-1 overflow-y-auto px-6 py-4">
             <div v-if="refPreviewNote.summary" class="text-sm text-gray-500 italic mb-3">{{ refPreviewNote.summary }}</div>
-            <div class="prose prose-sm max-w-none note-content" v-html="refPreviewHtml" />
+            <div class="note-content">
+              <div class="vditor-reset" v-html="refPreviewHtml" />
+            </div>
             <div v-if="refPreviewNote.tags?.length" class="flex flex-wrap gap-1.5 mt-4 pt-3 border-t border-gray-100">
               <span v-for="tag in refPreviewNote.tags" :key="tag" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">#{{ tag }}</span>
             </div>

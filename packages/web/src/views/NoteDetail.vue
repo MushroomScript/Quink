@@ -128,7 +128,9 @@ onUnmounted(() => {
       </div>
 
       <!-- Content -->
-      <div class="bg-white rounded-2xl shadow-sm p-6 md:p-8 note-content prose prose-sm max-w-none" v-html="rendered" />
+      <div class="bg-white rounded-2xl shadow-sm p-6 md:p-8 note-content">
+        <div class="vditor-reset" v-html="rendered" />
+      </div>
     </div>
   </div>
 </template>

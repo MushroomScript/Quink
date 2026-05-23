@@ -116,7 +116,10 @@ export function flyToNavLeave(el: Element, done: () => void) {
   }
   card.style.transformOrigin = 'center center';
   requestAnimationFrame(() => {
-    card.style.transition = 'transform 0.5s cubic-bezier(0.55, 0.06, 0.68, 0.19), opacity 0.5s ease-out';
+    // transform 用 ease-in cubic-bezier (前慢后快, "加速飞过去") 模拟 macOS dock 吸入感
+    // opacity 延迟到末段才开始变 (delay 0.35s + duration 0.15s), 让元素飞到目标附近时才 fade,
+    // 避免"飞了一半已经透明"的视觉 bug
+    card.style.transition = 'transform 0.5s cubic-bezier(0.55, 0.06, 0.68, 0.19), opacity 0.15s ease-out 0.35s';
     requestAnimationFrame(() => {
       card.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
       card.style.opacity = '0';

@@ -147,7 +147,9 @@ const typeColor: Record<string, string> = {
       </div>
 
       <p v-if="note.summary" class="text-xs text-gray-500 mb-1.5 italic">{{ note.summary }}</p>
-      <div class="prose prose-sm max-w-none text-gray-700 note-content line-clamp-4" v-html="renderedContent" />
+      <div class="text-gray-700 note-content">
+        <div class="vditor-reset line-clamp-4" v-html="renderedContent" />
+      </div>
 
       <div v-if="note.tags && note.tags.length > 0" class="flex flex-wrap gap-1.5 mt-2">
         <span v-for="tag in note.tags" :key="tag" class="text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">

@@ -108,9 +108,19 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function togglePin(id: string) {
     const note = notes.value.find((n) => n.id === id);
-    if (note) {
-      await updateNote(id, { pinned: !note.pinned });
-      await fetchNotes();
+    if (!note) return;
+    const newPinned = !note.pinned;
+    // 乐观更新: UI 立即反映 pinned 视觉(ring 边框/三点菜单文案),不等 API 往返
+    note.pinned = newPinned;
+    try {
+      await updateNote(id, { pinned: newPinned });
+      // 重拉让后端"按 pinned DESC 排序"生效(卡片位置变化);
+      // 传 lastExtra 保留 tag/type/日期 等过滤条件,否则 fetchNotes() 会清掉过滤
+      await fetchNotes(lastExtra);
+    } catch (e) {
+      // 失败回滚乐观更新
+      note.pinned = !newPinned;
+      console.error('[togglePin] failed, rolled back:', e);
     }
   }
 

@@ -7,6 +7,7 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { PhTrash } from '@phosphor-icons/vue';
 import { fadeOutLeave, flyToNavLeave, snapshotCards } from '@/utils/cardLeave';
+import { useMasonry } from '@/composables/useMasonry';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -18,6 +19,9 @@ const loading = ref(true);
 const confirmEmpty = ref(false);
 const confirmDeleteId = ref('');
 const rendered = ref<Record<string, string>>({});
+
+// 瀑布流分列 (跟 Notes.vue / Inspiration.vue / Todos.vue 一致, 修早期遗漏的回归)
+const { columns } = useMasonry(() => notes.value);
 
 async function load() {
   if (!isLoggedIn()) return;
@@ -118,27 +122,32 @@ function onLeave(el: Element, done: () => void) {
         <p class="text-gray-400 text-xs mt-1">删除的笔记会在这里保留30天</p>
       </div>
 
-      <TransitionGroup tag="div" class="notes-masonry" :css="false" @leave="onLeave">
-        <div v-for="n in notes" :key="n.id" :data-note-type="n.type" class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden group transition-transform duration-300">
-          <div class="px-4 py-3">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="text-xs text-gray-400">{{ deletedAgo(n) }}</span>
-              <span v-if="n.tags?.length" class="text-xs text-gray-300">
-                {{ (n.tags as string[]).map(t => '#' + t).join(' ') }}
-              </span>
+      <div class="notes-masonry">
+        <TransitionGroup v-for="(col, ci) in columns" :key="ci" tag="div"
+          data-animated-list class="masonry-col" :css="false" @leave="onLeave">
+          <div v-for="n in col" :key="n.id" :data-note-type="n.type" class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden group transition-transform duration-300">
+            <div class="px-4 py-3">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-xs text-gray-400">{{ deletedAgo(n) }}</span>
+                <span v-if="n.tags?.length" class="text-xs text-gray-300">
+                  {{ (n.tags as string[]).map(t => '#' + t).join(' ') }}
+                </span>
+              </div>
+              <div class="text-gray-500 note-content">
+                <div class="vditor-reset line-clamp-4" v-html="rendered[n.id] || n.content" />
+              </div>
             </div>
-            <div class="prose prose-sm max-w-none text-gray-500 line-clamp-4 note-content" v-html="rendered[n.id] || n.content" />
+            <div class="flex items-center gap-1 px-3 py-2 border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button @click="confirmRestoreId = n.id" class="px-3 py-1 text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
+                恢复
+              </button>
+              <button @click="confirmDeleteId = n.id" class="px-3 py-1 text-xs ml-auto rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+                永久删除
+              </button>
+            </div>
           </div>
-          <div class="flex items-center gap-1 px-3 py-2 border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button @click="confirmRestoreId = n.id" class="px-3 py-1 text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
-              恢复
-            </button>
-            <button @click="confirmDeleteId = n.id" class="px-3 py-1 text-xs ml-auto rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
-              永久删除
-            </button>
-          </div>
-        </div>
-      </TransitionGroup>
+        </TransitionGroup>
+      </div>
     </template>
   </div>
 

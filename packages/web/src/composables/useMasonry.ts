@@ -80,8 +80,47 @@ export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
     const firstId = newItems[0]?.id;
     const shrunk = newItems.length < lastLength;
     const firstChanged = firstId !== lastFirstId;
+
+    // 严格删除场景(单删/批量删/恢复): newItems 是 oldItems 的子集,只少不增。
+    // 走增量 splice,避免全量 rebuild 引起的"跨列重排"
+    // ——跨列移动会让 TransitionGroup 在原列触发 leave + 新列 enter,
+    // 误调 onLeave 钩子(如 flyToNavLeave 飞向 sidebar)→ 看着像"后面卡片跟着被删项一起飞"。
+    if (shrunk) {
+      const newIds = new Set(newItems.map((n) => n.id));
+      let hasNewIds = false;
+      for (const item of newItems) {
+        let found = false;
+        for (const col of columns.value) {
+          if ((col as T[]).some((c) => (c as any).id === (item as any).id)) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          hasNewIds = true;
+          break;
+        }
+      }
+      if (!hasNewIds) {
+        // 真·删除: 从对应 col 里 splice 掉被删项,colHeights 减相应估算高度。
+        // staying 元素的 DOM 引用不动,TransitionGroup 只对被删项触发 leave。
+        for (let ci = 0; ci < columns.value.length; ci++) {
+          const col = columns.value[ci] as T[];
+          for (let i = col.length - 1; i >= 0; i--) {
+            if (!newIds.has((col[i] as any).id)) {
+              colHeights[ci] -= estimateHeight(col[i]);
+              col.splice(i, 1);
+            }
+          }
+        }
+        lastLength = newItems.length;
+        lastFirstId = firstId;
+        return;
+      }
+    }
+
     if (shrunk || firstChanged) {
-      // 全量重建(数据缩了/换 view/搜索)
+      // 数据洗牌(换 view/搜索/排序变化): 全量重建
       rebuild();
     } else if (newItems.length > lastLength) {
       // loadMore 增量 append: 新卡片各自找最矮列,push 到 columns.value[col] mutation

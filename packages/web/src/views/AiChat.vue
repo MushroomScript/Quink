@@ -176,7 +176,9 @@ onUnmounted(() => { document.removeEventListener('keydown', onGlobalKeydown); })
         <div v-for="msg in messages" :key="msg.id" class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
           <div class="max-w-[85%] px-3 py-2 rounded-2xl text-sm"
             :class="msg.role === 'user' ? 'bg-primary text-white rounded-br-md' : 'bg-gray-100 text-gray-700 rounded-bl-md'">
-            <div v-if="msg.html" class="note-content prose prose-sm max-w-none" v-html="msg.html" />
+            <div v-if="msg.html" class="note-content">
+              <div class="vditor-reset" v-html="msg.html" />
+            </div>
             <template v-else>{{ parseThinking(msg.content).answer || msg.content }}</template>
           </div>
         </div>

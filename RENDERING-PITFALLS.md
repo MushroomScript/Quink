@@ -1,0 +1,65 @@
+# RENDERING-PITFALLS.md
+
+Quink web 端渲染相关坑：DOM 操作 / CSS 布局 / Vue 模板 / HMR / markdown 渲染 / Vditor 编辑器 / 动画 / 鼠标事件。
+
+**改 UI、markdown 渲染、编辑器、列表动画相关代码前先来这里查一下**，避免踩重复的坑。本文件不自动加载，由根 `CLAUDE.md` 指针引导按需阅读。
+
+新增渲染坑时也加到这里（不要再加回根 `CLAUDE.md`）。
+
+## CSS / 布局
+
+- **`-webkit-line-clamp` 截断要求 `-webkit-box` 容器直接包含可截断内容，不能隔一层 div**：典型错误是 `<div class="line-clamp-4"><div v-html="..."></div></div>` —— 外层 -webkit-box 只看到 1 个块级子元素（内层 div），把整体当 1 行 box 算 → 4 行截断失效，整个 markdown 全部展开。**修法**：line-clamp-N class 直接套在包含 markdown 的 div 上（如 `<div class="vditor-reset line-clamp-4" v-html="..." />`），让 -webkit-box 直接含 markdown 输出的 p/h1/ul 等块级子元素。同时确保没有 `overflow: visible !important` 之类的高优先级规则顶住 line-clamp 的 overflow:hidden。范例：`NoteCard.vue` / `Trash.vue`。
+
+- **圆角裁切 + absolute 定位锚点不要混在同一个 div 上**：父级 `overflow-hidden` 会裁掉绝对定位的子下拉。修法：外层套一个仅做 `relative` 的容器，内层做 `overflow-hidden` 圆角裁切。
+
+## Popover / Teleport / Stacking context
+
+- **下拉/popover 在编辑器旁边总被盖住**：编辑器（Vditor 等）经常创建 stacking context，子组件的 z-[9999] 不起作用。解决方案：**默认走 `<Teleport to="body">` + `position: fixed` + 动态算位置**。范例：TopBar 的标签建议下拉、batchMove 下拉。
+
+- **"下拉 + 遮罩"成对组件不能"半个 Teleport"**：典型是"点外面关菜单"模式——菜单 `absolute z-50` + 全屏透明遮罩 `fixed z-40`。如果只 Teleport 其中一个，遇到祖先有 stacking context（`opacity != 1` / `transform` / `filter` / `will-change` 等）时本地那个 z-index 会被困在局部 context、对外失效（等同 z-auto），Teleport 出去的反而盖住它，**点击全落到遮罩上、菜单按钮看着在那但全部失效**。修法：要么都 Teleport，要么都不。范例：NoteCard 三点菜单+关闭遮罩 在 Todos 已完成区 `.notes-masonry opacity-60` 内被坑过（编辑/置顶/撤销完成/删除全点不动）。
+
+## Vue / HMR
+
+- **`onMounted` 给 `document`/`window` 挂全局副作用 HMR 不友好**：开发期 HMR 重 mount 后旧 handler 还在 document 上，capture 阶段先于新 handler 触发并 `stopImmediatePropagation`，调用旧闭包里的函数（操作旧响应式状态，新 UI 完全没反应；典型症状："改完代码 X 功能失效，F5 就好"）。**`onBeforeUnmount` 不够用**——HMR 卸载顺序不可靠。修法：组件文件顶部用模块级 `let prevXxxHandler = null` 缓存上次挂的对象，下次 `onMounted` 入口先 `removeEventListener` / 还原原函数再挂新的。范例：`App.vue` 顶部 `prevRefClickHandler` + `prevWindowOpen` 的模块级清理逻辑。
+
+## markdown 渲染（含 Vditor）
+
+- **显示态复用 Vditor 编辑器 CSS（`.vditor-reset`）渲染 markdown，避免重写一套 markdown 样式**：NoteCard / NoteDetail / Trash / AI 对话 / 引用预览这些显示态笔记 markdown 的地方，结构上用 `<div class="note-content"><div class="vditor-reset" v-html="..."></div></div>` 嵌套两层。外层 `.note-content` 提供搜索高亮 / 音频胶囊 / 图片预览 click delegate 等附加规则，内层 `.vditor-reset` 复用 `vditor.css` 的 heading / list / code / table 等 markdown 元素样式（显示态视觉跟编辑态完全一致）。**`style.css` 的 `.note-content .vditor-reset` 必须清零 background / color / padding / margin（覆盖 vditor.css 默认值），但绝对不要加 `overflow: visible !important` —— 它会顶住 `.line-clamp-N` 需要的 overflow:hidden 导致截断失效**。vditor-reset 默认 `overflow:auto` 在我们卡片/弹窗里实际不会触发滚动条（高度自适应，无固定 height）。历史教训：曾经尝试装 `@tailwindcss/typography` 用 `prose prose-sm`，但 prose 自带颜色/字号风格跟主题不搭，且跟 Vditor 编辑态视觉不一致，最终选了"复用 vditor-reset"方案 C。
+
+- **`html.replace(regex, '<mark>$1</mark>')` 这种字符串级别的搜索高亮会破坏 HTML 属性**（比如 `<a href="x.mp3">` 里的 mp3 被替换 → CSS 选择器 `a[href$=".mp3"]` 不匹配 → 音频胶囊样式失效）。正确做法：用 `(<[^>]+>)|([^<]+)` regex 拆"标签 vs 文本"，只在文本上替换。范例：`NoteCard.vue` 的搜索高亮。AI.vue 用 TreeWalker + range.surroundContents，天然安全。
+
+- **markdown 内嵌 emoji + 渲染端 regex 自动加 emoji = 双图标 bug**：写入端就别塞 emoji，渲染端用 `replace(/^📌\s*/, '')` 剥老数据的前缀。范例：`utils/refLink.ts`。
+
+- **流式 markdown 渲染用"单调递增版本号 + GT 比较"**：每个 SSE delta 都触发一次 `Vditor.md2html(snapshot)`（异步、多个 in-flight、完成顺序乱）。错误做法是给每个 delta 分 `myVer` 然后完成时检查 `myVer === currentVer`（"还是最新版才覆盖"），结果连续 delta 时 myVer 永远被超越 → 永远不更新 → 看着"全部出完才渲染"。**正解**：维护 `lastRenderVer`，完成时 `myVer > lastRender` 才覆盖（内容单调向新）。范例：`AI.vue` 的 `streamingVersion` + `streamingLastRenderVer`。
+
+- **markdown 编辑器按 Enter vs 粘贴文本行间距差异**：Markdown 语法里"换行"是个语义陷阱 —— 按 Enter 一次生成段落分隔（`<p>...</p><p>...</p>`，间距 = `p` 的 `margin-bottom` 默认 16px）；粘贴含 `\n` 的多行文本生成同段落硬换行（`<br>`，间距 = `line-height` 大约 21px）。视觉上"两行文字"但 DOM 结构完全不同。Vditor 默认 `.vditor-reset p { margin-bottom: 16px }` 让段落间距偏大。**修法**：全局 CSS 把 `.vditor-reset p` 和 `.note-content p` 的 `margin` 缩小到 `0.4em`（用 em 跟字体缩放）。**保留 markdown 段落语义**（导出 / 搜索 / AI 处理都正确），只调视觉。范例：`style.css` 的 `.note-content p, .vditor-reset p { margin: 0 0 0.4em !important }`。
+
+- **Vditor (lute) 解析器会破坏 markdown 内嵌的 inline `<svg>` / HTML span**：把 SVG 字符串拼进 markdown 字符串里 → `md2html` 后 span 的 class/data-* 一并被剥掉，全局 click 监听找不到锚点（典型症状：引用预览不弹了）。**分两步**：markdown 阶段只生成不带 SVG 的纯 span，md2html 之后再用 `injectXxxIcons(html)` 用 string.replace 把 SVG 注入进去。范例：`utils/refLink.ts` 的 `renderRefLink` + `injectRefLinkIcons` 双阶段。三个调用点 `NoteCard.vue` / `App.vue` / `NoteDetail.vue` 都要走这个流程。
+
+- **`Vditor.insertValue` 在异步回调里必须先 `focus()`**：`insertValue` 内部走 `range.insertNode`，插入位置是浏览器**全局 selection**，不是 editor 内位置。异步等待期间（上传 / 引用搜索 / AI 应用 / 录音上传）用户可能点了别处，selection 跑到 TopBar / Sidebar / 任意 DOM 节点 → markdown 文本作为纯 text node 插到那里，**切换路由不消失**（被插的节点不在 router-view 子树），F5 才能刷掉。偶发，看用户点击时机。**统一 pattern**：`vditor?.focus(); setTimeout(() => vditor?.insertValue(...), 80);`，给浏览器 ~80ms commit focus。范例：`RichEditor.vue` 全部 4 处 insertValue（upload format / insertRef / applyAiResult / uploadPendingVoice）都走这个。
+
+- **Vditor 工具栏 upload 项是 `<div>` 不是 `<button>`**：源码硬编码 `s = "upload" === t.name ? "div" : "button"`，整个工具栏唯一例外。任何 `.vditor-toolbar__item button` 的样式（尺寸 / color / hover 灰底圆角 / 子 SVG width/height）对 upload **全失效**，要把 `[data-type="upload"]` 接进同一组 selector。另外 div 默认不居中，要单独给 upload 加 `display: inline-flex + align-items: center + justify-content: center + cursor: pointer`，否则 SVG 贴左上角且鼠标不变手。范例：`RichEditor.vue` toolbar 样式块（`.vditor-wrapper .vditor-toolbar__item ...` 那一段）。
+
+- **Vditor mount 会覆盖 wrapper inline style 的 minHeight**：源码 `e.element.style.minHeight = options.minHeight + 'px'` 直接写到 wrapper 上。如果 Vue 端 `:style` 设的 minHeight 跟传给 Vditor 的 `options.minHeight` 不一致，会出现"加载前高 / 加载后矮 / 用户首次 reactive 交互后再变高"的三段抖动 —— 因为 Vue 每次 patchStyle 会把 :style object 里的 minHeight 重写回 element.style，盖掉 Vditor 设的。**修法**：让 Vue 端 inline minHeight 精确等于传给 Vditor 的 `options.minHeight`（不要自己加 toolbar 占位高度），三个时刻就一致。范例：`RichEditor.vue` 的 `<div ref="editorRef" class="vditor-wrapper" :style="{ minHeight: minHeight + 'px' }">` 跟 Vditor config `minHeight: props.minHeight` 完全对齐。
+
+- **Vditor IR 模式 heading 的 H1/H2/H3 标记会"半个数字"溢出编辑区左边**：Vditor 给 heading 加 `:before` 伪元素显示 "H1" / "H2" 标记，定位用 `margin-left: -29px` 飞到编辑区外。我们 `.vditor-reset` 的 `padding-left: 16px` 不够容纳 29px 偏移 → 标记左半被裁。**修法**：直接 `display: none !important` 隐藏标记，IR 已经把 heading 渲染成大字粗体，语义足够明显，不需要额外标记提示。范例：`RichEditor.vue` 的 `.vditor-ir .vditor-reset > h1..h6:before` 隐藏。
+
+- **Vditor toolbar tooltip 默认伪元素会被 `main` 的 `overflow-y-auto` 裁切**：App.vue 的 `<main class="flex-1 overflow-y-auto">` 让 tooltip 飞出 main 上边界（朝向 TopBar 方向）时被 overflow 裁掉一半。这跟 z-index / stacking context 无关 —— overflow 裁切是另一回事。**修法**：CSS 隐藏 Vditor 默认 tooltip 伪元素，用 `<Teleport to="body">` 实现自定义 tooltip：mouseover 事件委托到 vditor-wrapper → closest `.vditor-tooltipped` 找按钮 → 读 `aria-label` → `getBoundingClientRect` 算位置 → fixed 定位 + `z-[10000]` 永远顶层。**边界处理**：`r.top < 32` 时自动翻转到按钮下方（应对 Capture 等顶部贴边场景）；tooltip center 用 `clamp(HALF+MARGIN, vw-HALF-MARGIN)` 防止最左/最右按钮 tooltip 超出窗口边界。范例：`RichEditor.vue` 的 `customTooltip` + `onToolbarMouseOver`。
+
+## 动画（TransitionGroup / FLIP）
+
+- **TransitionGroup 中"长距离飞行 + 渐隐"动画的 transform 和 opacity 曲线方向不能相反**：典型错误是 `transition: transform 0.5s cubic-bezier(0.55, 0.06, 0.68, 0.19), opacity 0.5s ease-out`（transform 前慢后快"加速冲过去"、opacity 前快后慢"早早就 fade 掉"）。结果：实际位置进度约 25-30% 时 opacity 已经 ~0.2 几乎透明 → 视觉上"飞一半就消失"。**修法**：给 opacity 加 delay 推到飞行末段才开始变化，比如 `opacity 0.15s ease-out 0.35s`（350ms 后才开始 fade，150ms 内变 0）。这是 macOS dock"被吸进 dock"的标准做法 —— 元素始终可见地飞过去，到目的地附近才淡化。范例：`utils/cardLeave.ts` 的 `flyToNavLeave`。短距离飞行不明显（opacity 还没 fade 完元素就到目的地了），长距离场景才暴露 bug。
+
+- **TransitionGroup 列表删除"左飞 + 高度收缩"动画**：用 `<TransitionGroup name="xxx" tag="div">` 包 v-for；CSS `.leave-active` **必须** `overflow: hidden`，否则 max-height 不生效；`.leave-to` 同时设 `max-height: 0`、`opacity: 0`、`transform: translateX(-110%)`，并把 `margin/padding-y` 都 `!important` 归零（否则空间不收缩、相邻项不会自然上移）；`.leave-from` 显式给个 max-height（如 5rem）作为起点。范例：`AI.vue` 末尾的 `.conv-list-leave-*`。
+
+- **笔记卡片列表 leave 动画体系**（`utils/cardLeave.ts` 含 `fadeOutLeave` / `collapseLeave` / `flyToNavLeave` / `fadeInEnter`）—— 涉及 TransitionGroup + Vue FLIP 干扰、`watch flush:'sync'` snapshot、helper 按容器布局选型、staying 对齐动画依赖等多个坑，详见 **`packages/web/src/utils/CLAUDE.md`**。改这些 helper 或在 view 里用它们前先读那里。
+
+## 拖动 / 鼠标事件
+
+- **"拖动 + 单击关闭"并存要防"拖完误关"**：`mousedown → 拖 → mouseup` 后浏览器自然会再触发一次 `click`，如果这个元素的 click 绑了关闭/导航，手刚松开就误触发。修法：`mousemove` 时记录 `dragMoved = true`（带 ~3px 阈值避免抖动误判），`click` handler 检测 `dragMoved` 真就 `return`、否则关闭。同时 `mousemove` / `mouseup` 监听必须挂 `window`（不是元素本身），否则鼠标快速移出元素时拖动状态会卡住；`<img>` 加 `draggable="false"` 防止 HTML5 原生拖图弹出半透明鬼影。范例：`Resources` 图片预览（放大后可拖、单击关闭，两者共存）。
+
+## 其他
+
+- **Windows bat 文件编码**：永远用 PowerShell `[System.IO.File]::WriteAllBytes` 写 **GBK + CRLF** 的 bat 文件，**不要**用 Write 工具（UTF-8 + LF），cmd 默认 cp936 会把 UTF-8 中文字节当命令分隔符乱读。`chcp 65001` 救不了，因为 cmd 逐行读，那一行本身就被拆了。
+
+- **`prompts.ts` 模板字符串里别嵌反引号写示例**：在 `` `...` `` 模板字符串内再写 `` ` `` 会让 tsx 解析器把模板字符串提前闭合 → server 起不来 → 没有红色编辑器警告，只有运行时崩溃。**用 「」 或 '...' 包代码/字段示例**。范例：`prompts.ts` chat prompt 里 `「label」(refId:xxx)` 写法（不要再变成 `` `「label」(refId:xxx)` ``）。

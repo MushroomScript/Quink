@@ -207,6 +207,9 @@
   margin-top: 0 !important;
   margin-bottom: 0.4em !important;
 }
+/* 显示态复用 vditor 编辑器 CSS (方案 C): .note-content 包 .vditor-reset。
+   注: 不要给 .vditor-reset 强制 overflow,否则会覆盖 .line-clamp-N 需要的 overflow:hidden,导致截断失效。
+   vditor-reset 默认 overflow:auto 在我们的卡片/弹窗里实际不会触发(高度自适应内容,没固定高度)。 */
 .note-content .vditor-reset { background: transparent !important; color: inherit !important; padding: 0 !important; margin: 0 !important; }
 .note-content img { max-width: 100%; border-radius: 8px; margin: 0.5em 0; }
 .note-content a { color: rgb(var(--c-accent-dark)); text-decoration: underline; word-break: break-all; }

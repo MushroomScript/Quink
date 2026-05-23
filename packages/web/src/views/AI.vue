@@ -731,7 +731,9 @@ async function retryLastMessage() {
                 <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-500 select-none">查看思考过程</summary>
                 <div class="mt-1 px-3 py-2 bg-gray-50 rounded-lg text-xs text-gray-400 italic whitespace-pre-wrap max-h-40 overflow-y-auto">{{ parseThinking(msg.content).thinking }}</div>
               </details>
-              <div v-if="msg.html" class="note-content prose prose-sm max-w-none" v-html="msg.thinkingHtml || msg.html" />
+              <div v-if="msg.html" class="note-content">
+                <div class="vditor-reset" v-html="msg.thinkingHtml || msg.html" />
+              </div>
               <template v-else>{{ parseThinking(msg.content).answer || msg.content }}</template>
             </div>
             <!-- 来源标注 -->
@@ -777,8 +779,12 @@ async function retryLastMessage() {
             </div>
             <!-- 正式回答：v-html 增量渲染 markdown，首 60ms 内 fallback 纯文本 -->
             <template v-if="parseThinking(streamingMap.get(currentConvId) || '').answer || !parseThinking(streamingMap.get(currentConvId) || '').thinking">
-              <div v-if="streamingHtmlMap.get(currentConvId)" class="note-content prose prose-sm max-w-none" v-html="streamingHtmlMap.get(currentConvId)" />
-              <div v-else class="note-content prose prose-sm max-w-none whitespace-pre-wrap">{{ parseThinking(streamingMap.get(currentConvId) || '').answer || streamingMap.get(currentConvId) }}</div>
+              <div v-if="streamingHtmlMap.get(currentConvId)" class="note-content">
+                <div class="vditor-reset" v-html="streamingHtmlMap.get(currentConvId)" />
+              </div>
+              <div v-else class="note-content">
+                <div class="vditor-reset whitespace-pre-wrap">{{ parseThinking(streamingMap.get(currentConvId) || '').answer || streamingMap.get(currentConvId) }}</div>
+              </div>
               <span class="animate-pulse">▊</span>
             </template>
           </div>
