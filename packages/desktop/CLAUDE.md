@@ -50,6 +50,18 @@ Electron 主进程 + preload 相关坑。该目录的代码主要写 `main.ts`�
 - **切换主题时**：sync-theme IPC 触发 `destroy()` 销毁快捷窗口；下次按快捷键走完整 create → ensureCurrentTheme → 等 content-ready → show 路径 (~300ms)，用新主题完整渲染
 - 平衡了**速度**（同主题下快）和**正确性**（切换后不闪）
 
+### BrowserWindow 边界是 OS 级硬限制 — DOM 无法溢出
+Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边界。**任何 DOM 元素都无法溢出**，包括 `position: fixed` + 高 z-index 也不行 —— fixed 只是相对 viewport（= window 客户区），window 边界外的部分会被操作系统直接裁掉。
+
+这跟浏览器里"右键菜单可以飞到地址栏外"不一样：那是 OS 渲染的弹出窗口，不是 DOM。微信 PC 端等能让 tooltip / 弹出菜单溢出主窗口，是因为它们用 OS 原生 popup（Win32 `CreateWindowEx` 创建独立小窗口），不是 DOM。
+
+**对 Capture / AiChat 这类小窗口的影响**：tooltip / popover / dropdown 等浮层元素要保证完整可见，必须在 window 内自适应位置：
+- tooltip 默认朝上、上方空间不够时翻转朝下（`r.top < threshold` 检测）
+- tooltip 左右居中、超出窗口边界时 `clamp(left, MARGIN+HALF, vw-MARGIN-HALF)`
+- 范例：`RichEditor.vue` 的 `onToolbarMouseOver` 实现
+
+**如果真的需要让 popup 溢出 Capture 窗口**：唯一方法是新建一个无边框 + 透明 + alwaysOnTop 的 BrowserWindow 当 popup 用，每次 hover 时创建 / setPosition / show / hide。工作量大（~100 行 IPC + 窗口管理），不建议为单个 tooltip 这么做。
+
 ## IPC 契约
 
 | 通道名 | 方向 | 用途 |
@@ -59,8 +71,10 @@ Electron 主进程 + preload 相关坑。该目录的代码主要写 `main.ts`�
 | `note-saved` | renderer → main (send) | 通知 main 显示"已保存" toast |
 | `content-ready` | renderer → main (send) | Vditor 等异步组件加载完，main 才 show 窗口 |
 | `sync-theme` | renderer → main (send) | 主窗口切主题时通知 main，main 销毁快捷窗口 + 更新缓存 |
+| `sync-font-size` | renderer → main (send) | 主窗口改字体时通知 main，main 调整 Capture 窗口尺寸 + 转发到快捷窗口 |
 | `reload-shortcuts` | renderer → main (send) | 用户修改快捷键后重新注册 |
 | `window-shown` | main → renderer (send) | 通知 renderer 窗口刚显示（用于聚焦输入框、同步主题等） |
 | `window-hidden` | main → renderer (send) | 通知 renderer 窗口被隐藏 |
+| `font-size-changed` | main → renderer (send) | 通知 Capture / AiChat renderer 更新 document fontSize（用户在主窗口改了字体） |
 
 改 IPC 时三处都要同步：`main.ts` 的 `ipcMain.on/once`、`preload.ts` 的 `exposeInMainWorld`、web 端调用 `(window as any).quink?.xxx`。

@@ -114,6 +114,37 @@ const editorRef = ref<HTMLDivElement>();
 let vditor: Vditor | null = null;
 const dirty = ref(false);
 
+// 自定义 vditor toolbar tooltip: 默认 vditor tooltip 是按钮的 ::before/::after 伪元素
+// 被 App.vue main 的 overflow-y-auto 裁切(尤其飞向上方时)。改用 Teleport 到 body 的
+// 自定义 tooltip,固定定位 + z-index 最顶,脱离任何 overflow 控制,永远朝上显示完整
+const customTooltip = ref({ visible: false, text: '', top: 0, left: 0 });
+function onToolbarMouseOver(e: MouseEvent) {
+  const btn = (e.target as HTMLElement)?.closest?.('.vditor-tooltipped') as HTMLElement | null;
+  if (!btn) return;
+  const label = btn.getAttribute('aria-label');
+  if (!label) return;
+  const r = btn.getBoundingClientRect();
+  // 上方空间不够 32px 时翻转到按钮下方,避免 Capture 等顶部贴边场景 tooltip 跑出窗口看不见
+  const flipDown = r.top < 32;
+  // tooltip 用 translateX(-50%) 居中对齐按钮中心,最左/最右按钮可能让 tooltip 超出窗口边界。
+  // 估算 tooltip 半宽 40 (中文 2-4 字 + padding),clamp 中心位置到窗口内安全区
+  const HALF = 40;
+  const MARGIN = 8;
+  const center = r.left + r.width / 2;
+  const safeLeft = Math.max(HALF + MARGIN, Math.min(window.innerWidth - HALF - MARGIN, center));
+  customTooltip.value = {
+    visible: true,
+    text: label,
+    top: flipDown ? r.bottom + 8 : r.top - 32,
+    left: safeLeft,
+  };
+}
+function onToolbarMouseOut(e: MouseEvent) {
+  const related = e.relatedTarget as HTMLElement | null;
+  if (related?.closest?.('.vditor-tooltipped')) return;
+  customTooltip.value.visible = false;
+}
+
 onMounted(() => {
   if (!editorRef.value) return;
 
@@ -165,6 +196,10 @@ onMounted(() => {
     after: () => {
       vditor?.focus();
       emit('ready');
+      // Vditor 加载完后才有 toolbar DOM,这时给 wrapper 绑事件委托
+      // (mouseover bubble 上来,closest 找 .vditor-tooltipped 按钮)
+      editorRef.value?.addEventListener('mouseover', onToolbarMouseOver);
+      editorRef.value?.addEventListener('mouseout', onToolbarMouseOut);
     },
     input: () => {
       dirty.value = true;
@@ -173,6 +208,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  editorRef.value?.removeEventListener('mouseover', onToolbarMouseOver);
+  editorRef.value?.removeEventListener('mouseout', onToolbarMouseOut);
   vditor?.destroy();
   vditor = null;
 });
@@ -724,6 +761,15 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
     @confirm="uploadPendingVoice"
     @cancel="uploadPendingVoice('语音备忘')"
   />
+
+  <!-- 自定义 vditor toolbar tooltip: Teleport 到 body,脱离 main overflow 裁切 -->
+  <Teleport to="body">
+    <div v-if="customTooltip.visible"
+         class="fixed z-[10000] px-2 py-1 bg-gray-800 text-white text-[11px] rounded shadow-lg pointer-events-none whitespace-nowrap"
+         :style="{ top: customTooltip.top + 'px', left: customTooltip.left + 'px', transform: 'translateX(-50%)' }">
+      {{ customTooltip.text }}
+    </div>
+  </Teleport>
 </template>
 
 <style>
@@ -745,6 +791,11 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
   border-bottom: 1px solid #f1f5f9 !important;
   padding: 2px 6px !important;
   background: transparent !important;
+}
+/* 隐藏 Vditor 默认 tooltip 伪元素,由 Teleport 到 body 的自定义 tooltip 替代 */
+.vditor-tooltipped::before,
+.vditor-tooltipped::after {
+  display: none !important;
 }
 .vditor-wrapper .vditor-toolbar__item {
   padding: 0 !important;
@@ -797,6 +848,17 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 .vditor-wrapper .vditor-reset > :first-child {
   margin-top: 0 !important;
   padding-top: 0 !important;
+}
+/* Vditor IR 模式给 heading 加 :before 伪元素显示 H1/H2/H3 标记,用 margin-left: -29px
+   定位到左侧编辑区外。我们的 padding-left 16px 不够容纳 → 标记左半被裁(显示半个数字)。
+   IR 模式 heading 已经渲染成大字粗体,语义已经够明显,直接隐藏标记保持视觉干净 */
+.vditor-ir .vditor-reset > h1:before,
+.vditor-ir .vditor-reset > h2:before,
+.vditor-ir .vditor-reset > h3:before,
+.vditor-ir .vditor-reset > h4:before,
+.vditor-ir .vditor-reset > h5:before,
+.vditor-ir .vditor-reset > h6:before {
+  display: none !important;
 }
 /* 去掉 Vditor 内置的居中和多余间距，让内容区撑满 */
 .vditor-wrapper .vditor-reset,

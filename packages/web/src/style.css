@@ -199,6 +199,14 @@
 
 /* ── Note Content (Markdown rendered) ── */
 .note-content { font-size: 14px; line-height: 1.6; overflow-wrap: break-word; word-break: break-word; }
+/* 段落 margin 缩小: 让"按 Enter 生成 <p>" 跟 "粘贴硬换行 <br>" 视觉接近。
+   保留 markdown 段落语义 (导出/搜索/AI 处理都正确),只调视觉间距。
+   用 em 让间距跟字体缩放 */
+.note-content p,
+.vditor-reset p {
+  margin-top: 0 !important;
+  margin-bottom: 0.4em !important;
+}
 .note-content .vditor-reset { background: transparent !important; color: inherit !important; padding: 0 !important; margin: 0 !important; }
 .note-content img { max-width: 100%; border-radius: 8px; margin: 0.5em 0; }
 .note-content a { color: rgb(var(--c-accent-dark)); text-decoration: underline; word-break: break-all; }
