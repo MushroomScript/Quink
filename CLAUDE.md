@@ -116,6 +116,15 @@ SQLite + 启动时自动迁移（`db/index.ts` 中 `CREATE TABLE IF NOT EXISTS` 
 ### Vditor
 静态文件从 `packages/web/public/vditor/dist/`（从 node_modules 复制）提供。RichEditor.vue 的 CDN 配置指向 `/vditor`。`pnpm install` 后执行：`cp -r node_modules/vditor/dist packages/web/public/vditor/dist`
 
+## Claude Code 工具链（MCP + Skill）
+
+本项目已配的工具，做相应任务时优先用：
+
+- **MCP `chrome-devtools`** — 调试 Quink Electron 桌面端。Electron 启动脚本带 `--remote-debugging-port=9222`（`start-desktop.bat` 第 66 行 + `packages/desktop/package.json` 的 dev 脚本），MCP 通过 `http://127.0.0.1:9222` 接入。**视觉/layout 闪烁 bug 走它 + MutationObserver**，比肉眼录屏精确到毫秒。范例：定位 NoteEditModal 关闭时 vditor.destroy 在 3ms 内提前触发的 root cause。详见 `packages/desktop/CLAUDE.md` "chrome-devtools-mcp 调试 Electron" 段
+- **MCP `sqlite`** — 直接 SQL 查/改 `packages/server/quink.db`。**塞测试数据 / 查后端状态 / 排查数据问题用**，跳过写一次性脚本（之前 list-users.ts / seed-demo-notes.ts 这类全免了）
+- **MCP `playwright`** — E2E 测试 Quink web 端。**单次回归测试用 prompt 触发**（"测一遍 X 流程"），启动新 Chromium 走完整流程 + 断言。**不写持久化测试代码**——UI 频繁迭代阶段维护成本太高
+- **Slash command `/playwright-e2e`**（qaskills 装的，在 `~/.claude/commands/playwright-e2e/`）— 写 Playwright 测试代码时按业界 best practice（getByRole 选 selector / Page Object Model / auto-waiting / 测试隔离）。**未来真要写持久化测试时用**
+
 ## 核心约定
 
 - 所有 UI 文案使用中文。
