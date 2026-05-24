@@ -8,6 +8,10 @@ Quink web 端渲染相关坑：DOM 操作 / CSS 布局 / Vue 模板 / HMR / mark
 
 ## CSS / 布局
 
+- **`overflow-x: auto` 会被浏览器隐式提升另一轴到 `overflow-y: auto`(W3C 规范)**：写 `<div class="overflow-x-auto">` 看似只想要横向滚动,实际 computed style 是 `overflow-x: auto + overflow-y: auto`(浏览器规则:一轴非 visible 时另一轴会从 visible 被强制提升到 auto,防止内容无法滚动)。**症状**:子元素 `transform: scale(1.x)` 的 visual box 即使只溢出 ~1px,这层容器也会跳出纵向滚动条。**修法**:确认容器是否真需要横向滚动 → 不需要就**整个容器删掉**(grid `minmax(0, 1fr)` 永远不溢出场景);需要就用 `overflow-x: clip`(Chrome 111+ 支持,clip 不会触发 overflow-y 自动提升)。范例:`Stats.vue` 热力图原 `<div class="overflow-x-auto">` 包裹层是死代码 + 让 cell hover scale(1.25) 触发滚动条,删了就好。
+
+- **CSS container query 单位 `cqw` 让子元素跟容器宽度等比缩放**:固定 px 的元素在容器变宽时不跟着放大,视觉看起来"色块大了间距小了挤一团"。**修法**:给容器加 `container-type: inline-size` → 内部所有 `cqw` 单位(1cqw = container width 1%)随容器宽度等比缩放。比 vw(viewport)更精确——侧栏宽度变化只影响主区,viewport 不变但 cqw 会变。范例:`Stats.vue` 热力图卡片 `container-type: inline-size` + grid gap `0.3cqw` + 图例色块 `1.5cqw` + 字号 `1cqw`,窗口拉宽 cell/gap/图例同步等比放大,不再"色块大间距挤"。Chrome 105+ / Safari 16+ / Firefox 110+ 支持,Electron 内核够新。
+
 - **`-webkit-line-clamp` 截断要求 `-webkit-box` 容器直接包含可截断内容，不能隔一层 div**：典型错误是 `<div class="line-clamp-4"><div v-html="..."></div></div>` —— 外层 -webkit-box 只看到 1 个块级子元素（内层 div），把整体当 1 行 box 算 → 4 行截断失效，整个 markdown 全部展开。**修法**：line-clamp-N class 直接套在包含 markdown 的 div 上（如 `<div class="vditor-reset line-clamp-4" v-html="..." />`），让 -webkit-box 直接含 markdown 输出的 p/h1/ul 等块级子元素。同时确保没有 `overflow: visible !important` 之类的高优先级规则顶住 line-clamp 的 overflow:hidden。范例：`NoteCard.vue` / `Trash.vue`。
 
 - **圆角裁切 + absolute 定位锚点不要混在同一个 div 上**：父级 `overflow-hidden` 会裁掉绝对定位的子下拉。修法：外层套一个仅做 `relative` 的容器，内层做 `overflow-hidden` 圆角裁切。

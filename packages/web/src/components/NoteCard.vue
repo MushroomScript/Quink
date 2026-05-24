@@ -66,9 +66,45 @@ function handleClick(e: MouseEvent) {
     store.toggleSelect(props.note.id);
     return;
   }
+  // 任务列表 checkbox 点击 → 切换 task 状态,不进详情(放 selectMode 之后:选择模式下 checkbox 不响应,整卡片当选择目标)
+  const tgt = e.target as HTMLElement;
+  if (tgt.tagName === 'INPUT' && (tgt as HTMLInputElement).type === 'checkbox') {
+    onTaskCheckboxClick(e, tgt as HTMLInputElement);
+    return;
+  }
   // 点击卡片内的 a 标签 → 走链接自身处理(引用预览 / 附件打开 / 外部网址),不进详情
   if ((e.target as HTMLElement).closest?.('a')) return;
   router.push(`/note/${props.note.id}`);
+}
+
+// 任务列表 checkbox 点击 → toggle markdown 源里对应的 - [x] / - [ ] + 后台保存
+// 跟 NoteDetail 同模式: regex 匹配第 N 个 task 标记,兼容 `-` / `*` 列表标记和 `[x] / [X] / [ ]` 三种状态;
+// 立即视觉同步(input.checked + props.note.content 触发 watchEffect 重渲染),失败回滚
+async function onTaskCheckboxClick(e: MouseEvent, input: HTMLInputElement) {
+  e.preventDefault();
+  e.stopPropagation();
+  const wrapper = e.currentTarget as HTMLElement;
+  const allCheckboxes = Array.from(wrapper.querySelectorAll('input[type="checkbox"]'));
+  const taskIndex = allCheckboxes.indexOf(input);
+  if (taskIndex < 0) return;
+
+  const oldContent = props.note.content;
+  let idx = 0;
+  const newContent = oldContent.replace(/^(\s*[-*]\s+\[)([xX ])(\])/gm, (match, prefix, mark, suffix) => {
+    if (idx === taskIndex) { idx++; return `${prefix}${mark === ' ' ? 'x' : ' '}${suffix}`; }
+    idx++; return match;
+  });
+  if (newContent === oldContent) return;
+
+  input.checked = !input.checked;
+  props.note.content = newContent;
+  try {
+    await store.updateNote(props.note.id, { content: newContent });
+  } catch (err) {
+    props.note.content = oldContent;
+    input.checked = !input.checked;
+    console.error('[NoteCard] toggle task failed:', err);
+  }
 }
 const showMenu = ref(false);
 const confirmDelete = ref(false);
@@ -116,6 +152,14 @@ watchEffect(async () => {
     const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 20));
     let html = await Vditor.md2html(processed, { cdn: '/vditor' } as any);
     html = injectRefLinkIcons(html);
+    // 列表卡片 task list checkbox 可点击: lute 默认输出 disabled,浏览器对 disabled input 不触发 click 事件。
+    // 跟 NoteDetail 同处理 —— DOM 剥 disabled(regex 易漏: 属性顺序 / 空值 / 自闭合斜杠 等变体)
+    {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      tmp.querySelectorAll('input[type="checkbox"]').forEach((i) => i.removeAttribute('disabled'));
+      html = tmp.innerHTML;
+    }
     // 搜索关键词高亮（只在标签之间的文本上替换，避免破坏 a[href]、class 等 HTML 属性 → 进而破坏音频胶囊等 CSS 选择器）
     const q = store.searchQuery;
     if (q && q.trim()) {

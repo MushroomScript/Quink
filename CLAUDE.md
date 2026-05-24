@@ -30,7 +30,7 @@
 Quink（一念）是一款带 AI 自动打标签、自动分类、写作辅助的个人笔记应用。pnpm monorepo，三个 package：
 
 - **packages/server** — Hono + SQLite（better-sqlite3）+ Drizzle ORM 后端 API
-- **packages/web** — Vue 3 + Vite + TailwindCSS + Vditor（Markdown 编辑器）前端
+- **packages/web** — Vue 3 + Vite + TailwindCSS + Vditor（Markdown 编辑器）+ ECharts（统计页环形图）前端
 - **packages/desktop** — Electron 桌面壳（主窗口加载 web，全局快捷键弹快速记录窗口）
 
 ## 开发命令

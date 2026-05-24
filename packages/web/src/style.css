@@ -96,6 +96,20 @@
   --sb-text: rgba(255,255,255,0.88); --sb-dim: rgba(255,255,255,0.38); --sb-hover: rgba(255,255,255,0.06); --sb-active-bg: rgba(130,160,255,0.15); --sb-active-text: #a0bfff; --sb-border: rgba(255,255,255,0.08);
 }
 
+/* 热力图色域(亮主题 light → 深端深色;暗主题反过来,深 = 满色 accent 在暗背景上更亮显眼) */
+:root { --heatmap-low: rgb(var(--c-accent-light)); --heatmap-high: color-mix(in srgb, rgb(var(--c-accent-dark)) 75%, #000); }
+[data-theme="dark"] { --heatmap-low: rgba(var(--c-accent) / 0.18); --heatmap-high: rgb(var(--c-accent)); }
+
+/* Stats 顶卡图标方块暗主题适配: Tailwind bg-XXX-50 是浅色,暗主题下会"漂浮"在暗卡片上。
+   用同色相 alpha 0.2 替换,保留每张卡的色彩差异化同时跟暗背景协调。父选择器 .grid-cols-7 限定 scope 不污染全局 */
+[data-theme="dark"] .grid-cols-7 .bg-blue-50    { background-color: rgba(59, 130, 246, 0.2); }
+[data-theme="dark"] .grid-cols-7 .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.2); }
+[data-theme="dark"] .grid-cols-7 .bg-amber-50   { background-color: rgba(245, 158, 11, 0.2); }
+[data-theme="dark"] .grid-cols-7 .bg-purple-50  { background-color: rgba(168, 85, 247, 0.2); }
+[data-theme="dark"] .grid-cols-7 .bg-sky-50     { background-color: rgba(14, 165, 233, 0.2); }
+[data-theme="dark"] .grid-cols-7 .bg-pink-50    { background-color: rgba(236, 72, 153, 0.2); }
+[data-theme="dark"] .grid-cols-7 .bg-gray-100   { background-color: rgba(156, 163, 175, 0.2); }
+
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 
@@ -229,9 +243,9 @@
 .note-content ul, .vditor-reset ul { list-style-type: disc; }
 /* 任务列表(.vditor-task)单独覆盖回 none,跟 vditor.css 第 1083 行的 !important 保持一致 */
 .vditor-reset ul.vditor-task { list-style: none; }
-/* 详情页 task checkbox 可点击 toggle: hover 时边框加深告诉用户可点 */
-.note-detail-content .vditor-task input[type="checkbox"] { cursor: pointer; }
-.note-detail-content .vditor-task input[type="checkbox"]:hover { border-color: rgb(var(--c-accent-dark)); transform: scale(1.1); transition: all 0.15s ease; }
+/* task checkbox 可点击 toggle: hover 时边框加深 + 放大告诉用户可点(列表卡片 + 详情页通用,不挑 .vditor-task 因为 lute md2html 不一定加该类) */
+.note-content input[type="checkbox"] { cursor: pointer; }
+.note-content input[type="checkbox"]:hover { border-color: rgb(var(--c-accent-dark)); transform: scale(1.1); transition: all 0.15s ease; }
 
 /* Prevent text selection on UI elements */
 button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webkit-user-select: none; }
