@@ -29,3 +29,10 @@ packages/server/uploads/
 
 # OS
 *.log
+
+# Playwright MCP 调试残留(snapshot / console log / 截图)
+.playwright-mcp/
+blinko-analytics.png
+
+# DB 备份(手动备份不入库)
+*.db.bak-*

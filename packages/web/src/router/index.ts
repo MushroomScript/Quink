@@ -38,7 +38,7 @@ const router = createRouter({
       path: '/stats',
       name: 'stats',
       component: () => import('@/views/Stats.vue'),
-      meta: { title: '统计' },
+      meta: { title: '统计', hideSearch: true },
     },
     {
       path: '/resources',
@@ -56,7 +56,7 @@ const router = createRouter({
       path: '/tags',
       name: 'tags',
       component: () => import('@/views/Tags.vue'),
-      meta: { title: '标签', hideSearch: true },
+      meta: { title: '标签' },
     },
     {
       path: '/trash',

@@ -14,6 +14,10 @@ export const useNotesStore = defineStore('notes', () => {
   const filterCategory = ref('');
   const filterType = ref('');
   const sortBy = ref<'created' | 'updated'>('created');
+  // 资源页筛选: 跟 TopBar 筛选面板共享(类型 + 日期),不属于笔记 fetchNotes 参数,Resources view 自己 watch
+  const fileCategory = ref<'all' | 'image' | 'audio' | 'document'>('all');
+  const fileDateFrom = ref('');
+  const fileDateTo = ref('');
 
   // Sorted notes
   const sortedNotes = computed(() => {
@@ -191,6 +195,9 @@ export const useNotesStore = defineStore('notes', () => {
     searchQuery,
     filterCategory,
     filterType,
+    fileCategory,
+    fileDateFrom,
+    fileDateTo,
     sortBy,
     sortedNotes,
     groupedByDate,

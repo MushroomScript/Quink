@@ -177,4 +177,13 @@ SQLite + 启动时自动迁移（`db/index.ts` 中 `CREATE TABLE IF NOT EXISTS` 
 - 原始 SQL 仅限内部统计/迁移等不直接返回给前端的场景。如必须使用，需给列加 `AS camelCase` 别名。
 
 ## 文件上传
-上传接口 `/api/upload/file`，静态服务 `/api/uploads/*`。文件存在 `packages/server/uploads/` 并在 `files` 表登记。最大 20MB。头像上传接口 `/api/upload/avatar`（2MB 限制）。
+上传接口 `/api/upload/file`，静态服务 `/api/uploads/*`。文件存在 `packages/server/uploads/` 并在 `files` 表登记。最大 100MB。头像上传接口 `/api/upload/avatar`（2MB 限制）。
+
+**url 约定（重要）**：DB `files.url` 字段 + 笔记 `content` 里 markdown link 的 url 都只存**裸文件名**（如 `xxx.png`），不带 `/api/uploads/` 前缀。渲染层用 `@/utils/fileUrl.ts` 的两个 helper 拼前缀：
+- **`resolveFileUrl(url)`**：直接拼路径（用于 `<img :src>` / `<a :href>` / `<audio :src>` 等元素属性）
+- **`resolveMarkdownFileUrls(md)`**：markdown 字符串预处理（用于 `Vditor.md2html` 前），把 `[xxx](裸名.ext)` 拼成 `[xxx](/api/uploads/裸名.ext)`。已识别规则：括号内不含 URL 特殊字符（`/`/`?`/`#`/`:`）且含扩展名 `.ext` 才拼，不会误伤外链/引用链接 `(?ref=xxx)`/内部路由 `(/note/abc)`
+- **`stripMarkdownFileUrls(md)`**：编辑器 `getValue` 后用，把 absolute path 剥回裸名（编辑器内 markdown 用 absolute 让 Vditor 能渲染 img，保存出去要剥回裸名保持 DB 干净）
+
+新增 markdown 渲染入口（NoteCard / NoteDetail / Trash / AI / AiChat / App 引用预览 / RichEditor）必须套这两个 helper，否则文件链接 404。
+
+**重命名**：`PATCH /api/upload/files/:id` 只改 DB `filename`（display name），磁盘真实文件名 + url 不动，避免历史笔记 link 失效。同时扫该用户所有笔记 content，把 `[label](url)` 里 label === 历史曾用过的文件名（`filenameHistory` JSON 数组累积）的同步改成新名；用户自定义过 label 的（如把 "xxx.m4a" 改成 "今天会议录音"）保留不动尊重写作意图。

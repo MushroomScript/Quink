@@ -12,6 +12,7 @@ import NoteEditModal from '@/components/NoteEditModal.vue';
 import GlobalToast from '@/components/GlobalToast.vue';
 import { PhMinus, PhSquare, PhX, PhXCircle, PhCaretLeft } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
+import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import { useTheme } from '@/composables/useTheme';
 import { useToast } from '@/composables/useToast';
 import { useImagePreview } from '@/composables/useImagePreview';
@@ -142,7 +143,8 @@ async function openRefPreview(noteId: string) {
     const res = await api.getNote(noteId);
     let md = res.data.content.replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
     const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
-    let html = await Vditor.md2html(processed, { cdn: '/vditor' } as any);
+    const withFiles = resolveMarkdownFileUrls(processed);  // 文件链接裸名拼前缀
+    let html = await Vditor.md2html(withFiles, { cdn: '/vditor' } as any);
     html = injectRefLinkIcons(html);
     refPreviewStack.value.push({ note: res.data, html });
 

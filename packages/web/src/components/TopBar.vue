@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import { api, type Category } from '@/api';
 import { markRaw } from 'vue';
-import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen } from '@phosphor-icons/vue';
+import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen, PhCalendarBlank, PhCheck } from '@phosphor-icons/vue';
 
 const toggleMobileSidebar = inject<() => void>('toggleMobileSidebar');
 
@@ -45,10 +45,17 @@ const showTagSuggestions = ref(false);
 watch(() => route.path, () => {
   clearTimeout(searchTimer);
   searchText.value = '';
+  store.searchQuery = '';  // 切页清掉 store 里残留(资源/标签 view watch 它过滤,残留会让新页一进来就被过滤)
   filterTags.value = [];
   filterTypes.value = ['note', 'snippet', 'todo'];
   filterDateFrom.value = '';
   filterDateTo.value = new Date().toISOString().slice(0, 10);
+  // 离开资源页时清掉 file 筛选(避免再回去带着上次的过滤)
+  if (route.path !== '/resources') {
+    store.fileCategory = 'all';
+    store.fileDateFrom = '';
+    store.fileDateTo = '';
+  }
   showMobileSearch.value = false;
   showTagSuggestions.value = false;
   if (store.selectMode) store.toggleSelectMode();
@@ -71,13 +78,49 @@ const titleCount = computed(() => {
 });
 const hideSearch = computed(() => !!route.meta.hideSearch);
 const hideRefresh = computed(() => !!route.meta.hideRefresh);
-const hasFilters = computed(() => filterTags.value.length > 0 || filterDateFrom.value || store.filterCategory || filterTypes.value.length < 3);
+// 资源/标签页搜索语义不同(搜文件 / 搜标签),不走笔记 fetchNotes,只设 store.searchQuery 让 view 自己 watch
+const searchScope = computed(() => {
+  if (route.path === '/resources') return 'files';
+  if (route.path === '/tags') return 'tags';
+  return 'notes';
+});
+const searchPlaceholder = computed(() => {
+  if (searchScope.value === 'files') return '搜索文件';
+  if (searchScope.value === 'tags') return '搜索标签';
+  return '搜索...      Ctrl + F';
+});
+const hasFilters = computed(() => {
+  // 资源页日历按钮高亮态只看日期(类型由页面顶部 chip 控制,日历不管)
+  if (searchScope.value === 'files') return !!store.fileDateFrom || !!store.fileDateTo;
+  return filterTags.value.length > 0 || filterDateFrom.value || store.filterCategory || filterTypes.value.length < 3;
+});
 
 const typeOptions = [
   { value: 'note', label: '灵感', icon: markRaw(PhLightbulb) },
   { value: 'snippet', label: '笔记', icon: markRaw(PhNotePencil) },
   { value: 'todo', label: '待办', icon: markRaw(PhCheckSquare) },
 ];
+
+// 资源页日期弹窗(按钮 + 弹窗 + 位置)
+const dateFilterOpen = ref(false);
+const dateFilterBtn = ref<HTMLElement>();
+const dateFilterPos = ref({ top: '0px', right: '0px' });
+function openDateFilter() {
+  if (dateFilterOpen.value) { dateFilterOpen.value = false; return; }
+  if (dateFilterBtn.value) {
+    const r = dateFilterBtn.value.getBoundingClientRect();
+    dateFilterPos.value = {
+      top: `${r.bottom + 4}px`,
+      right: `${window.innerWidth - r.right}px`,
+    };
+  }
+  dateFilterOpen.value = true;
+}
+function clearDateFilter() {
+  store.fileDateFrom = '';
+  store.fileDateTo = '';
+  dateFilterOpen.value = false;
+}
 
 function toggleType(t: string) {
   const idx = filterTypes.value.indexOf(t);
@@ -105,6 +148,8 @@ function doSearch(immediate = false) {
   clearTimeout(searchTimer);
   const run = () => {
     store.searchQuery = searchText.value;
+    // 资源/标签页只设 searchQuery,各 view 自己 watch 过滤,不走笔记 fetchNotes
+    if (searchScope.value !== 'notes') return;
     // types 筛选激活时覆盖页面级 filterType
     const useTypes = filterTypes.value.length < 3;
     if (useTypes) store.filterType = '';
@@ -130,12 +175,14 @@ function updateTagSuggestPos() {
 }
 
 function onSearch() {
-  // 加载标签列表(首次)
-  if (allTags.value.length === 0) {
-    api.getTags().then(res => { allTags.value = res.data; }).catch(() => {});
+  // 资源/标签页搜索不显示标签建议下拉(语义不对),只走基础 search → store.searchQuery
+  if (searchScope.value === 'notes') {
+    if (allTags.value.length === 0) {
+      api.getTags().then(res => { allTags.value = res.data; }).catch(() => {});
+    }
+    showTagSuggestions.value = true;
+    updateTagSuggestPos();
   }
-  showTagSuggestions.value = true;
-  updateTagSuggestPos();
   doSearch();
 }
 
@@ -158,6 +205,12 @@ watch(filterTags, (v) => { if (v.length) showFilters.value = true; }, { deep: tr
 function applyFilters() { doSearch(true); }
 
 function clearFilters() {
+  if (searchScope.value === 'files') {
+    store.fileCategory = 'all';
+    store.fileDateFrom = '';
+    store.fileDateTo = '';
+    return;
+  }
   store.filterCategory = '';
   filterTags.value = [];
   filterTypes.value = ['note', 'snippet', 'todo'];
@@ -256,7 +309,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <div class="flex items-center bg-gray-100/80 rounded-full border border-gray-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition overflow-hidden">
             <PhMagnifyingGlass size="1rem" weight="fill" class="ml-3 text-gray-400 shrink-0" />
             <input ref="searchInput" v-model="searchText" @input="onSearch" @focus="onSearch" @blur="hideTagSuggestionsDelayed" type="text"
-              placeholder="搜索...      Ctrl + F"
+              :placeholder="searchPlaceholder"
               class="flex-1 min-w-0 px-2 py-1.5 border-0 text-sm outline-none placeholder-gray-400"
               style="background: transparent !important" />
             <!-- 清空搜索 -->
@@ -272,9 +325,18 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <PhMagnifyingGlass size="1.25rem" weight="fill" />
         </button>
 
-        <!-- Filter toggle -->
-        <button @click="toggleFilters" class="p-1.5 rounded-lg transition-colors hidden md:block"
-          :class="showFilters || hasFilters ? 'bg-primary-light text-primary-dark' : 'hover:bg-gray-100 text-gray-400 hover:text-gray-600'">
+        <!-- 笔记页: PhFunnel + 横向 filter bar;资源页: PhCalendarBlank + 下方日期弹窗;标签页: invisible 占位保持搜索框对齐 -->
+        <button v-if="searchScope === 'files'" ref="dateFilterBtn" @click="openDateFilter"
+          class="p-1.5 rounded-lg transition-colors hidden md:block"
+          :class="dateFilterOpen || hasFilters ? 'bg-primary-light text-primary-dark' : 'hover:bg-gray-100 text-gray-400 hover:text-gray-600'"
+          title="按时间筛选">
+          <PhCalendarBlank size="1rem" weight="fill" />
+        </button>
+        <button v-else @click="toggleFilters" class="p-1.5 rounded-lg transition-colors hidden md:block"
+          :class="[
+            showFilters || hasFilters ? 'bg-primary-light text-primary-dark' : 'hover:bg-gray-100 text-gray-400 hover:text-gray-600',
+            searchScope === 'tags' ? 'invisible pointer-events-none' : '',
+          ]">
           <PhFunnel size="1rem" weight="fill" />
         </button>
       </div>
@@ -283,16 +345,16 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
     <!-- Mobile search bar (expanded) -->
     <div v-if="showMobileSearch" class="px-3 pb-2 md:hidden">
       <div class="relative">
-        <input v-model="searchText" @input="onSearch" type="text" placeholder="搜索..."
+        <input v-model="searchText" @input="onSearch" type="text" :placeholder="searchPlaceholder"
           class="w-full pl-9 pr-3 py-2 bg-gray-100/80 border-0 rounded-full text-sm outline-none focus:bg-white focus:ring-2 focus:ring-primary/30 placeholder-gray-400" autofocus />
         <PhMagnifyingGlass size="1rem" weight="fill" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
       </div>
     </div>
 
-    <!-- Desktop filter panel -->
+    <!-- 笔记页横向 filter bar(标签/资源页都不显示横向 bar,它们各自有专属交互) -->
     <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="opacity-0 -translate-y-1"
       leave-active-class="transition duration-100 ease-in" leave-to-class="opacity-0 -translate-y-1">
-      <div v-if="showFilters" class="px-6 pb-3 space-y-2 hidden md:block">
+      <div v-if="showFilters && searchScope === 'notes'" class="px-6 pb-3 space-y-2 hidden md:block">
         <!-- 类型 + 时间 + 清除 -->
         <div class="flex items-center gap-3 h-7">
           <span class="text-xs text-gray-400 w-8 shrink-0">类型</span>
@@ -315,7 +377,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
             清除全部筛选
           </button>
         </div>
-        <!-- 分类 + 标签：外层 gap-3 与类型行对齐，内层 gap-1.5 让 chip 之间紧凑 -->
+        <!-- 分类 + 标签 -->
         <div class="flex items-center gap-3 h-7">
           <span class="text-xs text-gray-400 w-8 shrink-0">筛选</span>
           <div class="flex items-center gap-1.5 flex-wrap">
@@ -354,6 +416,35 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       </div>
     </div>
   </header>
+
+  <!-- 资源页日期筛选弹窗(Teleport + fixed,按钮下方向左展开 = 弹窗右上对齐按钮右下) -->
+  <Teleport to="body">
+    <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 -translate-y-1"
+      leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0">
+      <div v-if="dateFilterOpen"
+        class="fixed z-[9999] bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-56"
+        :style="dateFilterPos">
+        <div class="text-[11px] text-gray-400 mb-2">按时间筛选</div>
+        <div class="space-y-2">
+          <div>
+            <label class="block text-[11px] text-gray-500 mb-0.5">开始日期</label>
+            <input v-model="store.fileDateFrom" type="date" class="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:border-primary bg-white" />
+          </div>
+          <div>
+            <label class="block text-[11px] text-gray-500 mb-0.5">结束日期</label>
+            <input v-model="store.fileDateTo" type="date" class="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:border-primary bg-white" />
+          </div>
+        </div>
+        <!-- 即时搜索已生效,"确定"语义就是关弹窗(用户心理舒服);清除按钮挪到资源页 chip 行 -->
+        <button @click="dateFilterOpen = false"
+          class="mt-3 w-full inline-flex items-center justify-center gap-1 text-xs py-1.5 rounded-lg bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          <PhCheck size="0.875rem" weight="fill" />
+          <span>确定</span>
+        </button>
+      </div>
+    </Transition>
+    <div v-if="dateFilterOpen" class="fixed inset-0 z-[9998]" @click="dateFilterOpen = false" />
+  </Teleport>
 
   <!-- 标签建议下拉（Teleport 到 body，避开主区编辑器层级） -->
   <Teleport to="body">

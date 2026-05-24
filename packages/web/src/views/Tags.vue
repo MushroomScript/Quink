@@ -9,7 +9,13 @@ import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
 const store = useNotesStore();
 const router = useRouter();
 const allTags = ref<string[]>([]);
-const pageCount = computed(() => allTags.value.length);
+// TopBar 搜索框的 store.searchQuery 在标签页用作标签名过滤(不区分大小写)
+const visibleTags = computed(() => {
+  const q = store.searchQuery?.trim().toLowerCase();
+  if (!q) return allTags.value;
+  return allTags.value.filter(t => t.toLowerCase().includes(q));
+});
+const pageCount = computed(() => visibleTags.value.length);
 provide('pageCount', pageCount);
 const loading = ref(true);
 const editingTag = ref('');
@@ -64,7 +70,8 @@ async function doDeleteTag() {
 onMounted(load);
 
 // 数据变更前主动 snapshot 所有卡片位置，避免 onLeave 钩子里拿到的是 v-if 切换后的错位坐标
-watch(() => allTags.value.length, () => snapshotCards(), { flush: 'sync' });
+// 用 visibleTags(不是 allTags) — 搜索过滤时标签数变化也要触发 fadeOutLeave 动画
+watch(() => visibleTags.value.length, () => snapshotCards(), { flush: 'sync' });
 </script>
 
 <template>
@@ -81,8 +88,8 @@ watch(() => allTags.value.length, () => snapshotCards(), { flush: 'sync' });
       </div>
 
       <TransitionGroup tag="div" data-animated-list class="flex flex-wrap gap-2" :css="false" @leave="fadeOutLeave">
-        <div v-for="tag in allTags" :key="tag"
-          class="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 rounded-full group transition-all duration-300"
+        <div v-for="tag in visibleTags" :key="tag"
+          class="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 rounded-full group transition-all duration-200 hover:scale-105 hover:shadow-md cursor-pointer"
           style="background: rgb(var(--c-accent-light)); color: rgb(var(--c-accent-dark))">
           <span class="text-sm cursor-pointer hover:opacity-70" @click="filterByTag(tag)">#{{ tag }}</span>
           <div class="flex gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">

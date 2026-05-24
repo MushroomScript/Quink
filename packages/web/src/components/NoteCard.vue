@@ -16,6 +16,7 @@ import {
   PhTrash,
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
+import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -150,7 +151,9 @@ watchEffect(async () => {
     let md = content.replace(/[▶⏸]/g, '').replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
     // 引用链接:先在 Markdown 层面简化(旧数据可能有多行 label,Vditor 解析不了)
     const processed = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 20));
-    let html = await Vditor.md2html(processed, { cdn: '/vditor' } as any);
+    // 文件链接裸名拼前缀: 笔记里 `[xxx](文件名.ext)` → `[xxx](/api/uploads/文件名.ext)`,让 <a>/<img>/<audio> 能加载
+    const withFiles = resolveMarkdownFileUrls(processed);
+    let html = await Vditor.md2html(withFiles, { cdn: '/vditor' } as any);
     html = injectRefLinkIcons(html);
     // 列表卡片 task list checkbox 可点击: lute 默认输出 disabled,浏览器对 disabled input 不触发 click 事件。
     // 跟 NoteDetail 同处理 —— DOM 剥 disabled(regex 易漏: 属性顺序 / 空值 / 自闭合斜杠 等变体)

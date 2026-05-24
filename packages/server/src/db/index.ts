@@ -113,5 +113,11 @@ sqlite.exec(`
 
 // Migrate: add deleted_at column if not exists
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN deleted_at TEXT'); } catch {}
+// Migrate: files.filename_history(JSON 数组,重命名时记录所有曾用过的 displayName,让"曾经是文件名的 label"也能识别为可同步)
+try { sqlite.exec('ALTER TABLE files ADD COLUMN filename_history TEXT'); } catch {}
+// Migrate: 把 /api/uploads/ 前缀从 files.url + notes.content 里 REPLACE 掉(新格式 url 裸名,渲染层拼前缀)。
+// 用 WHERE LIKE 限制只 update 还残留前缀的 row,后续启动 LIKE 不匹配自然跳过,反复跑无害。
+try { sqlite.exec(`UPDATE files SET url = REPLACE(url, '/api/uploads/', '') WHERE url LIKE '/api/uploads/%'`); } catch {}
+try { sqlite.exec(`UPDATE notes SET content = REPLACE(content, '/api/uploads/', '') WHERE content LIKE '%/api/uploads/%'`); } catch {}
 
 export { schema };

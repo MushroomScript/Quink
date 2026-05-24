@@ -9,6 +9,7 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { PhNotePencil, PhCaretLeft, PhPencilSimple } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
+import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -31,6 +32,7 @@ async function renderContent(content: string): Promise<string> {
     // 历史污染清理: 旧版 RichEditor 的播放按钮 ▶/⏸ 被 Vditor 序列化进了 markdown,这里剥掉
     let md = content.replace(/[▶⏸]/g, '').replace(/^\* \[([ xX])\]/gm, (_, c) => `- [${c.toLowerCase()}]`);
     md = md.replace(REF_LINK_REGEX, (_, label, href) => renderRefLink(label, href, 30));
+    md = resolveMarkdownFileUrls(md);  // 文件链接裸名拼 /api/uploads/ 前缀
     let html = await Vditor.md2html(md, { cdn: '/vditor' } as any);
     html = injectRefLinkIcons(html);
     // 详情页 task list checkbox 可点击: lute 默认输出 disabled,浏览器对 disabled input 不触发 click 事件。

@@ -295,10 +295,12 @@ app.post('/transcribe-async', async (c) => {
         return;
       }
 
-      // 下载音频文件
+      // 读音频文件: audioUrl 可能是裸名 "xxx.webm"(新格式) 或 "/api/uploads/xxx.webm"(老格式),
+      // 剥掉前缀统一拿到磁盘文件名 → resolve 到 uploads 目录
       const { resolve: pathResolve } = await import('path');
       const { readFileSync } = await import('fs');
-      const filePath = pathResolve(process.cwd(), audioUrl.replace(/^\/api\//, ''));
+      const filename = audioUrl.replace(/^\/api\/uploads\//, '').replace(/^uploads\//, '');
+      const filePath = pathResolve(process.cwd(), 'uploads', filename);
       const buffer = readFileSync(filePath);
 
       const { transcribeAudio } = await import('../ai/client.js');

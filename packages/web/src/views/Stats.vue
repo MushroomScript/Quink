@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, markRaw } from 'vue';
+import { useRouter } from 'vue-router';
 import { api, isLoggedIn } from '@/api';
+import { useNotesStore } from '@/stores/notes';
+
+const router = useRouter();
+const notesStore = useNotesStore();
 import {
   PhLightbulb,
   PhNotePencil,
@@ -37,14 +42,15 @@ function getTypeCount(type: string): number {
 const activeDays = computed(() => (stats.value.dailyCounts || []).length);
 
 // 顶部卡片数字渐变马卡龙色: 浅马卡龙起色 → 中等饱和同色系末色,135deg 斜向更自然
+// path 为 null 的卡片(活跃天数)点击不跳转,其余跳到对应 sidebar 入口 view
 const topCards = computed(() => [
-  { label: '灵感', count: getTypeCount('note'), icon: markRaw(PhLightbulb), color: 'bg-blue-50 text-blue-600', gradient: 'linear-gradient(135deg, #A7C7FF, #6890E0)' },
-  { label: '笔记', count: getTypeCount('snippet'), icon: markRaw(PhNotePencil), color: 'bg-emerald-50 text-emerald-600', gradient: 'linear-gradient(135deg, #B5E8C8, #5BC589)' },
-  { label: '待办', count: getTypeCount('todo'), icon: markRaw(PhCheckSquare), color: 'bg-amber-50 text-amber-600', gradient: 'linear-gradient(135deg, #FFE4A0, #FBBF24)' },
-  { label: '资源', count: fileCount.value, icon: markRaw(PhPaperclip), color: 'bg-purple-50 text-purple-600', gradient: 'linear-gradient(135deg, #D4C5FF, #A78BFA)' },
-  { label: '标签', count: tagCount.value, icon: markRaw(PhTag), color: 'bg-sky-50 text-sky-600', gradient: 'linear-gradient(135deg, #BAE6FD, #38BDF8)' },
-  { label: '活跃天数', count: activeDays.value, icon: markRaw(PhCalendarCheck), color: 'bg-pink-50 text-pink-600', gradient: 'linear-gradient(135deg, #FBCFE8, #EC4899)' },
-  { label: '回收站', count: trashCount.value, icon: markRaw(PhTrash), color: 'bg-gray-100 text-gray-500', gradient: 'linear-gradient(135deg, #E5E7EB, #9CA3AF)' },
+  { label: '灵感', count: getTypeCount('note'), icon: markRaw(PhLightbulb), color: 'bg-blue-50 text-blue-600', gradient: 'linear-gradient(135deg, #A7C7FF, #6890E0)', path: '/' },
+  { label: '笔记', count: getTypeCount('snippet'), icon: markRaw(PhNotePencil), color: 'bg-emerald-50 text-emerald-600', gradient: 'linear-gradient(135deg, #B5E8C8, #5BC589)', path: '/notes' },
+  { label: '待办', count: getTypeCount('todo'), icon: markRaw(PhCheckSquare), color: 'bg-amber-50 text-amber-600', gradient: 'linear-gradient(135deg, #FFE4A0, #FBBF24)', path: '/todos' },
+  { label: '资源', count: fileCount.value, icon: markRaw(PhPaperclip), color: 'bg-purple-50 text-purple-600', gradient: 'linear-gradient(135deg, #D4C5FF, #A78BFA)', path: '/resources' },
+  { label: '标签', count: tagCount.value, icon: markRaw(PhTag), color: 'bg-sky-50 text-sky-600', gradient: 'linear-gradient(135deg, #BAE6FD, #38BDF8)', path: '/tags' },
+  { label: '活跃天数', count: activeDays.value, icon: markRaw(PhCalendarCheck), color: 'bg-pink-50 text-pink-600', gradient: 'linear-gradient(135deg, #FBCFE8, #EC4899)', path: null },
+  { label: '回收站', count: trashCount.value, icon: markRaw(PhTrash), color: 'bg-gray-100 text-gray-500', gradient: 'linear-gradient(135deg, #E5E7EB, #9CA3AF)', path: '/trash' },
 ]);
 
 type CellData = { date: string; day: number; count: number; noteCount: number; snippetCount: number; todoCount: number; linkCount: number };
@@ -152,6 +158,19 @@ function toggleShowAll() {
   showAllCategories.value = !showAllCategories.value;
   // 切换时清掉 hover 状态避免错位
   hoveredPieIdx.value = null;
+}
+
+// 点击分类(饼图段或右侧 list 项): 跟 sidebar 分类点击同效果 — 设 store filterCategory + 跳 / 灵感页
+function onCategoryClick(name: string) {
+  notesStore.filterCategory = name;
+  notesStore.fetchNotes();
+  router.push('/');
+}
+
+// "未分类"(NULL 笔记后端筛不到) + "其他"(真实分类名语义模糊) + isOthers(折叠"其他 N 项") 都不可点击筛选
+function isClickableCategory(item: { name: string; isOthers?: boolean }): boolean {
+  if (item.isOthers) return false;
+  return item.name !== '未分类' && item.name !== '其他';
 }
 
 // chart 实例引用,用于 dispatchAction 联动右侧 list hover
@@ -275,9 +294,12 @@ onUnmounted(() => {
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <template v-else>
-      <!-- 顶部卡片：灵感/笔记/待办/资源/标签/回收站/活跃天数 -->
+      <!-- 顶部卡片：灵感/笔记/待办/资源/标签/回收站/活跃天数;hover scale + shadow,relative+z-10 让浮起来盖到邻居上;点击跳对应 view(活跃天数 path=null 不跳) -->
       <div class="grid grid-cols-7 gap-3 mb-6">
-        <div v-for="card in topCards" :key="card.label" class="bg-white rounded-xl border border-gray-200 p-3 flex flex-col items-center text-center">
+        <div v-for="card in topCards" :key="card.label"
+          class="bg-white rounded-xl border border-gray-200 p-3 flex flex-col items-center text-center relative transition-all duration-200 hover:scale-105 hover:shadow-md hover:z-10"
+          :class="card.path ? 'cursor-pointer' : 'cursor-default'"
+          @click="card.path && router.push(card.path)">
           <div class="w-8 h-8 rounded-lg flex items-center justify-center mb-2" :class="card.color">
             <component :is="card.icon" size="1.125rem" weight="fill" />
           </div>
@@ -321,15 +343,21 @@ onUnmounted(() => {
         <div v-if="categoryData.length" class="flex items-center gap-8 justify-center flex-wrap">
           <VChart ref="chartRef" :option="pieOption" autoresize
             class="shrink-0" style="width: 440px; height: 380px"
-            @mouseover="onChartMouseOver" @mouseout="onChartMouseOut" />
+            @mouseover="onChartMouseOver" @mouseout="onChartMouseOut"
+            @click="(p: any) => p.componentType === 'series' && p.data && isClickableCategory(p.data) && onCategoryClick(p.data.name)" />
           <!-- 2 列网格;折叠态(Top 10)完全展开不滚动;展开"其他"显示全部时加 max-h + 滚动,卡片高度稳定;px-2 给 hover scale 1.06 留水平缓冲避免被 overflow 裁 -->
           <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 w-[320px] py-2 px-2"
             :class="{ 'max-h-[380px] overflow-y-auto scrollbar-hide': showAllCategories }">
             <div v-for="(item, i) in categoryData" :key="item.name"
-              class="legend-item flex items-center gap-1.5 text-xs px-2 py-1.5 rounded-md cursor-pointer transition-all min-w-0"
-              :class="{ 'legend-item-active': hoveredPieIdx === i, 'legend-item-others': item.isOthers }"
+              class="legend-item flex items-center gap-1.5 text-xs px-2 py-1.5 rounded-md transition-all min-w-0"
+              :class="{
+                'legend-item-active': hoveredPieIdx === i,
+                'legend-item-others': item.isOthers,
+                'cursor-pointer': isClickableCategory(item) || item.isOthers,
+                'cursor-default': !isClickableCategory(item) && !item.isOthers,
+              }"
               @mouseenter="onLegendEnter(i)" @mouseleave="onLegendLeave(i)"
-              @click="item.isOthers && toggleShowAll()">
+              @click="item.isOthers ? toggleShowAll() : (isClickableCategory(item) && onCategoryClick(item.name))">
               <span class="w-2 h-2 rounded-sm shrink-0" :style="{ background: item.color }" />
               <span class="text-gray-700 truncate flex-1">{{ item.name }}</span>
               <span class="text-gray-400 tabular-nums shrink-0">{{ item.pct.toFixed(0) }}%</span>

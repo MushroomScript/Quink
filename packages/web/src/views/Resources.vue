@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, provide, watch } from 'vue';
 import { api, isLoggedIn } from '@/api';
+import { useNotesStore } from '@/stores/notes';
 import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
 import { useImagePreview } from '@/composables/useImagePreview';
+import { resolveFileUrl } from '@/utils/fileUrl';
+
+const store = useNotesStore();
 import {
   PhFolder,
   PhMusicNote,
@@ -10,6 +14,7 @@ import {
   PhFileText,
   PhFileZip,
   PhFile,
+  PhXCircle,
 } from '@phosphor-icons/vue';
 
 interface FileItem {
@@ -26,14 +31,18 @@ const files = ref<FileItem[]>([]);
 const pageCount = computed(() => files.value.length);
 provide('pageCount', pageCount);
 const loading = ref(true);
-const filter = ref('all');
 const confirmDeleteId = ref('');
+// 重命名: target 持有原文件 reference + 当前 input 值
+const renameTarget = ref<FileItem | null>(null);
+const renameValue = ref('');
+const renameInput = ref<HTMLInputElement | null>(null);
 const imageFiles = computed(() => filtered.value.filter(isImage));
 const { open: openImagePreview } = useImagePreview();
 
 // 点击 grid 内某张图 → 打开全屏预览（缩放 / 拖动 / 上下张切换 / 下载 / Esc 关闭 都由 ImagePreview 组件统一处理）
 function onImageClick(f: FileItem) {
-  const imgs = imageFiles.value.map(x => ({ url: x.url, filename: x.filename }));
+  // 文件 url 现在存裸名,预览组件拿到的要拼成绝对路径
+  const imgs = imageFiles.value.map(x => ({ url: resolveFileUrl(x.url), filename: x.filename }));
   const idx = imageFiles.value.findIndex(x => x.id === f.id);
   openImagePreview(imgs, Math.max(0, idx));
 }
@@ -46,8 +55,14 @@ const filters = [
 ];
 
 const filtered = computed(() => {
-  if (filter.value === 'all') return files.value;
-  return files.value.filter(f => f.category === filter.value);
+  let list = store.fileCategory === 'all' ? files.value : files.value.filter(f => f.category === store.fileCategory);
+  // TopBar 搜索框的 store.searchQuery 在资源页用作文件名过滤(不区分大小写)
+  const q = store.searchQuery?.trim().toLowerCase();
+  if (q) list = list.filter(f => f.filename.toLowerCase().includes(q));
+  // 日期范围过滤(TopBar 筛选面板)
+  if (store.fileDateFrom) list = list.filter(f => f.createdAt.slice(0, 10) >= store.fileDateFrom);
+  if (store.fileDateTo) list = list.filter(f => f.createdAt.slice(0, 10) <= store.fileDateTo);
+  return list;
 });
 
 // 数据变更前主动 snapshot 所有卡片位置，避免 onLeave 钩子里拿到的是 v-if 切换后的错位坐标
@@ -76,6 +91,36 @@ function formatDate(iso: string): string {
 function isImage(f: FileItem) { return f.mimeType.startsWith('image/'); }
 function isAudio(f: FileItem) { return f.mimeType.startsWith('audio/'); }
 
+function startRename(f: FileItem) {
+  renameTarget.value = f;
+  renameValue.value = f.filename;
+  // 弹窗渲染后 focus + 选中(不带扩展名只选中前面的名字部分让用户直接覆盖输入)
+  setTimeout(() => {
+    const el = renameInput.value;
+    if (!el) return;
+    el.focus();
+    const dotIdx = renameValue.value.lastIndexOf('.');
+    el.setSelectionRange(0, dotIdx > 0 ? dotIdx : renameValue.value.length);
+  }, 50);
+}
+
+async function doRename() {
+  if (!renameTarget.value) return;
+  const name = renameValue.value.trim();
+  const target = renameTarget.value;
+  if (!name || name === target.filename) {
+    renameTarget.value = null;
+    return;
+  }
+  try {
+    await api.renameFile(target.id, name);
+    files.value = files.value.map(f => f.id === target.id ? { ...f, filename: name } : f);
+  } catch (e) {
+    console.error('[Resources] rename failed', e);
+  }
+  renameTarget.value = null;
+}
+
 async function doDeleteFile() {
   const id = confirmDeleteId.value;
   confirmDeleteId.value = '';
@@ -98,6 +143,11 @@ function triggerUpload() {
   input.click();
 }
 
+function clearDateFilter() {
+  store.fileDateFrom = '';
+  store.fileDateTo = '';
+}
+
 function onRefresh() { load(); }
 onMounted(() => {
   load();
@@ -113,16 +163,23 @@ onUnmounted(() => {
     <!-- Filter + upload -->
     <div class="flex items-center justify-between mb-6">
       <div class="flex gap-1">
-        <button v-for="f in filters" :key="f.value" @click="filter = f.value"
+        <button v-for="f in filters" :key="f.value" @click="store.fileCategory = f.value as any"
           class="px-3 py-1.5 rounded-lg text-xs transition-colors"
-          :class="filter === f.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-500 hover:bg-gray-100'">
+          :class="store.fileCategory === f.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-500 hover:bg-gray-100'">
           {{ f.label }}
         </button>
       </div>
-      <button @click="triggerUpload"
-        class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark transition-colors">
-        上传文件
-      </button>
+      <div class="flex items-center gap-2">
+        <button v-if="store.fileDateFrom || store.fileDateTo" @click="clearDateFilter"
+          class="text-xs font-medium px-3 py-1.5 rounded-lg text-red-600 bg-red-100 hover:bg-red-200 inline-flex items-center gap-1 transition-colors">
+          <PhXCircle size="0.875rem" weight="fill" />
+          <span>清除时间筛选</span>
+        </button>
+        <button @click="triggerUpload"
+          class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark transition-colors">
+          上传文件
+        </button>
+      </div>
     </div>
 
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
@@ -142,15 +199,15 @@ onUnmounted(() => {
           class="bg-white rounded-xl border border-gray-200 overflow-hidden group hover:shadow-md transition-all duration-300">
         <!-- Preview area -->
         <div class="h-32 bg-gray-50 flex items-center justify-center overflow-hidden">
-          <!-- Image preview -->
-          <img v-if="isImage(f)" :src="f.url" :alt="f.filename" @click="onImageClick(f)"
+          <!-- Image preview;url 是裸名,resolveFileUrl 拼 /api/uploads/ 前缀 -->
+          <img v-if="isImage(f)" :src="resolveFileUrl(f.url)" :alt="f.filename" @click="onImageClick(f)"
             class="w-full h-full object-cover cursor-zoom-in" />
           <!-- Audio player -->
           <div v-else-if="isAudio(f)" class="px-3 w-full">
             <div class="flex justify-center mb-2 text-gray-400">
               <PhMusicNote size="1.75rem" weight="fill" />
             </div>
-            <audio :src="f.url" controls class="w-full h-8" style="min-width: 0;" />
+            <audio :src="resolveFileUrl(f.url)" controls class="w-full h-8" style="min-width: 0;" />
           </div>
           <!-- Document icon -->
           <div v-else class="text-center">
@@ -173,14 +230,18 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Actions -->
+        <!-- Actions: 下载 / 重命名 / 删除,中间 border-l 视觉分隔 -->
         <div class="flex items-center border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
-          <a :href="f.url" target="_blank" download
+          <a :href="resolveFileUrl(f.url)" target="_blank" download
             class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-primary">
             下载
           </a>
+          <button @click="startRename(f)"
+            class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-primary border-l border-gray-50">
+            重命名
+          </button>
           <button @click="confirmDeleteId = f.id"
-            class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-red-50 hover:text-red-500">
+            class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-red-50 hover:text-red-500 border-l border-gray-50">
             删除
           </button>
         </div>
@@ -188,6 +249,29 @@ onUnmounted(() => {
       </TransitionGroup>
     </template>
   </div>
+
+  <!-- 重命名弹窗: 标准 modal 风格,Enter 提交 / Esc 取消 / 点 mask 取消 -->
+  <Teleport to="body">
+    <Transition name="modal">
+      <div v-if="renameTarget" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="renameTarget = null" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-80">
+          <p class="text-sm text-gray-700 mb-1">重命名文件</p>
+          <p class="text-xs text-gray-400 mb-3">引用这个文件的笔记里链接显示名会同步更新</p>
+          <input ref="renameInput" v-model="renameValue"
+            @keydown.enter="doRename"
+            @keydown.esc="renameTarget = null"
+            class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary mb-4" />
+          <div class="flex gap-2 justify-end">
+            <button @click="renameTarget = null"
+              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doRename"
+              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark">保存</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 
   <Teleport to="body">
     <Transition name="modal">

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, markRaw } f
 import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import { api } from '@/api';
+import { resolveFileUrl, resolveMarkdownFileUrls, stripMarkdownFileUrls } from '@/utils/fileUrl';
 import RenameModal from './RenameModal.vue';
 import {
   PhLightbulb,
@@ -155,7 +156,8 @@ onMounted(() => {
   if (!editorRef.value) return;
 
   vditor = new Vditor(editorRef.value, {
-    value: props.initialContent,
+    // 编辑器内部用 absolute path,让 Vditor IR 模式渲染 <img>/<a href> 能加载;保存时(handleSubmit)再剥回裸名入 DB
+    value: resolveMarkdownFileUrls(props.initialContent),
     placeholder: props.placeholder,
     minHeight: props.minHeight,
     width: '100%',
@@ -182,7 +184,8 @@ onMounted(() => {
           if (res.data?.url) {
             const file = files[0];
             if (file.type.startsWith('image/')) {
-              return JSON.stringify({ msg: '', code: 0, data: { errFiles: [], succMap: { [file.name]: res.data.url } } });
+              // Vditor 用 succMap 生成 ![](url) markdown,给 absolute url 让编辑器内图片预览能加载
+              return JSON.stringify({ msg: '', code: 0, data: { errFiles: [], succMap: { [file.name]: resolveFileUrl(res.data.url) } } });
             }
             // Non-image: insert as link
             // 必须先 focus 拉回光标!上传是异步的,期间用户可能点了别处,
@@ -191,7 +194,7 @@ onMounted(() => {
             // 切换路由不消失,F5 才能刷掉 (偶发 bug,看用户点击时机)。
             vditor?.focus();
             setTimeout(() => {
-              vditor?.insertValue(`[📎 ${file.name}](${res.data.url})`);
+              vditor?.insertValue(`[📎 ${file.name}](${resolveFileUrl(res.data.url)})`);
             }, 80);
             return JSON.stringify({ msg: '', code: 0, data: { errFiles: [], succMap: {} } });
           }
@@ -258,7 +261,8 @@ function onKeydown(e: KeyboardEvent) {
 
 function handleSubmit() {
   if (!vditor) return;
-  const md = vditor.getValue().trim();
+  // 编辑器内 markdown 是 absolute path,保存前剥前缀回裸名(DB 约定)
+  const md = stripMarkdownFileUrls(vditor.getValue().trim());
   if (!md) return;
 
   emit('submit', { html: md, type: noteType.value, tags: [...tags.value] });
@@ -334,7 +338,7 @@ function applyAiResult() {
     // Replace selection — Vditor doesn't have replaceSelection, insert after clearing
     document.execCommand('insertText', false, aiResult.value);
   } else {
-    vditor.setValue(aiResult.value);
+    vditor.setValue(resolveMarkdownFileUrls(aiResult.value));
   }
   showAiPanel.value = false;
   aiResult.value = '';
@@ -580,7 +584,7 @@ async function uploadPendingVoice(name: string) {
     if (res.data?.url && vditor) {
       vditor.focus();
       setTimeout(() => {
-        vditor?.insertValue(`[语音备忘 ${dur}s](${res.data.url})`);
+        vditor?.insertValue(`[语音备忘 ${dur}s](${resolveFileUrl(res.data.url)})`);
       }, 80);
       try {
         const me = await api.getMe();

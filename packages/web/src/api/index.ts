@@ -254,6 +254,14 @@ export const api = {
     return request<{ message: string }>(`/upload/files/${id}`, { method: 'DELETE' });
   },
 
+  // 重命名: 改 DB 的 display filename + 后端同步扫描所有笔记把 [oldName](url) markdown link label 改成 [newName](url)
+  renameFile(id: string, filename: string) {
+    return request<{ data: { id: string; filename: string; url: string } }>(`/upload/files/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ filename }),
+    });
+  },
+
   // AI Configs
   getAiConfigs() {
     return request<{ data: AiConfigItem[] }>('/ai/configs');

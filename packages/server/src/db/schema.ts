@@ -40,6 +40,8 @@ export const files = sqliteTable('files', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
   filename: text('filename').notNull(),
+  // 历史 displayName 列表(JSON 数组),重命名时把旧名追加。让笔记里 label 是"曾经的文件名"也能识别为可同步
+  filenameHistory: text('filename_history'),
   url: text('url').notNull(),
   mimeType: text('mime_type').notNull(),
   category: text('category').notNull(), // image, audio, document
