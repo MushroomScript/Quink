@@ -76,7 +76,22 @@ export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
   let lastLength = 0;
   let lastFirstId: string | undefined;
 
-  watch(getItems, (newItems) => {
+  watch(getItems, (newItems, oldItems) => {
+    // === 区分 ref 全量替换(reassign) vs 内部 mutation ===
+    // store.notes 被赋值新数组(fetchNotes 非 append 路径,即筛选/搜索/换 view) → newItems !== oldItems
+    // store.notes 内部 push/splice/unshift(create/delete/loadMore) → newItems === oldItems
+    // 第一次 immediate 触发 oldItems === undefined,按 mutation 路径处理(配合 onMounted 的 rebuild)
+    const replaced = oldItems !== undefined && newItems !== oldItems;
+    if (replaced) {
+      // 全量替换 = 筛选/搜索/排序导致的数据洗牌,无论 length 变化方向都必须 rebuild,
+      // 让结果从 col[0] 起重新分配。不能走下面的 shrunk + splice 优化路径,
+      // 否则"筛选结果只有 1 张时它留在原本的列里(如第 3 列)而不是第 1 列"。
+      rebuild();
+      lastLength = newItems.length;
+      lastFirstId = newItems[0]?.id;
+      return;
+    }
+
     const firstId = newItems[0]?.id;
     const shrunk = newItems.length < lastLength;
     const firstChanged = firstId !== lastFirstId;

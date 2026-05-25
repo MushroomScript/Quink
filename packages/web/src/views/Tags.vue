@@ -5,15 +5,17 @@ import { useNotesStore } from '@/stores/notes';
 import { useRouter } from 'vue-router';
 import { PhTag, PhPencilSimple, PhXCircle } from '@phosphor-icons/vue';
 import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
+import { pinyinMatch } from '@/utils/pinyin';
 
 const store = useNotesStore();
 const router = useRouter();
 const allTags = ref<string[]>([]);
-// TopBar 搜索框的 store.searchQuery 在标签页用作标签名过滤(不区分大小写)
+// TopBar 搜索框的 store.searchQuery 在标签页用作标签名过滤
+// pinyinMatch 支持拼音搜索: 输入 zb/zhoubao 都能命中"周报"
 const visibleTags = computed(() => {
-  const q = store.searchQuery?.trim().toLowerCase();
+  const q = store.searchQuery?.trim();
   if (!q) return allTags.value;
-  return allTags.value.filter(t => t.toLowerCase().includes(q));
+  return allTags.value.filter(t => pinyinMatch(t, q));
 });
 const pageCount = computed(() => visibleTags.value.length);
 provide('pageCount', pageCount);

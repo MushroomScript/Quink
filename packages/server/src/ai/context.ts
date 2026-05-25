@@ -33,13 +33,16 @@ export function extractKeywords(question: string): string[] {
   return [...new Set(words)].slice(0, 15);
 }
 
-const INTENT_TYPE_MAP: Record<string, string[]> = {
+// 精确成 schema 里的 enum 类型,让 inArray(schema.notes.type, intentTypes) 通过严格类型检查
+type NoteType = 'note' | 'todo' | 'snippet' | 'link';
+
+const INTENT_TYPE_MAP: Record<string, NoteType[]> = {
   '待办': ['todo'], '代办': ['todo'], 'todo': ['todo'],
   '笔记': ['snippet', 'note'], '灵感': ['note'], '记录': ['note', 'snippet'],
 };
 
-function detectIntentTypes(question: string): string[] {
-  const types: string[] = [];
+function detectIntentTypes(question: string): NoteType[] {
+  const types: NoteType[] = [];
   for (const [keyword, noteTypes] of Object.entries(INTENT_TYPE_MAP)) {
     if (question.includes(keyword)) types.push(...noteTypes);
   }

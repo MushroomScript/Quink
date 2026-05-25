@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, inject, type Ref } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, watchEffect, inject, type Ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import { api, type Category } from '@/api';
 import { markRaw } from 'vue';
 import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen, PhCalendarBlank, PhCheck } from '@phosphor-icons/vue';
+import { pinyinMatch } from '@/utils/pinyin';
 
 const toggleMobileSidebar = inject<() => void>('toggleMobileSidebar');
 
@@ -32,6 +33,7 @@ const searchInput = ref<HTMLInputElement>();
 const searchBoxEl = ref<HTMLElement>();
 const tagSuggestPos = ref({ top: '0px', left: '0px', width: '0px' });
 const searchText = ref('');
+const searchFocused = ref(false);
 const showFilters = ref(false);
 const showMobileSearch = ref(false);
 const filterTags = ref<string[]>([]);
@@ -95,6 +97,15 @@ const hasFilters = computed(() => {
   return filterTags.value.length > 0 || filterDateFrom.value || store.filterCategory || filterTypes.value.length < 3;
 });
 
+// 把 searchFocused(搜索框焦点) / showMobileSearch(移动端搜索框展开) / hasFilters /
+// showFilters(漏斗面板) / searchQuery 合并写回 store.isFiltering,让 Inspiration / Notes /
+// Todos 据此隐藏顶部 NoteInput 编辑区.
+// 这几个都算"进入筛选模式",哪怕还没具体输入条件(用户意图已经摆出来,让位给搜索体验)
+watchEffect(() => {
+  // hasFilters 短路返回 string | boolean (filterDateFrom 等是 string),包一层 !! 转成纯 boolean
+  store.isFiltering = searchFocused.value || showMobileSearch.value || !!store.searchQuery || !!hasFilters.value || showFilters.value;
+});
+
 const typeOptions = [
   { value: 'note', label: '灵感', icon: markRaw(PhLightbulb) },
   { value: 'snippet', label: '笔记', icon: markRaw(PhNotePencil) },
@@ -135,7 +146,8 @@ function toggleType(t: string) {
 const tagSuggestions = computed(() => {
   const q = searchText.value.trim();
   if (!q) return [];
-  return allTags.value.filter(t => t.includes(q) && !filterTags.value.includes(t)).slice(0, 6);
+  // pinyinMatch 让"zb"也能匹配"周报"
+  return allTags.value.filter(t => pinyinMatch(t, q) && !filterTags.value.includes(t)).slice(0, 6);
 });
 
 // 输入框失焦时延迟关闭标签建议下拉（让点击建议项的事件能先触发）
@@ -308,7 +320,9 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <div ref="searchBoxEl" class="hidden md:block w-56">
           <div class="flex items-center bg-gray-100/80 rounded-full border border-gray-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition overflow-hidden">
             <PhMagnifyingGlass size="1rem" weight="fill" class="ml-3 text-gray-400 shrink-0" />
-            <input ref="searchInput" v-model="searchText" @input="onSearch" @focus="onSearch" @blur="hideTagSuggestionsDelayed" type="text"
+            <input ref="searchInput" v-model="searchText" @input="onSearch"
+              @focus="searchFocused = true; onSearch()"
+              @blur="searchFocused = false; hideTagSuggestionsDelayed()" type="text"
               :placeholder="searchPlaceholder"
               class="flex-1 min-w-0 px-2 py-1.5 border-0 text-sm outline-none placeholder-gray-400"
               style="background: transparent !important" />

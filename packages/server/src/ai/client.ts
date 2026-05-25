@@ -499,7 +499,9 @@ export async function transcribeAudio(userId: string, audioBuffer: Buffer, mimeT
 
   const formData = new FormData();
   const ext = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
-  formData.append('file', new Blob([audioBuffer], { type: mimeType }), `audio.${ext}`);
+  // Node Buffer 直接给 Blob 在严格 TS 下不接受(Buffer<ArrayBufferLike> 不匹配 BlobPart 要求的 ArrayBuffer)
+  // 转 Uint8Array 是个零拷贝 view,类型完美匹配 BlobPart,运行时行为完全一致
+  formData.append('file', new Blob([new Uint8Array(audioBuffer)], { type: mimeType }), `audio.${ext}`);
   formData.append('model', 'whisper-1');
   formData.append('language', 'zh');
 

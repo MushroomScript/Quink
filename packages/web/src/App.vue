@@ -39,7 +39,7 @@ function formatBytes(b: number): string {
   if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
   return (b / 1024 / 1024).toFixed(1) + ' MB';
 }
-desk?.onAttachmentProgress?.((data) => {
+desk?.onAttachmentProgress?.((data: { url: string; received: number; total: number }) => {
   if (!currentAttachment || data.url !== currentAttachment.url) return;
   const recv = formatBytes(data.received);
   const tail = data.total

@@ -5,6 +5,7 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { useNotesStore } from '@/stores/notes';
+import { useToast } from '@/composables/useToast';
 import type { Note } from '@/api';
 import {
   PhCheck,
@@ -17,6 +18,7 @@ import {
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { highlightTextByPinyin } from '@/utils/pinyin';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -24,6 +26,7 @@ dayjs.locale('zh-cn');
 const props = defineProps<{ note: Note }>();
 const store = useNotesStore();
 const router = useRouter();
+const toast = useToast();
 const openEditModal = inject<(note: Note) => void>('openEditModal');
 
 // 拖动检测: mousedown 时记录起点和时间, click 触发时跟 e.clientX/Y 比较
@@ -91,8 +94,15 @@ async function onTaskCheckboxClick(e: MouseEvent, input: HTMLInputElement) {
 
   const oldContent = props.note.content;
   let idx = 0;
+  // 闭包捕获 toggle 方向: mark==' ' → 切到 done; mark=='x'/'X' → 切到 undone.
+  // 用 toast 反馈,让用户在列表里隔着卡片也能看到操作生效
+  let toggledToDone = false;
   const newContent = oldContent.replace(/^(\s*[-*]\s+\[)([xX ])(\])/gm, (match, prefix, mark, suffix) => {
-    if (idx === taskIndex) { idx++; return `${prefix}${mark === ' ' ? 'x' : ' '}${suffix}`; }
+    if (idx === taskIndex) {
+      toggledToDone = mark === ' ';
+      idx++;
+      return `${prefix}${mark === ' ' ? 'x' : ' '}${suffix}`;
+    }
     idx++; return match;
   });
   if (newContent === oldContent) return;
@@ -101,6 +111,7 @@ async function onTaskCheckboxClick(e: MouseEvent, input: HTMLInputElement) {
   props.note.content = newContent;
   try {
     await store.updateNote(props.note.id, { content: newContent });
+    toast.show(toggledToDone ? '已完成' : '已取消完成', toggledToDone ? 'success' : 'default');
   } catch (err) {
     props.note.content = oldContent;
     input.checked = !input.checked;
@@ -143,7 +154,12 @@ const renderedContent = ref('');
 // Markdown → HTML rendering with search highlight
 import Vditor from 'vditor';
 
-watchEffect(async () => {
+watchEffect(async (onCleanup) => {
+  // 防 race condition: content 变化触发 callback 时,上一次的 await Vditor.md2html(旧内容)
+  // 可能还 pending。如果旧的 await 后完成 → 用旧 html 覆盖 renderedContent → UI"不刷新"
+  // (蘑菇遇到过偶发的"编辑后列表不更新"就是这个)。onCleanup 标记过期,过期结果不回写
+  let cancelled = false;
+  onCleanup(() => { cancelled = true; });
   const content = props.note.content;
   try {
     // 任务列表:* [X] → - [x] (Vditor md2html 只认 - 开头的任务列表)
@@ -164,16 +180,17 @@ watchEffect(async () => {
       html = tmp.innerHTML;
     }
     // 搜索关键词高亮（只在标签之间的文本上替换，避免破坏 a[href]、class 等 HTML 属性 → 进而破坏音频胶囊等 CSS 选择器）
+    // highlightTextByPinyin 同时支持字面 + 拼音(全拼/首字母/混合),让 query="zb" 也能在 content="周报..." 里命中"周报"高亮
     const q = store.searchQuery;
     if (q && q.trim()) {
-      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(`(${escaped})`, 'gi');
       html = html.replace(/(<[^>]+>)|([^<]+)/g, (_, tag, text) =>
-        tag ? tag : text.replace(re, '<mark class="search-highlight">$1</mark>')
+        tag ? tag : highlightTextByPinyin(text, q)
       );
     }
+    if (cancelled) return;
     renderedContent.value = html;
   } catch {
+    if (cancelled) return;
     renderedContent.value = content;
   }
 });

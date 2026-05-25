@@ -6,6 +6,7 @@ import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
 import { autoTag, autoClassify, autoSummary } from '../ai/client.js';
+import { toPinyinSearchable } from '../utils/pinyin.js';
 
 const app = new Hono();
 
@@ -43,13 +44,14 @@ app.get('/', async (c) => {
   ];
 
   if (search) {
-    // 搜索内容、摘要和标签
+    // 搜索内容、摘要、分类、标签 + 拼音(全拼/首字母,英文输入命中中文笔记)
     conditions.push(
       or(
         like(schema.notes.content, `%${search}%`),
         like(schema.notes.summary, `%${search}%`),
         like(schema.notes.category, `%${search}%`),
-        sql`${schema.notes.tags} LIKE ${'%' + search + '%'}`
+        sql`${schema.notes.tags} LIKE ${'%' + search + '%'}`,
+        like(schema.notes.contentPinyin, `%${search.toLowerCase()}%`),
       )
     );
   }
@@ -150,7 +152,9 @@ app.get('/tags', async (c) => {
     const t = (n.tags as string[]) || [];
     t.forEach(tag => tagSet.add(tag));
   }
-  return c.json({ data: [...tagSet].sort() });
+  // Intl.Collator 用 CLDR 中文 locale 按拼音排:'啊' < '吧' < '从' (a < b < c),
+  // 中英数字混排时数字/英文也按本地化规则插入 (而非纯 UTF-16 字典序)
+  return c.json({ data: [...tagSet].sort(new Intl.Collator('zh-Hans-CN').compare) });
 });
 
 // GET /api/notes/:id
@@ -177,6 +181,7 @@ app.post('/', async (c) => {
     id: nanoid(12),
     userId,
     content: parsed.data.content,
+    contentPinyin: toPinyinSearchable(parsed.data.content),
     type: parsed.data.type,
     category: parsed.data.category ?? null,
     tags: parsed.data.tags ?? [],
@@ -212,7 +217,10 @@ app.patch('/:id', async (c) => {
 
   const updates: Record<string, any> = { updatedAt: dayjs().toISOString() };
   const data = parsed.data;
-  if (data.content !== undefined) updates.content = data.content;
+  if (data.content !== undefined) {
+    updates.content = data.content;
+    updates.contentPinyin = toPinyinSearchable(data.content);
+  }
   if (data.summary !== undefined) updates.summary = data.summary;
   if (data.category !== undefined) updates.category = data.category;
   if (data.tags !== undefined) updates.tags = data.tags;

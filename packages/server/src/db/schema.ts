@@ -14,6 +14,8 @@ export const notes = sqliteTable('notes', {
   id: text('id').primaryKey(), // nanoid
   userId: text('user_id').notNull().references(() => users.id),
   content: text('content').notNull(),
+  // 全拼 + 首字母拼接串(toPinyinSearchable 生成),让搜索框支持拼音输入"zb/zhoubao"命中"周报"
+  contentPinyin: text('content_pinyin'),
   summary: text('summary'),
   category: text('category'), // e.g. "编程/踩坑记录"
   tags: text('tags', { mode: 'json' }).$type<string[]>().default([]),

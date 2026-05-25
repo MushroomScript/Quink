@@ -24,6 +24,8 @@ Quink web 端渲染相关坑：DOM 操作 / CSS 布局 / Vue 模板 / HMR / mark
 
 ## Vue / HMR
 
+- **`async watch` / `async watchEffect` 必须用 `onCleanup` 守门,否则迟早 race**:依赖快速变化(用户连续编辑 / 流式 SSE / 快速切卡片)时,多次 callback 并行运行,await 完成顺序无保证 —— 旧的若后完成会覆盖新的最终值,UI 看似"不刷新"。**症状**:编辑后偶尔列表显示旧内容,刷新页面又正常(reload 后 watch 从零跑第一次,没竞争)。**修法**:`watchEffect(async (onCleanup) => { let cancelled = false; onCleanup(() => cancelled = true; ); ... await ...; if (cancelled) return; result.value = ...; })`。watch 签名是 `(new, old, onCleanup)`,第三参数同理。范例:`NoteCard.vue` 的 markdown 渲染 watchEffect、`NoteDetail.vue` 的 content watch。**通用规律**:只要 watch/watchEffect 里有 `await`,就要 onCleanup,跟 fetch 过期 abort / setTimeout 卸载 clear 是同类责任。
+
 - **`onMounted` 给 `document`/`window` 挂全局副作用 HMR 不友好**：开发期 HMR 重 mount 后旧 handler 还在 document 上，capture 阶段先于新 handler 触发并 `stopImmediatePropagation`，调用旧闭包里的函数（操作旧响应式状态，新 UI 完全没反应；典型症状："改完代码 X 功能失效，F5 就好"）。**`onBeforeUnmount` 不够用**——HMR 卸载顺序不可靠。修法：组件文件顶部用模块级 `let prevXxxHandler = null` 缓存上次挂的对象，下次 `onMounted` 入口先 `removeEventListener` / 还原原函数再挂新的。范例：`App.vue` 顶部 `prevRefClickHandler` + `prevWindowOpen` 的模块级清理逻辑。
 
 ## markdown 渲染（含 Vditor）

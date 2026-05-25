@@ -104,9 +104,15 @@ async function onContentClick(e: MouseEvent) {
 }
 
 // 监听 content 变化触发重渲染(loadNote / 编辑保存 / task toggle 都走这里统一)
-watch(() => note.value?.content, async (newContent) => {
+// 防 race: 旧 content 的 renderContent 还 pending 时新内容触发,旧的若后完成会覆盖新 html。
+// onCleanup 标记过期,过期结果不回写
+watch(() => note.value?.content, async (newContent, _old, onCleanup) => {
+  let cancelled = false;
+  onCleanup(() => { cancelled = true; });
   if (!newContent) { rendered.value = ''; return; }
-  rendered.value = await renderContent(newContent);
+  const html = await renderContent(newContent);
+  if (cancelled) return;
+  rendered.value = html;
 }, { immediate: true });
 
 // store 重新 fetch 后笔记数组整体被替换,同步 note.value 引用(让后续 mutate 能直接生效)

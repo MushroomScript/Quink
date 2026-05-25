@@ -90,17 +90,15 @@ react-masonry-css 用 `i % N` round-robin，简单但**列高不平衡**（长�
 
 **记住**：spy 抓不到 = scrollTop 不是被代码改的，**是浏览器自己归零**（多半是 unmount/remount）。这条断言救了至少一次（坑 3 就是这么定位的）。
 
-### 坑 6：shrunk 不能全量 rebuild，否则跨列重排误触发 leave
+### 坑 6：删除走 mutate / 筛选走 reassign，靠 `newItems !== oldItems` 区分
 
-删除 / 恢复一个笔记时，早期 useMasonry 无条件 `rebuild()` —— 全量重新分配 notes 到 N 列。pickShortest 算法可能让 staying 笔记跨列移动（比如 B 从 col[0] 跨到 col[1]）。但 TransitionGroup 是按 col 独立工作的：跨列移动对每个 col 来说 = 原列 **leave** + 新列 **enter**。
+删除 / 恢复时如果无条件 `rebuild()`，pickShortest 会让 staying 笔记跨列移动 → TransitionGroup 原列 leave + 新列 enter → 误触发 onLeave 钩子 → 看着像"后面卡片跟着一起飞向 sidebar"（回收站 flyToNavLeave 时尤其醒目，Inspiration/Notes/Todos 用 fadeOutLeave 视觉不明显）。所以删除必须走增量 splice，只有筛选/搜索/换 view 才 rebuild。
 
-结果：被恢复的笔记触发 leave（正确），但**所有跨列移动的 staying 笔记也被各自原列 TransitionGroup 触发 leave**（错误），调用 onLeave 钩子 → 一起执行 flyToNavLeave → 看着像"后面卡片跟着被恢复的卡片一起飞向 sidebar"。Inspiration / Notes / Todos 用 fadeOutLeave（小幅淡出）时这个 bug 视觉不明显，**回收站用 flyToNavLeave（飞跨整屏）就特别醒目**。
+区分方式：`watch(getItems, (newItems, oldItems) => ...)` 的两个参数。
+- **reassign**（`notes.value = newArr`）→ `newItems !== oldItems` → rebuild
+- **mutate**（`push` / `splice` / `unshift`）→ `newItems === oldItems`（deep watch 检测内部变化）→ 走 splice / append
 
-修法：shrunk 时先检查是不是"严格删除"（newItems ⊆ oldItems，没新增 id）。如果是 → 增量从对应 col `splice` 掉被删项 + `colHeights` 减相应估算高度，staying 元素 DOM 引用不动 → TransitionGroup 只对真正被删项触发 leave。如果不是（数据洗牌 / 换 view / 搜索 / 排序）→ 仍走全量 rebuild。
-
-代价：连续删多个后某列可能比其他列短，下次 append 时 pickShortest 会自然补偿（新卡片优先填到较矮的列）。如果完全没 append（回收站这种）则不平衡持续到换 view。可接受。
-
-范例：`useMasonry.ts` 的 watch 内 shrunk 分支。
+**配套要求：store 操作 `notes.value` 时语义必须跟读写方式一致。** 尤其 `deleteNote` **不能**用 `notes.value = notes.value.filter(...)` —— `filter()` 返回新数组 + `=` 是 reassign，会被 useMasonry 误判为筛选 → 走 rebuild → 跨列重排闪烁。必须用 `findIndex + splice` 走 mutate。
 
 ### 配合 store 的动态 pageSize
 

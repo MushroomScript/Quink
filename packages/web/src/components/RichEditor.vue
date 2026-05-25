@@ -54,10 +54,25 @@ const props = withDefaults(defineProps<{
 });
 
 const isFullscreen = ref(props.initialFullscreen);
+
+// 同页面允许多个 RichEditor 共存(NoteInput + NoteEditModal),view-transition-name 必须唯一,
+// 否则浏览器认为多个元素争抢同名快照,直接放弃动画
+const vtName = `rich-editor-${Math.random().toString(36).slice(2, 8)}`;
+
+// View Transitions API: 切全屏时把 DOM 突变包成一帧过渡,浏览器自动给 wrapper 做 morph
+// (旧/新两个快照之间 opacity + transform 插值)。Electron 用的 Chromium 已稳定支持。
+function withViewTransition(cb: () => void) {
+  const start = (document as any).startViewTransition;
+  if (typeof start === 'function') start.call(document, cb);
+  else cb();
+}
+
 function toggleFullscreen() {
-  isFullscreen.value = !isFullscreen.value;
-  // 持久化偏好,让 NoteEditModal 下次从列表/详情页打开时默认用这个状态
-  try { localStorage.setItem('quink_edit_fullscreen', isFullscreen.value ? '1' : '0'); } catch {}
+  withViewTransition(() => {
+    isFullscreen.value = !isFullscreen.value;
+    // 持久化偏好,让 NoteEditModal 下次从列表/详情页打开时默认用这个状态
+    try { localStorage.setItem('quink_edit_fullscreen', isFullscreen.value ? '1' : '0'); } catch {}
+  });
 }
 
 const emit = defineEmits<{
@@ -244,7 +259,7 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && isFullscreen.value) {
     e.preventDefault();
     e.stopPropagation();
-    isFullscreen.value = false;
+    withViewTransition(() => { isFullscreen.value = false; });
     return;
   }
   if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
@@ -267,6 +282,10 @@ function handleSubmit() {
 
   emit('submit', { html: md, type: noteType.value, tags: [...tags.value] });
   dirty.value = false;
+  // 保存后退出全屏: NoteInput 场景让用户看回到列表; NoteEditModal 场景下 modal 自身也在
+  // 关闭(同一 tick 内 store.updateNote 后 showInner=false),这里只是顺手清掉状态。
+  // 不同步 localStorage —— 那是用户手动 toggle 的偏好,保留下次打开默认行为
+  if (isFullscreen.value) isFullscreen.value = false;
 }
 
 function clearContent() {
@@ -607,6 +626,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 <template>
   <div @keydown="onKeydown"
     :data-fullscreen="isFullscreen || undefined"
+    :style="{ viewTransitionName: vtName }"
     :class="isFullscreen
       ? 'fixed inset-0 z-[200] bg-white flex flex-col'
       : 'flex flex-col'">

@@ -297,6 +297,34 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
 }
 
 
+/* 顶部编辑区显隐过渡 (Inspiration / Notes / Todos): 进入筛选/搜索状态时折叠.
+   用 grid-template-rows 1fr ↔ 0fr 的 trick —— 浏览器原生支持的"auto 高度过渡",
+   不依赖死值 max-height,编辑区无论多长都能完整折叠 / 展开。
+   要点:
+   - 外层 wrap 设 display:grid + grid-template-rows:1fr,折叠时切到 0fr
+   - 内层子元素必须 overflow:hidden + min-height:0,否则 grid 子项的最小内容高度
+     会撑开父容器,0fr 不生效(grid 默认 min-content auto 的坑)
+   - margin-bottom 也一起过渡到 0,否则塌缩后下方还会留一段 1.5rem 的空白
+   兼容性: Chrome 117+ / FF 102+ / Safari 16+,Electron 当前版本都覆盖 */
+.editor-area-wrap {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+.editor-area-wrap > * {
+  overflow: hidden;
+  min-height: 0;
+}
+.editor-area-enter-active,
+.editor-area-leave-active {
+  transition: grid-template-rows 0.25s ease, opacity 0.2s ease, margin-bottom 0.25s ease;
+}
+.editor-area-enter-from,
+.editor-area-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  margin-bottom: 0 !important;  /* 覆盖 mb-4 / md:mb-6 utility class */
+}
+
 /* 编辑模态全屏打开时用的过渡: 只 fade,不 scale。
    原因: scale 动画期间 .relative 容器一直有 transform,导致内部 RichEditor 的
    fixed inset-0 不再相对 viewport(CSS 规范: transform 祖先成为 fixed 子元素的
@@ -356,8 +384,9 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
   font-size: 13px;
   font-weight: 500;
   transition: opacity 0.15s, filter 0.15s;
-  vertical-align: middle;
-  margin: 4px 0;
+  /* bottom: 胶囊底贴行盒底,后面文字 descender 也在行盒底 → 视觉"底对底" */
+  vertical-align: bottom;
+  margin: 4px 10px 4px 0;
 }
 .note-content a[href$=".webm"]:hover,
 .note-content a[href$=".mp3"]:hover,

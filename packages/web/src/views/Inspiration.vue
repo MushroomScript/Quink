@@ -43,10 +43,14 @@ onActivated(() => {
 
 <template>
   <div class="px-4 md:px-8 py-4 md:py-6">
-    <div class="mb-4 md:mb-6">
-      <MobileInput v-if="isMobile" />
-      <NoteInput v-else default-type="note" />
-    </div>
+    <Transition name="editor-area">
+      <div v-if="!store.isFiltering" class="editor-area-wrap mb-4 md:mb-6">
+        <div>
+          <MobileInput v-if="isMobile" />
+          <NoteInput v-else default-type="note" />
+        </div>
+      </div>
+    </Transition>
 
     <!-- 只在首次加载(notes 为空)时显示全屏 loading;loadMore 时不要切到这个分支,
          否则会 unmount 整个 .notes-masonry,remount 后 main 容器 scrollTop 自动回到 0 -->

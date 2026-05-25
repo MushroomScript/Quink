@@ -50,10 +50,14 @@ onActivated(async () => {
 
 <template>
   <div class="px-4 md:px-8 py-4 md:py-6">
-    <div class="mb-4 md:mb-6">
-      <MobileInput v-if="isMobile" />
-      <NoteInput v-else default-type="todo" />
-    </div>
+    <Transition name="editor-area">
+      <div v-if="!store.isFiltering" class="editor-area-wrap mb-4 md:mb-6">
+        <div>
+          <MobileInput v-if="isMobile" />
+          <NoteInput v-else default-type="todo" />
+        </div>
+      </div>
+    </Transition>
 
     <div :class="pendingTodos.length > 0 ? 'mb-6 md:mb-8' : ''">
       <h3 v-if="pendingTodos.length > 0" class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">未完成 ({{ pendingTodos.length }})</h3>

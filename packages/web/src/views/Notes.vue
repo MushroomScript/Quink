@@ -33,10 +33,14 @@ watch(() => store.notes.length, () => snapshotCards(), { flush: 'sync' });
 
 <template>
   <div class="px-4 md:px-8 py-4 md:py-6">
-    <div class="mb-4 md:mb-6">
-      <MobileInput v-if="isMobile" />
-      <NoteInput v-else default-type="snippet" />
-    </div>
+    <Transition name="editor-area">
+      <div v-if="!store.isFiltering" class="editor-area-wrap mb-4 md:mb-6">
+        <div>
+          <MobileInput v-if="isMobile" />
+          <NoteInput v-else default-type="snippet" />
+        </div>
+      </div>
+    </Transition>
 
     <!-- 同 Inspiration.vue: 仅首次加载才整体显示 loading,避免 loadMore 时整列表 unmount → scrollTop 回顶 -->
     <div v-if="store.loading && store.notes.length === 0" class="text-center py-12 text-gray-400 text-sm">加载中...</div>

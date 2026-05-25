@@ -5,6 +5,7 @@ import { useNotesStore } from '@/stores/notes';
 import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
 import { useImagePreview } from '@/composables/useImagePreview';
 import { resolveFileUrl } from '@/utils/fileUrl';
+import { pinyinMatch } from '@/utils/pinyin';
 
 const store = useNotesStore();
 import {
@@ -56,9 +57,10 @@ const filters = [
 
 const filtered = computed(() => {
   let list = store.fileCategory === 'all' ? files.value : files.value.filter(f => f.category === store.fileCategory);
-  // TopBar 搜索框的 store.searchQuery 在资源页用作文件名过滤(不区分大小写)
-  const q = store.searchQuery?.trim().toLowerCase();
-  if (q) list = list.filter(f => f.filename.toLowerCase().includes(q));
+  // TopBar 搜索框的 store.searchQuery 在资源页用作文件名过滤
+  // pinyinMatch 支持拼音搜索: 输入 yyx/yuyinxiaoxi 都能命中"语音消息.mp3"
+  const q = store.searchQuery?.trim();
+  if (q) list = list.filter(f => pinyinMatch(f.filename, q));
   // 日期范围过滤(TopBar 筛选面板)
   if (store.fileDateFrom) list = list.filter(f => f.createdAt.slice(0, 10) >= store.fileDateFrom);
   if (store.fileDateTo) list = list.filter(f => f.createdAt.slice(0, 10) <= store.fileDateTo);

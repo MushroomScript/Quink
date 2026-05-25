@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
 import { resolve } from 'path';
+import { toPinyinSearchable } from '../utils/pinyin.js';
 
 const DB_PATH = process.env.QUINK_DB_PATH || resolve(process.cwd(), 'quink.db');
 
@@ -119,5 +120,30 @@ try { sqlite.exec('ALTER TABLE files ADD COLUMN filename_history TEXT'); } catch
 // 用 WHERE LIKE 限制只 update 还残留前缀的 row,后续启动 LIKE 不匹配自然跳过,反复跑无害。
 try { sqlite.exec(`UPDATE files SET url = REPLACE(url, '/api/uploads/', '') WHERE url LIKE '/api/uploads/%'`); } catch {}
 try { sqlite.exec(`UPDATE notes SET content = REPLACE(content, '/api/uploads/', '') WHERE content LIKE '%/api/uploads/%'`); } catch {}
+// Migrate: notes.content_pinyin (拼音搜索支持: 全拼 + 首字母拼接串,搜索时 LIKE %query% 命中)
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN content_pinyin TEXT'); } catch {}
+// 一次性回填 + 升级重算: PINYIN_SCHEMA_VERSION 每次 toPinyinSearchable 算法升级时 +1,
+// 启动检测 config 表里存的版本号,低于当前版本就把所有 content_pinyin 清空让下面回填重算。
+// v1: 全拼 + 单读音首字母. v2: 多音字首字母穷举. v3: 多音字只取前 2 读音. v4: 加罕用读音黑名单.
+// v5: 弃用多音字穷举,只用 pinyin-pro 默认读音 —— 牺牲"重做"搜 cxcz 换全局零误命中(蘑菇的决策)
+const PINYIN_SCHEMA_VERSION = 5;
+try {
+  const row = sqlite.prepare("SELECT value FROM config WHERE key = 'pinyin_schema_version'").get() as { value: string } | undefined;
+  const curVer = row ? Number(JSON.parse(row.value)) : 0;
+  if (curVer < PINYIN_SCHEMA_VERSION) {
+    sqlite.prepare("UPDATE notes SET content_pinyin = NULL").run();
+    console.log(`[pinyin migration] schema v${curVer} → v${PINYIN_SCHEMA_VERSION}, forcing full re-backfill`);
+  }
+  const pending = sqlite.prepare('SELECT id, content FROM notes WHERE content_pinyin IS NULL').all() as Array<{ id: string; content: string }>;
+  if (pending.length > 0) {
+    const upd = sqlite.prepare('UPDATE notes SET content_pinyin = ? WHERE id = ?');
+    const tx = sqlite.transaction((rows: typeof pending) => {
+      for (const r of rows) upd.run(toPinyinSearchable(r.content), r.id);
+    });
+    tx(pending);
+    console.log(`[pinyin migration] backfilled ${pending.length} notes`);
+  }
+  sqlite.prepare("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)").run('pinyin_schema_version', JSON.stringify(PINYIN_SCHEMA_VERSION));
+} catch (e) { console.error('[pinyin migration] failed:', e); }
 
 export { schema };

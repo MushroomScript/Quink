@@ -13,6 +13,9 @@ export const useNotesStore = defineStore('notes', () => {
   const searchQuery = ref('');
   const filterCategory = ref('');
   const filterType = ref('');
+  // 是否有用户主动的筛选 (搜索/分类/标签/类型/日期)。由 TopBar watchEffect 写入,
+  // 各 view 用它隐藏顶部 NoteInput 编辑区,避免筛选状态下还让用户新写笔记
+  const isFiltering = ref(false);
   const sortBy = ref<'created' | 'updated'>('created');
   // 资源页筛选: 跟 TopBar 筛选面板共享(类型 + 日期),不属于笔记 fetchNotes 参数,Resources view 自己 watch
   const fileCategory = ref<'all' | 'image' | 'audio' | 'document'>('all');
@@ -110,7 +113,12 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function deleteNote(id: string) {
     await api.deleteNote(id);
-    notes.value = notes.value.filter((n) => n.id !== id);
+    // 用 splice 而不是 filter 重新赋值: filter 创建新数组等于 reassign,会跟筛选/搜索的
+    // notes.value = res.data 在 useMasonry 视角下混淆 —— 都是"length 减少 + 子集",
+    // 误走 splice 优化让筛选结果留在原列。改 mutate 后,useMasonry 用 reassign 检测
+    // 能精确区分两种场景: reassign=筛选(rebuild), mutate=删除(走原 splice 优化)
+    const idx = notes.value.findIndex((n) => n.id === id);
+    if (idx >= 0) notes.value.splice(idx, 1);
     total.value = Math.max(0, total.value - 1);
   }
 
@@ -195,6 +203,7 @@ export const useNotesStore = defineStore('notes', () => {
     searchQuery,
     filterCategory,
     filterType,
+    isFiltering,
     fileCategory,
     fileDateFrom,
     fileDateTo,

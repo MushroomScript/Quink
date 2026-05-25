@@ -6,6 +6,7 @@ import { resolve } from 'path';
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
+import { toPinyinSearchable } from '../utils/pinyin.js';
 
 const UPLOAD_DIR = resolve(process.cwd(), 'uploads');
 
@@ -225,7 +226,7 @@ app.patch('/files/:id', async (c) => {
     });
     if (newContent !== note.content) {
       await db.update(schema.notes)
-        .set({ content: newContent, updatedAt: now })
+        .set({ content: newContent, contentPinyin: toPinyinSearchable(newContent), updatedAt: now })
         .where(eq(schema.notes.id, note.id));
     }
   }
