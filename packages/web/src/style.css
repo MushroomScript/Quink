@@ -384,8 +384,8 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
   font-size: 13px;
   font-weight: 500;
   transition: opacity 0.15s, filter 0.15s;
-  /* bottom: 胶囊底贴行盒底,后面文字 descender 也在行盒底 → 视觉"底对底" */
-  vertical-align: bottom;
+  /* 胶囊比文字高,完全底对底视觉上文字看着偏低. -1px 让胶囊轻微下沉,文字相对上移更自然 */
+  vertical-align: -1px;
   margin: 4px 10px 4px 0;
 }
 .note-content a[href$=".webm"]:hover,

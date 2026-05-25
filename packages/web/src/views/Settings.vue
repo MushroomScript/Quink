@@ -26,6 +26,7 @@ const uploadingAvatar = ref(false);
 const prefs = reactive({
   theme: 'blueberry',
   fontSize: 14,
+  autoTag: true,
   autoSummary: true,
   autoSummaryMinLen: 50,
   autoTranscribeVoice: false,
@@ -544,12 +545,19 @@ function goBack() {
               :class="prefs.showTodoBadge ? 'translate-x-6' : 'translate-x-1'" />
           </button>
         </div>
-        <!-- 自动摘要 -->
+        <!-- 自动生成标签 -->
         <div class="flex items-center justify-between pt-2 border-t border-gray-100">
-          <div>
-            <div class="text-sm text-gray-700 font-medium">自动摘要</div>
-            <div class="text-xs text-gray-400 mt-0.5">新建笔记后 AI 自动生成内容摘要</div>
-          </div>
+          <div class="text-sm text-gray-700 font-medium">自动生成标签</div>
+          <button @click="prefs.autoTag = !prefs.autoTag"
+            class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4"
+            :class="prefs.autoTag ? 'bg-primary' : 'bg-gray-300'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
+              :class="prefs.autoTag ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
+        </div>
+        <!-- 自动生成摘要 -->
+        <div class="flex items-center justify-between pt-2 border-t border-gray-100">
+          <div class="text-sm text-gray-700 font-medium">自动生成摘要</div>
           <button @click="prefs.autoSummary = !prefs.autoSummary"
             class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4"
             :class="prefs.autoSummary ? 'bg-primary' : 'bg-gray-300'">
@@ -615,10 +623,7 @@ function goBack() {
           </div>
           <!-- Token 上限 -->
           <div class="flex items-center justify-between">
-            <div>
-              <div class="text-xs text-gray-600">上下文 Token 上限</div>
-              <div class="text-[11px] text-gray-400">越大记住越多对话历史，但消耗更多 Token</div>
-            </div>
+            <div class="text-xs text-gray-600">上下文 Token 上限</div>
             <select v-model.number="prefs.aiChatMaxTokens" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30">
               <option :value="4096">4K</option>
               <option :value="8192">8K</option>
@@ -638,8 +643,6 @@ function goBack() {
     <!-- ═══ 快捷键 ═══ -->
     <div v-if="activeTab === 'shortcuts'">
       <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-        <p class="text-xs text-gray-400 mb-2">点击快捷键区域，然后按下新的组合键来修改</p>
-
         <div class="space-y-3">
           <!-- Capture shortcut -->
           <div class="flex items-center justify-between py-3 border-b border-gray-50">
@@ -780,7 +783,6 @@ function goBack() {
       <!-- Feature bindings -->
       <div class="bg-white rounded-xl border border-gray-200 p-6">
         <h3 class="text-sm font-medium text-gray-800 mb-4">功能绑定</h3>
-        <p class="text-xs text-gray-400 mb-4">为每个 AI 功能选择使用哪个配置，选择后自动保存</p>
         <div class="space-y-3">
           <div v-for="f in aiFeatures" :key="f.key" class="flex items-center justify-between">
             <span class="text-sm text-gray-600">{{ f.label }}</span>
