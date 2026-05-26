@@ -36,7 +36,7 @@ watch(() => store.notes.length, () => snapshotCards(), { flush: 'sync' });
     <Transition name="editor-area">
       <div v-if="!store.isFiltering" class="editor-area-wrap mb-4 md:mb-6">
         <div>
-          <MobileInput v-if="isMobile" />
+          <MobileInput v-if="isMobile" default-type="snippet" />
           <NoteInput v-else default-type="snippet" />
         </div>
       </div>

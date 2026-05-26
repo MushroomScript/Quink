@@ -53,7 +53,7 @@ onActivated(async () => {
     <Transition name="editor-area">
       <div v-if="!store.isFiltering" class="editor-area-wrap mb-4 md:mb-6">
         <div>
-          <MobileInput v-if="isMobile" />
+          <MobileInput v-if="isMobile" default-type="todo" />
           <NoteInput v-else default-type="todo" />
         </div>
       </div>

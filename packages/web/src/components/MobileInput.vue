@@ -1,6 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, withDefaults } from 'vue';
 import { useNotesStore } from '@/stores/notes';
+
+// 跟 NoteInput 对齐: 主界面编辑器 type 强制走 view 对应的 defaultType,
+// 避免在 /notes / /todos 编辑器写的内容默认变成灵感 (D1 错配)。
+const props = withDefaults(defineProps<{ defaultType?: string }>(), {
+  defaultType: 'note',
+});
 
 const store = useNotesStore();
 const content = ref('');
@@ -12,7 +18,7 @@ async function submit() {
   if (!text || submitting.value) return;
   submitting.value = true;
   try {
-    await store.createNote(text, 'note');
+    await store.createNote(text, props.defaultType);
     content.value = '';
     showToast.value = true;
     setTimeout(() => (showToast.value = false), 1500);

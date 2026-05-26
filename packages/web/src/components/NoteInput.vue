@@ -4,9 +4,11 @@ import { useNotesStore } from '@/stores/notes';
 import { useToast } from '@/composables/useToast';
 import RichEditor from './RichEditor.vue';
 
-const props = withDefaults(defineProps<{ defaultType?: string; showTypeSelector?: boolean }>(), {
+// 主界面 3 个 view (Inspiration/Notes/Todos) 的编辑器:固定走 view 对应的 type (defaultType),
+// 不显示类型选择器 — 避免"在 /notes 编辑器选'灵感'保存"导致的卡片错落到非匹配列表的问题 (D1)。
+// 跨类型快速记录走 Capture 快捷弹窗 (那里直接用 RichEditor 保留 type selector)。
+const props = withDefaults(defineProps<{ defaultType?: string }>(), {
   defaultType: 'note',
-  showTypeSelector: true,
 });
 
 const store = useNotesStore();
@@ -29,6 +31,6 @@ async function onSubmit(data: { html: string; type: string; tags: string[] }) {
 
 <template>
   <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
-    <RichEditor ref="editorRef" @submit="onSubmit" :initial-type="defaultType" :show-type-selector="showTypeSelector" placeholder="写下你的想法..." />
+    <RichEditor ref="editorRef" @submit="onSubmit" :initial-type="defaultType" :show-type-selector="false" placeholder="写下你的想法..." />
   </div>
 </template>
