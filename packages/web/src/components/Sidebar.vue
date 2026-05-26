@@ -95,12 +95,55 @@ function filterByCategory(name: string) {
   }
 }
 
-const mainNav = [
-  { path: '/', label: '灵感', icon: markRaw(PhLightbulb) },
-  { path: '/notes', label: '笔记', icon: markRaw(PhNotePencil) },
-  { path: '/todos', label: '待办', icon: markRaw(PhCheckSquare) },
+// dropType 标记: 主导航前 3 项作为"拖到此处改 type"的 drop target (AI 不参与)
+const mainNav: Array<{ path: string; label: string; icon: any; dropType?: 'note' | 'snippet' | 'todo' }> = [
+  { path: '/', label: '灵感', icon: markRaw(PhLightbulb), dropType: 'note' },
+  { path: '/notes', label: '笔记', icon: markRaw(PhNotePencil), dropType: 'snippet' },
+  { path: '/todos', label: '待办', icon: markRaw(PhCheckSquare), dropType: 'todo' },
   { path: '/ai', label: 'AI', icon: markRaw(PhSparkle) },
 ];
+
+// 拖动 NoteCard 到 sidebar 的 drop target. payload 在 NoteCard.onDragStart 里设;
+// dragOverTarget 标识当前 hover 的 target id ('type:note' / 'cat:工作' 等), 用于视觉高亮
+const dragOverTarget = ref<string | null>(null);
+
+function parseDragPayload(e: DragEvent): { id: string; type: string; category: string } | null {
+  const raw = e.dataTransfer?.getData('text/plain');
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+function onTypeDragOver(e: DragEvent, type: string) {
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  dragOverTarget.value = 'type:' + type;
+}
+function onTypeDragLeave(type: string) {
+  if (dragOverTarget.value === 'type:' + type) dragOverTarget.value = null;
+}
+async function onTypeDrop(e: DragEvent, type: 'note' | 'snippet' | 'todo') {
+  e.preventDefault();
+  dragOverTarget.value = null;
+  const data = parseDragPayload(e);
+  if (!data || !data.id || data.type === type) return;
+  try { await notesStore.updateNote(data.id, { type } as any); } catch {}
+}
+
+function onCatDragOver(e: DragEvent, name: string) {
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  dragOverTarget.value = 'cat:' + name;
+}
+function onCatDragLeave(name: string) {
+  if (dragOverTarget.value === 'cat:' + name) dragOverTarget.value = null;
+}
+async function onCatDrop(e: DragEvent, name: string) {
+  e.preventDefault();
+  dragOverTarget.value = null;
+  const data = parseDragPayload(e);
+  if (!data || !data.id || data.category === name) return;
+  try { await notesStore.updateNote(data.id, { category: name } as any); } catch {}
+}
 
 const moreNav = [
   { path: '/stats', label: '统计', icon: markRaw(PhChartBar) },
@@ -153,10 +196,14 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
 
     <!-- Nav -->
     <nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
-      <!-- Main nav -->
+      <!-- Main nav (前 3 项有 dropType: 拖卡片到此改 type) -->
       <router-link v-for="item in mainNav" :key="item.path" :to="item.path"
         :data-nav-path="item.path"
         class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-150 nav-item"
+        :class="{ 'drop-target-active': item.dropType && dragOverTarget === 'type:' + item.dropType }"
+        @dragover="item.dropType && onTypeDragOver($event, item.dropType)"
+        @dragleave="item.dropType && onTypeDragLeave(item.dropType)"
+        @drop="item.dropType && onTypeDrop($event, item.dropType)"
         :style="isActive(item.path)
           ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)', fontWeight: 500 }
           : { color: 'var(--sb-dim)' }">
@@ -192,7 +239,11 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
       <div v-else class="space-y-0.5 max-h-40 overflow-y-auto">
         <div v-for="cat in categories" :key="cat.id"
           @click="filterByCategory(cat.name)"
+          @dragover="onCatDragOver($event, cat.name)"
+          @dragleave="onCatDragLeave(cat.name)"
+          @drop="onCatDrop($event, cat.name)"
           class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-all group"
+          :class="{ 'drop-target-active': dragOverTarget === 'cat:' + cat.name }"
           :style="activeCategory === cat.name
             ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)' }
             : { color: 'var(--sb-dim)' }">
@@ -203,7 +254,11 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
         <template v-for="cat in categories" :key="'children-' + cat.id">
           <div v-for="child in cat.children" :key="child.id"
             @click="filterByCategory(child.name)"
+            @dragover="onCatDragOver($event, child.name)"
+            @dragleave="onCatDragLeave(child.name)"
+            @drop="onCatDrop($event, child.name)"
             class="flex items-center gap-2 px-3 py-1.5 pl-8 rounded-lg text-xs cursor-pointer transition-all group"
+            :class="{ 'drop-target-active': dragOverTarget === 'cat:' + child.name }"
             :style="activeCategory === child.name
               ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)' }
               : { color: 'var(--sb-dim)' }">
@@ -262,5 +317,12 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
 .nav-item:not(.router-link-active):hover {
   background: var(--sb-hover);
   color: var(--sb-text);
+}
+/* 拖动 NoteCard 到 sidebar 时 drop target 高亮: 虚线边框 + 背景色提示"可放下"
+   dragover 是逐帧触发的, dragleave 不一定精确(子元素冒泡有时漏触发), dragOverTarget 用 id 去重避免视觉抖动 */
+.drop-target-active {
+  outline: 2px dashed rgb(var(--c-accent));
+  outline-offset: -2px;
+  background: rgba(var(--c-accent), 0.08) !important;
 }
 </style>

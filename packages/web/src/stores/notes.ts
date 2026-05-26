@@ -193,6 +193,28 @@ export const useNotesStore = defineStore('notes', () => {
     await fetchNotes();
   }
 
+  // 批量改 type: todoStatus 字段不动 (todo→snippet/note 时 DB 仍保留, 转回 todo 时复用)
+  async function batchUpdateType(type: 'note' | 'snippet' | 'todo') {
+    for (const id of selectedIds.value) {
+      await api.updateNote(id, { type } as any);
+    }
+    selectedIds.value.clear();
+    await fetchNotes();
+  }
+
+  // 批量加标签: 合并到现有 tags (去重), 不覆盖
+  async function batchAddTags(tagsToAdd: string[]) {
+    if (!tagsToAdd.length) return;
+    for (const id of selectedIds.value) {
+      const note = notes.value.find(n => n.id === id);
+      const existing = note?.tags || [];
+      const merged = Array.from(new Set([...existing, ...tagsToAdd]));
+      await api.updateNote(id, { tags: merged } as any);
+    }
+    selectedIds.value.clear();
+    await fetchNotes();
+  }
+
   return {
     notes,
     loading,
@@ -224,5 +246,7 @@ export const useNotesStore = defineStore('notes', () => {
     clearSelection,
     batchDelete,
     batchMove,
+    batchUpdateType,
+    batchAddTags,
   };
 });

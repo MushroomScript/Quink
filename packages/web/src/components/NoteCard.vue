@@ -9,6 +9,7 @@ import { useToast } from '@/composables/useToast';
 import type { Note } from '@/api';
 import {
   PhCheck,
+  PhCheckSquare,
   PhDotsThreeVertical,
   PhPushPin,
   PhMapPin,
@@ -119,6 +120,31 @@ async function onTaskCheckboxClick(e: MouseEvent, input: HTMLInputElement) {
   }
 }
 const showMenu = ref(false);
+
+// 三点菜单"选择": 进入 selectMode 同时把当前卡片入选
+function enterSelectMode() {
+  if (!store.selectMode) store.toggleSelectMode();
+  if (!store.selectedIds.has(props.note.id)) store.toggleSelect(props.note.id);
+  showMenu.value = false;
+}
+
+// 拖动到 sidebar (改 category / 改 type, drop handler 在 Sidebar.vue);
+// selectMode 下 :draggable 关掉避免冲突
+const isDragging = ref(false);
+function onDragStart(e: DragEvent) {
+  if (!e.dataTransfer) return;
+  // payload: id 给 update API, 当前 type/category 给 drop handler 做"same-target 跳过"判断
+  e.dataTransfer.setData('text/plain', JSON.stringify({
+    id: props.note.id,
+    type: props.note.type,
+    category: props.note.category || '',
+  }));
+  e.dataTransfer.effectAllowed = 'move';
+  isDragging.value = true;
+}
+function onDragEnd() {
+  isDragging.value = false;
+}
 const confirmDelete = ref(false);
 const menuBtn = ref<HTMLElement>();
 const menuPos = ref<{ top: string; right: string }>({ top: '0px', right: '0px' });
@@ -208,15 +234,21 @@ const typeColor: Record<string, string> = {
 </script>
 
 <template>
-  <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group relative"
-    :class="{ 'ring-2 ring-primary/50': note.pinned, 'ring-2 ring-primary': store.selectedIds.has(note.id) }">
+  <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group relative card-draggable"
+    :class="{ 'ring-2 ring-primary/50': note.pinned, 'ring-2 ring-primary': store.selectedIds.has(note.id), 'opacity-50': isDragging }"
+    :draggable="!store.selectMode"
+    @dragstart="onDragStart"
+    @dragend="onDragEnd">
     <div class="px-3 py-2.5 md:px-4 md:py-3 cursor-pointer" @click="handleClick" @mousedown="onMouseDown">
       <div class="flex items-center gap-2 mb-2">
-        <!-- Checkbox (visible in select mode or when selected) -->
+        <!-- 多选 checkbox: 跟 task list 视觉接近 — 空心圆 border (未选) / 实心主色 + 白勾 (已选);
+             用 w-[18px] h-[18px] 显式像素值 (Tailwind 默认无 4.5 spacing, w-4.5 会渲染成 0 尺寸残留点) -->
         <div v-if="store.selectMode"
-          class="w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors"
-          :class="store.selectedIds.has(note.id) ? 'bg-primary border-primary' : 'border-gray-300'">
-          <PhCheck v-if="store.selectedIds.has(note.id)" size="0.625rem" weight="fill" class="text-white" />
+          class="w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
+          :class="store.selectedIds.has(note.id) ? 'bg-primary border-primary' : 'border-gray-400 bg-white hover:border-primary'">
+          <svg v-if="store.selectedIds.has(note.id)" class="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none">
+            <path d="M5 12l5 5L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </div>
         <span class="text-[11px] px-2 py-0.5 rounded-full font-medium" :class="typeColor[note.type]">
           {{ typeLabels[note.type] }}
@@ -266,9 +298,14 @@ const typeColor: Record<string, string> = {
             <PhCheck v-else size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>{{ note.todoStatus === 'done' ? '撤销完成' : '标记完成' }}</span>
           </button>
+          <button @click.stop="enterSelectMode()"
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+            <PhCheckSquare size="0.875rem" weight="fill" style="margin-top: 2px" />
+            <span>多选</span>
+          </button>
           <div class="border-t border-gray-100 my-0.5"></div>
           <button @click.stop="askDelete()"
-            class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-red-50 hover:text-red-500 transition-colors">
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 transition-colors">
             <PhTrash size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>删除</span>
           </button>

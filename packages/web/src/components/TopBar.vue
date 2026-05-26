@@ -29,6 +29,79 @@ function toggleBatchMove() {
   }
 }
 const confirmBatchDelete = ref(false);
+
+// 批量"移至类型" popover (灵感/笔记/待办, 复用 batchMove 的弹窗模式)
+const showBatchType = ref(false);
+const batchTypeBtn = ref<HTMLElement>();
+const batchTypePos = ref({ top: '0px', left: '0px' });
+function toggleBatchType() {
+  showBatchType.value = !showBatchType.value;
+  if (showBatchType.value && batchTypeBtn.value) {
+    const r = batchTypeBtn.value.getBoundingClientRect();
+    batchTypePos.value = { top: (r.bottom + 4) + 'px', left: (r.right - 140) + 'px' };
+  }
+}
+function pickBatchType(type: 'note' | 'snippet' | 'todo') {
+  store.batchUpdateType(type);
+  showBatchType.value = false;
+}
+
+// 批量"加标签" popover (input + 现有标签建议下拉 + 已选 chip + 确认按钮)
+const showBatchTags = ref(false);
+const batchTagsBtn = ref<HTMLElement>();
+const batchTagsPos = ref({ top: '0px', left: '0px' });
+const batchTagInput = ref('');
+const batchTagsSelected = ref<string[]>([]);
+// 空输入显示所有未选标签 (容器 max-h-32 + overflow 滚动, 多标签也能浏览); 输入时 pinyin fuzzy 过滤前 20 条
+const batchTagSuggestions = computed(() => {
+  const q = batchTagInput.value.trim();
+  const all = allTags.value.filter(t => !batchTagsSelected.value.includes(t));
+  if (!q) return all;
+  return all.filter(t => pinyinMatch(t, q)).slice(0, 20);
+});
+async function toggleBatchTags() {
+  showBatchTags.value = !showBatchTags.value;
+  if (showBatchTags.value) {
+    if (allTags.value.length === 0) {
+      try { const res = await api.getTags(); allTags.value = res.data; } catch (e) { console.error('[toggleBatchTags] getTags failed:', e); }
+    }
+    if (batchTagsBtn.value) {
+      const r = batchTagsBtn.value.getBoundingClientRect();
+      batchTagsPos.value = { top: (r.bottom + 4) + 'px', left: (r.right - 240) + 'px' };
+    }
+  } else {
+    batchTagInput.value = '';
+    batchTagsSelected.value = [];
+  }
+}
+function addBatchTag(t: string) {
+  const tag = t.trim();
+  if (!tag || batchTagsSelected.value.includes(tag)) return;
+  batchTagsSelected.value.push(tag);
+  batchTagInput.value = '';
+}
+function removeBatchTag(t: string) {
+  batchTagsSelected.value = batchTagsSelected.value.filter(x => x !== t);
+}
+function onBatchTagInputEnter() {
+  // 回车: 优先用建议第一项 (跟 sidebar 搜索栏 addTag 一致), 没有则用 input 字面值新建
+  const first = batchTagSuggestions.value[0];
+  if (first) addBatchTag(first);
+  else if (batchTagInput.value.trim()) addBatchTag(batchTagInput.value);
+}
+async function confirmBatchTags() {
+  if (!batchTagsSelected.value.length) return;
+  // 先把状态快照(store.batchAddTags 内会 clear selectedIds), 再 await; 失败时 console.error 不静默
+  const tags = [...batchTagsSelected.value];
+  try {
+    await store.batchAddTags(tags);
+    showBatchTags.value = false;
+    batchTagInput.value = '';
+    batchTagsSelected.value = [];
+  } catch (e) {
+    console.error('[batchAddTags] failed:', e);
+  }
+}
 const searchInput = ref<HTMLInputElement>();
 const searchBoxEl = ref<HTMLElement>();
 const tagSuggestPos = ref({ top: '0px', left: '0px', width: '0px' });
@@ -37,7 +110,14 @@ const searchFocused = ref(false);
 const showFilters = ref(false);
 const showMobileSearch = ref(false);
 const filterTags = ref<string[]>([]);
-const filterTypes = ref<string[]>(['note', 'snippet', 'todo']);
+// filterTypes 默认跟当前 view 对应的类型走 (之前默认全选 3 个 → 用户输关键字搜出 3 类型,
+// 但 view 自己又 filterType 过滤到单类型,看起来"全选了却没全搜"。现在默认值跟 view 对齐,所见即所得)
+function getDefaultFilterTypes(): string[] {
+  if (route.path === '/notes') return ['snippet'];
+  if (route.path === '/todos') return ['todo'];
+  return ['note'];
+}
+const filterTypes = ref<string[]>(getDefaultFilterTypes());
 const filterDateFrom = ref('');
 const filterDateTo = ref(new Date().toISOString().slice(0, 10));
 const allTags = ref<string[]>([]);
@@ -49,7 +129,7 @@ watch(() => route.path, () => {
   searchText.value = '';
   store.searchQuery = '';  // 切页清掉 store 里残留(资源/标签 view watch 它过滤,残留会让新页一进来就被过滤)
   filterTags.value = [];
-  filterTypes.value = ['note', 'snippet', 'todo'];
+  filterTypes.value = getDefaultFilterTypes();
   filterDateFrom.value = '';
   filterDateTo.value = new Date().toISOString().slice(0, 10);
   // 离开资源页时清掉 file 筛选(避免再回去带着上次的过滤)
@@ -94,7 +174,11 @@ const searchPlaceholder = computed(() => {
 const hasFilters = computed(() => {
   // 资源页日历按钮高亮态只看日期(类型由页面顶部 chip 控制,日历不管)
   if (searchScope.value === 'files') return !!store.fileDateFrom || !!store.fileDateTo;
-  return filterTags.value.length > 0 || filterDateFrom.value || store.filterCategory || filterTypes.value.length < 3;
+  // filterTypes 跟当前 view 默认值不一致 = 用户主动改过类型 (默认就一个,所以不能用 length<3 判断)
+  const defaultTypes = getDefaultFilterTypes();
+  const typesChanged = filterTypes.value.length !== defaultTypes.length
+    || !filterTypes.value.every(t => defaultTypes.includes(t));
+  return filterTags.value.length > 0 || !!filterDateFrom.value || !!store.filterCategory || typesChanged;
 });
 
 // 把 searchFocused(搜索框焦点) / showMobileSearch(移动端搜索框展开) / hasFilters /
@@ -162,12 +246,15 @@ function doSearch(immediate = false) {
     store.searchQuery = searchText.value;
     // 资源/标签页只设 searchQuery,各 view 自己 watch 过滤,不走笔记 fetchNotes
     if (searchScope.value !== 'notes') return;
-    // types 筛选激活时覆盖页面级 filterType
-    const useTypes = filterTypes.value.length < 3;
-    if (useTypes) store.filterType = '';
+    // 用户主动改了 filterTypes (跟当前 view 默认不同) 才走 types 路径覆盖 view 自带的 filterType;
+    // 默认状态下保留 view 设的 filterType, 让 fetchNotes 按 store.filterType 单类型过滤
+    const defaultTypes = getDefaultFilterTypes();
+    const typesChanged = filterTypes.value.length !== defaultTypes.length
+      || !filterTypes.value.every(t => defaultTypes.includes(t));
+    if (typesChanged) store.filterType = '';
     store.fetchNotes({
       tags: filterTags.value.length ? filterTags.value.join(',') : undefined,
-      types: useTypes ? filterTypes.value.join(',') : undefined,
+      types: typesChanged ? filterTypes.value.join(',') : undefined,
       dateFrom: filterDateFrom.value || undefined,
       dateTo: filterDateFrom.value ? (filterDateTo.value || undefined) : undefined,
     });
@@ -225,7 +312,7 @@ function clearFilters() {
   }
   store.filterCategory = '';
   filterTags.value = [];
-  filterTypes.value = ['note', 'snippet', 'todo'];
+  filterTypes.value = getDefaultFilterTypes();
   filterDateFrom.value = '';
   filterDateTo.value = new Date().toISOString().slice(0, 10);
   doSearch(true);
@@ -280,6 +367,31 @@ function handleKeydown(e: KeyboardEvent) {
   if (e.ctrlKey && e.key === 'f') {
     e.preventDefault();
     searchInput.value?.focus();
+    return;
+  }
+  // ESC 分级退出: 批量 popover > 筛选菜单 (漏斗下拉 / 资源页日期弹窗) > 多选模式
+  if (e.key === 'Escape') {
+    if (showBatchType.value || showBatchMove.value || showBatchTags.value || confirmBatchDelete.value) {
+      showBatchType.value = false;
+      showBatchMove.value = false;
+      showBatchTags.value = false;
+      confirmBatchDelete.value = false;
+      return;
+    }
+    if (showFilters.value || dateFilterOpen.value) {
+      // ESC 退出筛选 = "清除全部筛选"等效: 关下拉 + 清搜索词 + 清所有 filter state, 让编辑区恢复
+      // (之前只关下拉不清状态, hasFilters 仍 true 编辑区不出, 跟用户预期不符)
+      searchText.value = '';
+      store.searchQuery = '';
+      showTagSuggestions.value = false;
+      showFilters.value = false;
+      dateFilterOpen.value = false;
+      clearFilters();
+      return;
+    }
+    if (store.selectMode) {
+      store.toggleSelectMode();
+    }
   }
 }
 
@@ -289,7 +401,7 @@ onMounted(() => {
     const tag = e.detail;
     if (tag && !filterTags.value.includes(tag)) {
       filterTags.value = [tag];
-      filterTypes.value = ['note', 'snippet', 'todo'];
+      filterTypes.value = getDefaultFilterTypes();
       showFilters.value = true;
       doSearch(true);
     }
@@ -301,7 +413,7 @@ onMounted(() => {
     if (!date) return;
     filterDateFrom.value = date;
     filterDateTo.value = date;
-    filterTypes.value = ['note', 'snippet', 'todo'];
+    filterTypes.value = getDefaultFilterTypes();
     showFilters.value = true;
     doSearch(true);
   }) as EventListener);
@@ -385,8 +497,8 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <span class="text-xs text-gray-400 w-8 shrink-0">类型</span>
           <div class="flex items-center gap-1">
             <button v-for="t in typeOptions" :key="t.value" @click="toggleType(t.value)"
-              class="px-2 py-0.5 rounded-full text-xs font-medium transition-colors inline-flex items-center gap-1"
-              :class="filterTypes.includes(t.value) ? 'bg-primary-light text-primary-dark' : 'bg-gray-100 text-gray-400'">
+              class="px-2.5 py-0.5 rounded-full text-xs font-medium transition-all inline-flex items-center gap-1"
+              :class="filterTypes.includes(t.value) ? 'bg-primary text-white shadow-sm' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'">
               <component :is="t.icon" size="0.75rem" weight="fill" />
               {{ t.label }}
             </button>
@@ -429,13 +541,21 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       <button @click="store.selectAll()" class="text-xs text-primary hover:underline">全选</button>
       <button @click="store.toggleSelectMode()" class="text-xs text-gray-400 hover:underline">退出选择</button>
       <div class="ml-auto flex items-center gap-2">
-        <div class="relative">
-          <button ref="batchMoveBtn" @click="toggleBatchMove" class="px-3 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100">
-            移动分类
-          </button>
-        </div>
+        <!-- 顺序: 移至类型 → 移动分类 → 加标签 → 删除 (跨类型操作前置, 跟分类语义优先级一致) -->
+        <button ref="batchTypeBtn" @click="toggleBatchType"
+          class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          移至类型
+        </button>
+        <button ref="batchMoveBtn" @click="toggleBatchMove"
+          class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          移动分类
+        </button>
+        <button ref="batchTagsBtn" @click="toggleBatchTags"
+          class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          加标签
+        </button>
         <button @click="confirmBatchDelete = true"
-          class="px-3 py-1 text-xs rounded-lg border border-gray-200 text-red-500 hover:bg-red-50 transition-colors">
+          class="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
           删除
         </button>
       </div>
@@ -498,6 +618,62 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       </div>
     </div>
     <div v-if="showBatchMove" class="fixed inset-0 z-[9998]" @click="showBatchMove = false" />
+  </Teleport>
+
+  <!-- 批量"移至类型"下拉 (灵感/笔记/待办 三选) -->
+  <Teleport to="body">
+    <div v-if="showBatchType" class="fixed z-[9999]" :style="batchTypePos">
+      <div class="bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-32">
+        <button @click="pickBatchType('note')"
+          class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 inline-flex items-center gap-1.5">
+          <PhLightbulb size="0.75rem" weight="fill" />
+          <span>灵感</span>
+        </button>
+        <button @click="pickBatchType('snippet')"
+          class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 inline-flex items-center gap-1.5">
+          <PhNotePencil size="0.75rem" weight="fill" />
+          <span>笔记</span>
+        </button>
+        <button @click="pickBatchType('todo')"
+          class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 inline-flex items-center gap-1.5">
+          <PhCheckSquare size="0.75rem" weight="fill" />
+          <span>待办</span>
+        </button>
+      </div>
+    </div>
+    <div v-if="showBatchType" class="fixed inset-0 z-[9998]" @click="showBatchType = false" />
+  </Teleport>
+
+  <!-- 批量"加标签"弹窗 (输入框 + 建议 + 已选 chip + 确认) -->
+  <Teleport to="body">
+    <div v-if="showBatchTags" class="fixed z-[9999] bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-60" :style="batchTagsPos">
+      <div class="text-[11px] text-gray-400 mb-2">为选中笔记加标签</div>
+      <!-- 已选 chip 列表 -->
+      <div v-if="batchTagsSelected.length" class="flex flex-wrap gap-1 mb-2">
+        <span v-for="t in batchTagsSelected" :key="t" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-primary-light text-primary-dark">
+          <PhTag size="0.625rem" weight="fill" />
+          <span>{{ t }}</span>
+          <button @click="removeBatchTag(t)" class="hover:opacity-60">×</button>
+        </span>
+      </div>
+      <input v-model="batchTagInput" @keydown.enter.prevent="onBatchTagInputEnter" type="text"
+        placeholder="输入标签名,回车添加"
+        class="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:border-primary bg-white" />
+      <!-- 建议: 输入时 fuzzy 过滤, 无输入时显示前 6 个未选 (跟 sidebar 搜索建议同模式) -->
+      <div v-if="batchTagSuggestions.length" class="mt-2 max-h-32 overflow-y-auto">
+        <button v-for="t in batchTagSuggestions" :key="t" @click="addBatchTag(t)"
+          class="w-full text-left px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 rounded inline-flex items-center gap-1.5">
+          <PhTag size="0.625rem" weight="fill" class="text-primary-dark" />
+          <span>{{ t }}</span>
+        </button>
+      </div>
+      <button @click="confirmBatchTags" :disabled="!batchTagsSelected.length"
+        class="mt-3 w-full inline-flex items-center justify-center gap-1 text-xs py-1.5 rounded-lg bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+        <PhCheck size="0.875rem" weight="fill" />
+        <span>添加 {{ batchTagsSelected.length || '' }} 个标签到 {{ store.selectedIds.size }} 项</span>
+      </button>
+    </div>
+    <div v-if="showBatchTags" class="fixed inset-0 z-[9998]" @click="showBatchTags = false" />
   </Teleport>
 
   <!-- 批量删除确认弹窗 -->

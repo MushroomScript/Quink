@@ -7,7 +7,19 @@ import Vditor from 'vditor';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
-import { PhNotePencil, PhCaretLeft, PhPencilSimple } from '@phosphor-icons/vue';
+import {
+  PhNotePencil,
+  PhCaretLeft,
+  PhPencilSimple,
+  PhDotsThreeVertical,
+  PhPushPin,
+  PhMapPin,
+  PhTrash,
+  PhCheck,
+  PhArrowCounterClockwise,
+  PhLightbulb,
+  PhCheckSquare,
+} from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 
@@ -122,6 +134,53 @@ watch(() => store.notes, () => {
   if (updated && updated !== note.value) note.value = updated;
 }, { deep: true });
 
+// 三点菜单 (置顶 / 移至类型 / [todo] 标记完成 / 删除); 编辑保留 header 上独立按钮高频路径
+const showMenu = ref(false);
+const menuBtn = ref<HTMLElement>();
+const menuPos = ref<{ top: string; right: string }>({ top: '0px', right: '0px' });
+function toggleMenu() {
+  if (showMenu.value) { showMenu.value = false; return; }
+  if (menuBtn.value) {
+    const r = menuBtn.value.getBoundingClientRect();
+    menuPos.value = {
+      top: (r.bottom + 4) + 'px',
+      right: (window.innerWidth - r.right) + 'px',
+    };
+  }
+  showMenu.value = true;
+}
+
+async function moveTo(type: 'note' | 'snippet' | 'todo') {
+  if (!note.value) return;
+  await store.updateNote(note.value.id, { type } as any);
+  showMenu.value = false;
+}
+
+async function togglePin() {
+  if (!note.value) return;
+  await store.togglePin(note.value.id);
+  showMenu.value = false;
+}
+
+async function toggleTodo() {
+  if (!note.value || note.value.type !== 'todo') return;
+  await store.toggleTodo(note.value.id);
+  showMenu.value = false;
+}
+
+const confirmDelete = ref(false);
+function askDelete() {
+  showMenu.value = false;
+  confirmDelete.value = true;
+}
+async function doDelete() {
+  if (!note.value) return;
+  const id = note.value.id;
+  confirmDelete.value = false;
+  await store.deleteNote(id);
+  goBack();
+}
+
 function goBack() {
   // 有预览栈等待恢复 → 先显示预览,不导航
   if (hasRefPreviewPending?.value) {
@@ -176,7 +235,73 @@ onUnmounted(() => {
           <PhPencilSimple size="0.875rem" weight="fill" />
           <span>编辑</span>
         </button>
+        <button ref="menuBtn" @click.stop="toggleMenu" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+          <PhDotsThreeVertical size="1.25rem" weight="bold" />
+        </button>
       </div>
+
+      <!-- 三点菜单 popover (Teleport 避祖先 overflow + 同步遮罩, 跟 NoteCard 同模式) -->
+      <Teleport to="body">
+        <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
+          leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
+          <div v-if="showMenu" class="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[9999] min-w-[130px] [&_svg]:mt-px"
+            :style="menuPos">
+            <button @click.stop="togglePin"
+              class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+              <PhPushPin v-if="note.pinned" size="0.875rem" weight="fill" />
+              <PhMapPin v-else size="0.875rem" weight="fill" />
+              <span>{{ note.pinned ? '取消置顶' : '置顶' }}</span>
+            </button>
+            <button v-if="note.type === 'todo'" @click.stop="toggleTodo"
+              class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+              <PhArrowCounterClockwise v-if="note.todoStatus === 'done'" size="0.875rem" weight="fill" />
+              <PhCheck v-else size="0.875rem" weight="fill" />
+              <span>{{ note.todoStatus === 'done' ? '撤销完成' : '标记完成' }}</span>
+            </button>
+            <div class="border-t border-gray-100 my-0.5"></div>
+            <!-- 移至类型: 当前 type 不显示, 避免"移至自身"无效项 -->
+            <button v-if="note.type !== 'note'" @click.stop="moveTo('note')"
+              class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+              <PhLightbulb size="0.875rem" weight="fill" />
+              <span>移至灵感</span>
+            </button>
+            <button v-if="note.type !== 'snippet'" @click.stop="moveTo('snippet')"
+              class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+              <PhNotePencil size="0.875rem" weight="fill" />
+              <span>移至笔记</span>
+            </button>
+            <button v-if="note.type !== 'todo'" @click.stop="moveTo('todo')"
+              class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+              <PhCheckSquare size="0.875rem" weight="fill" />
+              <span>移至待办</span>
+            </button>
+            <div class="border-t border-gray-100 my-0.5"></div>
+            <button @click.stop="askDelete()"
+              class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 transition-colors">
+              <PhTrash size="0.875rem" weight="fill" />
+              <span>删除</span>
+            </button>
+          </div>
+        </Transition>
+        <div v-if="showMenu" class="fixed inset-0 z-[9998]" @click="showMenu = false" />
+      </Teleport>
+
+      <!-- 删除确认弹窗 (跟 TopBar 批量删除同模式) -->
+      <Teleport to="body">
+        <Transition name="modal">
+          <div v-if="confirmDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
+            <div class="absolute inset-0 bg-black/30" @click="confirmDelete = false" />
+            <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+              <p class="text-sm text-gray-700 mb-1">删除笔记</p>
+              <p class="text-xs text-gray-400 mb-4">删除后可在回收站找回</p>
+              <div class="flex gap-2 justify-center">
+                <button @click="confirmDelete = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+                <button @click="doDelete" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </Teleport>
 
       <!-- Summary -->
       <p v-if="note.summary" class="text-sm text-gray-500 italic mb-4">{{ note.summary }}</p>
