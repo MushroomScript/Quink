@@ -84,6 +84,7 @@ pnpm run dev:desktop
 - **MCP `sqlite`** —— 直接 SQL 查/改 `packages/server/quink.db`。**塞测试数据 / 查后端状态 / 排查数据问题用**，跳过写一次性脚本（之前 list-users.ts / seed-demo-notes.ts 这类全免了）
 - **MCP `playwright`** —— E2E 测试 Quink web 端。**单次回归测试用 prompt 触发**（"测一遍 X 流程"），启动新 Chromium 走完整流程 + 断言。**不写持久化测试代码** —— UI 频繁迭代阶段维护成本太高
 - **Slash command `/playwright-e2e`**（qaskills 装的，在 `~/.claude/commands/playwright-e2e/`）—— 写 Playwright 测试代码时按业界 best practice（getByRole 选 selector / Page Object Model / auto-waiting / 测试隔离）。**未来真要写持久化测试时用**
+- **Slash command `/ship`**（项目级，在 `.claude/commands/ship/SKILL.md`）—— 一组改动完成后的收尾流程：看工作树 → 划 TODO 完成项 → 必要时同步 CLAUDE.md / RENDERING-PITFALLS.md → 写 commit message → stage + commit。蘑菇说 "commit"/"更新 todo 然后 commit" 等都触发。TODO.MD 不进 commit
 
 ## 核心约定（跨包全局）
 
