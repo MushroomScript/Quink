@@ -213,6 +213,8 @@ function applyUserPreferences(user: any) {
 // 抢先 stopImmediatePropagation 调用旧闭包里的 openRefPreview（操作旧响应式状态，新 UI 看不到预览）。
 let prevRefClickHandler: ((e: MouseEvent) => void) | null = null;
 let prevImgClickHandler: ((e: MouseEvent) => void) | null = null;
+let prevCopyHandler: ((e: ClipboardEvent) => void) | null = null;
+let prevCtrlAHandler: ((e: KeyboardEvent) => void) | null = null;
 let prevWindowOpen: typeof window.open | null = null;
 
 const { open: openImagePreview } = useImagePreview();
@@ -227,6 +229,8 @@ onMounted(async () => {
   // 清理 HMR 残留
   if (prevRefClickHandler) document.removeEventListener('click', prevRefClickHandler, true);
   if (prevImgClickHandler) document.removeEventListener('click', prevImgClickHandler, true);
+  if (prevCopyHandler) document.removeEventListener('copy', prevCopyHandler);
+  if (prevCtrlAHandler) document.removeEventListener('keydown', prevCtrlAHandler, true);
   if (prevWindowOpen) window.open = prevWindowOpen;
 
   // 全局拦截 note-content 内 img 单击 → 弹图片预览(同一笔记的所有图作为一组,可左右切换)
@@ -297,6 +301,65 @@ onMounted(async () => {
   document.addEventListener('click', handler, true);
   prevRefClickHandler = handler;
 
+  // 跨多 NoteCard 复制时整理剪贴板: 浏览器默认拼接 textContent 会让"类型 分类 时间 内容 #tag"
+  // 全部挤一坨,粘出来乱. 这里检测 selection 是否跨多个卡片,跨多个时自定义 clipboard:
+  // 每张卡片 = [类型 · 分类 · 时间] + 正文 + tags, 中间用 --- 分隔
+  const copyHandler = (e: ClipboardEvent) => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    // 收集 selection 跨过的所有 NoteCard
+    const cards = document.querySelectorAll('.notes-masonry .masonry-col > div');
+    const touched: Element[] = [];
+    for (const card of cards) {
+      if (sel.containsNode(card, true)) touched.push(card);
+    }
+    if (touched.length < 2) return; // 单卡片 / 不在列表 → 浏览器默认行为
+    const blocks = touched.map(card => {
+      // type 标签自己也带 .text-[11px] class,跟时间区分:type 是 .rounded-full, 时间是 .ml-auto
+      const type = card.querySelector('.flex.items-center.gap-2 > .rounded-full')?.textContent?.trim() || '';
+      const category = card.querySelector('.flex.items-center.gap-2 > .text-xs:not(.rounded-full)')?.textContent?.trim() || '';
+      const time = card.querySelector('.flex.items-center.gap-2 > .ml-auto')?.textContent?.trim() || '';
+      const headerLine = [type, category, time].filter(Boolean).join(' · ');
+      const summary = card.querySelector('p.italic')?.textContent?.trim() || '';
+      const content = card.querySelector('.note-content')?.textContent?.trim() || '';
+      const tags = [...card.querySelectorAll('.flex.flex-wrap > span')].map(s => s.textContent?.trim()).filter(Boolean).join(' ');
+      const parts = [headerLine, summary, content, tags].filter(Boolean);
+      return parts.join('\n');
+    });
+    e.preventDefault();
+    e.clipboardData?.setData('text/plain', blocks.join('\n\n---\n\n'));
+  };
+  document.addEventListener('copy', copyHandler);
+  prevCopyHandler = copyHandler;
+
+  // 拦截 Ctrl+A: 浏览器默认全选 document(含标题栏 / sidebar / TopBar),
+  // 限定 selection 到 .notes-masonry,只让用户看到列表卡片范围被高亮.
+  // user-select:none 不阻挡 selectAll(Chromium 标准),靠 CSS 解决不了.
+  // 放行规则:
+  // - INPUT/TEXTAREA: 用户在输入框 → 默认
+  // - Vditor 编辑器有内容: 用户在打字编辑 → 默认(让 Ctrl+A 全选自己写的)
+  // - 其他(含编辑器为空 auto-focus): 拦截到列表
+  const ctrlAHandler = (e: KeyboardEvent) => {
+    if (!((e.ctrlKey || e.metaKey) && e.key === 'a' && !e.shiftKey && !e.altKey)) return;
+    const ae = document.activeElement as HTMLElement | null;
+    // 光标在搜索框/输入框 内 → 默认(让用户全选输入框内容)
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+    // 光标在编辑器(contenteditable)内 → 默认.
+    // 代价: 进列表页时编辑器 auto-focus → Ctrl+A 选不到列表,需要先点列表区域取消 focus.
+    if (ae?.closest('[contenteditable="true"]')) return;
+    // 其他情况(看列表 / sidebar / topbar / 任何非编辑区域)→ 拦截到 .notes-masonry
+    const masonry = document.querySelector('.notes-masonry');
+    if (!masonry) return; // 非列表页 → 浏览器默认行为
+    e.preventDefault();
+    const range = document.createRange();
+    range.selectNodeContents(masonry);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  };
+  document.addEventListener('keydown', ctrlAHandler, true);
+  prevCtrlAHandler = ctrlAHandler;
+
   // 拦截 window.open(兜底:Vditor 可能用 window.open 打开链接)
   const origOpen = window.open.bind(window);
   prevWindowOpen = origOpen;
@@ -337,8 +400,8 @@ watch(() => auth.user, (user) => {
   <!-- 主界面 -->
   <template v-else>
     <div class="flex flex-col h-full overflow-hidden">
-      <!-- 自定义标题栏(仅 Electron) -->
-      <div v-if="isElectron" class="flex items-center justify-between h-9 pl-3 pr-2 shrink-0"
+      <!-- 自定义标题栏(仅 Electron). select-none: Ctrl+A 时不要选这里的"Quink - 一念" -->
+      <div v-if="isElectron" class="flex items-center justify-between h-9 pl-3 pr-2 shrink-0 select-none"
         style="-webkit-app-region: drag; background: rgb(var(--c-sidebar))">
         <div class="flex items-center gap-2">
           <img :src="`/quink-${currentTheme}-192.png`" alt="" class="w-4 h-4" draggable="false" />

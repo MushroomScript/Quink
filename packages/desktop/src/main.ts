@@ -257,9 +257,12 @@ function createMainWindow() {
           {
             label: '全选',
             click: () => {
+              // 用 params.x/y 找右键点击的 .note-content (列表里多张卡片时,固定 querySelector
+              // 会永远拿第一个 → 全选错那张卡片). elementFromPoint 拿到当前光标下元素再 closest 上溯
               mainWindow!.webContents.executeJavaScript(`
                 (function() {
-                  var el = document.querySelector('.note-content') || document.querySelector('.vditor-reset');
+                  var pt = document.elementFromPoint(${params.x}, ${params.y});
+                  var el = pt && (pt.closest('.note-content') || pt.closest('.vditor-reset'));
                   if (el) {
                     var range = document.createRange();
                     range.selectNodeContents(el);
