@@ -26,6 +26,22 @@ schema 定义 4 个值：`note / todo / snippet / link`（看 `packages/server/s
 
 这个映射也写在 `src/utils/cardLeave.ts` 的 `TYPE_TO_NAV_PATH`（控制回收站恢复时卡片飞向哪个 sidebar 菜单项）。改 type 枚举或加 view 时记得两边都改。
 
+## 跨视图筛选跳转
+
+view A 触发跳转 → view B 落地并自动应用筛选 chip 的模式。当前 2 条线（Stats 热力图 → 灵感页按日期；Inspiration tag → 灵感页按标签），都走同一套：
+
+1. **触发方**：`router.push({ path: 目标 view, query: { 筛选键: 值 } })`
+2. **目标 view 的 `onActivated`**：读 `route.query.筛选键`，命中则**只设 `store.filterType = ''` + 派事件**（`dispatchEvent('quink-filter-XXX', { detail: 值 })`），**不要自己 `fetchNotes`**
+3. **TopBar `onMounted`** 监听 `quink-filter-XXX`：设对应筛选状态（chip / 日期 / types 全选）+ `showFilters = true` + `doSearch(true)` 统一拉数据
+
+**关键约定**：onActivated 不主动 fetchNotes，让 TopBar 统一负责。否则会"onActivated 拉一次 + TopBar doSearch 又拉一次"= 后端 2 倍请求 + UI 数据填充 2 次闪烁 + TransitionGroup 动画打断。
+
+**注意顺序**：TopBar 的 `watch(route.path)` 会先清空旧筛选，目标 view 的 `onActivated` 必须**在路由切完后**派事件才能盖回。当前两条线都走 onActivated 这条路径，顺序天然对。
+
+**mount 顺序依赖（⚠️ 改 App.vue 布局时注意）**：派事件模式要求 TopBar 比 RouterView 先 mount，否则 onMounted 注册监听器之前事件就派完了，监听器收不到 → 跨视图跳转**静默失效**（无报错，但 chip 不显示、数据不刷新，看到的是旧内容）。当前 `App.vue` 里 `<TopBar />` 写在 `<RouterView />` 前（line ~437/439），顺序天然对。如果挪布局把 TopBar 挪到 RouterView 后面，D2 / tag query 都会裂。
+
+涉及文件：`Stats.vue`（cell click）/ `Inspiration.vue`（query 分支）/ `TopBar.vue`（事件监听）。加新跳转线时三处都要补。
+
 ## Vditor 静态文件
 
 静态文件从 `public/vditor/dist/`（从 node_modules 复制）提供。RichEditor.vue 的 CDN 配置指向 `/vditor`。`pnpm install` 后执行：

@@ -108,6 +108,14 @@ function onCellEnter(e: MouseEvent, cell: CellData) {
 }
 function onCellLeave() { tooltip.value.visible = false; }
 
+// 点 cell: 有记录的天跳到灵感页并按该日筛选(query.date 由 Inspiration.vue 接收 + 派 quink-filter-date 给 TopBar 同步 chip)
+// 空 cell 不响应,避免跳过去空列表
+function onCellClick(cell: CellData) {
+  if (!cell.count) return;
+  tooltip.value.visible = false;
+  router.push({ path: '/', query: { date: cell.date } });
+}
+
 // 项目自有调色板(13 色,避免 10 色循环重复)
 const PIE_COLORS = ['#748cfc', '#5eceac', '#fc9686', '#f0be50', '#a78bfa', '#8ca0b9', '#f472b6', '#38bdf8', '#fb923c', '#a3e635', '#34d399', '#f87171', '#fbbf24'];
 const PIE_TOP_N = 10;  // 超过这个数量折叠为"其他 N 项"
@@ -317,9 +325,11 @@ onUnmounted(() => {
             <div class="flex flex-col" style="gap: 0.3cqw">
               <div v-for="cell in week" :key="cell.date"
                 class="aspect-square heatmap-cell"
+                :class="{ 'heatmap-cell-empty': !cell.count }"
                 :style="{ background: cellOpacity(cell.count) || 'var(--heatmap-empty, #f1f5f9)', borderRadius: '25%' }"
                 @mouseenter="onCellEnter($event, cell)"
-                @mouseleave="onCellLeave()" />
+                @mouseleave="onCellLeave()"
+                @click="onCellClick(cell)" />
             </div>
           </template>
         </div>
@@ -379,7 +389,7 @@ onUnmounted(() => {
     <!-- 热力图 cell tooltip: Teleport 到 body 跨过祖先容器;每种类型一行,数字右对齐(tabular-nums 等宽避免抖) -->
     <Teleport to="body">
       <div v-if="tooltip.visible"
-        class="fixed z-[9999] pointer-events-none bg-gray-800 text-white text-[11px] px-3 py-2 rounded-lg shadow-lg whitespace-nowrap min-w-[110px]"
+        class="fixed z-[9999] pointer-events-none bg-gray-800 text-white text-xs px-3 py-2 rounded-lg shadow-lg whitespace-nowrap min-w-[7rem]"
         :style="{ top: tooltip.top, left: tooltip.left, transform: 'translate(-50%, -100%)' }">
         <div class="font-medium tabular-nums">{{ tooltip.date }}</div>
         <template v-if="tooltip.parts.length">
@@ -405,6 +415,10 @@ onUnmounted(() => {
   transform: scale(1.25);
   filter: brightness(1.12);
   z-index: 2;
+}
+/* 空 cell(无记录): 视觉保留放大反馈,但 cursor 为常态 + onCellClick 守住不响应点击 */
+.heatmap-cell-empty {
+  cursor: default;
 }
 
 /* 自定义 legend item: hover 时放大 + 浅背景,跟饼图扇形双向联动 */

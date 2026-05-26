@@ -294,6 +294,17 @@ onMounted(() => {
       doSearch(true);
     }
   }) as EventListener);
+  // 统计页热力图 → 灵感页跨视图跳转: 单日筛选(dateFrom=dateTo=date),types 全选不限类型
+  // 注意 watch(route.path) 会先清空 filterDateFrom/filterDateTo,所以本事件必须在路由切完后(onActivated)派出来才能盖回去
+  window.addEventListener('quink-filter-date', ((e: CustomEvent) => {
+    const date = e.detail;
+    if (!date) return;
+    filterDateFrom.value = date;
+    filterDateTo.value = date;
+    filterTypes.value = ['note', 'snippet', 'todo'];
+    showFilters.value = true;
+    doSearch(true);
+  }) as EventListener);
 });
 onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
 </script>

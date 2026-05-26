@@ -24,11 +24,20 @@ watch(columnCount, (n) => { store.pageSize = n * 10; }, { immediate: true });
 watch(() => store.notes.length, () => snapshotCards(), { flush: 'sync' });
 
 onActivated(() => {
+  // 跨视图跳转: ?date=YYYY-MM-DD 从统计页热力图过来; ?tag=xxx 从笔记编辑器/标签云过来。
+  // 两条线都只设 store + 派事件给 TopBar,数据由 TopBar 监听器 doSearch(true) 统一拉,
+  // 避免"Inspiration 拉一次 + TopBar 又拉一次"的重复请求 + UI 闪烁。
+  const dateQuery = route.query.date as string;
+  if (dateQuery) {
+    store.filterType = '';
+    store.searchQuery = '';
+    window.dispatchEvent(new CustomEvent('quink-filter-date', { detail: dateQuery }));
+    return;
+  }
   const tagQuery = route.query.tag as string;
   if (tagQuery) {
     store.filterType = '';
     store.searchQuery = '';
-    store.fetchNotes({ tags: tagQuery });
     window.dispatchEvent(new CustomEvent('quink-filter-tag', { detail: tagQuery }));
     return;
   }
