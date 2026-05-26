@@ -195,7 +195,11 @@ function goBack() {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') goBack();
+  if (e.key !== 'Escape') return;
+  // ESC 分级: 删除确认 modal > 三点菜单 > 返回页面 (避免 modal 开着按 ESC 顺带跳出详情页)
+  if (confirmDelete.value) { confirmDelete.value = false; return; }
+  if (showMenu.value) { showMenu.value = false; return; }
+  goBack();
 }
 
 onMounted(() => { document.addEventListener('keydown', onKeydown); loadNote(); });
@@ -292,8 +296,8 @@ onUnmounted(() => {
           <div v-if="confirmDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
             <div class="absolute inset-0 bg-black/30" @click="confirmDelete = false" />
             <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-              <p class="text-sm text-gray-700 mb-1">删除笔记</p>
-              <p class="text-xs text-gray-400 mb-4">删除后可在回收站找回</p>
+              <p class="text-sm text-gray-700 mb-1">删除内容</p>
+              <p class="text-xs text-gray-400 mb-4">可在回收站找回</p>
               <div class="flex gap-2 justify-center">
                 <button @click="confirmDelete = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
                 <button @click="doDelete" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>

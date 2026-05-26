@@ -226,9 +226,11 @@ app.post('/conversations/:id/messages', async (c) => {
       }
     } catch (err: any) {
       console.error('[AI Chat] error:', err);
-      await write({ type: 'error', error: err.message || 'AI 调用失败' });
+      // 客户端可能已断开导致 stream 关闭, write 自身也可能抛, 包 try-catch 避免传到 finally 之后还出错
+      try { await write({ type: 'error', error: err.message || 'AI 调用失败' }); } catch {}
     } finally {
-      writer.close();
+      // writer.close() 在 stream 已关闭时同步抛 TypeError(ERR_INVALID_STATE), 不 catch 会让 async IIFE 顶层 unhandled → Node 进程崩 → 所有后续请求 500
+      try { await writer.close(); } catch {}
     }
   })();
 

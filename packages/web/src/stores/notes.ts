@@ -106,8 +106,17 @@ export const useNotesStore = defineStore('notes', () => {
     // 用 notes.value[idx] = newObj 替换数组元素,columns 里的旧引用还指向旧对象,
     // NoteCard.props.note 不会感知到内容变化(典型症状: 三点菜单"编辑"保存后列表不刷新)。
     // Object.assign 保持引用同时更新字段,columns / NoteDetail / 任何持有该 ref 的地方都收到响应式更新。
-    const note = notes.value.find((n) => n.id === id);
-    if (note) Object.assign(note, res.data);
+    const idx = notes.value.findIndex((n) => n.id === id);
+    if (idx >= 0) {
+      Object.assign(notes.value[idx], res.data);
+      // type / category 改后跟当前 view 过滤不一致 → 从本地列表移除, 让卡片直接消失 (用户视觉清晰: 移走了的卡片不留在原页面)
+      const typeMismatch = !!filterType.value && res.data.type !== filterType.value;
+      const categoryMismatch = !!filterCategory.value && res.data.category !== filterCategory.value;
+      if (typeMismatch || categoryMismatch) {
+        notes.value.splice(idx, 1);
+        total.value = Math.max(0, total.value - 1);
+      }
+    }
     return res.data;
   }
 

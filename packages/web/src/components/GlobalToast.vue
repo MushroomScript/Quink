@@ -13,7 +13,7 @@ const { state } = useToast();
     leave-to-class="opacity-0 -translate-y-2"
   >
     <div v-if="state.visible"
-      class="fixed top-16 left-1/2 -translate-x-1/2 z-[9999] px-5 py-2.5 rounded-xl text-sm font-medium pointer-events-none select-none shadow-lg"
+      class="fixed top-16 left-1/2 md:left-[calc(50%+7.5rem)] -translate-x-1/2 z-[9999] px-5 py-2.5 rounded-xl text-sm font-medium pointer-events-none select-none shadow-lg"
       :style="{
         background: state.kind === 'error'
           ? 'rgb(220 38 38 / 0.95)'

@@ -9,6 +9,7 @@ import { PhTrash } from '@phosphor-icons/vue';
 import { fadeOutLeave, flyToNavLeave, snapshotCards } from '@/utils/cardLeave';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import { useMasonry } from '@/composables/useMasonry';
+import { useEscToClose } from '@/composables/useEscToClose';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -20,6 +21,8 @@ const loading = ref(true);
 const confirmEmpty = ref(false);
 const confirmDeleteId = ref('');
 const rendered = ref<Record<string, string>>({});
+useEscToClose(confirmEmpty);
+useEscToClose(confirmDeleteId, '');
 
 // 瀑布流分列 (跟 Notes.vue / Inspiration.vue / Todos.vue 一致, 修早期遗漏的回归)
 const { columns } = useMasonry(() => notes.value);
@@ -39,6 +42,8 @@ async function load() {
 
 const confirmRestoreId = ref('');
 const confirmRestoreAll = ref(false);
+useEscToClose(confirmRestoreId, '');
+useEscToClose(confirmRestoreAll);
 
 async function doRestore() {
   const id = confirmRestoreId.value;
@@ -101,7 +106,7 @@ function onLeave(el: Element, done: () => void) {
 <template>
   <div class="px-4 md:px-8 py-6">
     <div class="flex items-center justify-between mb-6" v-if="notes.length > 0">
-      <p class="text-xs text-gray-400">{{ notes.length }} 条已删除的笔记，30天后自动永久删除</p>
+      <p class="text-xs text-gray-400">{{ notes.length }} 条已删除的内容，30天后自动永久删除</p>
       <div class="flex items-center gap-2">
         <button @click="confirmRestoreAll = true" class="px-3 py-1.5 text-xs rounded-lg bg-primary-light text-primary-dark hover:opacity-80 transition-colors">
           恢复所有
@@ -120,7 +125,7 @@ function onLeave(el: Element, done: () => void) {
           <PhTrash size="3rem" weight="fill" />
         </div>
         <p class="text-gray-500 text-sm">回收站是空的</p>
-        <p class="text-gray-400 text-xs mt-1">删除的笔记会在这里保留30天</p>
+        <p class="text-gray-400 text-xs mt-1">删除的内容会在这里保留30天</p>
       </div>
 
       <div class="notes-masonry">
@@ -176,7 +181,7 @@ function onLeave(el: Element, done: () => void) {
         <div class="absolute inset-0 bg-black/30" @click="confirmEmpty = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">清空回收站</p>
-          <p class="text-xs text-gray-400 mb-4">将永久删除所有 {{ notes.length }} 条笔记，不可恢复</p>
+          <p class="text-xs text-gray-400 mb-4">将永久删除所有 {{ notes.length }} 条内容，不可恢复</p>
           <div class="flex gap-2 justify-center">
             <button @click="confirmEmpty = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="doEmptyAll" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">清空</button>
@@ -192,8 +197,8 @@ function onLeave(el: Element, done: () => void) {
       <div v-if="confirmRestoreId" class="fixed inset-0 z-[200] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmRestoreId = ''" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-          <p class="text-sm text-gray-700 mb-1">恢复笔记</p>
-          <p class="text-xs text-gray-400 mb-4">将从回收站恢复此笔记</p>
+          <p class="text-sm text-gray-700 mb-1">恢复内容</p>
+          <p class="text-xs text-gray-400 mb-4">将从回收站恢复此条内容</p>
           <div class="flex gap-2 justify-center">
             <button @click="confirmRestoreId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="doRestore" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复</button>
@@ -210,7 +215,7 @@ function onLeave(el: Element, done: () => void) {
         <div class="absolute inset-0 bg-black/30" @click="confirmRestoreAll = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">恢复所有</p>
-          <p class="text-xs text-gray-400 mb-4">将恢复回收站中全部 {{ notes.length }} 条笔记</p>
+          <p class="text-xs text-gray-400 mb-4">将恢复回收站中全部 {{ notes.length }} 条内容</p>
           <div class="flex gap-2 justify-center">
             <button @click="confirmRestoreAll = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="doRestoreAll" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复所有</button>

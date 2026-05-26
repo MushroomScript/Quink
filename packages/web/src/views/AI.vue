@@ -5,6 +5,8 @@ import { api } from '@/api';
 import Vditor from 'vditor';
 import { useRouter, useRoute } from 'vue-router';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { useEscToClose } from '@/composables/useEscToClose';
+import { dragState } from '@/utils/cardDnd';
 import {
   PhXCircle,
   PhList,
@@ -37,6 +39,7 @@ const streamingHtmlMap = ref(new Map<string, string>());
 const streamingVersion = new Map<string, number>();
 const streamingLastRenderVer = new Map<string, number>();
 const confirmDeleteId = ref('');
+useEscToClose(confirmDeleteId, '');
 const searchConv = ref('');
 const showMobileConvs = ref(false);
 const abortControllers = new Map<string, AbortController>();
@@ -118,7 +121,14 @@ onMounted(async () => {
     if (el) el.addEventListener('scroll', () => { savedScroll = el.scrollTop; }, { passive: true });
   }, { immediate: true });
   window.addEventListener('quink-refresh', loadConversations);
+  window.addEventListener('quink-ai-drop', onAiDropEvent);
   document.addEventListener('keydown', onGlobalKeydown);
+  // 兜底: drop 在 AI 还没 mount 时派的事件 listener 没挂上, 走 sessionStorage 中转
+  const pendingRaw = sessionStorage.getItem('quink_ai_pending_drop');
+  if (pendingRaw) {
+    sessionStorage.removeItem('quink_ai_pending_drop');
+    try { await handleAiDrop(JSON.parse(pendingRaw)); } catch {}
+  }
 });
 
 onDeactivated(() => {
@@ -126,13 +136,19 @@ onDeactivated(() => {
   if (messagesEl.value) messagesEl.value.style.visibility = 'hidden';
 });
 
-onActivated(() => {
+onActivated(async () => {
   requestAnimationFrame(() => {
     if (messagesEl.value) {
       messagesEl.value.scrollTop = savedScroll;
       messagesEl.value.style.visibility = '';
     }
   });
+  // keep-alive 复用时 onMounted 不再触发, 这里也兜一道 pending drop
+  const pendingRaw = sessionStorage.getItem('quink_ai_pending_drop');
+  if (pendingRaw) {
+    sessionStorage.removeItem('quink_ai_pending_drop');
+    try { await handleAiDrop(JSON.parse(pendingRaw)); } catch {}
+  }
 });
 
 async function loadConversations() {
@@ -152,6 +168,43 @@ function newConversation() {
   findQuery.value = '';
   sessionStorage.removeItem('quink_ai_conv');
   router.replace({ query: {} });
+}
+
+// 卡片拖到 AI 各分支统一处理: 拼简洁的引用链接塞 query (多条换行分隔, 用户视觉简洁);
+// new: 新对话 (但如果当前已有打开的对话, 不开新, 走 current); conv: 切到指定 conv; current: 当前对话不动只填输入框
+async function handleAiDrop(payload: { kind: 'new' | 'conv' | 'current'; ids: string[]; convId?: string }) {
+  const refs: string[] = [];
+  for (const id of payload.ids) {
+    try {
+      const res = await api.getNote(id);
+      const n = res.data;
+      const label = (n.summary || n.content?.slice(0, 30) || '笔记').replace(/[\[\]]/g, '').replace(/\n+/g, ' ');
+      refs.push(`[${label}](?ref=${id})`);
+    } catch {}
+  }
+  const text = refs.join('\n');
+  if (!text) return;
+  // kind='new' 但当前已经有打开的对话 (用户在 /ai 内拖到 sidebar AI 项) → 走 current, 别开新对话
+  const effectiveKind = payload.kind === 'new' && currentConvId.value ? 'current' : payload.kind;
+  if (effectiveKind === 'conv' && payload.convId) {
+    if (currentConvId.value !== payload.convId) await selectConversation(payload.convId);
+    await nextTick();
+  } else if (effectiveKind === 'new') {
+    newConversation();
+    await nextTick();
+  }
+  query.value = query.value ? (query.value + '\n' + text) : text;
+  // textarea v-model 赋值不触发 @input → 手动调一次 autoGrow 撑高
+  await nextTick();
+  autoGrowTextarea();
+  queryEl.value?.focus();
+}
+
+function onAiDropEvent(e: Event) {
+  // 同时清 sessionStorage 中转, 避免 onActivated 切回时又读 + 重复 handleAiDrop 追加
+  sessionStorage.removeItem('quink_ai_pending_drop');
+  const payload = (e as CustomEvent).detail;
+  if (payload) handleAiDrop(payload);
 }
 
 const filteredConversations = ref<Conversation[]>([]);
@@ -619,8 +672,12 @@ async function retryLastMessage() {
         <TransitionGroup name="conv-list" tag="div" class="space-y-0.5">
           <div v-for="conv in filteredConversations" :key="conv.id"
             @click="selectConversation(conv.id)"
+            :data-drop-target="'conv:' + conv.id"
             class="group flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer text-xs transition-colors"
-            :class="currentConvId === conv.id ? 'bg-white shadow-sm font-medium text-gray-800' : 'text-gray-500 hover:bg-white/60'">
+            :class="[
+              currentConvId === conv.id ? 'bg-white shadow-sm font-medium text-gray-800' : 'text-gray-500 hover:bg-white/60',
+              dragState.active && dragState.hoverTarget === 'conv:' + conv.id ? 'drop-target-active' : ''
+            ]">
             <div class="flex-1 min-w-0">
               <div v-if="editingConvId === conv.id" class="flex">
                 <input v-model="editingTitle" @blur="saveTitle" @keydown.enter="saveTitle" class="w-full px-1 py-0.5 border border-gray-200 rounded text-xs outline-none" autofocus @click.stop />
@@ -690,7 +747,7 @@ async function retryLastMessage() {
           <PhXCircle size="0.875rem" weight="fill" />
         </button>
       </div>
-      <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-4">
+      <div ref="messagesEl" data-drop-target="ai-page" class="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-4">
         <!-- 空状态 -->
         <div v-if="!currentConvId || messages.length === 0" class="text-center py-16">
           <div class="mb-3 flex justify-center text-gray-300">
@@ -812,8 +869,8 @@ async function retryLastMessage() {
         </div>
       </div>
 
-      <!-- 输入框 -->
-      <div class="px-4 md:px-6 py-3 border-t border-gray-100">
+      <!-- 输入框 (data-drop-target 让拖到输入框松开也走 'ai-page' 分支 = 塞到当前对话输入框) -->
+      <div class="px-4 md:px-6 py-3 border-t border-gray-100" data-drop-target="ai-page">
         <div class="flex gap-2 items-end">
           <div class="flex-1 min-w-0 bg-white border border-gray-200 rounded-xl overflow-hidden focus-within:border-primary transition-colors pt-1.5">
             <textarea ref="queryEl" v-model="query" @keydown="handleKeydown" @input="autoGrowTextarea" placeholder="问点什么..." rows="1"

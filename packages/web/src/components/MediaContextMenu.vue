@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
-import { PhDownloadSimple, PhPlay, PhArrowCounterClockwise, PhEye } from '@phosphor-icons/vue';
-import { AUDIO_EXTS, playVoiceAt } from '@/utils/audio';
+import { ref, onMounted, onUnmounted, computed, markRaw } from 'vue';
+import { PhDownloadSimple, PhPlay, PhArrowCounterClockwise, PhEye, PhSpeakerHigh, PhSpeakerLow, PhSpeakerSlash } from '@phosphor-icons/vue';
+import { AUDIO_EXTS, playVoiceAt, getVoiceVolume, getVoiceMuted, setVoiceVolume, toggleVoiceMute } from '@/utils/audio';
 import { useImagePreview, type PreviewImage } from '@/composables/useImagePreview';
 
 const { open: openImagePreview } = useImagePreview();
@@ -48,13 +48,35 @@ async function triggerDownload(url: string, name: string) {
 function show(kind: 'image' | 'audio', url: string, filename: string, x: number, y: number,
               audioEl: HTMLAnchorElement | null = null, audioState: AudioState = 'idle',
               imgEl: HTMLImageElement | null = null) {
-  // 音频暂停态 3 项最高 ~130px,音频 idle/playing 2 项 + 图片 2 项都约 90px
-  const W = 160;
-  const H = kind === 'audio' && audioState === 'paused' ? 130 : 90;
+  // 音频: 顶部音量行 ~40 + 分割线 + 1-2 个播放控制 + 分割线 + 下载 ~ 130-170px; 图片 ~ 90px
+  const W = 180;
+  const H = kind === 'audio' ? (audioState === 'paused' ? 170 : 130) : 90;
   const vw = window.innerWidth, vh = window.innerHeight;
   if (x + W > vw - 8) x = vw - W - 8;
   if (y + H > vh - 8) y = vh - H - 8;
   menu.value = { visible: true, x, y, kind, url, filename, audioEl, audioState, imgEl };
+  // 打开菜单时同步当前音量到 reactive ref, 让 slider 显示对的值
+  volumeUi.value = getVoiceVolume();
+  mutedUi.value = getVoiceMuted();
+}
+
+// 音量 UI 状态 (从 audio.ts global 读, 拖动同步回去)
+const volumeUi = ref(1);
+const mutedUi = ref(false);
+const volumeIcon = computed(() => {
+  if (mutedUi.value || volumeUi.value === 0) return markRaw(PhSpeakerSlash);
+  if (volumeUi.value > 0.5) return markRaw(PhSpeakerHigh);
+  return markRaw(PhSpeakerLow);
+});
+function onVolumeInput(e: Event) {
+  const v = parseFloat((e.target as HTMLInputElement).value);
+  setVoiceVolume(v);
+  volumeUi.value = v;
+  mutedUi.value = v === 0;
+}
+function onMuteClick() {
+  toggleVoiceMute();
+  mutedUi.value = getVoiceMuted();
 }
 
 function hide() { menu.value.visible = false; }
@@ -186,6 +208,20 @@ onUnmounted(() => {
 
         <!-- 音频菜单:根据 audioState 动态显示 -->
         <template v-if="menu.kind === 'audio'">
+          <!-- 音量行: 顶部内嵌 (喇叭点静音切换 + slider 拖音量); inline 不展开二级 popover, 直接操控 -->
+          <div class="px-3 py-2 flex items-center gap-2">
+            <button @click.stop="onMuteClick"
+              class="text-gray-500 hover:text-gray-700 shrink-0 audio-volume-btn">
+              <component :is="volumeIcon" size="1rem" weight="fill" />
+            </button>
+            <input type="range" min="0" max="1" step="0.05" :value="mutedUi ? 0 : volumeUi" @input="onVolumeInput" @click.stop
+              class="audio-volume-slider flex-1"
+              :style="{
+                background: `linear-gradient(to right, rgb(var(--c-accent)) 0%, rgb(var(--c-accent)) ${(mutedUi ? 0 : volumeUi) * 100}%, rgb(229 231 235) ${(mutedUi ? 0 : volumeUi) * 100}%, rgb(229 231 235) 100%)`,
+              }" />
+          </div>
+          <div class="border-t border-gray-100 my-1"></div>
+
           <!-- 未播放 idle → 显示 "播放" -->
           <button v-if="menu.audioState === 'idle'" @click="doPlay"
             class="w-full px-3 py-2 text-sm text-left text-gray-700 hover:bg-gray-100 flex items-center gap-2 transition-colors">
@@ -219,3 +255,44 @@ onUnmounted(() => {
     </Transition>
   </Teleport>
 </template>
+
+<style scoped>
+.audio-volume-btn,
+.audio-volume-btn:focus,
+.audio-volume-btn:focus-visible {
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+/* 自定义 range slider (跟 AudioPlayer 同套路, 关 webkit/moz 默认外观让 inline gradient 生效) */
+.audio-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+}
+.audio-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  background: rgb(var(--c-accent));
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  cursor: pointer;
+}
+.audio-volume-slider::-moz-range-thumb {
+  background: rgb(var(--c-accent));
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  cursor: pointer;
+}
+.audio-volume-slider::-moz-range-track {
+  background: transparent;
+  border: none;
+}
+</style>

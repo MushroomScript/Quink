@@ -6,11 +6,13 @@ import { api, type Category } from '@/api';
 import { markRaw } from 'vue';
 import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen, PhCalendarBlank, PhCheck } from '@phosphor-icons/vue';
 import { pinyinMatch } from '@/utils/pinyin';
+import { useToast } from '@/composables/useToast';
 
 const toggleMobileSidebar = inject<() => void>('toggleMobileSidebar');
 
 const route = useRoute();
 const store = useNotesStore();
+const toast = useToast();
 const categories = ref<Category[]>([]);
 const showBatchMove = ref(false);
 const batchMoveBtn = ref<HTMLElement>();
@@ -359,8 +361,20 @@ const spinning = ref(false);
 async function refresh() {
   if (spinning.value) return;
   spinning.value = true;
-  try { await store.fetchNotes(); window.dispatchEvent(new CustomEvent('quink-refresh')); } catch {}
-  spinning.value = false;
+  // fetchNotes 通常 1-50ms 返回, 太快 spinning 反馈来不及看清; pin 最少 600ms 保证视觉看到完整一圈旋转
+  const minDuration = 600;
+  const start = Date.now();
+  try {
+    await store.fetchNotes();
+    window.dispatchEvent(new CustomEvent('quink-refresh'));
+  } catch (e) {
+    console.error('[refresh] failed:', e);
+  } finally {
+    const elapsed = Date.now() - start;
+    if (elapsed < minDuration) await new Promise(r => setTimeout(r, minDuration - elapsed));
+    spinning.value = false;
+    toast.show('已刷新');
+  }
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -432,7 +446,8 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <PhList size="1.25rem" weight="fill" />
         </button>
         <button v-if="!hideRefresh" @click="refresh" class="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors hidden md:block" title="刷新">
-          <PhArrowsClockwise size="0.875rem" weight="fill" class="transition-transform duration-500" :style="spinning ? 'transform: rotate(360deg)' : ''" />
+          <!-- 用 CSS animation 一次完整 360° 旋转 (跟 spinning state 同步 600ms); 之前用 transition transform 在 fetchNotes 极快返回时只看到一瞬抖动 -->
+          <PhArrowsClockwise size="0.875rem" weight="fill" :class="{ 'refresh-spin': spinning }" />
         </button>
         <h1 class="text-sm md:text-base font-semibold text-gray-800 whitespace-nowrap">{{ title }}<span v-if="titleCount >= 0" class="text-xs text-gray-400 font-normal tabular-nums">（{{ titleCount }}）</span></h1>
       </div>
@@ -682,8 +697,8 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       <div v-if="confirmBatchDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmBatchDelete = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-          <p class="text-sm text-gray-700 mb-1">删除笔记</p>
-          <p class="text-xs text-gray-400 mb-4">确认删除选中的 {{ store.selectedIds.size }} 条笔记？</p>
+          <p class="text-sm text-gray-700 mb-1">删除内容</p>
+          <p class="text-xs text-gray-400 mb-4">将 {{ store.selectedIds.size }} 条内容移至回收站</p>
           <div class="flex gap-2 justify-center">
             <button @click="confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="store.batchDelete(); confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
@@ -693,3 +708,15 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
     </Transition>
   </Teleport>
 </template>
+
+<style scoped>
+/* 刷新按钮: 点击触发一次完整 360° 旋转 (跟 refresh() 内 minDuration=600 同步).
+   CSS animation 比 transition 稳: animation 是从 0→360 一次性, 即使 spinning state 提前 false 也不打断当前动画 */
+@keyframes refresh-spin {
+  from { transform: rotate(0); }
+  to { transform: rotate(360deg); }
+}
+.refresh-spin {
+  animation: refresh-spin 0.6s ease-out;
+}
+</style>

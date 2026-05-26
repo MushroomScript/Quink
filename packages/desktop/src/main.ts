@@ -229,9 +229,24 @@ function createMainWindow() {
   Menu.setApplicationMenu(null);
   mainWindow.loadURL(WEB_URL);
 
-  // 右键上下文菜单(仅编辑区和内容显示区)
+  // 右键上下文菜单
   mainWindow.webContents.on('context-menu', (_event, params) => {
-    // 只在编辑区(.vditor)或内容区(.note-content/.prose)内显示
+    const hasSelection = params.selectionText.length > 0;
+
+    // editable (input/textarea/contenteditable) 全局都显示编辑菜单 — 不限 .vditor/.note-content;
+    // AI 搜索框 / TopBar 搜索 / 各 modal input 等都受益
+    if (params.isEditable) {
+      Menu.buildFromTemplate([
+        { label: '剪切', role: 'cut', enabled: hasSelection },
+        { label: '复制', role: 'copy', enabled: hasSelection },
+        { label: '粘贴', role: 'paste' },
+        { type: 'separator' },
+        { label: '全选', role: 'selectAll' },
+      ]).popup();
+      return;
+    }
+
+    // 非 editable: 只在编辑区(.vditor)或内容区(.note-content/.prose)内显示复制/全选
     mainWindow!.webContents.executeJavaScript(`
       (function() {
         var el = document.elementFromPoint(${params.x}, ${params.y});
@@ -239,18 +254,7 @@ function createMainWindow() {
       })()
     `).then((inContentArea: boolean) => {
       if (!inContentArea) return;
-
-      const hasSelection = params.selectionText.length > 0;
-
-      if (params.isEditable) {
-        Menu.buildFromTemplate([
-          { label: '剪切', role: 'cut', enabled: hasSelection },
-          { label: '复制', role: 'copy', enabled: hasSelection },
-          { label: '粘贴', role: 'paste' },
-          { type: 'separator' },
-          { label: '全选', role: 'selectAll' },
-        ]).popup();
-      } else {
+      {
         Menu.buildFromTemplate([
           { label: '复制', role: 'copy', enabled: hasSelection },
           { type: 'separator' },

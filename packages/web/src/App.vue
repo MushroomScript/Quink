@@ -18,6 +18,7 @@ import { useToast } from '@/composables/useToast';
 import { useImagePreview } from '@/composables/useImagePreview';
 import ImagePreview from '@/components/ImagePreview.vue';
 import MediaContextMenu from '@/components/MediaContextMenu.vue';
+import DragGhost from '@/components/DragGhost.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -493,4 +494,7 @@ watch(() => auth.user, (user) => {
 
   <!-- 全局右键菜单:.note-content 内的图片 / 音频 a 标签右键下载 -->
   <MediaContextMenu />
+
+  <!-- 拖动卡片到 sidebar 时的浮动 ghost (cardDnd.ts pointer events 实现, 替代 HTML5 DnD 的浏览器自带 ghost) -->
+  <DragGhost />
 </template>

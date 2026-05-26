@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, inject, watchEffect } from 'vue';
+import { useEscToClose } from '@/composables/useEscToClose';
 import { useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -20,6 +21,7 @@ import {
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import { highlightTextByPinyin } from '@/utils/pinyin';
+import { startCardDrag, dragState } from '@/utils/cardDnd';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -128,24 +130,33 @@ function enterSelectMode() {
   showMenu.value = false;
 }
 
-// 拖动到 sidebar (改 category / 改 type, drop handler 在 Sidebar.vue);
-// selectMode 下 :draggable 关掉避免冲突
-const isDragging = ref(false);
-function onDragStart(e: DragEvent) {
-  if (!e.dataTransfer) return;
-  // payload: id 给 update API, 当前 type/category 给 drop handler 做"same-target 跳过"判断
-  e.dataTransfer.setData('text/plain', JSON.stringify({
-    id: props.note.id,
-    type: props.note.type,
-    category: props.note.category || '',
-  }));
-  e.dataTransfer.effectAllowed = 'move';
-  isDragging.value = true;
-}
-function onDragEnd() {
-  isDragging.value = false;
+// 自定义拖动 (cardDnd.ts pointer events 实现, 不用 HTML5 DnD); 当前卡片是否在被拖
+const isDragging = computed(() => dragState.active && dragState.ids.includes(props.note.id));
+
+function onPointerDown(e: PointerEvent) {
+  if (e.button !== 0) return;
+  // 胶囊音频链接自己处理 seek 拖动 (audio.ts pointer 监听), 不要让卡片抢
+  const audioA = (e.target as HTMLElement)?.closest?.('a') as HTMLAnchorElement | null;
+  if (audioA) {
+    const href = audioA.getAttribute('href') || '';
+    if (/\.(webm|mp3|wav|ogg|m4a)(\?.*)?$/i.test(href)) return;
+  }
+  // 多选 + 当前在选中集 + 选中 ≥ 2 → 整批; 否则单条
+  const useBatch = store.selectMode && store.selectedIds.has(props.note.id) && store.selectedIds.size > 1;
+  const ids = useBatch ? Array.from(store.selectedIds) : [props.note.id];
+  // ghost 文字: 多条显数量, 单条显内容前 30 字 (没内容用 type label 兜底)
+  const text = useBatch
+    ? `${ids.length} 条内容`
+    : (props.note.content?.replace(/[#*`>~\-!\[\]]/g, '').trim().slice(0, 30) || typeLabels[props.note.type] || '内容');
+  startCardDrag(e, {
+    ids,
+    type: ids.length === 1 ? props.note.type : null,
+    category: ids.length === 1 ? (props.note.category || '') : '',
+    text,
+  });
 }
 const confirmDelete = ref(false);
+useEscToClose(confirmDelete);
 const menuBtn = ref<HTMLElement>();
 const menuPos = ref<{ top: string; right: string }>({ top: '0px', right: '0px' });
 
@@ -234,11 +245,11 @@ const typeColor: Record<string, string> = {
 </script>
 
 <template>
+  <!-- 非 selectMode: 仅 type chip 是拖动 handle (其他地方鼠标按住选文字); selectMode: 整卡片可拖 (多选批量移动).
+       自定义拖动 (cardDnd.ts), 非 HTML5 DnD: selectMode 时整卡片 @pointerdown; 非 selectMode 时 type chip @pointerdown -->
   <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group relative card-draggable"
     :class="{ 'ring-2 ring-primary/50': note.pinned, 'ring-2 ring-primary': store.selectedIds.has(note.id), 'opacity-50': isDragging }"
-    :draggable="!store.selectMode"
-    @dragstart="onDragStart"
-    @dragend="onDragEnd">
+    @pointerdown="store.selectMode ? onPointerDown($event) : undefined">
     <div class="px-3 py-2.5 md:px-4 md:py-3 cursor-pointer" @click="handleClick" @mousedown="onMouseDown">
       <div class="flex items-center gap-2 mb-2">
         <!-- 多选 checkbox: 跟 task list 视觉接近 — 空心圆 border (未选) / 实心主色 + 白勾 (已选);
@@ -250,7 +261,10 @@ const typeColor: Record<string, string> = {
             <path d="M5 12l5 5L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </div>
-        <span class="text-[11px] px-2 py-0.5 rounded-full font-medium" :class="typeColor[note.type]">
+        <!-- type chip 在非 selectMode 时充当拖动 handle (整卡片不 draggable, 让正文可选文字); selectMode 时不需要它单独拖, 整卡片接管 -->
+        <span class="text-[11px] px-2 py-0.5 rounded-full font-medium select-none touch-none"
+          :class="[typeColor[note.type], !store.selectMode ? 'cursor-grab active:cursor-grabbing' : '']"
+          @pointerdown.stop="!store.selectMode ? onPointerDown($event) : undefined">
           {{ typeLabels[note.type] }}
         </span>
         <span v-if="note.category" class="text-xs text-gray-400">{{ note.category }}</span>
@@ -320,8 +334,8 @@ const typeColor: Record<string, string> = {
         <div v-if="confirmDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
           <div class="absolute inset-0 bg-black/30" @click="confirmDelete = false" />
           <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-            <p class="text-sm text-gray-700 mb-1">确认删除</p>
-            <p class="text-xs text-gray-400 mb-4">删除后将移入回收站</p>
+            <p class="text-sm text-gray-700 mb-1">删除内容</p>
+            <p class="text-xs text-gray-400 mb-4">可在回收站找回</p>
             <div class="flex gap-2 justify-center">
               <button @click="confirmDelete = false"
                 class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>

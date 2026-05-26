@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, provide, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, provide, watch } from 'vue';
 import { api, isLoggedIn } from '@/api';
 import { useNotesStore } from '@/stores/notes';
 import { useRouter } from 'vue-router';
 import { PhTag, PhPencilSimple, PhXCircle } from '@phosphor-icons/vue';
 import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
 import { pinyinMatch } from '@/utils/pinyin';
+import { useEscToClose } from '@/composables/useEscToClose';
 
 const store = useNotesStore();
 const router = useRouter();
@@ -23,6 +24,8 @@ const loading = ref(true);
 const editingTag = ref('');
 const newName = ref('');
 const confirmDeleteTag = ref('');
+useEscToClose(editingTag, '');
+useEscToClose(confirmDeleteTag, '');
 
 async function load() {
   if (!isLoggedIn()) return;
@@ -69,7 +72,13 @@ async function doDeleteTag() {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  load();
+  window.addEventListener('quink-refresh', load);
+});
+onUnmounted(() => {
+  window.removeEventListener('quink-refresh', load);
+});
 
 // 数据变更前主动 snapshot 所有卡片位置，避免 onLeave 钩子里拿到的是 v-if 切换后的错位坐标
 // 用 visibleTags(不是 allTags) — 搜索过滤时标签数变化也要触发 fadeOutLeave 动画
@@ -131,7 +140,7 @@ watch(() => visibleTags.value.length, () => snapshotCards(), { flush: 'sync' });
           <div class="absolute inset-0 bg-black/30" @click="confirmDeleteTag = ''" />
           <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
             <p class="text-sm text-gray-700 mb-1">删除标签 #{{ confirmDeleteTag }}</p>
-            <p class="text-xs text-gray-400 mb-4">将从所有笔记中移除此标签</p>
+            <p class="text-xs text-gray-400 mb-4">将从所有内容中移除此标签</p>
             <div class="flex gap-2 justify-center">
               <button @click="confirmDeleteTag = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
               <button @click="doDeleteTag" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>

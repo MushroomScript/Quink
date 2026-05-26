@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, markRaw } from 'vue';
+import { ref, watch, onMounted, onUnmounted, markRaw } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useNotesStore } from '@/stores/notes';
 import { api, isLoggedIn, type Category } from '@/api';
+import { useEscToClose } from '@/composables/useEscToClose';
+import { dragState } from '@/utils/cardDnd';
 import {
   PhLightbulb,
   PhNotePencil,
@@ -95,62 +97,46 @@ function filterByCategory(name: string) {
   }
 }
 
-// dropType 标记: 主导航前 3 项作为"拖到此处改 type"的 drop target (AI 不参与)
-const mainNav: Array<{ path: string; label: string; icon: any; dropType?: 'note' | 'snippet' | 'todo' }> = [
+// dropType 标记: 前 3 项 = "拖到此处改 type"; AI 用 dropAction='ai' (拖到 AI 项 = 跳 /ai 新对话 / 停留 1s 自动展开)
+const mainNav: Array<{ path: string; label: string; icon: any; dropType?: 'note' | 'snippet' | 'todo'; dropAction?: 'ai' }> = [
   { path: '/', label: '灵感', icon: markRaw(PhLightbulb), dropType: 'note' },
   { path: '/notes', label: '笔记', icon: markRaw(PhNotePencil), dropType: 'snippet' },
   { path: '/todos', label: '待办', icon: markRaw(PhCheckSquare), dropType: 'todo' },
-  { path: '/ai', label: 'AI', icon: markRaw(PhSparkle) },
+  { path: '/ai', label: 'AI', icon: markRaw(PhSparkle), dropAction: 'ai' },
 ];
-
-// 拖动 NoteCard 到 sidebar 的 drop target. payload 在 NoteCard.onDragStart 里设;
-// dragOverTarget 标识当前 hover 的 target id ('type:note' / 'cat:工作' 等), 用于视觉高亮
-const dragOverTarget = ref<string | null>(null);
-
-function parseDragPayload(e: DragEvent): { id: string; type: string; category: string } | null {
-  const raw = e.dataTransfer?.getData('text/plain');
-  if (!raw) return null;
-  try { return JSON.parse(raw); } catch { return null; }
-}
-
-function onTypeDragOver(e: DragEvent, type: string) {
-  e.preventDefault();
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-  dragOverTarget.value = 'type:' + type;
-}
-function onTypeDragLeave(type: string) {
-  if (dragOverTarget.value === 'type:' + type) dragOverTarget.value = null;
-}
-async function onTypeDrop(e: DragEvent, type: 'note' | 'snippet' | 'todo') {
-  e.preventDefault();
-  dragOverTarget.value = null;
-  const data = parseDragPayload(e);
-  if (!data || !data.id || data.type === type) return;
-  try { await notesStore.updateNote(data.id, { type } as any); } catch {}
-}
-
-function onCatDragOver(e: DragEvent, name: string) {
-  e.preventDefault();
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-  dragOverTarget.value = 'cat:' + name;
-}
-function onCatDragLeave(name: string) {
-  if (dragOverTarget.value === 'cat:' + name) dragOverTarget.value = null;
-}
-async function onCatDrop(e: DragEvent, name: string) {
-  e.preventDefault();
-  dragOverTarget.value = null;
-  const data = parseDragPayload(e);
-  if (!data || !data.id || data.category === name) return;
-  try { await notesStore.updateNote(data.id, { category: name } as any); } catch {}
-}
-
-const moreNav = [
+// moreNav 里只有"回收站"接受 drop (= 软删除); 其他 (统计/资源/标签) 不接受
+const moreNav: Array<{ path: string; label: string; icon: any; dropAction?: 'trash' }> = [
   { path: '/stats', label: '统计', icon: markRaw(PhChartBar) },
   { path: '/resources', label: '资源', icon: markRaw(PhFolder) },
   { path: '/tags', label: '标签', icon: markRaw(PhTag) },
-  { path: '/trash', label: '回收站', icon: markRaw(PhTrash) },
+  { path: '/trash', label: '回收站', icon: markRaw(PhTrash), dropAction: 'trash' },
 ];
+
+// 拖动到 sidebar 的 drop target 视觉/落地: 用 cardDnd 的 reactive state (cardDnd.ts 自己处理 pointer events 完成 update),
+// Sidebar 只负责暴露 [data-drop-target] 属性 + drop-target-active class. 回收站走 quink-drop-trash 事件触发确认.
+const confirmTrash = ref(false);
+const trashIds = ref<string[]>([]);
+useEscToClose(confirmTrash);
+useEscToClose(showAddCategory);
+useEscToClose(showDeleteConfirm);
+
+function isActiveDrop(target: string): boolean {
+  return dragState.active && dragState.hoverTarget === target;
+}
+
+async function doTrash() {
+  for (const id of trashIds.value) {
+    try { await notesStore.deleteNote(id); } catch {}
+  }
+  if (notesStore.selectMode) notesStore.clearSelection();
+  trashIds.value = [];
+  confirmTrash.value = false;
+}
+
+function cancelTrash() {
+  trashIds.value = [];
+  confirmTrash.value = false;
+}
 
 function isActive(path: string) { return route.path === path; }
 function toggleUserMenu() { showUserMenu.value = !showUserMenu.value; }
@@ -158,6 +144,26 @@ function closeUserMenu() { showUserMenu.value = false; }
 function goSettings() { closeUserMenu(); router.push('/settings'); }
 function handleLogout() { closeUserMenu(); auth.logout(); router.push('/login'); }
 function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() : '?'; }
+
+// 拖到回收站时 cardDnd 派 quink-drop-trash 事件, Sidebar 这里弹确认 modal (避开把 confirm UI 塞 utils/)
+function onDropTrashEvent(e: CustomEvent) {
+  const ids = e.detail as string[];
+  if (!ids?.length) return;
+  trashIds.value = ids;
+  confirmTrash.value = true;
+}
+// 拖动停留 sidebar AI 项 1s → cardDnd 派 quink-ai-expand → 这里 navigate /ai 但拖动状态不释放, 用户能继续拖 conv 列表
+function onAiExpand() {
+  if (route.path !== '/ai') router.push('/ai');
+}
+onMounted(() => {
+  window.addEventListener('quink-drop-trash', onDropTrashEvent as EventListener);
+  window.addEventListener('quink-ai-expand', onAiExpand);
+});
+onUnmounted(() => {
+  window.removeEventListener('quink-drop-trash', onDropTrashEvent as EventListener);
+  window.removeEventListener('quink-ai-expand', onAiExpand);
+});
 </script>
 
 <template>
@@ -196,14 +202,14 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
 
     <!-- Nav -->
     <nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
-      <!-- Main nav (前 3 项有 dropType: 拖卡片到此改 type) -->
+      <!-- Main nav (前 3 项有 dropType: 拖卡片到此改 type); 拖动状态机 (cardDnd) 通过 [data-drop-target] 属性识别 -->
       <router-link v-for="item in mainNav" :key="item.path" :to="item.path"
         :data-nav-path="item.path"
+        :data-drop-target="item.dropType ? 'type:' + item.dropType : item.dropAction ? 'action:' + item.dropAction : undefined"
         class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-150 nav-item"
-        :class="{ 'drop-target-active': item.dropType && dragOverTarget === 'type:' + item.dropType }"
-        @dragover="item.dropType && onTypeDragOver($event, item.dropType)"
-        @dragleave="item.dropType && onTypeDragLeave(item.dropType)"
-        @drop="item.dropType && onTypeDrop($event, item.dropType)"
+        :class="{
+          'drop-target-active': (item.dropType && isActiveDrop('type:' + item.dropType)) || (item.dropAction && isActiveDrop('action:' + item.dropAction))
+        }"
         :style="isActive(item.path)
           ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)', fontWeight: 500 }
           : { color: 'var(--sb-dim)' }">
@@ -215,9 +221,11 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
         </span>
       </router-link>
 
-      <!-- More (展开显示，样式与主导航一致) -->
+      <!-- More (其中"回收站"接受 drop = 软删除, 任何 type/单选多选都可拖入) -->
       <router-link v-for="item in moreNav" :key="item.path" :to="item.path"
+        :data-drop-target="item.dropAction ? 'action:' + item.dropAction : undefined"
         class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-150 nav-item"
+        :class="{ 'drop-target-active': item.dropAction && isActiveDrop('action:' + item.dropAction) }"
         :style="isActive(item.path)
           ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)', fontWeight: 500 }
           : { color: 'var(--sb-dim)' }">
@@ -239,11 +247,9 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
       <div v-else class="space-y-0.5 max-h-40 overflow-y-auto">
         <div v-for="cat in categories" :key="cat.id"
           @click="filterByCategory(cat.name)"
-          @dragover="onCatDragOver($event, cat.name)"
-          @dragleave="onCatDragLeave(cat.name)"
-          @drop="onCatDrop($event, cat.name)"
+          :data-drop-target="'cat:' + cat.name"
           class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-all group"
-          :class="{ 'drop-target-active': dragOverTarget === 'cat:' + cat.name }"
+          :class="{ 'drop-target-active': isActiveDrop('cat:' + cat.name) }"
           :style="activeCategory === cat.name
             ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)' }
             : { color: 'var(--sb-dim)' }">
@@ -254,11 +260,9 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
         <template v-for="cat in categories" :key="'children-' + cat.id">
           <div v-for="child in cat.children" :key="child.id"
             @click="filterByCategory(child.name)"
-            @dragover="onCatDragOver($event, child.name)"
-            @dragleave="onCatDragLeave(child.name)"
-            @drop="onCatDrop($event, child.name)"
+            :data-drop-target="'cat:' + child.name"
             class="flex items-center gap-2 px-3 py-1.5 pl-8 rounded-lg text-xs cursor-pointer transition-all group"
-            :class="{ 'drop-target-active': dragOverTarget === 'cat:' + child.name }"
+            :class="{ 'drop-target-active': isActiveDrop('cat:' + child.name) }"
             :style="activeCategory === child.name
               ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)' }
               : { color: 'var(--sb-dim)' }">
@@ -289,6 +293,21 @@ function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() :
             <button @click="addCategory"
               class="px-4 py-1.5 text-xs rounded-lg text-white font-medium"
               style="background: rgb(var(--c-accent-dark))">添加</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- 拖到回收站确认弹窗 (跟其他删除路径一致, 危险操作必须确认) -->
+    <Transition name="modal">
+      <div v-if="confirmTrash" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="cancelTrash" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">删除内容</p>
+          <p class="text-xs text-gray-400 mb-4">将 {{ trashIds.length }} 条内容移至回收站</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="cancelTrash" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doTrash" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
           </div>
         </div>
       </div>

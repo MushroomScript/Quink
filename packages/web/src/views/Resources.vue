@@ -6,11 +6,12 @@ import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
 import { useImagePreview } from '@/composables/useImagePreview';
 import { resolveFileUrl } from '@/utils/fileUrl';
 import { pinyinMatch } from '@/utils/pinyin';
+import AudioPlayer from '@/components/AudioPlayer.vue';
+import { useEscToClose } from '@/composables/useEscToClose';
 
 const store = useNotesStore();
 import {
   PhFolder,
-  PhMusicNote,
   PhFilePdf,
   PhFileText,
   PhFileZip,
@@ -36,6 +37,8 @@ const confirmDeleteId = ref('');
 // 重命名: target 持有原文件 reference + 当前 input 值
 const renameTarget = ref<FileItem | null>(null);
 const renameValue = ref('');
+useEscToClose(confirmDeleteId, '');
+useEscToClose(renameTarget, null);
 const renameInput = ref<HTMLInputElement | null>(null);
 const imageFiles = computed(() => filtered.value.filter(isImage));
 const { open: openImagePreview } = useImagePreview();
@@ -204,12 +207,9 @@ onUnmounted(() => {
           <!-- Image preview;url 是裸名,resolveFileUrl 拼 /api/uploads/ 前缀 -->
           <img v-if="isImage(f)" :src="resolveFileUrl(f.url)" :alt="f.filename" @click="onImageClick(f)"
             class="w-full h-full object-cover cursor-zoom-in" />
-          <!-- Audio player -->
+          <!-- Audio player: 自定义紧凑播放器, 内含顶部音符/跳动条 visual + 单行播放/进度/时间/音量 -->
           <div v-else-if="isAudio(f)" class="px-3 w-full">
-            <div class="flex justify-center mb-2 text-gray-400">
-              <PhMusicNote size="1.75rem" weight="fill" />
-            </div>
-            <audio :src="resolveFileUrl(f.url)" controls class="w-full h-8" style="min-width: 0;" />
+            <AudioPlayer :src="resolveFileUrl(f.url)" />
           </div>
           <!-- Document icon -->
           <div v-else class="text-center">

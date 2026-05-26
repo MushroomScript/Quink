@@ -35,16 +35,23 @@ const previewName = computed(() => {
   return `${datePrefix.value}_${safe}.${props.ext}`;
 });
 
-// 弹窗打开时重置 name + 当前时间 + autofocus/select
-watch(() => props.open, (v) => {
-  if (v) {
-    name.value = props.defaultName;
-    datePrefix.value = dayjs().format('YYYY-MM-DD_HHmmss');
-    nextTick(() => {
-      inputEl.value?.focus();
-      inputEl.value?.select();
-    });
-  }
+// 弹窗打开时重置 name + 当前时间 + autofocus/select + 挂 ESC 关闭 (cleanup 在关闭/卸载时移除)
+watch(() => props.open, (v, _old, onCleanup) => {
+  if (!v) return;
+  name.value = props.defaultName;
+  datePrefix.value = dayjs().format('YYYY-MM-DD_HHmmss');
+  nextTick(() => {
+    inputEl.value?.focus();
+    inputEl.value?.select();
+  });
+  const handler = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onCancel();
+    }
+  };
+  document.addEventListener('keydown', handler);
+  onCleanup(() => document.removeEventListener('keydown', handler));
 });
 
 function onConfirm() {
