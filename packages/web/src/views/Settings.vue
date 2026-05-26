@@ -28,7 +28,7 @@ const prefs = reactive({
   fontSize: 14,
   autoTag: true,
   autoSummary: true,
-  autoSummaryMinLen: 50,
+  autoSummaryMinLen: 200,
   autoTranscribeVoice: false,
   showTodoBadge: true,
   aiChatMaxTokens: 8192,

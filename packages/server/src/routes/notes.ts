@@ -261,13 +261,21 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
     const prefs = (user as any)?.preferences || {};
     const tagEnabled = prefs.autoTag !== false;
     const summaryEnabled = prefs.autoSummary !== false;
-    const summaryMinLen = prefs.autoSummaryMinLen || 50;
+    const summaryMinLen = prefs.autoSummaryMinLen || 200;
+
+    // 摘要长度判断: 排除图片/音频/视频/文档等附件 markdown,只看纯文字长度.
+    // 否则"只贴一张图"的笔记 content.length 很大但实际文字 0,触发 AI 摘要后 AI
+    // 回报"无法生成摘要 请提供文本内容"或"内容为空或无法识别"(蘑菇汇报的 G1/G2)
+    const plainTextLen = content
+      .replace(/!\[[^\]]*\]\([^)]+\)/g, '') // 图片 ![alt](url)
+      .replace(/\[[^\]]*\]\([^)]+\.(?:png|jpg|jpeg|gif|webp|svg|webm|mp3|wav|ogg|m4a|mp4|mov|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|txt|md|csv|json)\)/gi, '') // 附件链接
+      .trim().length;
 
     const [tags, category, summary] = await Promise.all([
       // 用户已自己写了标签 → 直接用; 关了自动标签 → 留空; 否则 AI 生成
       existingTags.length > 0 ? Promise.resolve(existingTags) : (tagEnabled ? autoTag(userId, content) : Promise.resolve([] as string[])),
       autoClassify(userId, content),
-      summaryEnabled && content.length >= summaryMinLen ? autoSummary(userId, content) : Promise.resolve(null),
+      summaryEnabled && plainTextLen >= summaryMinLen ? autoSummary(userId, content) : Promise.resolve(null),
     ]);
 
     const updates: Record<string, any> = { aiProcessed: true };
