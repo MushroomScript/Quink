@@ -436,10 +436,13 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
 </script>
 
 <template>
-  <header class="shrink-0 backdrop-blur-md"
-    style="background: var(--c-topbar); box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
+  <!-- header 本身透明: 把背景搬到 main bar / mobile search / filter bar 各自子元素上,
+       这样多选 batch bar 没 background 时, 透过 batch bar 看到的是 main 区里的卡片(不是 header bg),
+       视觉上跟回收站 sticky toolbar 一致(都是 bg-gray-50/80 半透明真正透出 main 卡片). -->
+  <header class="shrink-0"
+    style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
     <!-- Main bar -->
-    <div class="h-12 md:h-14 flex items-center justify-between px-3 md:px-6 gap-2">
+    <div class="h-12 md:h-14 flex items-center justify-between px-3 md:px-6 gap-2" style="background: var(--c-topbar)">
       <!-- Left: menu + title -->
       <div class="flex items-center gap-2 shrink-0">
         <button @click="toggleMobileSidebar?.()" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 md:hidden" title="菜单">
@@ -495,7 +498,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
     </div>
 
     <!-- Mobile search bar (expanded) -->
-    <div v-if="showMobileSearch" class="px-3 pb-2 md:hidden">
+    <div v-if="showMobileSearch" class="px-3 pb-2 md:hidden" style="background: var(--c-topbar)">
       <div class="relative">
         <input v-model="searchText" @input="onSearch" type="text" :placeholder="searchPlaceholder"
           class="w-full pl-9 pr-3 py-2 bg-gray-100/80 border-0 rounded-full text-sm outline-none focus:bg-white focus:ring-2 focus:ring-primary/30 placeholder-gray-400" autofocus />
@@ -506,7 +509,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
     <!-- 笔记页横向 filter bar(标签/资源页都不显示横向 bar,它们各自有专属交互) -->
     <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="opacity-0 -translate-y-1"
       leave-active-class="transition duration-100 ease-in" leave-to-class="opacity-0 -translate-y-1">
-      <div v-if="showFilters && searchScope === 'notes'" class="px-6 pb-3 space-y-2 hidden md:block">
+      <div v-if="showFilters && searchScope === 'notes'" class="px-6 pb-3 space-y-2 hidden md:block" style="background: var(--c-topbar)">
         <!-- 类型 + 时间 + 清除 -->
         <div class="flex items-center gap-3 h-7">
           <span class="text-xs text-gray-400 w-8 shrink-0">类型</span>
@@ -549,28 +552,29 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       </div>
     </Transition>
 
-    <!-- Batch action bar -->
+    <!-- Batch action bar: pt-[8px] pb-[10px] 而非 py-2 — padding 不对称让 content 整体上移 1px
+         抵消中文字符 baseline 在 line-box 内自然偏下的视觉偏差. box 高度 8+1+27+10=46 不变. -->
     <div v-if="store.selectMode"
-      class="px-4 md:px-6 py-2 flex items-center gap-3 border-t border-gray-100 bg-gray-50/80">
+      class="px-4 md:px-6 pt-[8px] pb-[10px] flex items-center gap-3 border-t border-gray-100 bg-gray-50/80">
       <span class="text-xs text-gray-500">已选 {{ store.selectedIds.size }} 项</span>
       <button @click="store.selectAll()" class="text-xs text-primary hover:underline">全选</button>
       <button @click="store.toggleSelectMode()" class="text-xs text-gray-400 hover:underline">退出选择</button>
       <div class="ml-auto flex items-center gap-2">
         <!-- 顺序: 移至类型 → 移动分类 → 加标签 → 删除 (跨类型操作前置, 跟分类语义优先级一致) -->
         <button ref="batchTypeBtn" @click="toggleBatchType"
-          class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          class="px-3 pt-[3.5px] pb-[5.5px] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
           移至类型
         </button>
         <button ref="batchMoveBtn" @click="toggleBatchMove"
-          class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          class="px-3 pt-[3.5px] pb-[5.5px] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
           移动分类
         </button>
         <button ref="batchTagsBtn" @click="toggleBatchTags"
-          class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          class="px-3 pt-[3.5px] pb-[5.5px] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
           加标签
         </button>
         <button @click="confirmBatchDelete = true"
-          class="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+          class="px-3 pt-[3.5px] pb-[5.5px] text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
           删除
         </button>
       </div>
@@ -700,8 +704,8 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <p class="text-sm text-gray-700 mb-1">删除内容</p>
           <p class="text-xs text-gray-400 mb-4">将 {{ store.selectedIds.size }} 条内容移至回收站</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="store.batchDelete(); confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+            <button @click="confirmBatchDelete = false" class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="store.batchDelete(); confirmBatchDelete = false" class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
           </div>
         </div>
       </div>

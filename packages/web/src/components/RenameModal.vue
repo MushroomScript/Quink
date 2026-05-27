@@ -86,14 +86,14 @@ function onCancel() {
           <div class="flex gap-2 justify-end mt-4">
             <button
               type="button"
-              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+              class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
               @click="onCancel"
             >
               取消
             </button>
             <button
               type="button"
-              class="px-4 py-1.5 text-xs rounded-lg font-medium text-white bg-primary hover:bg-primary-dark"
+              class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg font-medium text-white bg-primary hover:bg-primary-dark"
               @click="onConfirm"
             >
               确认

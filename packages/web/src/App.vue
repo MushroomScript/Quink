@@ -401,21 +401,24 @@ watch(() => auth.user, (user) => {
   <!-- 主界面 -->
   <template v-else>
     <div class="flex flex-col h-full overflow-hidden">
-      <!-- 自定义标题栏(仅 Electron). select-none: Ctrl+A 时不要选这里的"Quink - 一念" -->
-      <div v-if="isElectron" class="flex items-center justify-between h-9 pl-3 pr-2 shrink-0 select-none"
+      <!-- 自定义标题栏(仅 Electron). select-none: Ctrl+A 时不要选这里的"Quink - 一念".
+           固定 36px (而非 h-9 = 2.25rem): 标题栏不随用户字体大小 scale, 否则 rem=18 时 h-9=40.5px 引入 .5px
+           累积让下游 layout y 落在 .5 倍数 (如 batch bar btn.y=113.5), 浏览器在不同 paint context 下亚像素 round
+           不一致 (一边 113 一边 114) → 字符屏幕位置差 1 像素. 固定 px 让所有累积整数, paint 一致. -->
+      <div v-if="isElectron" class="flex items-center justify-between h-[36px] pl-3 pr-2 shrink-0 select-none"
         style="-webkit-app-region: drag; background: rgb(var(--c-sidebar))">
         <div class="flex items-center gap-2">
           <img :src="`/quink-${currentTheme}-192.png`" alt="" class="w-4 h-4" draggable="false" />
           <span class="text-xs font-semibold" style="color: var(--sb-text)">Quink - 一念</span>
         </div>
         <div class="flex items-center" style="-webkit-app-region: no-drag">
-          <button @click="desk?.minimize()" class="w-10 h-9 flex items-center justify-center hover:bg-black/10 transition-colors" style="color: var(--sb-dim)">
+          <button @click="desk?.minimize()" class="w-10 h-[36px] flex items-center justify-center hover:bg-black/10 transition-colors" style="color: var(--sb-dim)">
             <PhMinus size="1rem" weight="bold" />
           </button>
-          <button @click="desk?.maximize()" class="w-10 h-9 flex items-center justify-center hover:bg-black/10 transition-colors" style="color: var(--sb-dim)">
+          <button @click="desk?.maximize()" class="w-10 h-[36px] flex items-center justify-center hover:bg-black/10 transition-colors" style="color: var(--sb-dim)">
             <PhSquare size="0.875rem" weight="bold" />
           </button>
-          <button @click="desk?.close()" class="w-10 h-9 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors" style="color: var(--sb-dim)">
+          <button @click="desk?.close()" class="w-10 h-[36px] flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors" style="color: var(--sb-dim)">
             <PhX size="1rem" weight="bold" />
           </button>
         </div>

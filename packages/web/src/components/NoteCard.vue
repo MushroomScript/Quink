@@ -350,9 +350,9 @@ const typeColor: Record<string, string> = {
             <p class="text-xs text-gray-400 mb-4">可在回收站找回</p>
             <div class="flex gap-2 justify-center">
               <button @click="confirmDelete = false"
-                class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+                class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
               <button @click="doDelete()"
-                class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+                class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
             </div>
           </div>
         </div>

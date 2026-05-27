@@ -266,9 +266,9 @@ onUnmounted(() => {
             class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary mb-4" />
           <div class="flex gap-2 justify-end">
             <button @click="renameTarget = null"
-              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+              class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="doRename"
-              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark">保存</button>
+              class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark">保存</button>
           </div>
         </div>
       </div>
@@ -283,8 +283,8 @@ onUnmounted(() => {
           <p class="text-sm text-gray-700 mb-1">删除文件</p>
           <p class="text-xs text-gray-400 mb-4">删除后不可恢复</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmDeleteId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doDeleteFile" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+            <button @click="confirmDeleteId = ''" class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doDeleteFile" class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
           </div>
         </div>
       </div>
