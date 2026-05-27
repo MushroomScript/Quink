@@ -862,7 +862,7 @@ async function retryLastMessage() {
 
         <!-- 重试按钮（最后一条是用户消息，AI 没回复） -->
         <div v-if="lastMsgNeedsRetry" class="flex justify-center py-2">
-          <button @click="retryLastMessage" class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
+          <button @click="retryLastMessage" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
             <PhArrowsClockwise size="0.875rem" weight="fill" />
             重新生成
           </button>
@@ -900,8 +900,8 @@ async function retryLastMessage() {
           <p class="text-sm text-gray-700 mb-1">删除对话</p>
           <p class="text-xs text-gray-400 mb-4">删除后无法恢复</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmDeleteId = ''" class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="deleteConversation(confirmDeleteId)" class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+            <button @click="confirmDeleteId = ''" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="deleteConversation(confirmDeleteId)" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
           </div>
         </div>
       </div>

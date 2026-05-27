@@ -295,6 +295,18 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
 .modal-enter-from > .relative {
   transform: scale(0.95);
 }
+/* modal 内容容器永久 transform: translateZ(0) 让它一直在 GPU 合成层.
+   root cause: enter scale 动画期间 modal 进合成层, 结束后 transform 移除元素离开合成层,
+   字符 raster 在合成层 vs CPU 渲染亚像素 round 不一致 → 弹出瞬间字符 1px 抖动.
+   修法: 永久保持合成层, scale 动画在已有 translateZ(0) 基础上叠加 (enter-from 设 scale(0.95) translateZ(0)),
+   动画结束 transform 回到 translateZ(0) 而非 none, 元素仍在合成层无切换无抖动.
+   selector 限定 .fixed 直接子 + .relative + bg-white + rounded-xl 精确匹配 modal 内容 div 不误伤其他 */
+.fixed > .relative.bg-white.rounded-xl {
+  transform: translateZ(0);
+}
+.modal-enter-from > .relative.bg-white.rounded-xl {
+  transform: scale(0.95) translateZ(0);
+}
 
 
 /* 顶部编辑区显隐过渡 (Inspiration / Notes / Todos): 进入筛选/搜索状态时折叠.

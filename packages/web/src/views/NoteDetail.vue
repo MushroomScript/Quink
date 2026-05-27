@@ -313,8 +313,8 @@ onUnmounted(() => {
               <p class="text-sm text-gray-700 mb-1">删除内容</p>
               <p class="text-xs text-gray-400 mb-4">可在回收站找回</p>
               <div class="flex gap-2 justify-center">
-                <button @click="confirmDelete = false" class="inline-flex items-center justify-center px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-                <button @click="doDelete" class="inline-flex items-center justify-center px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+                <button @click="confirmDelete = false" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+                <button @click="doDelete" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
               </div>
             </div>
           </div>

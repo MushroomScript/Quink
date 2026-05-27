@@ -562,19 +562,19 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       <div class="ml-auto flex items-center gap-2">
         <!-- 顺序: 移至类型 → 移动分类 → 加标签 → 删除 (跨类型操作前置, 跟分类语义优先级一致) -->
         <button ref="batchTypeBtn" @click="toggleBatchType"
-          class="px-3 pt-[3.5px] pb-[5.5px] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
           移至类型
         </button>
         <button ref="batchMoveBtn" @click="toggleBatchMove"
-          class="px-3 pt-[3.5px] pb-[5.5px] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
           移动分类
         </button>
         <button ref="batchTagsBtn" @click="toggleBatchTags"
-          class="px-3 pt-[3.5px] pb-[5.5px] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
           加标签
         </button>
         <button @click="confirmBatchDelete = true"
-          class="px-3 pt-[3.5px] pb-[5.5px] text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+          class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
           删除
         </button>
       </div>
@@ -704,8 +704,8 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <p class="text-sm text-gray-700 mb-1">删除内容</p>
           <p class="text-xs text-gray-400 mb-4">将 {{ store.selectedIds.size }} 条内容移至回收站</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmBatchDelete = false" class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="store.batchDelete(); confirmBatchDelete = false" class="px-4 pt-[5.75px] pb-[7.75px] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+            <button @click="confirmBatchDelete = false" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="store.batchDelete(); confirmBatchDelete = false" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
           </div>
         </div>
       </div>
