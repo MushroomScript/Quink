@@ -18,6 +18,10 @@ Quink web 端渲染相关坑：DOM 操作 / CSS 布局 / Vue 模板 / HMR / mark
 
 - **`position: sticky` 的"上限"是父级 content box, 不是 scrollport**: 父级有 `padding-top` 时, sticky top: 0 子元素停在父级 padding 内边界, 不是 scrollport 顶部。**症状**: 滚动开始几像素 sticky 元素跟着内容滑动, 到达父级 padding 边界才钉住。**修法**: sticky 元素的父级 padding-top **必须去掉**(改 pb-x 只留底部, 或者把 padding 移到 sticky 元素自身内部用 pt-x 代替)。范例: `Trash.vue` 根 div 从 `py-6` 改 `pb-6`, sticky toolbar 自带 `py-2` 给视觉间距。
 
+- **sticky 元素的钉住范围 = containing block, 父级太矮等同 sticky 失效**: sticky 元素只能在 containing block (最近 block 父) 内部钉住, 父级 height = sticky 自身 height 时没"钉住"空间, 元素跟着 normal flow 滚走。**症状**: 加 `sticky top-0` 但实际滚动时跟着内容走, 像 sticky 没生效。**修法**: 让 sticky 的父级跨越整个 scrollport (overflow 容器) 的内容高度。**典型场景**: Teleport target 是 main 内的空 portal div, batch bar 是 portal 唯一子, portal height = 46px → sticky 失效。**正确做法**: portal 同时包住 RouterView (portal height = main 内容全高), 或者 sticky 元素直接是 scrollport 的子。范例: `App.vue` 的 `#batch-bar-portal` 包住 `<RouterView>`。
+
+- **Vue 3.5+ `<Teleport>` target 在 source 之后 mount 要用 `defer` prop**: TopBar 跟 main 是 flex sibling, TopBar 先 mount 时 main 内的 `#batch-bar-portal` 还不存在 → Teleport warn 找不到 target 并 fallback 到原 DOM 位置 (源代码位置), 等于 Teleport 没生效。**症状**: portal div 为空, source 内容在原位置渲染。**修法**: `<Teleport to="#batch-bar-portal" defer>` 让 Teleport 延后到 patch 完成后 attach, 那时 target 已经 mount。范例: TopBar batch bar Teleport 到 App.vue main 内 portal。
+
 - **sticky 元素切换 relative ↔ fixed 那一瞬间, 内容亚像素抖动 1-2px**: sticky 元素从"跟随文档流"切到"钉住"时浏览器重新计算渲染层, 亚像素位置(如 23.7px)在切换瞬间四舍五入到 24px, 文字位置抖一两像素。**修法**: sticky 元素加 `transform: translateZ(0)` + `will-change: transform`, 强制从挂载起就在独立 GPU 合成层, 切换时不需要动态创建 layer, 亚像素位置一直稳定。范例: `Trash.vue` sticky toolbar inline style。**注意**: `transform` 会让该元素成为 `position: fixed` 子元素的 containing block, 所以只在叶子节点(没 fixed 子代)上用; 全屏 fixed modal 之类的祖先用 transform 会困住子代(详见动画段同名坑)。
 
 ## Popover / Teleport / Stacking context

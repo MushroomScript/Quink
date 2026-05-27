@@ -51,7 +51,7 @@ onActivated(async () => {
 <template>
   <div class="px-4 md:px-8 py-4 md:py-6">
     <Transition name="editor-area">
-      <div v-if="!store.isFiltering" class="editor-area-wrap mb-4 md:mb-6">
+      <div v-if="!store.isFiltering && !store.selectMode" class="editor-area-wrap mb-4 md:mb-6">
         <div>
           <MobileInput v-if="isMobile" default-type="todo" />
           <NoteInput v-else default-type="todo" />

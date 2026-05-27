@@ -552,10 +552,17 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       </div>
     </Transition>
 
-    <!-- Batch action bar: pt-[8px] pb-[10px] 而非 py-2 — padding 不对称让 content 整体上移 1px
-         抵消中文字符 baseline 在 line-box 内自然偏下的视觉偏差. box 高度 8+1+27+10=46 不变. -->
+  </header>
+
+  <!-- Batch action bar 用 Teleport 渲染到 main 内 portal (App.vue 内 #batch-bar-portal),
+       让 batch bar 物理位置在 main 内 sticky top-0, 跟卡片在同一 overflow 容器,
+       半透明 bg-gray-50/80 透过去能看到下方卡片轮廓 (跟回收站 sticky toolbar 同款视觉).
+       Vue context 仍在 TopBar 不变, 所有按钮回调 (toggleBatchType / batchDelete 等) 照常工作.
+       pt-[8px] pb-[10px] 抵消中文字符 baseline 在 line-box 内自然偏下的视觉偏差. -->
+  <Teleport to="#batch-bar-portal" defer>
     <div v-if="store.selectMode"
-      class="px-4 md:px-6 pt-[8px] pb-[10px] flex items-center gap-3 border-t border-gray-100 bg-gray-50/80">
+      class="sticky top-0 z-10 px-4 md:px-6 pt-[8px] pb-[10px] flex items-center gap-3 border-t border-gray-100 bg-gray-50/80"
+      style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <span class="text-xs text-gray-500">已选 {{ store.selectedIds.size }} 项</span>
       <button @click="store.selectAll()" class="text-xs text-primary hover:underline">全选</button>
       <button @click="store.toggleSelectMode()" class="text-xs text-gray-400 hover:underline">退出选择</button>
@@ -579,7 +586,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         </button>
       </div>
     </div>
-  </header>
+  </Teleport>
 
   <!-- 资源页日期筛选弹窗(Teleport + fixed,按钮下方向左展开 = 弹窗右上对齐按钮右下) -->
   <Teleport to="body">

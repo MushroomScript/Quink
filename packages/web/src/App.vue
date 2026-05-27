@@ -440,11 +440,18 @@ watch(() => auth.user, (user) => {
       <div class="flex-1 flex flex-col overflow-hidden">
         <TopBar />
         <main ref="mainEl" class="flex-1 overflow-y-auto" style="scrollbar-gutter: stable">
-          <RouterView v-slot="{ Component }">
-            <KeepAlive :include="['inspiration', 'notes', 'todos', 'ai-page']">
-              <component :is="Component" />
-            </KeepAlive>
-          </RouterView>
+          <!-- batch action bar Teleport target: TopBar 的 batch bar 用 Teleport 渲染到这里,
+               让 batch bar 物理位置在 main 内 (跟卡片在同一 overflow 容器), 半透明 bg-gray-50/80
+               透过去能看到下方卡片轮廓 (跟回收站 sticky toolbar 同款视觉).
+               portal 必须包住 RouterView: sticky 元素的钉住范围 = containing block, portal 必须高度 = main 内容全高,
+               否则 sticky 范围被限制在 batch bar 自身那 46px 内, 等同 sticky 失效跟随滚动. -->
+          <div id="batch-bar-portal">
+            <RouterView v-slot="{ Component }">
+              <KeepAlive :include="['inspiration', 'notes', 'todos', 'ai-page']">
+                <component :is="Component" />
+              </KeepAlive>
+            </RouterView>
+          </div>
         </main>
       </div>
       </div>

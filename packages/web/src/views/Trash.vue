@@ -31,7 +31,8 @@ watch(selectMode, (v) => { if (!v) selectedIds.value.clear(); });
 function toggleSelect(id: string) {
   if (selectedIds.value.has(id)) selectedIds.value.delete(id);
   else selectedIds.value.add(id);
-  if (selectedIds.value.size === 0) selectMode.value = false;
+  // 取消所有选中不自动退出 selectMode, 让用户用顶部"退出"按钮或 ESC 主动退出
+  // (之前自动退出让 Ctrl+点击进入多选 → 立刻取消那张 → 自动退出, 体验突兀)
 }
 
 function onCardClick(e: MouseEvent, n: Note) {
