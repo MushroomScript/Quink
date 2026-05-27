@@ -455,7 +455,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       <!-- Right: search -->
       <div v-if="!hideSearch" class="flex items-center gap-1.5">
         <!-- Desktop search -->
-        <div ref="searchBoxEl" class="hidden md:block w-56">
+        <div ref="searchBoxEl" data-search-box class="hidden md:block w-56">
           <div class="flex items-center bg-gray-100/80 rounded-full border border-gray-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/40 transition overflow-hidden">
             <PhMagnifyingGlass size="1rem" weight="fill" class="ml-3 text-gray-400 shrink-0" />
             <input ref="searchInput" v-model="searchText" @input="onSearch"

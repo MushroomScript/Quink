@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, inject, watch, type Ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
+import { useToast } from '@/composables/useToast';
 import { api, type Note } from '@/api';
 import Vditor from 'vditor';
 import dayjs from 'dayjs';
@@ -29,6 +30,7 @@ dayjs.locale('zh-cn');
 const route = useRoute();
 const router = useRouter();
 const store = useNotesStore();
+const toast = useToast();
 const note = ref<Note | null>(null);
 const rendered = ref('');
 const loading = ref(true);
@@ -176,9 +178,21 @@ function askDelete() {
 async function doDelete() {
   if (!note.value) return;
   const id = note.value.id;
+  // 留个 snapshot 给撤销用 (跳页后 note ref 会被清, 必须先拷贝)
+  const snapshot = { ...note.value };
   confirmDelete.value = false;
   await store.deleteNote(id);
   goBack();
+  toast.show('已移到回收站', {
+    duration: 5000,
+    action: {
+      label: '撤销',
+      onClick: async () => {
+        const n = await store.undoDelete([snapshot]);
+        if (!n) toast.show('撤销失败', 'error');
+      },
+    },
+  });
 }
 
 function goBack() {

@@ -183,7 +183,19 @@ function askDelete() {
 
 async function doDelete() {
   confirmDelete.value = false;
+  // 留个 snapshot 给撤销用: store.deleteNote 走 splice 会让 props.note 引用失效, 必须先拷贝
+  const snapshot = { ...props.note };
   await store.deleteNote(props.note.id);
+  toast.show('已移到回收站', {
+    duration: 5000,
+    action: {
+      label: '撤销',
+      onClick: async () => {
+        const n = await store.undoDelete([snapshot]);
+        if (!n) toast.show('撤销失败', 'error');
+      },
+    },
+  });
 }
 
 const renderedContent = ref('');

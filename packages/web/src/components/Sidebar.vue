@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useNotesStore } from '@/stores/notes';
 import { api, isLoggedIn, type Category } from '@/api';
 import { useEscToClose } from '@/composables/useEscToClose';
+import { useToast } from '@/composables/useToast';
 import { dragState } from '@/utils/cardDnd';
 import {
   PhLightbulb,
@@ -26,6 +27,7 @@ const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
 const notesStore = useNotesStore();
+const toast = useToast();
 const stats = ref({ totalNotes: 0, totalTodos: 0, pendingTodos: 0 });
 const showUserMenu = ref(false);
 const categories = ref<Category[]>([]);
@@ -125,12 +127,29 @@ function isActiveDrop(target: string): boolean {
 }
 
 async function doTrash() {
+  // 先 snapshot, deleteNote 走 splice 后就找不到了
+  const snapshots: typeof notesStore.notes[number][] = [];
+  for (const id of trashIds.value) {
+    const n = notesStore.notes.find((x) => x.id === id);
+    if (n) snapshots.push({ ...n });
+  }
   for (const id of trashIds.value) {
     try { await notesStore.deleteNote(id); } catch {}
   }
   if (notesStore.selectMode) notesStore.clearSelection();
   trashIds.value = [];
   confirmTrash.value = false;
+  if (snapshots.length === 0) return;
+  toast.show(snapshots.length === 1 ? '已移到回收站' : `已移到回收站 ${snapshots.length} 条`, {
+    duration: 5000,
+    action: {
+      label: '撤销',
+      onClick: async () => {
+        const n = await notesStore.undoDelete(snapshots);
+        if (!n) toast.show('撤销失败', 'error');
+      },
+    },
+  });
 }
 
 function cancelTrash() {

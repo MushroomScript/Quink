@@ -131,6 +131,25 @@ export const useNotesStore = defineStore('notes', () => {
     total.value = Math.max(0, total.value - 1);
   }
 
+  // 撤销删除: 调 restoreNote API + 把 snapshot unshift 回 notes 顶端 (不重新 fetch, 保留 scroll/分页状态)
+  // 批量传 snapshots 数组, 一次性 unshift 让 useMasonry watch 只触发一次
+  async function undoDelete(snapshots: Note[]): Promise<number> {
+    const restored: Note[] = [];
+    for (const snap of snapshots) {
+      try {
+        await api.restoreNote(snap.id);
+        restored.push(snap);
+      } catch (e) {
+        console.error('[undoDelete] failed for', snap.id, e);
+      }
+    }
+    if (restored.length) {
+      notes.value.unshift(...restored);
+      total.value += restored.length;
+    }
+    return restored.length;
+  }
+
   async function togglePin(id: string) {
     const note = notes.value.find((n) => n.id === id);
     if (!note) return;
@@ -245,6 +264,7 @@ export const useNotesStore = defineStore('notes', () => {
     createNote,
     updateNote,
     deleteNote,
+    undoDelete,
     togglePin,
     toggleTodo,
     selectMode,
