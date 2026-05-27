@@ -16,6 +16,10 @@ Quink web 端渲染相关坑：DOM 操作 / CSS 布局 / Vue 模板 / HMR / mark
 
 - **圆角裁切 + absolute 定位锚点不要混在同一个 div 上**：父级 `overflow-hidden` 会裁掉绝对定位的子下拉。修法：外层套一个仅做 `relative` 的容器，内层做 `overflow-hidden` 圆角裁切。
 
+- **`position: sticky` 的"上限"是父级 content box, 不是 scrollport**: 父级有 `padding-top` 时, sticky top: 0 子元素停在父级 padding 内边界, 不是 scrollport 顶部。**症状**: 滚动开始几像素 sticky 元素跟着内容滑动, 到达父级 padding 边界才钉住。**修法**: sticky 元素的父级 padding-top **必须去掉**(改 pb-x 只留底部, 或者把 padding 移到 sticky 元素自身内部用 pt-x 代替)。范例: `Trash.vue` 根 div 从 `py-6` 改 `pb-6`, sticky toolbar 自带 `py-2` 给视觉间距。
+
+- **sticky 元素切换 relative ↔ fixed 那一瞬间, 内容亚像素抖动 1-2px**: sticky 元素从"跟随文档流"切到"钉住"时浏览器重新计算渲染层, 亚像素位置(如 23.7px)在切换瞬间四舍五入到 24px, 文字位置抖一两像素。**修法**: sticky 元素加 `transform: translateZ(0)` + `will-change: transform`, 强制从挂载起就在独立 GPU 合成层, 切换时不需要动态创建 layer, 亚像素位置一直稳定。范例: `Trash.vue` sticky toolbar inline style。**注意**: `transform` 会让该元素成为 `position: fixed` 子元素的 containing block, 所以只在叶子节点(没 fixed 子代)上用; 全屏 fixed modal 之类的祖先用 transform 会困住子代(详见动画段同名坑)。
+
 ## Popover / Teleport / Stacking context
 
 - **下拉/popover 在编辑器旁边总被盖住**：编辑器（Vditor 等）经常创建 stacking context，子组件的 z-[9999] 不起作用。解决方案：**默认走 `<Teleport to="body">` + `position: fixed` + 动态算位置**。范例：TopBar 的标签建议下拉、batchMove 下拉。

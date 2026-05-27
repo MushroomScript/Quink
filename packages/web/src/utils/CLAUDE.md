@@ -37,7 +37,7 @@ helper 提供 4 个函数：
 
 - **staying 元素"对齐/补位"动画要在 v-for 子元素 class 上加 `transition-all duration-300`**（或 `transition-transform`），让 Vue FLIP 给 staying 元素设的 transform 变化能过渡。否则被删项淡出后剩余项瞬间补位（看着"砰一下"补上去）。`NoteCard` 因为本身有 `transition-all duration-200`（hover 阴影用）顺带让 FLIP 生效，其他列表组件必须主动加。
 
-- **`snapshotCards` 调用时机**：`fadeOutLeave` / `flyToNavLeave` 必须配合 `watch(() => list.length, () => snapshotCards(), { flush: 'sync' })`（在数据变更前 snapshot 位置，避免 onLeave 钩子拿到 v-if 切换后的错位坐标）；`collapseLeave` **不需要 snapshot**（不脱流，不锁位置）。
+- **`snapshotCards` 调用时机**：`fadeOutLeave` / `flyToNavLeave` 必须配合 `watch(() => list.length, () => snapshotCards(), { flush: 'sync' })`（在数据变更前 snapshot 位置，避免 onLeave 钩子拿到 v-if 切换后的错位坐标）；`collapseLeave` **不需要 snapshot**（不脱流，不锁位置）。**批量场景额外建议**: 用户滚动 main 后做批量删除/恢复时, watch sync 触发的 snapshot 时序复杂(多次 splice / selectMode 切换 / Vue patch 交错), 偶尔 snapshot 拿到的不是"用户视觉位置"。批量操作函数顶部、splice 之前**主动**调一次 `snapshotCards()` 强制锚定一份, leave 钩子 100% 跟视觉对齐。范例: `Trash.vue` 的 `doBatchRestore` / `doBatchDelete`。
 
 - **批量操作要用乐观更新**：`恢复所有` / `清空回收站` / 批量删除 AI 配置等，必须先改 UI 触发动画再 await API（否则 Promise.all reject 会让 `notes.value = []` 不执行，动画不触发）。范例：`Trash.vue` 的 `doRestoreAll` / `Tags.vue` 的 `doDeleteTag` / `Settings.vue` 的 `deleteConfig`。
 

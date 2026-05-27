@@ -21,6 +21,34 @@ const notes = ref<Note[]>([]);
 const pageCount = computed(() => notes.value.length);
 provide('pageCount', pageCount);
 
+// 多选模式 (Ctrl/Meta 单击触发, 跟主界面 NoteCard 一致), 但用 view 局部 state 不复用 store.selectMode
+// — store 那套是给主界面 notes 列表用的, Trash 是独立 notes ref
+const selectMode = ref(false);
+const selectedIds = ref<Set<string>>(new Set());
+useEscToClose(selectMode);
+watch(selectMode, (v) => { if (!v) selectedIds.value.clear(); });
+
+function toggleSelect(id: string) {
+  if (selectedIds.value.has(id)) selectedIds.value.delete(id);
+  else selectedIds.value.add(id);
+  if (selectedIds.value.size === 0) selectMode.value = false;
+}
+
+function onCardClick(e: MouseEvent, n: Note) {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    selectMode.value = true;
+    toggleSelect(n.id);
+    return;
+  }
+  if (selectMode.value) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleSelect(n.id);
+  }
+}
+
 // 单卡片悬停显示"X 天后自动删除", 永久保留则不显示 tooltip
 function daysLeftTooltip(n: any): string | undefined {
   const raw = (auth.user?.preferences as any)?.trashRetentionDays;
@@ -59,8 +87,12 @@ async function load() {
 
 const confirmRestoreId = ref('');
 const confirmRestoreAll = ref(false);
+const confirmBatchRestore = ref(false);
+const confirmBatchDelete = ref(false);
 useEscToClose(confirmRestoreId, '');
 useEscToClose(confirmRestoreAll);
+useEscToClose(confirmBatchRestore);
+useEscToClose(confirmBatchDelete);
 
 async function doRestore() {
   const id = confirmRestoreId.value;
@@ -113,6 +145,42 @@ async function doEmptyAll() {
   }
 }
 
+// 批量恢复 / 永久删除: 用 splice mutate 防 useMasonry 跨列重排 (跟 doRestore / doPermanentDelete 同根因).
+// 走乐观更新 + Promise.all 并发: 先从 UI 移除触发 leave 动画再并发跑 API (跟 doRestoreAll / doEmptyAll 同模式).
+// 任一失败只 console.error 不回滚, server 数据不一致下次刷新自动同步 (详见根 CLAUDE.md 批量操作用乐观更新).
+//
+// 主动 snapshotCards(): 批量场景下连续多次 splice 触发的 watch sync snapshot 时序复杂
+// (用户滚动 main 后, splice/selectMode 切换的 patch 顺序里 layout 可能微调, 让 flyToNavLeave
+// 的起始坐标偏离用户视觉位置). 在 splice 之前主动 snapshot 一次, 缓存"用户点按钮那一瞬间"的所有
+// 卡片 viewport 坐标, leave 钩子 100% 用这份 snapshot, 起点跟视觉对齐.
+async function doBatchRestore() {
+  confirmBatchRestore.value = false;
+  const ids = Array.from(selectedIds.value);
+  if (!ids.length) return;
+  snapshotCards();
+  leaveMode = 'restore';
+  for (const id of ids) {
+    const idx = notes.value.findIndex(n => n.id === id);
+    if (idx >= 0) notes.value.splice(idx, 1);
+  }
+  selectMode.value = false;
+  await Promise.all(ids.map(id => api.restoreNote(id).catch(e => console.error('[batchRestore]', id, e))));
+}
+
+async function doBatchDelete() {
+  confirmBatchDelete.value = false;
+  const ids = Array.from(selectedIds.value);
+  if (!ids.length) return;
+  snapshotCards();
+  leaveMode = 'delete';
+  for (const id of ids) {
+    const idx = notes.value.findIndex(n => n.id === id);
+    if (idx >= 0) notes.value.splice(idx, 1);
+  }
+  selectMode.value = false;
+  await Promise.all(ids.map(id => api.permanentDeleteNote(id).catch(e => console.error('[batchDelete]', id, e))));
+}
+
 function deletedAgo(n: any) {
   return n.deletedAt ? dayjs(n.deletedAt).fromNow() + '删除' : '';
 }
@@ -142,16 +210,37 @@ function onLeave(el: Element, done: () => void) {
 </script>
 
 <template>
-  <div class="px-4 md:px-8 py-6">
-    <div class="flex items-center justify-between mb-6" v-if="notes.length > 0">
-      <p class="text-xs text-gray-400">{{ notes.length }} 条已删除的内容</p>
+  <div class="px-4 md:px-8 pb-6">
+    <!-- toolbar sticky top-0 + 视觉对齐 TopBar 内嵌的灵感 batch action bar (px-4 md:px-6 py-2 + border-t + bg-gray-50/80).
+         根 div 顶部 padding 必须去掉 (改 pb-6 只留底部), 否则 sticky 元素的 containing block 是父级 content box,
+         停在 main top + 父级 padding-top 处, 视觉上前一段滚动它跟着滑动. transform: translateZ(0) 防 sticky 切换时亚像素抖动 -->
+    <div v-if="notes.length > 0"
+      class="sticky top-0 z-10 -mx-4 md:-mx-8 px-4 md:px-6 py-2 mb-4 flex items-center justify-between border-t border-gray-100 bg-gray-50/80 backdrop-blur-md"
+      style="will-change: transform; transform: translateZ(0)">
+      <p v-if="!selectMode" class="text-xs text-gray-400">{{ notes.length }} 条已删除的内容</p>
+      <p v-else class="text-xs text-primary-dark font-medium">已选 {{ selectedIds.size }} 条</p>
       <div class="flex items-center gap-2">
-        <button @click="confirmRestoreAll = true" class="px-3 py-1.5 text-xs rounded-lg bg-primary-light text-primary-dark hover:opacity-80 transition-colors">
-          恢复所有
-        </button>
-        <button @click="confirmEmpty = true" class="px-3 py-1.5 text-xs rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
-          清空回收站
-        </button>
+        <template v-if="selectMode">
+          <button @click="confirmBatchRestore = true" :disabled="!selectedIds.size"
+            class="px-3 py-1 text-xs rounded-lg bg-primary-light text-primary-dark hover:opacity-80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            批量恢复
+          </button>
+          <button @click="confirmBatchDelete = true" :disabled="!selectedIds.size"
+            class="px-3 py-1 text-xs rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            批量永久删除
+          </button>
+          <button @click="selectMode = false" class="px-3 py-1 text-xs rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors">
+            退出
+          </button>
+        </template>
+        <template v-else>
+          <button @click="confirmRestoreAll = true" class="px-3 py-1 text-xs rounded-lg bg-primary-light text-primary-dark hover:opacity-80 transition-colors">
+            恢复所有
+          </button>
+          <button @click="confirmEmpty = true" class="px-3 py-1 text-xs rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+            清空回收站
+          </button>
+        </template>
       </div>
     </div>
 
@@ -169,10 +258,20 @@ function onLeave(el: Element, done: () => void) {
       <div class="notes-masonry">
         <TransitionGroup v-for="(col, ci) in columns" :key="ci" tag="div"
           data-animated-list class="masonry-col" :css="false" @leave="onLeave">
-          <div v-for="n in col" :key="n.id" :data-note-type="n.type" class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden group transition-transform duration-300">
+          <div v-for="n in col" :key="n.id" :data-note-type="n.type"
+            class="bg-white rounded-2xl shadow-sm border overflow-hidden group transition-all duration-200 cursor-default"
+            :class="selectedIds.has(n.id) ? 'border-primary ring-2 ring-primary' : 'border-gray-100'"
+            @click="onCardClick($event, n)">
             <div class="px-4 py-3">
-              <!-- 顶部行: 左侧 类型 chip + 分类, 右侧 删除时间 (ml-auto 推到最右) -->
+              <!-- 顶部行: selectMode 时左侧加 checkbox + 类型 chip + 分类, 右侧 删除时间 -->
               <div class="flex items-center gap-2 mb-2">
+                <div v-if="selectMode"
+                  class="w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
+                  :class="selectedIds.has(n.id) ? 'bg-primary border-primary' : 'border-gray-400 bg-white'">
+                  <svg v-if="selectedIds.has(n.id)" class="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none">
+                    <path d="M5 12l5 5L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </div>
                 <span class="text-[11px] px-2 py-0.5 rounded-full font-medium select-none" :class="typeColor[n.type]">
                   {{ typeLabels[n.type] }}
                 </span>
@@ -196,11 +295,12 @@ function onLeave(el: Element, done: () => void) {
                 </span>
               </div>
             </div>
-            <div class="flex items-center gap-1 px-3 py-2 border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button @click="confirmRestoreId = n.id" class="px-3 py-1 text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
+            <!-- selectMode 时隐藏底部单条按钮区, 避免"选中"和"单条操作"语义冲突 -->
+            <div v-if="!selectMode" class="flex items-center gap-1 px-3 py-2 border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button @click.stop="confirmRestoreId = n.id" class="px-3 py-1 text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
                 恢复
               </button>
-              <button @click="confirmDeleteId = n.id" class="px-3 py-1 text-xs ml-auto rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+              <button @click.stop="confirmDeleteId = n.id" class="px-3 py-1 text-xs ml-auto rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
                 永久删除
               </button>
             </div>
@@ -272,6 +372,40 @@ function onLeave(el: Element, done: () => void) {
           <div class="flex gap-2 justify-center">
             <button @click="confirmRestoreAll = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="doRestoreAll" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复所有</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <!-- 批量恢复确认弹窗 -->
+  <Teleport to="body">
+    <Transition name="modal">
+      <div v-if="confirmBatchRestore" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="confirmBatchRestore = false" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">批量恢复</p>
+          <p class="text-xs text-gray-400 mb-4">将恢复选中的 {{ selectedIds.size }} 条内容</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="confirmBatchRestore = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doBatchRestore" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <!-- 批量永久删除确认弹窗 -->
+  <Teleport to="body">
+    <Transition name="modal">
+      <div v-if="confirmBatchDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="confirmBatchDelete = false" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+          <p class="text-sm text-gray-700 mb-1">批量永久删除</p>
+          <p class="text-xs text-gray-400 mb-4">将永久删除选中的 {{ selectedIds.size }} 条内容，不可恢复</p>
+          <div class="flex gap-2 justify-center">
+            <button @click="confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doBatchDelete" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">永久删除</button>
           </div>
         </div>
       </div>

@@ -133,9 +133,8 @@ async function doTrash() {
     const n = notesStore.notes.find((x) => x.id === id);
     if (n) snapshots.push({ ...n });
   }
-  for (const id of trashIds.value) {
-    try { await notesStore.deleteNote(id); } catch {}
-  }
+  // Promise.all 并发 (跟 Trash 的 doRestoreAll / doBatchRestore 等批量操作风格统一)
+  await Promise.all(trashIds.value.map(id => notesStore.deleteNote(id).catch(e => console.error('[doTrash]', id, e))));
   if (notesStore.selectMode) notesStore.clearSelection();
   trashIds.value = [];
   confirmTrash.value = false;

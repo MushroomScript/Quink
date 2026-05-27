@@ -205,41 +205,40 @@ export const useNotesStore = defineStore('notes', () => {
     selectedIds.value.clear();
   }
 
+  // 批量操作统一走 Promise.all 并发 + 失败 console.error (跟 Trash batch ops / Sidebar.doTrash 同模式)
   async function batchDelete() {
-    for (const id of selectedIds.value) {
-      await api.deleteNote(id);
-    }
+    const ids = Array.from(selectedIds.value);
     selectedIds.value.clear();
+    await Promise.all(ids.map(id => api.deleteNote(id).catch(e => console.error('[batchDelete]', id, e))));
     await fetchNotes();
   }
 
   async function batchMove(category: string) {
-    for (const id of selectedIds.value) {
-      await api.updateNote(id, { category } as any);
-    }
+    const ids = Array.from(selectedIds.value);
     selectedIds.value.clear();
+    await Promise.all(ids.map(id => api.updateNote(id, { category } as any).catch(e => console.error('[batchMove]', id, e))));
     await fetchNotes();
   }
 
   // 批量改 type: todoStatus 字段不动 (todo→snippet/note 时 DB 仍保留, 转回 todo 时复用)
   async function batchUpdateType(type: 'note' | 'snippet' | 'todo') {
-    for (const id of selectedIds.value) {
-      await api.updateNote(id, { type } as any);
-    }
+    const ids = Array.from(selectedIds.value);
     selectedIds.value.clear();
+    await Promise.all(ids.map(id => api.updateNote(id, { type } as any).catch(e => console.error('[batchUpdateType]', id, e))));
     await fetchNotes();
   }
 
   // 批量加标签: 合并到现有 tags (去重), 不覆盖
   async function batchAddTags(tagsToAdd: string[]) {
     if (!tagsToAdd.length) return;
-    for (const id of selectedIds.value) {
+    const ids = Array.from(selectedIds.value);
+    selectedIds.value.clear();
+    await Promise.all(ids.map(id => {
       const note = notes.value.find(n => n.id === id);
       const existing = note?.tags || [];
       const merged = Array.from(new Set([...existing, ...tagsToAdd]));
-      await api.updateNote(id, { tags: merged } as any);
-    }
-    selectedIds.value.clear();
+      return api.updateNote(id, { tags: merged } as any).catch(e => console.error('[batchAddTags]', id, e));
+    }));
     await fetchNotes();
   }
 
