@@ -101,13 +101,7 @@ console.log(`
 
 serve({ fetch: app.fetch, port: PORT, hostname: '0.0.0.0' });
 
-// 自动清理过期回收站（默认30天）
-import dayjs from 'dayjs';
-function cleanTrash() {
-  try {
-    const cutoff = dayjs().subtract(30, 'day').toISOString();
-    db.delete(schema.notes).where(sql`${schema.notes.deletedAt} IS NOT NULL AND ${schema.notes.deletedAt} < ${cutoff}`).run();
-  } catch {}
-}
-cleanTrash();
-setInterval(cleanTrash, 6 * 60 * 60 * 1000); // 每6小时清理一次
+// 启动 + 每 6h 跑一次全量清理 (用户改 trashRetentionDays 时另在 PATCH /me 处单独触发该用户的清理, 见 cleanup.ts)
+import { cleanAllTrash } from './cleanup.js';
+cleanAllTrash();
+setInterval(cleanAllTrash, 6 * 60 * 60 * 1000);

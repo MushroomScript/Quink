@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { hashPassword, verifyPassword, signToken, authMiddleware } from '../auth.js';
+import { cleanTrashForUser } from '../cleanup.js';
 
 const app = new Hono();
 
@@ -118,6 +119,13 @@ app.patch('/me', authMiddleware, async (c) => {
 
   if (Object.keys(updates).length > 0) {
     await db.update(schema.users).set(updates).where(eq(schema.users.id, userId));
+  }
+
+  // 用户保存了新的 retention 设置 → 立即按新天数清理该用户回收站, 不用等下个 6h 定时 tick
+  if (parsed.data.preferences !== undefined) {
+    const raw = (parsed.data.preferences as any).trashRetentionDays;
+    const days = typeof raw === 'number' && raw >= 0 ? raw : 30;
+    cleanTrashForUser(userId, days);
   }
 
   const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();

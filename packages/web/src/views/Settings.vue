@@ -31,6 +31,7 @@ const prefs = reactive({
   autoSummaryMinLen: 200,
   autoTranscribeVoice: false,
   showTodoBadge: true,
+  trashRetentionDays: 30,
   aiChatMaxTokens: 8192,
   aiPersona: 'concise',
   aiPersonaCustom: '',
@@ -544,6 +545,24 @@ function goBack() {
             <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
               :class="prefs.showTodoBadge ? 'translate-x-6' : 'translate-x-1'" />
           </button>
+        </div>
+        <!-- 回收站保留天数 -->
+        <div class="pt-2 border-t border-gray-100">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm text-gray-700 font-medium">回收站保留时间</div>
+              <div class="text-xs text-gray-400 mt-0.5">超过此时长的已删除内容会自动永久删除</div>
+            </div>
+            <select v-model.number="prefs.trashRetentionDays" class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none bg-white">
+              <option :value="7">7 天</option>
+              <option :value="14">14 天</option>
+              <option :value="30">30 天</option>
+              <option :value="60">60 天</option>
+              <option :value="90">90 天</option>
+              <option :value="180">180 天</option>
+              <option :value="0">永久保留</option>
+            </select>
+          </div>
         </div>
         <!-- 自动生成标签 -->
         <div class="flex items-center justify-between pt-2 border-t border-gray-100">
