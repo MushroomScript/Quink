@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth.js';
 import { db, schema } from '../db/index.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and, isNull, inArray } from 'drizzle-orm';
 import { resolve } from 'path';
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
+import { Readable } from 'stream';
+import archiver from 'archiver';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { toPinyinSearchable } from '../utils/pinyin.js';
@@ -118,6 +120,7 @@ app.post('/file', async (c) => {
   const body = await c.req.parseBody();
   const file = body['file'];
   const displayNameField = body['displayName'];
+  const folderIdField = body['folderId']; // 可选, 不传 = 上传到根目录
 
   if (!file || typeof file === 'string') {
     return c.json({ error: '请选择文件' }, 400);
@@ -143,6 +146,7 @@ app.post('/file', async (c) => {
   const userId = c.get('userId');
   const id = nanoid(12);
 
+  const folderId = typeof folderIdField === 'string' && folderIdField ? folderIdField : null;
   await db.insert(schema.files).values({
     id,
     userId,
@@ -151,6 +155,7 @@ app.post('/file', async (c) => {
     mimeType: file.type || 'application/octet-stream',
     category,
     size: file.size,
+    folderId,
     createdAt: dayjs().toISOString(),
   });
 
@@ -250,6 +255,209 @@ app.delete('/files/:id', async (c) => {
     if (existsSync(diskPath)) unlinkSync(diskPath);
   } catch {}
   return c.json({ message: '已删除' });
+});
+
+// ──────────── 文件夹相关 ────────────
+
+// GET /api/upload/folders — 列出当前用户所有文件夹 (嵌套树由前端按 parentId 组装)
+app.get('/folders', async (c) => {
+  const userId = c.get('userId');
+  const results = await db.select().from(schema.folders)
+    .where(eq(schema.folders.userId, userId))
+    .orderBy(schema.folders.name)
+    .all();
+  return c.json({ data: results });
+});
+
+// POST /api/upload/folders — 创建文件夹. body: { name, parentId?: string | null }
+app.post('/folders', async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json().catch(() => ({}));
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId : null;
+  if (!name) return c.json({ error: '文件夹名不能为空' }, 400);
+  if (name.length > 80) return c.json({ error: '文件夹名过长' }, 400);
+  // 校验 parentId 真实存在且属于当前用户 (防造假 parentId)
+  if (parentId) {
+    const parent = await db.select().from(schema.folders).where(eq(schema.folders.id, parentId)).get();
+    if (!parent || parent.userId !== userId) return c.json({ error: '父文件夹不存在' }, 400);
+  }
+  const id = nanoid(12);
+  const row = { id, userId, name, parentId, createdAt: dayjs().toISOString() };
+  await db.insert(schema.folders).values(row);
+  return c.json({ data: row }, 201);
+});
+
+// PATCH /api/upload/folders/:id — 重命名文件夹. body: { name }
+app.patch('/folders/:id', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const body = await c.req.json().catch(() => ({}));
+  const newName = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!newName) return c.json({ error: '文件夹名不能为空' }, 400);
+  const folder = await db.select().from(schema.folders).where(eq(schema.folders.id, id)).get();
+  if (!folder || folder.userId !== userId) return c.json({ error: '文件夹不存在' }, 404);
+  await db.update(schema.folders).set({ name: newName }).where(eq(schema.folders.id, id));
+  return c.json({ data: { ...folder, name: newName } });
+});
+
+// 递归收集 folder 下所有子文件夹 (含自身) + 它们的 files. relPath 是相对原 folder 的路径
+async function collectFolderTree(userId: string, rootFolderId: string): Promise<{ files: Array<{ id: string; url: string; filename: string; relPath: string }>; folderIds: string[] }> {
+  const allFolders = await db.select().from(schema.folders).where(eq(schema.folders.userId, userId)).all();
+  const allFiles = await db.select().from(schema.files).where(eq(schema.files.userId, userId)).all();
+  const byParent = new Map<string | null, typeof allFolders>();
+  for (const f of allFolders) {
+    const arr = byParent.get(f.parentId) || [];
+    arr.push(f);
+    byParent.set(f.parentId, arr);
+  }
+  const filesInFolder = new Map<string | null, typeof allFiles>();
+  for (const f of allFiles) {
+    const arr = filesInFolder.get(f.folderId) || [];
+    arr.push(f);
+    filesInFolder.set(f.folderId, arr);
+  }
+  const result: { files: Array<{ id: string; url: string; filename: string; relPath: string }>; folderIds: string[] } = { files: [], folderIds: [] };
+  function walk(folderId: string, prefix: string) {
+    result.folderIds.push(folderId);
+    for (const f of filesInFolder.get(folderId) || []) {
+      result.files.push({ id: f.id, url: f.url, filename: f.filename, relPath: prefix ? `${prefix}/${f.filename}` : f.filename });
+    }
+    for (const child of byParent.get(folderId) || []) {
+      walk(child.id, prefix ? `${prefix}/${child.name}` : child.name);
+    }
+  }
+  walk(rootFolderId, '');
+  return result;
+}
+
+// GET /api/upload/folders/:id/download — 把文件夹内容(含子文件夹递归) 打包 zip 流式响应
+app.get('/folders/:id/download', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const folder = await db.select().from(schema.folders).where(eq(schema.folders.id, id)).get();
+  if (!folder || folder.userId !== userId) return c.json({ error: '文件夹不存在' }, 404);
+  const tree = await collectFolderTree(userId, id);
+  const archive = archiver('zip', { zlib: { level: 6 } });
+  for (const f of tree.files) {
+    const diskPath = resolve(UPLOAD_DIR, f.url);
+    if (existsSync(diskPath)) archive.file(diskPath, { name: `${folder.name}/${f.relPath}` });
+  }
+  archive.finalize();
+  // Node Readable → Web ReadableStream (node 18+ 内置)
+  const stream = Readable.toWeb(archive as any) as ReadableStream;
+  c.header('Content-Type', 'application/zip');
+  c.header('Content-Disposition', `attachment; filename="${encodeURIComponent(folder.name)}.zip"`);
+  return c.body(stream);
+});
+
+// DELETE /api/upload/folders/:id — 删除文件夹.
+// body { deleteFiles?: boolean }:
+//   - false (默认): 内部文件 folderId 设回上级 (回根 / 父文件夹), 子文件夹 parent_id 提升一级
+//   - true: 递归删除文件夹内所有文件 (含子文件夹) + 删除子文件夹本身
+app.delete('/folders/:id', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const body = await c.req.json().catch(() => ({}));
+  const deleteFiles = body.deleteFiles === true;
+  const folder = await db.select().from(schema.folders).where(eq(schema.folders.id, id)).get();
+  if (!folder || folder.userId !== userId) return c.json({ error: '文件夹不存在' }, 404);
+  if (deleteFiles) {
+    // 递归删: 收集所有子文件夹 + 文件
+    const tree = await collectFolderTree(userId, id);
+    // DB 事务先删 (要么全成 要么全不动, 避免 files 删了 folders 没删的孤儿状态),
+    // 磁盘删放事务之后 best-effort (磁盘删失败留孤儿文件占空间, 不影响 DB consistency, 比 "DB 删了磁盘留" 用户视角少看 missing-file 报错)
+    db.transaction((tx) => {
+      if (tree.files.length) {
+        tx.delete(schema.files).where(and(eq(schema.files.userId, userId), inArray(schema.files.id, tree.files.map(x => x.id)))).run();
+      }
+      if (tree.folderIds.length) {
+        tx.delete(schema.folders).where(and(eq(schema.folders.userId, userId), inArray(schema.folders.id, tree.folderIds))).run();
+      }
+    });
+    // 物理删 (best-effort, 失败留孤儿)
+    for (const f of tree.files) {
+      try {
+        const diskPath = resolve(UPLOAD_DIR, f.url);
+        if (existsSync(diskPath)) unlinkSync(diskPath);
+      } catch {}
+    }
+  } else {
+    // 不删文件: folder_id / parent_id 提升一级
+    await db.update(schema.files).set({ folderId: folder.parentId }).where(and(eq(schema.files.userId, userId), eq(schema.files.folderId, id)));
+    await db.update(schema.folders).set({ parentId: folder.parentId }).where(and(eq(schema.folders.userId, userId), eq(schema.folders.parentId, id)));
+    await db.delete(schema.folders).where(eq(schema.folders.id, id));
+  }
+  return c.json({ message: '已删除' });
+});
+
+// POST /api/upload/items/move — 批量移动文件和/或文件夹到指定文件夹 (targetFolderId null = 移到根目录).
+// body: { fileIds?: string[]; folderIds?: string[]; targetFolderId: string | null }
+// 校验循环: 文件夹不能移动到自己 / 自己子孙内 (否则形成 cycle)
+app.post('/items/move', async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json().catch(() => ({}));
+  const fileIds = Array.isArray(body.fileIds) ? body.fileIds.filter((x: any) => typeof x === 'string') : [];
+  const folderIds = Array.isArray(body.folderIds) ? body.folderIds.filter((x: any) => typeof x === 'string') : [];
+  const targetFolderId = typeof body.targetFolderId === 'string' && body.targetFolderId ? body.targetFolderId : null;
+  if (!fileIds.length && !folderIds.length) return c.json({ error: '没有要移动的项' }, 400);
+  // 目标 folder 必须存在
+  if (targetFolderId) {
+    const folder = await db.select().from(schema.folders).where(eq(schema.folders.id, targetFolderId)).get();
+    if (!folder || folder.userId !== userId) return c.json({ error: '目标文件夹不存在' }, 400);
+  }
+  // 文件夹循环校验
+  if (folderIds.length) {
+    const allFolders = await db.select().from(schema.folders).where(eq(schema.folders.userId, userId)).all();
+    const childrenMap = new Map<string | null, string[]>();
+    for (const f of allFolders) {
+      const arr = childrenMap.get(f.parentId) || [];
+      arr.push(f.id);
+      childrenMap.set(f.parentId, arr);
+    }
+    function descendants(id: string): Set<string> {
+      const r = new Set<string>([id]);
+      let q = [id];
+      while (q.length) {
+        const next: string[] = [];
+        for (const fid of q) {
+          for (const child of childrenMap.get(fid) || []) {
+            if (!r.has(child)) { r.add(child); next.push(child); }
+          }
+        }
+        q = next;
+      }
+      return r;
+    }
+    for (const sId of folderIds) {
+      if (sId === targetFolderId) return c.json({ error: '不能把文件夹移动到自身' }, 400);
+      const desc = descendants(sId);
+      if (targetFolderId && desc.has(targetFolderId)) return c.json({ error: '不能把文件夹移动到它的子文件夹内' }, 400);
+    }
+  }
+  // 执行
+  db.transaction((tx) => {
+    if (fileIds.length) tx.update(schema.files).set({ folderId: targetFolderId }).where(and(eq(schema.files.userId, userId), inArray(schema.files.id, fileIds))).run();
+    if (folderIds.length) tx.update(schema.folders).set({ parentId: targetFolderId }).where(and(eq(schema.folders.userId, userId), inArray(schema.folders.id, folderIds))).run();
+  });
+  return c.json({ message: '已移动', count: fileIds.length + folderIds.length });
+});
+
+// POST /api/upload/files/move — 批量移动文件到指定文件夹 (folderId null = 移到根目录).
+// body: { ids: string[], folderId: string | null }
+app.post('/files/move', async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json().catch(() => ({}));
+  const ids = Array.isArray(body.ids) ? body.ids.filter((x: any) => typeof x === 'string') : [];
+  const folderId = typeof body.folderId === 'string' && body.folderId ? body.folderId : null;
+  if (!ids.length) return c.json({ error: 'ids 不能为空' }, 400);
+  // 校验目标文件夹真实存在 (null = 根目录, 不校验)
+  if (folderId) {
+    const folder = await db.select().from(schema.folders).where(eq(schema.folders.id, folderId)).get();
+    if (!folder || folder.userId !== userId) return c.json({ error: '目标文件夹不存在' }, 400);
+  }
+  await db.update(schema.files).set({ folderId }).where(and(eq(schema.files.userId, userId), inArray(schema.files.id, ids)));
+  return c.json({ message: '已移动', count: ids.length });
 });
 
 export default app;

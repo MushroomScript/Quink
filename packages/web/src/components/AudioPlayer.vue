@@ -5,7 +5,7 @@
 import { ref, computed, markRaw } from 'vue';
 import { PhPlay, PhPause, PhSpeakerHigh, PhSpeakerLow, PhSpeakerSlash } from '@phosphor-icons/vue';
 
-const props = defineProps<{ src: string }>();
+const props = defineProps<{ src: string; hideBars?: boolean }>();
 
 const audioEl = ref<HTMLAudioElement>();
 const volumeBtn = ref<HTMLElement>();
@@ -92,8 +92,9 @@ function syncFromAudio() {
 </script>
 
 <template>
-  <!-- 顶部 visual: 4 条圆角竖线 — 停止时灰色等高静止, 播放时主题色独立节奏跳动 (4 条不同 animation-duration 实现"长短不一") -->
-  <div class="flex justify-center mb-3 h-7 items-center">
+  <!-- 顶部 visual: 4 条圆角竖线 — 停止时灰色等高静止, 播放时主题色独立节奏跳动 (4 条不同 animation-duration 实现"长短不一").
+       hideBars 时跳过 (用于 list view / 紧凑场景, 仅显示单行播放控件不要顶部 visualizer) -->
+  <div v-if="!hideBars" class="flex justify-center mb-3 h-7 items-center">
     <div class="audio-bars flex items-center gap-1 h-7" :class="{ playing: isPlaying }">
       <span class="bar"></span>
       <span class="bar"></span>

@@ -523,8 +523,10 @@ ipcMain.handle('save-note', async (_event, content: string, type: string) => {
 // chromium 下对 text/markdown 等 mime 显示空白页,所以 web 端拦截后转发到这里。
 //
 // 两层去重: inflight map(同一 URL 并发只跑一次 fetch) + cache map(下载过的二次点击秒开)
-const attachmentInflight = new Map<string, Promise<{ success: boolean; error?: string }>>();
+const attachmentInflight = new Map<string, Promise<{ success: boolean; error?: string; cancelled?: boolean }>>();
 const attachmentCache = new Map<string, string>(); // URL → 本地临时路径
+// 取消支持: open-attachment 注册 controller, cancel-attachment IPC 通过 URL 找到对应 controller 调 abort()
+const attachmentControllers = new Map<string, AbortController>();
 
 // 15 秒没新 chunk 视为下载停滞,abort fetch 让用户看到错误而非永远转圈
 const ATTACHMENT_STALL_MS = 15000;
@@ -538,18 +540,23 @@ ipcMain.handle('open-attachment', async (event, url: string) => {
   const task = (async () => {
     let stallChecker: NodeJS.Timeout | null = null;
     const sender = event.sender;
+    // cancelled 标志区分"用户主动取消"vs"下载停滞超时", 提到 try 块外让 catch 能访问
+    let cancelledByUser = false;
     try {
       // 缓存命中: 文件还在临时目录就直接 openPath, 跳过 fetch
+      // cached: true 让 renderer 知道不需要走悬浮 dock(没下载过程, 直接 toast 即可)
       const cached = attachmentCache.get(fullUrl);
       if (cached && fs.existsSync(cached)) {
         const err = await shell.openPath(cached);
         if (err) throw new Error(err);
-        return { success: true };
+        return { success: true, cached: true };
       }
 
       const controller = new AbortController();
+      attachmentControllers.set(fullUrl, controller);
       let lastProgressAt = Date.now();
       let lastEmitAt = 0;
+      (controller as any).__cancelMark = () => { cancelledByUser = true; };
       stallChecker = setInterval(() => {
         if (Date.now() - lastProgressAt > ATTACHMENT_STALL_MS) controller.abort();
       }, 1000);
@@ -586,18 +593,31 @@ ipcMain.handle('open-attachment', async (event, url: string) => {
       if (err) throw new Error(err);
       return { success: true };
     } catch (e: any) {
-      // AbortError → stall 超时,转成友好提示
+      // AbortError 两个来源: 用户主动 cancel(cancelledByUser=true) / stall 超时. 前者不算错误
       if (e?.name === 'AbortError' || /abort/i.test(e?.message || '')) {
+        if (cancelledByUser) return { success: false, cancelled: true };
         return { success: false, error: `下载停滞(${ATTACHMENT_STALL_MS / 1000} 秒无响应)` };
       }
       return { success: false, error: e?.message || String(e) };
     } finally {
       if (stallChecker) clearInterval(stallChecker);
       attachmentInflight.delete(fullUrl);
+      attachmentControllers.delete(fullUrl);
     }
   })();
   attachmentInflight.set(fullUrl, task);
   return task;
+});
+
+// 取消正在下载的附件: 找到对应 AbortController 调 abort(). __cancelMark 让 open-attachment 的
+// catch 分支区分"用户主动取消"vs"stall 超时", 前者返回 cancelled: true 不算错误
+ipcMain.handle('cancel-attachment', (_event, url: string) => {
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
+  const controller = attachmentControllers.get(fullUrl);
+  if (!controller) return { success: false };
+  (controller as any).__cancelMark?.();
+  controller.abort();
+  return { success: true };
 });
 
 ipcMain.on('hide-window', (_event) => {

@@ -110,7 +110,17 @@ sqlite.exec(`
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS folders (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    parent_id TEXT,
+    created_at TEXT NOT NULL
+  );
 `);
+// Migrate: files.folder_id (资源页文件夹: null = 根目录, 非 null = 在指定 folders.id 下)
+try { sqlite.exec('ALTER TABLE files ADD COLUMN folder_id TEXT'); } catch {}
 
 // Migrate: add deleted_at column if not exists
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN deleted_at TEXT'); } catch {}

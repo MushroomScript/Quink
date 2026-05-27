@@ -7,7 +7,7 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { PhTrash } from '@phosphor-icons/vue';
 import { fadeOutLeave, flyToNavLeave, snapshotCards } from '@/utils/cardLeave';
-import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { resolveMarkdownFileUrls, injectMissingFileFallback } from '@/utils/fileUrl';
 import { useMasonry } from '@/composables/useMasonry';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useAuthStore } from '@/stores/auth';
@@ -80,7 +80,7 @@ async function load() {
     const res = await api.getTrash();
     notes.value = res.data;
     for (const n of res.data) {
-      try { rendered.value[n.id] = await Vditor.md2html(resolveMarkdownFileUrls(n.content), { cdn: '/vditor' } as any); } catch { rendered.value[n.id] = n.content; }
+      try { rendered.value[n.id] = injectMissingFileFallback(await Vditor.md2html(resolveMarkdownFileUrls(n.content), { cdn: '/vditor' } as any)); } catch { rendered.value[n.id] = n.content; }
     }
   } catch {}
   loading.value = false;

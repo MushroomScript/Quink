@@ -34,3 +34,21 @@ export function stripMarkdownFileUrls(md: string): string {
   if (!md) return md;
   return md.replace(/\]\(\/api\/uploads\/([^)\s]+)\)/g, ']($1)');
 }
+
+// md2html 后处理: 给所有 <img src="/api/uploads/*"> 加 onerror 让"文件已删除"的引用显示红色占位 span,
+// 让用户清楚知道这张图 / 这个附件已经从资源库被删 (而不是看到默默的裂图).
+// audio.ts 已经处理 audio link 错误自动重置. <a> 链接保留默认行为 (404 浏览器显示).
+// CSS .quink-missing-file 样式在 style.css 内定义.
+export function injectMissingFileFallback(html: string): string {
+  if (!html) return html;
+  return html.replace(
+    /<img([^>]*?)\s+src="(\/api\/uploads\/[^"]+)"([^>]*)>/g,
+    (_match, before, src, after) => {
+      // 提取 alt 用作占位文字 (没 alt 就用 "图片")
+      const altMatch = (before + after).match(/alt="([^"]*)"/);
+      const alt = altMatch ? altMatch[1].replace(/"/g, '&quot;') : '图片';
+      // onerror inline JS: 用 replaceWith 把 img 换成 span. 文本: "⚠ 文件已删除：<alt>"
+      return `<img${before} src="${src}"${after} data-missing-label="${alt}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'quink-missing-file',textContent:'⚠ 文件已删除：'+(this.dataset.missingLabel||'图片')}))">`;
+    }
+  );
+}

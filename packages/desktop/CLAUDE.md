@@ -77,6 +77,7 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 | `window-hidden` | main → renderer (send) | 通知 renderer 窗口被隐藏 |
 | `font-size-changed` | main → renderer (send) | 通知 Capture / AiChat renderer 更新 document fontSize（用户在主窗口改了字体） |
 | `open-attachment` | renderer → main (invoke) | 用系统默认应用打开附件 URL（fetch 到 OS 临时目录 → `shell.openPath`）。原因：直接让浏览器跟随 `<a href="/api/uploads/xxx.md">` 跳走时，Electron 内嵌 chromium 对 `text/markdown` 等 mime 显示空白页 |
+| `cancel-attachment` | renderer → main (invoke) | 取消正在下载的附件。main 端在 `attachmentControllers: Map<url, AbortController>` 找到对应 controller 调 `abort()`，被取消的 `open-attachment` 走 catch 分支返回 `{ success: false, cancelled: true }`（区别于停滞超时 → `{ success: false, error: '下载停滞...' }`）。renderer 据此决定是否弹 toast（cancelled 不弹） |
 
 ## chrome-devtools-mcp 调试 Electron
 

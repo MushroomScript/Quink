@@ -48,6 +48,17 @@ export const files = sqliteTable('files', {
   mimeType: text('mime_type').notNull(),
   category: text('category').notNull(), // image, audio, document
   size: integer('size').notNull(),
+  // folderId: null = 根目录, 非 null = 在指定文件夹内 (嵌套树状, folders.parentId 递归)
+  folderId: text('folder_id'),
+  createdAt: text('created_at').notNull(),
+});
+
+// 嵌套文件夹: parentId null = 根目录的文件夹, 非 null = 子文件夹 (递归)
+export const folders = sqliteTable('folders', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  name: text('name').notNull(),
+  parentId: text('parent_id'), // 嵌套支持: 自引用
   createdAt: text('created_at').notNull(),
 });
 
@@ -108,6 +119,7 @@ export type Note = typeof notes.$inferSelect;
 export type NewNote = typeof notes.$inferInsert;
 export type Category = typeof categories.$inferSelect;
 export type FileRecord = typeof files.$inferSelect;
+export type Folder = typeof folders.$inferSelect;
 export type AiConfig = typeof aiConfigs.$inferSelect;
 export type AiPrompt = typeof aiPrompts.$inferSelect;
 export type AiConversation = typeof aiConversations.$inferSelect;

@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import { api, type Category } from '@/api';
 import { markRaw } from 'vue';
-import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen, PhCalendarBlank, PhCheck } from '@phosphor-icons/vue';
+import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen, PhCalendarBlank, PhCheck, PhCaretRight } from '@phosphor-icons/vue';
 import { pinyinMatch } from '@/utils/pinyin';
 import { useToast } from '@/composables/useToast';
 
@@ -149,6 +149,8 @@ watch(() => route.path, () => {
 
 const detailTitle = inject<Ref<string>>('detailTitle', ref(''));
 const pageCount = inject<Ref<number>>('pageCount', ref(-1));
+// 资源页面包屑: 因 Resources view 跟 TopBar 是 flex sibling 不是父子链, provide/inject 不通, 用 module-level ref 共享
+import { resourceBreadcrumb, resourceBreadcrumbGoTo } from '@/composables/useResourceBreadcrumb';
 const title = computed(() => {
   const base = detailTitle.value || (route.meta.title as string) || '';
   if (pageCount.value >= 0) return base;
@@ -453,6 +455,22 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <PhArrowsClockwise size="0.875rem" weight="fill" :class="{ 'refresh-spin': spinning }" />
         </button>
         <h1 class="text-sm md:text-base font-semibold text-gray-800 whitespace-nowrap">{{ title }}<span v-if="titleCount >= 0" class="text-xs text-gray-400 font-normal tabular-nums">（{{ titleCount }}）</span></h1>
+        <!-- 资源页面包屑: 在"资源"标题后渲染. 进入子目录时 "资源 > 根目录 > 文件夹A > 子B" 含可点的"根目录" 起点 -->
+        <template v-if="resourceBreadcrumb.length > 0">
+          <PhCaretRight size="0.75rem" weight="bold" class="text-gray-300 shrink-0" />
+          <button @click="resourceBreadcrumbGoTo && resourceBreadcrumbGoTo(null)"
+            class="text-sm md:text-base font-medium whitespace-nowrap px-1.5 py-0.5 rounded text-gray-500 hover:bg-gray-100 transition-colors">
+            根目录
+          </button>
+          <template v-for="(b, i) in resourceBreadcrumb" :key="b.id">
+            <PhCaretRight size="0.75rem" weight="bold" class="text-gray-300 shrink-0" />
+            <button @click="resourceBreadcrumbGoTo && resourceBreadcrumbGoTo(b.id)"
+              class="text-sm md:text-base font-medium whitespace-nowrap px-1.5 py-0.5 rounded hover:bg-gray-100 transition-colors"
+              :class="i === resourceBreadcrumb.length - 1 ? 'text-gray-800' : 'text-gray-500'">
+              {{ b.name }}
+            </button>
+          </template>
+        </template>
       </div>
 
       <!-- Right: search -->

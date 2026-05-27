@@ -12,13 +12,15 @@ import NoteEditModal from '@/components/NoteEditModal.vue';
 import GlobalToast from '@/components/GlobalToast.vue';
 import { PhMinus, PhSquare, PhX, PhXCircle, PhCaretLeft } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
-import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { resolveMarkdownFileUrls, injectMissingFileFallback } from '@/utils/fileUrl';
 import { useTheme } from '@/composables/useTheme';
 import { useToast } from '@/composables/useToast';
 import { useImagePreview } from '@/composables/useImagePreview';
 import ImagePreview from '@/components/ImagePreview.vue';
 import MediaContextMenu from '@/components/MediaContextMenu.vue';
 import DragGhost from '@/components/DragGhost.vue';
+import AttachmentDownloadDock from '@/components/AttachmentDownloadDock.vue';
+import { addTask as addAttachmentTask, updateProgress as updateAttachmentProgress, markSuccess as markAttachmentSuccess, markFailed as markAttachmentFailed, markCancelled as markAttachmentCancelled } from '@/composables/useAttachmentTasks';
 
 const route = useRoute();
 const router = useRouter();
@@ -33,22 +35,14 @@ const appReady = ref(false);
 const currentTheme = useTheme();
 const { show: showToast } = useToast();
 
-// 附件下载进度: main 进程推送 progress 时用 URL 匹配当前下载的附件,更新 toast 文案
-let currentAttachment: { url: string; filename: string } | null = null;
-function formatBytes(b: number): string {
-  if (b < 1024) return b + ' B';
-  if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
-  return (b / 1024 / 1024).toFixed(1) + ' MB';
-}
+// 附件下载: 进度走悬浮 dock(AttachmentDownloadDock + useAttachmentTasks), 仅在最终 success/failed 弹 toast.
+// 不再用单条 toast 滚动文案的旧方案(每 100ms 推一次会堆叠 N 条).
 desk?.onAttachmentProgress?.((data: { url: string; received: number; total: number }) => {
-  if (!currentAttachment || data.url !== currentAttachment.url) return;
-  const recv = formatBytes(data.received);
-  const tail = data.total
-    ? `${Math.round(data.received / data.total * 100)}% (${recv} / ${formatBytes(data.total)})`
-    : recv;
-  // 30s duration 兜底,实际由后续 progress / 成功 / 失败 toast 覆盖
-  showToast(`正在打开 ${currentAttachment.filename}... ${tail}`, 'default', 30000);
+  updateAttachmentProgress(data.url, data.received, data.total);
 });
+// renderer 端记录"已成功打开过的 URL", 二次点击跳过 dock 直接 toast.
+// 跟 main 端的 attachmentCache 同生命周期(重启都清), 一致性自然保证.
+const openedAttachments = new Set<string>();
 
 // 主题切换时同步换 favicon（含 .ico 和 .png 两条 link）
 watch(currentTheme, (t) => {
@@ -147,6 +141,7 @@ async function openRefPreview(noteId: string) {
     const withFiles = resolveMarkdownFileUrls(processed);  // 文件链接裸名拼前缀
     let html = await Vditor.md2html(withFiles, { cdn: '/vditor' } as any);
     html = injectRefLinkIcons(html);
+    html = injectMissingFileFallback(html);
     refPreviewStack.value.push({ note: res.data, html });
 
     if (!refPreviewEscHandler) {
@@ -277,15 +272,29 @@ onMounted(async () => {
       const fullUrl = new URL(href, location.origin).toString();
       const filename = decodeURIComponent(href.split('/').pop() || '附件');
       if (desk?.openAttachment) {
-        // currentAttachment 让上面的 progress 监听知道当前显示哪个附件的进度
-        // main 进程会推 attachment-progress 事件,每 100ms 一次,自动更新 toast 文案
-        currentAttachment = { url: fullUrl, filename };
-        showToast(`正在打开 ${filename}...`, 'default', 30000);
+        // renderer 端 cache: 之前成功打开过这个 URL → 跳过 dock 直接 invoke + toast.
+        // 跟 main 端 attachmentCache 同生命周期(都是进程内 Map, 重启都清), 不会出现 renderer 觉得
+        // 有 cache 但 main 那边却没 cache 的情况
+        if (openedAttachments.has(fullUrl)) {
+          const result = await desk.openAttachment(fullUrl);
+          if (result?.success) {
+            showToast(`已打开 ${filename}`, 'success', 1500);
+          } else {
+            showToast(`打开失败: ${result?.error || '未知错误'}`, 'error', 3000);
+          }
+          return;
+        }
+        // 第一次打开: 走 dock 全流程
+        addAttachmentTask(fullUrl, filename);
         const result = await desk.openAttachment(fullUrl);
-        currentAttachment = null;
         if (result?.success) {
-          showToast(`已打开 ${filename}`, 'success', 1200);
+          markAttachmentSuccess(fullUrl);
+          openedAttachments.add(fullUrl);
+          showToast(`已打开 ${filename}`, 'success', 1500);
+        } else if (result?.cancelled) {
+          markAttachmentCancelled(fullUrl);
         } else {
+          markAttachmentFailed(fullUrl, result?.error || '未知错误');
           showToast(`打开失败: ${result?.error || '未知错误'}`, 'error', 3000);
         }
       } else {
@@ -507,4 +516,7 @@ watch(() => auth.user, (user) => {
 
   <!-- 拖动卡片到 sidebar 时的浮动 ghost (cardDnd.ts pointer events 实现, 替代 HTML5 DnD 的浏览器自带 ghost) -->
   <DragGhost />
+
+  <!-- 附件下载悬浮列表(屏幕中下方, 显示进度 + 取消, 3s 无活动任务自动 fade out) -->
+  <AttachmentDownloadDock />
 </template>

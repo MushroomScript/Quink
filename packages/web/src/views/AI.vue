@@ -4,7 +4,7 @@ import { ref, onMounted, onActivated, onDeactivated, nextTick, watch } from 'vue
 import { api } from '@/api';
 import Vditor from 'vditor';
 import { useRouter, useRoute } from 'vue-router';
-import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { resolveMarkdownFileUrls, injectMissingFileFallback } from '@/utils/fileUrl';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { dragState } from '@/utils/cardDnd';
 import {
@@ -296,7 +296,7 @@ async function selectConversation(id: string) {
       if (msg.role === 'assistant') {
         const { answer } = parseThinking(msg.content);
         const renderContent = stripOuterCodeFence(answer || msg.content);
-        try { html = await Vditor.md2html(resolveMarkdownFileUrls(renderContent), { cdn: '/vditor' } as any); } catch {}
+        try { html = injectMissingFileFallback(await Vditor.md2html(resolveMarkdownFileUrls(renderContent), { cdn: '/vditor' } as any)); } catch {}
       }
       messages.value.push({ ...msg, role: msg.role as 'user' | 'assistant', sources: msg.sources || [], html, thinkingHtml });
     }
@@ -420,7 +420,7 @@ async function sendMessage() {
               const { answer } = parseThinking(snapshot);
               const content = stripOuterCodeFence(answer || snapshot);
               try {
-                const h = await Vditor.md2html(resolveMarkdownFileUrls(content), { cdn: '/vditor' } as any);
+                const h = injectMissingFileFallback(await Vditor.md2html(resolveMarkdownFileUrls(content), { cdn: '/vditor' } as any));
                 if (myVer > (streamingLastRenderVer.get(targetConvId) || 0) && streamingMap.value.has(targetConvId)) {
                   streamingLastRenderVer.set(targetConvId, myVer);
                   streamingHtmlMap.value.set(targetConvId, h);

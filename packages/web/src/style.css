@@ -308,6 +308,35 @@ button, .tbtn, .sep, nav, aside, header, .select-none { user-select: none; -webk
   transform: scale(0.95) translateZ(0);
 }
 
+/* 资源页拖动文件期间禁止全局文字选中 (body.resources-dragging 由 Resources.vue 在 drag active 时加).
+   防 drag 时浏览器默认 mousedown→mousemove 选字干扰 ghost 视觉效果. drag 结束移除. */
+body.resources-dragging,
+body.resources-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* 笔记里引用的资源文件被删除后的占位 (由 utils/fileUrl.ts injectMissingFileFallback inject 给 <img onerror>).
+   红色边框 + 浅红底 + 警告语义, 让用户清楚知道这个引用断了 */
+.quink-missing-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.2em 0.6em;
+  margin: 0.15em 0;
+  background: rgb(254 226 226);
+  color: rgb(185 28 28);
+  border: 1px solid rgb(252 165 165);
+  border-radius: 0.35rem;
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+[data-theme="dark"] .quink-missing-file {
+  background: rgba(220, 38, 38, 0.15);
+  color: rgb(252 165 165);
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
 
 /* 顶部编辑区显隐过渡 (Inspiration / Notes / Todos): 进入筛选/搜索状态时折叠.
    用 grid-template-rows 1fr ↔ 0fr 的 trick —— 浏览器原生支持的"auto 高度过渡",

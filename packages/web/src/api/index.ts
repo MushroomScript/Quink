@@ -226,11 +226,12 @@ export const api = {
   async uploadFile(
     file: File,
     endpoint: 'avatar' | 'file' = 'file',
-    options?: { displayName?: string }
+    options?: { displayName?: string; folderId?: string | null }
   ): Promise<{ data: { url: string; filename?: string; type?: string; category?: string; size?: number } }> {
     const formData = new FormData();
     formData.append('file', file);
     if (options?.displayName) formData.append('displayName', options.displayName);
+    if (options?.folderId) formData.append('folderId', options.folderId);
 
     const token = getToken();
     const res = await fetch(`${BASE}/upload/${endpoint}`, {
@@ -247,7 +248,7 @@ export const api = {
 
   // Files
   getFiles() {
-    return request<{ data: Array<{ id: string; filename: string; url: string; mimeType: string; category: string; size: number; createdAt: string }> }>('/upload/files');
+    return request<{ data: Array<{ id: string; filename: string; url: string; mimeType: string; category: string; size: number; createdAt: string; folderId: string | null }> }>('/upload/files');
   },
 
   deleteFile(id: string) {
@@ -260,6 +261,72 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ filename }),
     });
+  },
+
+  // 批量移动文件到指定文件夹 (folderId null = 移到根目录)
+  moveFiles(ids: string[], folderId: string | null) {
+    return request<{ message: string; count: number }>('/upload/files/move', {
+      method: 'POST',
+      body: JSON.stringify({ ids, folderId }),
+    });
+  },
+
+  // 批量移动文件和/或文件夹到指定文件夹. 文件夹移动会校验循环 (不能移到自己 / 自己子孙)
+  moveItems(payload: { fileIds?: string[]; folderIds?: string[]; targetFolderId: string | null }) {
+    return request<{ message: string; count: number }>('/upload/items/move', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  // Folders
+  getFolders() {
+    return request<{ data: Array<{ id: string; name: string; parentId: string | null; createdAt: string }> }>('/upload/folders');
+  },
+
+  createFolder(name: string, parentId: string | null) {
+    return request<{ data: { id: string; name: string; parentId: string | null; createdAt: string } }>('/upload/folders', {
+      method: 'POST',
+      body: JSON.stringify({ name, parentId }),
+    });
+  },
+
+  renameFolder(id: string, name: string) {
+    return request<{ data: { id: string; name: string } }>(`/upload/folders/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    });
+  },
+
+  deleteFolder(id: string, deleteFiles = false) {
+    return request<{ message: string }>(`/upload/folders/${id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ deleteFiles }),
+    });
+  },
+
+  // 文件夹打包下载: 用 fetch 带 Auth header 拿 zip blob, 触发浏览器下载
+  // (不能用 <a href> 因为 endpoint 受 authMiddleware 保护需要 Bearer token, <a href> 没法带 header)
+  // signal 可选: 调用方传 AbortController.signal 让 view unmount 时取消进行中的下载
+  async downloadFolder(folder: { id: string; name: string }, signal?: AbortSignal): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`${BASE}/upload/folders/${folder.id}/download`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${folder.name}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
 
   // AI Configs
