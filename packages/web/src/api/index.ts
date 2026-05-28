@@ -226,7 +226,14 @@ export const api = {
   async uploadFile(
     file: File,
     endpoint: 'avatar' | 'file' = 'file',
-    options?: { displayName?: string; folderId?: string | null }
+    options?: {
+      displayName?: string;
+      folderId?: string | null;
+      // XHR upload progress 回调, fetch + FormData 不支持 upload progress, 所以这里用 XMLHttpRequest
+      onProgress?: (received: number, total: number) => void;
+      // AbortSignal 支持外部取消
+      signal?: AbortSignal;
+    }
   ): Promise<{ data: { url: string; filename?: string; type?: string; category?: string; size?: number } }> {
     const formData = new FormData();
     formData.append('file', file);
@@ -234,16 +241,57 @@ export const api = {
     if (options?.folderId) formData.append('folderId', options.folderId);
 
     const token = getToken();
-    const res = await fetch(`${BASE}/upload/${endpoint}`, {
-      method: 'POST',
-      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-      body: formData,
+    // 用 XMLHttpRequest 因为只有 XHR 才能监听 upload 进度. fetch + FormData 拿不到上传 byte 数
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${BASE}/upload/${endpoint}`);
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+      // 注意是 xhr.upload.onprogress 不是 xhr.onprogress(后者是下载进度)
+      if (options?.onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) options.onProgress!(e.loaded, e.total);
+        };
+      }
+
+      // AbortSignal 集成: signal.abort 时主动 xhr.abort()
+      const onAbort = () => xhr.abort();
+      if (options?.signal) {
+        if (options.signal.aborted) {
+          reject(new DOMException('Aborted', 'AbortError'));
+          return;
+        }
+        options.signal.addEventListener('abort', onAbort);
+      }
+
+      xhr.onload = () => {
+        if (options?.signal) options.signal.removeEventListener('abort', onAbort);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch (e) {
+            reject(new Error('响应解析失败'));
+          }
+        } else {
+          let errMsg = xhr.statusText;
+          try {
+            const errBody = JSON.parse(xhr.responseText);
+            if (errBody.error) errMsg = errBody.error;
+          } catch {}
+          reject(new Error(errMsg));
+        }
+      };
+      xhr.onerror = () => {
+        if (options?.signal) options.signal.removeEventListener('abort', onAbort);
+        reject(new Error('网络错误'));
+      };
+      xhr.onabort = () => {
+        if (options?.signal) options.signal.removeEventListener('abort', onAbort);
+        reject(new DOMException('Aborted', 'AbortError'));
+      };
+
+      xhr.send(formData);
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || res.statusText);
-    }
-    return res.json();
   },
 
   // Files

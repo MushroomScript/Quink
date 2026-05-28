@@ -10,6 +10,7 @@ import AudioPlayer from '@/components/AudioPlayer.vue';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useToast } from '@/composables/useToast';
 import { resourceBreadcrumb, resourceBreadcrumbGoTo } from '@/composables/useResourceBreadcrumb';
+import { addUploadTask, updateProgressById, markSuccessById, markFailedById, markCancelledById } from '@/composables/useAttachmentTasks';
 
 const store = useNotesStore();
 const toast = useToast();
@@ -21,6 +22,7 @@ import {
   PhFileText,
   PhFileZip,
   PhFile,
+  PhFilmStrip,
   PhXCircle,
   PhSquaresFour,
   PhListBullets,
@@ -306,6 +308,7 @@ function formatDate(iso: string): string {
 
 function isImage(f: FileItem) { return f.mimeType.startsWith('image/'); }
 function isAudio(f: FileItem) { return f.mimeType.startsWith('audio/'); }
+function isVideo(f: FileItem) { return f.mimeType.startsWith('video/'); }
 
 function startRename(f: FileItem) {
   renameTarget.value = f;
@@ -347,6 +350,37 @@ async function doBatchDelete() {
   await Promise.all(ids.map(id => api.deleteFile(id).catch(e => console.error('[batchDelete]', id, e))));
 }
 
+async function uploadFiles(fileList: File[]) {
+  if (!fileList.length) return;
+  // 每个文件单独走 dock task (进度独立可见 + 可单独取消). Promise.all 并发上传.
+  // 完成总数后弹 toast 汇总成功/失败. 进度过程不再用 toast(dock 里已经有)
+  const results = await Promise.all(fileList.map(file => {
+    const ctrl = new AbortController();
+    const taskId = addUploadTask(file.name, file.size, ctrl);
+    return api.uploadFile(file, 'file', {
+      folderId: currentFolderId.value,
+      signal: ctrl.signal,
+      onProgress: (received, total) => updateProgressById(taskId, received, total),
+    })
+      .then(() => { markSuccessById(taskId); return { ok: true, name: file.name }; })
+      .catch(e => {
+        if (e?.name === 'AbortError') {
+          markCancelledById(taskId);
+          return { ok: false, cancelled: true, name: file.name };
+        }
+        console.error('[upload]', file.name, e);
+        markFailedById(taskId, e?.message || '上传失败');
+        return { ok: false, name: file.name };
+      });
+  }));
+  const ok = results.filter(r => r.ok).length;
+  const cancelled = results.filter(r => (r as any).cancelled).length;
+  const fail = results.length - ok - cancelled;
+  if (fail === 0 && cancelled === 0) toast.show(`已上传 ${ok} 个文件`, 'success');
+  else if (fail > 0) toast.show(`上传完成: ${ok} 成功, ${fail} 失败${cancelled ? `, ${cancelled} 取消` : ''}`, 'error');
+  load();
+}
+
 function triggerUpload() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -354,23 +388,75 @@ function triggerUpload() {
   input.multiple = true;
   input.onchange = async () => {
     if (!input.files) return;
-    const fileList = Array.from(input.files);
-    if (!fileList.length) return;
-    // Promise.all 并发 + 总进度 toast (原来 sequential await for-loop, 大文件慢且无进度反馈)
-    const toastId = toast.show(`正在上传 ${fileList.length} 个文件...`, { duration: 5 * 60 * 1000 });
-    const results = await Promise.all(fileList.map(file =>
-      api.uploadFile(file, 'file', { folderId: currentFolderId.value })
-        .then(() => ({ ok: true, name: file.name }))
-        .catch(e => { console.error('[upload]', file.name, e); return { ok: false, name: file.name }; })
-    ));
-    toast.dismiss(toastId);
-    const ok = results.filter(r => r.ok).length;
-    const fail = results.length - ok;
-    if (fail === 0) toast.show(`已上传 ${ok} 个文件`, 'success');
-    else toast.show(`上传完成: ${ok} 成功, ${fail} 失败`, fail === results.length ? 'error' : 'default');
-    load();
+    await uploadFiles(Array.from(input.files));
   };
   input.click();
+}
+
+// 外部文件拖入: HTML5 DnD (内部卡片拖动用 pointer events, 跟这个不会冲突).
+// dataTransfer.types 含 'Files' 时才是 OS 文件拖入, 否则是内部 dragstart 自带的类型(text/x-quink-... 等).
+// dragenter/dragleave 在子元素之间跳跃会乱发, 用计数器避免误关
+const isDraggingFiles = ref(false);
+let dragCounter = 0;
+
+// 拖入遮罩用 fixed 定位 + JS 动态算 main 与 sticky toolbar 的 boundingRect.
+// top = toolbar.bottom (遮罩不盖 toolbar), 其余三边贴 main viewport 边.
+// ResizeObserver 监听 main + toolbar 尺寸变化 (sidebar 折叠 / 多选 toolbar 内容变 / window resize 等).
+const overlayStyle = ref<Record<string, string>>({});
+let _resizeObserver: ResizeObserver | null = null;
+let _mainEl: HTMLElement | null = null;
+let _toolbarEl: HTMLElement | null = null;
+
+function updateOverlayPos() {
+  if (!_mainEl) return;
+  const m = _mainEl.getBoundingClientRect();
+  const tb = _toolbarEl?.getBoundingClientRect();
+  const topPx = tb ? tb.bottom : m.top;
+  // 右侧 / 下侧各往里 2px, 让 3px 虚线 border 不被 main 的 scrollbar-gutter / viewport 边裁掉
+  overlayStyle.value = {
+    left: `${m.left}px`,
+    top: `${topPx}px`,
+    width: `${m.width - 2}px`,
+    height: `${m.bottom - topPx - 2}px`,
+  };
+}
+
+watch(isDraggingFiles, (v) => { if (v) updateOverlayPos(); });
+
+function isExternalFileDrag(e: DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types || []).includes('Files');
+}
+
+function onExtDragEnter(e: DragEvent) {
+  if (!isExternalFileDrag(e)) return;
+  e.preventDefault();
+  dragCounter++;
+  isDraggingFiles.value = true;
+}
+
+function onExtDragOver(e: DragEvent) {
+  if (!isExternalFileDrag(e)) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+}
+
+function onExtDragLeave(e: DragEvent) {
+  if (!isExternalFileDrag(e)) return;
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    isDraggingFiles.value = false;
+  }
+}
+
+async function onExtDrop(e: DragEvent) {
+  if (!isExternalFileDrag(e)) return;
+  e.preventDefault();
+  dragCounter = 0;
+  isDraggingFiles.value = false;
+  const list = Array.from(e.dataTransfer?.files || []);
+  if (!list.length) return;
+  await uploadFiles(list);
 }
 
 function clearDateFilter() {
@@ -655,6 +741,15 @@ onMounted(() => {
   load();
   window.addEventListener('quink-refresh', onRefresh);
   window.addEventListener('keydown', onKeydown);
+  // 找全局唯一的 main 元素 (主窗口里只有一个, capture/aiChat 是独立 BrowserWindow 不共享 DOM)
+  _mainEl = document.querySelector('main');
+  _toolbarEl = document.querySelector('[data-resources-toolbar]');
+  updateOverlayPos();
+  if (_mainEl) {
+    _resizeObserver = new ResizeObserver(updateOverlayPos);
+    _resizeObserver.observe(_mainEl);
+    if (_toolbarEl) _resizeObserver.observe(_toolbarEl);
+  }
 });
 onUnmounted(() => {
   window.removeEventListener('quink-refresh', onRefresh);
@@ -662,13 +757,20 @@ onUnmounted(() => {
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
   if (currentDownloadAbort) currentDownloadAbort.abort();
+  _resizeObserver?.disconnect();
+  _resizeObserver = null;
 });
 </script>
 
 <template>
-  <div class="px-4 md:px-8 pb-6">
-    <!-- Sticky toolbar -->
-    <div class="sticky top-0 z-10 -mx-4 md:-mx-8 px-4 md:px-6 pt-[8px] pb-[10px] mb-4 flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/80"
+  <div class="px-4 md:px-8 pb-6 relative min-h-full flex flex-col"
+    @dragenter="onExtDragEnter"
+    @dragover="onExtDragOver"
+    @dragleave="onExtDragLeave"
+    @drop="onExtDrop">
+    <!-- Sticky toolbar — 在 wrapper 之外, 不被 blur. data-resources-toolbar 给遮罩计算 top 用 (遮罩贴它的下边线) -->
+    <div data-resources-toolbar
+      class="sticky top-0 z-10 -mx-4 md:-mx-8 px-4 md:px-6 pt-[8px] pb-[10px] mb-4 flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/80"
       style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <template v-if="selectMode">
         <p class="text-xs text-primary-dark font-medium">已选 {{ selectedIds.size }} 项</p>
@@ -748,6 +850,12 @@ onUnmounted(() => {
         </div>
       </template>
     </div>
+
+    <!-- relative 容器: wrapper + 遮罩平级. 遮罩 absolute inset-0 相对它, 自然贴合 toolbar 下方所有内容区域.
+         flex-1 占满根 div 内除 toolbar 之外的全部高度, 让遮罩在文件少时也能撑满整个可视区 -->
+    <div class="relative flex-1">
+    <!-- wrapper 包文件列表 / 空状态 / 各种 Teleport modal, 拖入时整体虚化 (Teleport 内容 portal 到 body 不受 blur) -->
+    <div class="transition-[filter] duration-150" :class="isDraggingFiles ? 'pointer-events-none blur-[3px] select-none' : ''">
 
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
@@ -836,6 +944,9 @@ onUnmounted(() => {
               </div>
               <img v-if="isImage(f)" :src="resolveFileUrl(f.url)" :alt="f.filename"
                 class="w-full h-full object-cover" :class="!selectMode ? 'cursor-zoom-in' : ''" />
+              <!-- 视频在卡片内播放: controls + preload=metadata 让首帧作为 poster, 不预下整段 -->
+              <video v-else-if="isVideo(f)" :src="resolveFileUrl(f.url)" controls preload="metadata"
+                class="w-full h-full object-contain bg-black" @click.stop />
               <div v-else-if="isAudio(f)" class="px-3 w-full" @click.stop>
                 <AudioPlayer :src="resolveFileUrl(f.url)" />
               </div>
@@ -911,6 +1022,7 @@ onUnmounted(() => {
             <div class="w-9 h-9 shrink-0 bg-gray-50 rounded flex items-center justify-center overflow-hidden">
               <img v-if="isImage(f)" :src="resolveFileUrl(f.url)" :alt="f.filename"
                 class="w-full h-full object-cover" :class="!selectMode ? 'cursor-zoom-in' : ''" />
+              <PhFilmStrip v-else-if="isVideo(f)" size="1.25rem" weight="fill" class="text-gray-400" />
               <PhFilePdf v-else-if="f.mimeType.includes('pdf')" size="1.25rem" weight="fill" class="text-gray-400" />
               <PhFileText v-else-if="f.mimeType.includes('json')" size="1.25rem" weight="fill" class="text-gray-400" />
               <PhFileZip v-else-if="f.mimeType.includes('zip')" size="1.25rem" weight="fill" class="text-gray-400" />
@@ -937,6 +1049,21 @@ onUnmounted(() => {
         </TransitionGroup>
       </template>
     </template>
+    </div><!-- /wrapper (blur 包装) -->
+
+    <!-- 外部文件拖入遮罩: fixed + JS 算 main viewport 真实边 (不跟 root content 撑大滚动),
+         left/top/width/height 通过 overlayStyle 注入. 左 = main 左边 (sidebar 右线),
+         上 = toolbar bottom, 右 = main 右边, 下 = main 底边 (随时跟着 main resize 自动更新) -->
+    <Transition name="ext-drop">
+      <div v-if="isDraggingFiles"
+        class="fixed z-30 pointer-events-none border-[3px] border-dashed border-primary rounded-xl bg-white/70 flex items-center justify-center"
+        :style="overlayStyle">
+        <p class="text-primary text-5xl font-bold select-none opacity-70">
+          上传文件到当前目录下
+        </p>
+      </div>
+    </Transition>
+    </div><!-- /relative wrapper -->
   </div>
 
   <!-- 文件重命名弹窗 -->
@@ -1096,3 +1223,15 @@ onUnmounted(() => {
     </Transition>
   </Teleport>
 </template>
+
+<style scoped>
+/* 外部文件拖入遮罩淡入淡出 */
+.ext-drop-enter-active,
+.ext-drop-leave-active {
+  transition: opacity 120ms ease;
+}
+.ext-drop-enter-from,
+.ext-drop-leave-to {
+  opacity: 0;
+}
+</style>
