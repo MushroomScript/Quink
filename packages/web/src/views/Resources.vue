@@ -44,6 +44,10 @@ import {
   PhFolder,
   PhFolderSimple,
   PhFolderPlus,
+  PhFolderOpen,
+  PhDownloadSimple,
+  PhPencilSimple,
+  PhTrash,
   PhFilePdf,
   PhFileText,
   PhFileZip,
@@ -351,7 +355,9 @@ function formatSize(bytes: number): string {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function isImage(f: FileItem) { return f.mimeType.startsWith('image/'); }
@@ -366,6 +372,20 @@ function fileExt(f: FileItem): string {
   const m = (f.filename || '').match(/\.([A-Za-z0-9]+)$/);
   if (m) return m[1].toLowerCase();
   return (f.mimeType.split('/')[1] || '').toLowerCase();
+}
+
+// list view 表格风格类型列显示用: 中文语义化类型
+function categoryLabel(f: FileItem): string {
+  if (isImage(f) || isHeic(f)) return '图片';
+  if (isVideo(f)) return '视频';
+  if (isAudio(f)) return '音频';
+  if (isPdf(f)) return 'PDF';
+  if (f.mimeType.includes('zip')) return '压缩包';
+  if (f.mimeType.startsWith('text/') || /\.(txt|md|json|log|csv)$/i.test(f.filename)) return '文本';
+  if (/\.(doc|docx)$/i.test(f.filename)) return 'Word';
+  if (/\.(xls|xlsx)$/i.test(f.filename)) return 'Excel';
+  if (/\.(ppt|pptx)$/i.test(f.filename)) return 'PPT';
+  return '其他';
 }
 
 function startRename(f: FileItem) {
@@ -984,15 +1004,23 @@ onUnmounted(() => {
               </div>
             </div>
             <div v-if="!selectMode" class="flex items-center border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button v-if="hasSearchQuery" @click.stop="openFolderLocation(folder)"
-                class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-primary">所在位置</button>
-              <button @click.stop="downloadFolder(folder)"
-                class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-primary"
-                :class="hasSearchQuery ? 'border-l border-gray-50' : ''">下载</button>
-              <button @click.stop="startRenameFolder(folder)"
-                class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-primary border-l border-gray-50">重命名</button>
-              <button @click.stop="confirmDeleteFolderId = folder.id"
-                class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-red-50 hover:text-red-500 border-l border-gray-50">删除</button>
+              <button v-if="hasSearchQuery" @click.stop="openFolderLocation(folder)" title="打开所在位置"
+                class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-gray-50 hover:text-primary">
+                <PhFolderOpen size="0.875rem" weight="bold" />
+              </button>
+              <button @click.stop="downloadFolder(folder)" title="下载"
+                class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-gray-50 hover:text-primary"
+                :class="hasSearchQuery ? 'border-l border-gray-50' : ''">
+                <PhDownloadSimple size="0.875rem" weight="bold" />
+              </button>
+              <button @click.stop="startRenameFolder(folder)" title="重命名"
+                class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-gray-50 hover:text-primary border-l border-gray-50">
+                <PhPencilSimple size="0.875rem" weight="bold" />
+              </button>
+              <button @click.stop="confirmDeleteFolderId = folder.id" title="删除"
+                class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-red-50 hover:text-red-500 border-l border-gray-50">
+                <PhTrash size="0.875rem" weight="bold" />
+              </button>
             </div>
           </div>
 
@@ -1040,15 +1068,23 @@ onUnmounted(() => {
               </div>
             </div>
             <div v-if="!selectMode" class="flex items-center border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button v-if="hasSearchQuery" @click.stop="openFileLocation(f)"
-                class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-primary">所在位置</button>
-              <a :href="resolveFileUrl(f.url)" target="_blank" download @click.stop
-                class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-primary"
-                :class="hasSearchQuery ? 'border-l border-gray-50' : ''">下载</a>
-              <button @click.stop="startRename(f)"
-                class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-primary border-l border-gray-50">重命名</button>
-              <button @click.stop="confirmDeleteId = f.id"
-                class="flex-1 text-center py-1.5 text-xs text-gray-500 hover:bg-red-50 hover:text-red-500 border-l border-gray-50">删除</button>
+              <button v-if="hasSearchQuery" @click.stop="openFileLocation(f)" title="打开所在位置"
+                class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-gray-50 hover:text-primary">
+                <PhFolderOpen size="0.875rem" weight="bold" />
+              </button>
+              <a :href="resolveFileUrl(f.url)" target="_blank" download @click.stop title="下载"
+                class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-gray-50 hover:text-primary"
+                :class="hasSearchQuery ? 'border-l border-gray-50' : ''">
+                <PhDownloadSimple size="0.875rem" weight="bold" />
+              </a>
+              <button @click.stop="startRename(f)" title="重命名"
+                class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-gray-50 hover:text-primary border-l border-gray-50">
+                <PhPencilSimple size="0.875rem" weight="bold" />
+              </button>
+              <button @click.stop="confirmDeleteId = f.id" title="删除"
+                class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-red-50 hover:text-red-500 border-l border-gray-50">
+                <PhTrash size="0.875rem" weight="bold" />
+              </button>
             </div>
           </div>
         </TransitionGroup>
@@ -1059,26 +1095,40 @@ onUnmounted(() => {
         <!-- folders + files 同 list (folders 在前, 紧挨, 不另起一行). ".." 上级卡片已独立提到列表顶部上方 -->
         <TransitionGroup tag="div" data-animated-list
           class="flex flex-col gap-1" :css="false" @leave="fadeOutLeave">
-          <!-- Folders 先 -->
+          <!-- Folders 先. 表格风格: 缩略图 | 名称(flex-1) | hover icons(w-120 右对齐) | 大小 | 类型 | 日期 -->
           <div v-for="folder in filteredFolders" :key="'folder-' + folder.id" :data-drop-folder="folder.id"
             class="bg-white rounded-lg border px-3 py-2 group hover:shadow-sm transition-all duration-200 cursor-pointer flex items-center gap-3"
             :class="dragState.active && dragState.hoverDropTarget === folder.id ? 'border-primary ring-2 ring-primary bg-primary-light/30' : 'border-gray-200'"
             @click="onFolderClick($event, folder)" @pointerdown="onFolderPointerDown($event, folder)">
-            <PhFolderSimple size="1.5rem" weight="fill" class="text-primary-dark shrink-0" />
-            <div class="flex-1 min-w-0">
-              <div class="text-xs font-medium text-gray-700 truncate" :title="folder.name">{{ folder.name }}</div>
-              <div class="text-[11px] text-gray-400 mt-0.5">文件夹</div>
+            <!-- 用 36×36 容器装 icon, 让文件夹行高跟文件行(36×36 缩略图)对齐 -->
+            <div class="w-9 h-9 shrink-0 bg-gray-50 rounded flex items-center justify-center">
+              <PhFolderSimple size="1.25rem" weight="fill" class="text-primary-dark" />
             </div>
-            <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button v-if="hasSearchQuery" @click.stop="openFolderLocation(folder)"
-                class="px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-primary rounded">所在位置</button>
-              <button @click.stop="downloadFolder(folder)"
-                class="px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-primary rounded">下载</button>
-              <button @click.stop="startRenameFolder(folder)"
-                class="px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-primary rounded">重命名</button>
-              <button @click.stop="confirmDeleteFolderId = folder.id"
-                class="px-2 py-1 text-[11px] text-gray-500 hover:bg-red-50 hover:text-red-500 rounded">删除</button>
+            <div class="flex-[5] min-w-0 text-xs font-medium text-gray-700 truncate" :title="folder.name">{{ folder.name }}</div>
+            <!-- audio 占位区 (文件行用), 文件夹行留空保持列位置一致 -->
+            <div class="w-48 shrink-0"></div>
+            <!-- hover icons 固定 w-[120px] 占位防止 hover 切换时列位置抖动 -->
+            <div class="w-[120px] shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button v-if="hasSearchQuery" @click.stop="openFolderLocation(folder)" title="打开所在位置"
+                class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
+                <PhFolderOpen size="0.875rem" weight="bold" />
+              </button>
+              <button @click.stop="downloadFolder(folder)" title="下载"
+                class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
+                <PhDownloadSimple size="0.875rem" weight="bold" />
+              </button>
+              <button @click.stop="startRenameFolder(folder)" title="重命名"
+                class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
+                <PhPencilSimple size="0.875rem" weight="bold" />
+              </button>
+              <button @click.stop="confirmDeleteFolderId = folder.id" title="删除"
+                class="p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-500 rounded">
+                <PhTrash size="0.875rem" weight="bold" />
+              </button>
             </div>
+            <div class="flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">—</div>
+            <div class="flex-[2] min-w-0 text-xs text-gray-400">文件夹</div>
+            <div class="flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">{{ formatDate(folder.createdAt) }}</div>
           </div>
           <!-- Files 后 -->
           <div v-for="f in filtered" :key="f.id"
@@ -1103,23 +1153,37 @@ onUnmounted(() => {
               <PhFileZip v-else-if="f.mimeType.includes('zip')" size="1.25rem" weight="fill" class="text-gray-400" />
               <PhFile v-else size="1.25rem" weight="fill" class="text-gray-400" />
             </div>
-            <div class="flex-1 min-w-0">
-              <div class="text-xs font-medium text-gray-700 truncate" :title="f.filename">{{ f.filename }}</div>
-              <div class="text-[11px] text-gray-400 mt-0.5">{{ formatSize(f.size) }} · {{ formatDate(f.createdAt) }}</div>
+            <div class="flex-[5] min-w-0 text-xs font-medium text-gray-700 truncate" :title="f.filename">{{ f.filename }}</div>
+            <!-- audio 区固定 w-48 占位, 所有行都占同样宽度 → 列位置永远一致 (audio 行渲染 player, 其他行空白) -->
+            <div class="w-48 shrink-0">
+              <div v-if="isAudio(f)" @click.stop>
+                <AudioPlayer :src="resolveFileUrl(f.url)" hideBars />
+              </div>
             </div>
-            <div v-if="isAudio(f)" class="w-48 shrink-0 mx-auto" @click.stop>
-              <AudioPlayer :src="resolveFileUrl(f.url)" hideBars />
+            <!-- hover icons 固定 w-[120px] 占位防止 hover/selectMode 切换时列位置抖动. selectMode 时按钮不渲染但 div 仍占位 -->
+            <div class="w-[120px] shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <template v-if="!selectMode">
+                <button v-if="hasSearchQuery" @click.stop="openFileLocation(f)" title="打开所在位置"
+                  class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
+                  <PhFolderOpen size="0.875rem" weight="bold" />
+                </button>
+                <a :href="resolveFileUrl(f.url)" target="_blank" download @click.stop title="下载"
+                  class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
+                  <PhDownloadSimple size="0.875rem" weight="bold" />
+                </a>
+                <button @click.stop="startRename(f)" title="重命名"
+                  class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
+                  <PhPencilSimple size="0.875rem" weight="bold" />
+                </button>
+                <button @click.stop="confirmDeleteId = f.id" title="删除"
+                  class="p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-500 rounded">
+                  <PhTrash size="0.875rem" weight="bold" />
+                </button>
+              </template>
             </div>
-            <div v-if="!selectMode" class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button v-if="hasSearchQuery" @click.stop="openFileLocation(f)"
-                class="px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-primary rounded">所在位置</button>
-              <a :href="resolveFileUrl(f.url)" target="_blank" download @click.stop
-                class="px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-primary rounded">下载</a>
-              <button @click.stop="startRename(f)"
-                class="px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-primary rounded">重命名</button>
-              <button @click.stop="confirmDeleteId = f.id"
-                class="px-2 py-1 text-[11px] text-gray-500 hover:bg-red-50 hover:text-red-500 rounded">删除</button>
-            </div>
+            <div class="flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">{{ formatSize(f.size) }}</div>
+            <div class="flex-[2] min-w-0 text-xs text-gray-400">{{ categoryLabel(f) }}</div>
+            <div class="flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">{{ formatDate(f.createdAt) }}</div>
           </div>
         </TransitionGroup>
       </template>
