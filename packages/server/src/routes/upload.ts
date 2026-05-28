@@ -9,6 +9,7 @@ import archiver from 'archiver';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { toPinyinSearchable } from '../utils/pinyin.js';
+import { isHeicFilename, generateHeicThumb, heicThumbPath, backfillHeicThumbs } from '../utils/heicThumb.js';
 
 const UPLOAD_DIR = resolve(process.cwd(), 'uploads');
 
@@ -138,7 +139,18 @@ app.post('/file', async (c) => {
     : nameFromOriginal(file.name);
 
   const { filename, displayFilename } = buildFilename(rawName, ext);
-  writeFileSync(resolve(UPLOAD_DIR, filename), Buffer.from(await file.arrayBuffer()));
+  const diskPath = resolve(UPLOAD_DIR, filename);
+  writeFileSync(diskPath, Buffer.from(await file.arrayBuffer()));
+
+  // HEIC 同步生成 <basename>.thumb.jpg 缩略图. 前端 HeicImage 直接 GET 这个 thumb URL,
+  // 不再客户端转码 (用 libheif-js + jpeg-js, 1-3s 阻塞上传响应, 个人使用场景可接受)
+  if (isHeicFilename(filename)) {
+    try {
+      await generateHeicThumb(diskPath);
+    } catch (e: any) {
+      console.warn('[upload] HEIC thumb generation failed:', filename, e?.message);
+    }
+  }
 
   // url 只存裸的磁盘文件名(不含 /api/uploads/ 前缀),前端 resolveFileUrl helper 拼前缀
   const url = filename;

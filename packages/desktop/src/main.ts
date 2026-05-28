@@ -8,6 +8,8 @@ import {
   shell,
   globalShortcut,
   clipboard,
+  dialog,
+  session,
 } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -17,6 +19,11 @@ import { registerShortcut, unregisterAll, startHook, stopHook, onKeydown } from 
 
 const API_BASE = `http://localhost:${process.env.QUINK_PORT || '38999'}`;
 const WEB_URL = `http://localhost:${process.env.QUINK_WEB_PORT || '24888'}`;
+
+// 显式声明 app name. Electron 默认用 package.json 的 name (@quink/desktop), 导致
+// userData 路径变成 %APPDATA%\@quink\desktop 难找. 显式设 Quink 让路径变 %APPDATA%\Quink.
+// 必须在任何 app.getPath('userData') 调用之前 (HEIC_CACHE_DIR / PDF_CACHE_DIR 初始化用了它)
+app.setName('Quink');
 
 let mainWindow: BrowserWindow | null = null;
 let captureWindow: BrowserWindow | null = null;
@@ -38,6 +45,8 @@ let nativeModuleRef: any = null;
 // 主题持久化到 userData/theme-cache.json,让启动时立即用上次主题创建 tray + mainWindow icon,
 // 否则要等 web 端 fetchMe + sync-theme IPC,首屏会看到默认 blueberry 闪一下再切到正确主题
 let currentTheme = 'blueberry';
+// 下载目录: 默认 ~/Downloads, renderer 端 (Settings 配置) 通过 IPC sync-download-path 推到这里
+let currentDownloadDir = app.getPath('downloads');
 // 当前用户字体大小(默认 16 跟 Settings.vue prefs 一致),用于 Capture 窗口高度按比例缩放
 let currentFontSize = 16;
 
@@ -609,6 +618,57 @@ ipcMain.handle('open-attachment', async (event, url: string) => {
   return task;
 });
 
+// PDF 首页缩略图持久化缓存. pdfjs 渲染 PDF 首页耗 CPU, 同一文件多次进资源页一直重算浪费.
+// 文件存 userData/pdf-thumb-cache/<basename>.jpg
+// (HEIC 已经走后端转码生成 .thumb.jpg, 不再需要客户端持久化)
+const PDF_CACHE_DIR = path.join(app.getPath('userData'), 'pdf-thumb-cache');
+try { fs.mkdirSync(PDF_CACHE_DIR, { recursive: true }); } catch {}
+
+function pdfThumbCacheFilename(url: string): string {
+  return path.basename(url) + '.jpg';
+}
+
+ipcMain.handle('pdf-thumb-cache:get', (_event, url: string): Buffer | null => {
+  const p = path.join(PDF_CACHE_DIR, pdfThumbCacheFilename(url));
+  if (!fs.existsSync(p)) return null;
+  try { return fs.readFileSync(p); } catch { return null; }
+});
+
+ipcMain.handle('pdf-thumb-cache:put', (_event, url: string, data: ArrayBuffer): boolean => {
+  try {
+    fs.writeFileSync(path.join(PDF_CACHE_DIR, pdfThumbCacheFilename(url)), Buffer.from(data));
+    return true;
+  } catch (e) {
+    console.error('[pdf-thumb-cache:put]', e);
+    return false;
+  }
+});
+
+// 视频首帧缩略图持久化缓存. 渲染端用 <video> + canvas drawImage 取首帧, IPC put 写盘.
+// 跟 PDF/HEIC 同 pattern. 优势: list/grid view 缓存命中后用 <img> 显示, 0 个 <video> 媒体 pipeline 占用
+const VIDEO_THUMB_CACHE_DIR = path.join(app.getPath('userData'), 'video-thumb-cache');
+try { fs.mkdirSync(VIDEO_THUMB_CACHE_DIR, { recursive: true }); } catch {}
+
+function videoThumbCacheFilename(url: string): string {
+  return path.basename(url) + '.jpg';
+}
+
+ipcMain.handle('video-thumb-cache:get', (_event, url: string): Buffer | null => {
+  const p = path.join(VIDEO_THUMB_CACHE_DIR, videoThumbCacheFilename(url));
+  if (!fs.existsSync(p)) return null;
+  try { return fs.readFileSync(p); } catch { return null; }
+});
+
+ipcMain.handle('video-thumb-cache:put', (_event, url: string, data: ArrayBuffer): boolean => {
+  try {
+    fs.writeFileSync(path.join(VIDEO_THUMB_CACHE_DIR, videoThumbCacheFilename(url)), Buffer.from(data));
+    return true;
+  } catch (e) {
+    console.error('[video-thumb-cache:put]', e);
+    return false;
+  }
+});
+
 // 取消正在下载的附件: 找到对应 AbortController 调 abort(). __cancelMark 让 open-attachment 的
 // catch 分支区分"用户主动取消"vs"stall 超时", 前者返回 cancelled: true 不算错误
 ipcMain.handle('cancel-attachment', (_event, url: string) => {
@@ -663,6 +723,26 @@ ipcMain.on('sync-token', (_event, token: string | null) => {
   if (token) {
     loadUserShortcuts().then(() => applyShortcuts());
   }
+});
+
+// renderer 端 (Settings 改下载目录) 把路径推过来, will-download 用这个路径直接 setSavePath
+ipcMain.on('sync-download-path', (_event, dirPath: string) => {
+  if (dirPath && typeof dirPath === 'string') currentDownloadDir = dirPath;
+});
+
+// 设置页显示"系统默认"的真实路径(Windows: C:\Users\xxx\Downloads, macOS/Linux: ~/Downloads)
+ipcMain.handle('get-default-download-dir', () => app.getPath('downloads'));
+
+// 设置页选下载目录: 弹系统目录选择对话框, 返回选中路径或 null
+ipcMain.handle('pick-directory', async (event): Promise<string | null> => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const result = await dialog.showOpenDialog(win || undefined as any, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: '选择下载文件夹',
+    defaultPath: currentDownloadDir,
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
 });
 
 // 用户改字体大小: 调整 currentFontSize + Capture 窗口尺寸 (宽+高) + 通知所有快捷窗口同步 html font-size
@@ -777,6 +857,25 @@ if (!gotLock) {
 }
 
 app.whenReady().then(() => {
+  // 注册全局下载处理: Electron 默认 <a download> / video controls 下载会直接存到 ~/Downloads,
+  // 不弹"另存为"对话框. 蘑菇要求"不弹窗 + 设置里指定目录", 这里直接 setSavePath 到 currentDownloadDir.
+  // currentDownloadDir 由 renderer 端启动时 IPC sync-download-path 推过来 (localStorage 配置), 默认 ~/Downloads
+  session.defaultSession.on('will-download', (_event, item) => {
+    const targetDir = currentDownloadDir;
+    // 重名时加序号: foo.txt → foo (1).txt → foo (2).txt
+    const originalName = item.getFilename();
+    let savePath = path.join(targetDir, originalName);
+    if (fs.existsSync(savePath)) {
+      const ext = path.extname(originalName);
+      const base = path.basename(originalName, ext);
+      let i = 1;
+      while (fs.existsSync(path.join(targetDir, `${base} (${i})${ext}`))) i++;
+      savePath = path.join(targetDir, `${base} (${i})${ext}`);
+    }
+    try { fs.mkdirSync(targetDir, { recursive: true }); } catch {}
+    item.setSavePath(savePath);
+  });
+
   // 必须在 createMainWindow / createTray 之前,这俩都用 currentTheme 决定图标
   currentTheme = readCachedTheme();
   createMainWindow();

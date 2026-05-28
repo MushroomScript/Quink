@@ -7,6 +7,32 @@ import { useImagePreview } from '@/composables/useImagePreview';
 import { resolveFileUrl } from '@/utils/fileUrl';
 import { pinyinMatch } from '@/utils/pinyin';
 import AudioPlayer from '@/components/AudioPlayer.vue';
+import PdfThumbnail from '@/components/PdfThumbnail.vue';
+import HeicImage from '@/components/HeicImage.vue';
+import VideoThumbnail from '@/components/VideoThumbnail.vue';
+import { heicThumbUrl } from '@/utils/heicCache';
+import { preconvert as pdfPreconvert } from '@/utils/pdfCache';
+import { useVideoPreview } from '@/composables/useVideoPreview';
+import { openedAttachments } from '@/utils/openedAttachments';
+
+const { open: openVideoPreview } = useVideoPreview();
+
+// 大文件单击确认: 防止误点 100MB 文件白下载. >20MB 且未缓存才弹, 缓存命中直接秒开
+const LARGE_FILE_THRESHOLD = 20 * 1024 * 1024;
+const confirmOpenFile = ref<FileItem | null>(null);
+
+function openAttachmentNow(f: FileItem): void {
+  const desk = (window as any).quinkDesktop;
+  if (!desk?.openAttachment) return;
+  const fullUrl = new URL(resolveFileUrl(f.url), location.origin).toString();
+  openedAttachments.add(fullUrl);
+  desk.openAttachment(fullUrl).catch((e: any) => console.error('[openAttachment]', e));
+}
+function confirmOpenAndOpen(): void {
+  if (!confirmOpenFile.value) return;
+  openAttachmentNow(confirmOpenFile.value);
+  confirmOpenFile.value = null;
+}
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useToast } from '@/composables/useToast';
 import { resourceBreadcrumb, resourceBreadcrumbGoTo } from '@/composables/useResourceBreadcrumb';
@@ -22,7 +48,6 @@ import {
   PhFileText,
   PhFileZip,
   PhFile,
-  PhFilmStrip,
   PhXCircle,
   PhSquaresFour,
   PhListBullets,
@@ -82,7 +107,8 @@ useEscToClose(moveTargetOpen);
 const renameInput = ref<HTMLInputElement | null>(null);
 const renameFolderInput = ref<HTMLInputElement | null>(null);
 const createFolderInput = ref<HTMLInputElement | null>(null);
-const imageFiles = computed(() => filtered.value.filter(isImage));
+// imageFiles 包含 HEIC: onImageClick 时 HEIC 走 heicGetOrConvert 拿 jpeg URL, 跟普通 image 一起 preview
+const imageFiles = computed(() => filtered.value.filter((f) => isImage(f) || isHeic(f)));
 const { open: openImagePreview } = useImagePreview();
 
 // ── 多选 (Ctrl+点击 / 选择按钮 触发) ──
@@ -131,8 +157,26 @@ function onCardClick(e: MouseEvent, f: FileItem) {
     toggleSelect(f.id);
     return;
   }
-  // 非选择模式下默认行为: 图片才打开预览, 其他不动 (按钮在 hover 区)
-  if (isImage(f)) onImageClick(f);
+  // 非选择模式下默认行为: 图片(含 HEIC, 内部 onImageClick 异步转 jpeg) 打开预览, PDF 走 OS 应用
+  if (isImage(f) || isHeic(f)) {
+    onImageClick(f);
+    return;
+  }
+  if (isVideo(f)) {
+    // 视频: 弹一念内嵌 modal 预览(VideoPreview 组件), 不走 OS 默认应用
+    openVideoPreview({ url: resolveFileUrl(f.url), filename: f.filename });
+    return;
+  }
+  // 其他文件 (PDF / txt / docx / zip / xlsx / 等) 走 OS 默认应用打开.
+  // 大文件 (>20MB) 且未缓存过的弹 confirm 防误点, 已缓存的秒开
+  const desk = (window as any).quinkDesktop;
+  if (!desk?.openAttachment) return;
+  const fullUrl = new URL(resolveFileUrl(f.url), location.origin).toString();
+  if (f.size > LARGE_FILE_THRESHOLD && !openedAttachments.has(fullUrl)) {
+    confirmOpenFile.value = f;
+    return;
+  }
+  openAttachmentNow(f);
 }
 
 // ── 剪切板 (本地 state, 不持久化, 跳页 / 刷新即失效) ──
@@ -185,7 +229,11 @@ const viewMode = ref<'grid' | 'list'>(((localStorage.getItem(VIEW_KEY) as any) =
 watch(viewMode, (v) => localStorage.setItem(VIEW_KEY, v));
 
 function onImageClick(f: FileItem) {
-  const imgs = imageFiles.value.map(x => ({ url: resolveFileUrl(x.url), filename: x.filename }));
+  // imageFiles 含 HEIC. HEIC 用后端生成的 <basename>.thumb.jpg, 其他 image 用原 URL
+  const imgs = imageFiles.value.map((x) => ({
+    url: isHeic(x) ? heicThumbUrl(resolveFileUrl(x.url)) : resolveFileUrl(x.url),
+    filename: x.filename,
+  }));
   const idx = imageFiles.value.findIndex(x => x.id === f.id);
   openImagePreview(imgs, Math.max(0, idx));
 }
@@ -309,6 +357,16 @@ function formatDate(iso: string): string {
 function isImage(f: FileItem) { return f.mimeType.startsWith('image/'); }
 function isAudio(f: FileItem) { return f.mimeType.startsWith('audio/'); }
 function isVideo(f: FileItem) { return f.mimeType.startsWith('video/'); }
+// HEIC: iPhone 默认照片格式. mime 经常被 OS 标成 application/octet-stream(浏览器不识别),
+// 所以判断不能只依赖 mime, 必须看扩展名. isHeic 独立于 isImage(后者会漏 octet-stream 的 HEIC)
+function isHeic(f: FileItem) { return /^image\/(heic|heif)$/i.test(f.mimeType) || /\.(heic|heif)$/i.test(f.filename); }
+function isPdf(f: FileItem) { return f.mimeType === 'application/pdf' || /\.pdf$/i.test(f.filename); }
+// 文件类型 chip 显示用: 优先扩展名, 退化到 mime subtype. mime 经常是 plain/octet-stream 等不友好值
+function fileExt(f: FileItem): string {
+  const m = (f.filename || '').match(/\.([A-Za-z0-9]+)$/);
+  if (m) return m[1].toLowerCase();
+  return (f.mimeType.split('/')[1] || '').toLowerCase();
+}
 
 function startRename(f: FileItem) {
   renameTarget.value = f;
@@ -362,7 +420,15 @@ async function uploadFiles(fileList: File[]) {
       signal: ctrl.signal,
       onProgress: (received, total) => updateProgressById(taskId, received, total),
     })
-      .then(() => { markSuccessById(taskId); return { ok: true, name: file.name }; })
+      .then((res) => {
+        markSuccessById(taskId);
+        // PDF 上传完后台预转码 + 持久化首页 thumb (客户端 pdfjs).
+        // HEIC thumb 由后端上传时同步生成, 这里不需要客户端预转码
+        if (res?.data?.url && /\.pdf$/i.test(file.name)) {
+          pdfPreconvert(`/api/uploads/${res.data.url}`);
+        }
+        return { ok: true, name: file.name };
+      })
       .catch(e => {
         if (e?.name === 'AbortError') {
           markCancelledById(taskId);
@@ -863,7 +929,7 @@ onUnmounted(() => {
       <!-- 子目录里 ".." 上级卡片独立提到列表顶部, 不在 TransitionGroup 内,
            这样空文件夹时 ".." 仍在 "此处暂无文件" 提示上方而非下方 -->
       <div v-if="currentFolderId !== null" class="mb-4">
-        <div v-if="viewMode === 'grid'" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div v-if="viewMode === 'grid'" class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));">
           <div :data-drop-folder="parentFolderId || 'root'"
             class="bg-white rounded-xl border overflow-hidden group hover:shadow-md transition-all duration-300 cursor-pointer"
             :class="dragState.active && dragState.hoverDropTarget === (parentFolderId || 'root') ? 'border-primary ring-2 ring-primary' : 'border-gray-200'"
@@ -902,7 +968,7 @@ onUnmounted(() => {
       <!-- Grid view: folders + files 同 grid (folders 在前, 紧挨, 不另起一行) -->
       <template v-if="viewMode === 'grid'">
         <TransitionGroup tag="div" data-animated-list
-          class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" :css="false" @leave="fadeOutLeave">
+          class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));" :css="false" @leave="fadeOutLeave">
           <!-- Folders 先 (跟文件卡片完全同尺寸 h-32 preview + 信息 + actions) -->
           <div v-for="folder in filteredFolders" :key="'folder-' + folder.id" :data-drop-folder="folder.id"
             class="bg-white rounded-xl border overflow-hidden group hover:shadow-md transition-all duration-300 cursor-pointer"
@@ -942,22 +1008,28 @@ onUnmounted(() => {
                   <path d="M5 12l5 5L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
               </div>
-              <img v-if="isImage(f)" :src="resolveFileUrl(f.url)" :alt="f.filename"
+              <!-- HEIC 独立判断(OS 经常把 .heic mime 标成 octet-stream 不走 isImage), 用 heic2any 转 jpeg -->
+              <HeicImage v-if="isHeic(f)" :src="resolveFileUrl(f.url)" :alt="f.filename" />
+              <img v-else-if="isImage(f)" :src="resolveFileUrl(f.url)" :alt="f.filename"
                 class="w-full h-full object-cover" :class="!selectMode ? 'cursor-zoom-in' : ''" />
-              <!-- 视频在卡片内播放: controls + preload=metadata 让首帧作为 poster, 不预下整段 -->
-              <video v-else-if="isVideo(f)" :src="resolveFileUrl(f.url)" controls preload="metadata"
-                class="w-full h-full object-contain bg-black" @click.stop />
+              <!-- 视频缩略图: 走 VideoThumbnail 组件(canvas 截首帧 + 双层缓存), 缓存命中后不挂 <video> 元素.
+                   点击走 onCardClick isVideo 分支 → openVideoPreview 全屏 modal -->
+              <VideoThumbnail v-else-if="isVideo(f)" :src="resolveFileUrl(f.url)" fit="contain"
+                :class="!selectMode ? 'cursor-pointer' : ''" />
               <div v-else-if="isAudio(f)" class="px-3 w-full" @click.stop>
                 <AudioPlayer :src="resolveFileUrl(f.url)" />
               </div>
+              <!-- PDF 卡片首页预览: pdfjs 渲染第一页. 点击卡片走 OS 默认应用打开完整 PDF (onCardClick 内处理) -->
+              <PdfThumbnail v-else-if="isPdf(f)" :src="resolveFileUrl(f.url)"
+                class="cursor-pointer" :class="!selectMode ? '' : 'pointer-events-none'" />
               <div v-else class="text-center">
                 <div class="flex justify-center mb-1 text-gray-400">
-                  <PhFilePdf v-if="f.mimeType.includes('pdf')" size="2.25rem" weight="fill" />
-                  <PhFileText v-else-if="f.mimeType.includes('json')" size="2.25rem" weight="fill" />
+                  <PhFileText v-if="f.mimeType.includes('json')" size="2.25rem" weight="fill" />
                   <PhFileZip v-else-if="f.mimeType.includes('zip')" size="2.25rem" weight="fill" />
                   <PhFile v-else size="2.25rem" weight="fill" />
                 </div>
-                <div class="text-xs text-gray-400">{{ f.mimeType.split('/')[1] }}</div>
+                <!-- 显示扩展名(如 txt/json/heic) 而非 mime subtype(plain/octet-stream 不友好) -->
+                <div class="text-xs text-gray-400">{{ fileExt(f) }}</div>
               </div>
             </div>
             <div class="px-3 py-2">
@@ -1020,10 +1092,13 @@ onUnmounted(() => {
               </svg>
             </div>
             <div class="w-9 h-9 shrink-0 bg-gray-50 rounded flex items-center justify-center overflow-hidden">
-              <img v-if="isImage(f)" :src="resolveFileUrl(f.url)" :alt="f.filename"
+              <HeicImage v-if="isHeic(f)" :src="resolveFileUrl(f.url)" :alt="f.filename" />
+              <img v-else-if="isImage(f)" :src="resolveFileUrl(f.url)" :alt="f.filename"
                 class="w-full h-full object-cover" :class="!selectMode ? 'cursor-zoom-in' : ''" />
-              <PhFilmStrip v-else-if="isVideo(f)" size="1.25rem" weight="fill" class="text-gray-400" />
-              <PhFilePdf v-else-if="f.mimeType.includes('pdf')" size="1.25rem" weight="fill" class="text-gray-400" />
+              <!-- 视频缩略: 走 VideoThumbnail 组件(同 grid). list view 用 cover 填满 36×36 + 小 play icon -->
+              <VideoThumbnail v-else-if="isVideo(f)" :src="resolveFileUrl(f.url)" fit="cover" />
+              <!-- PDF 缩略: 复用 PdfThumbnail 组件(已有 IntersectionObserver lazy + 双层缓存), cover 填满 36×36 -->
+              <PdfThumbnail v-else-if="isPdf(f)" :src="resolveFileUrl(f.url)" fit="cover" />
               <PhFileText v-else-if="f.mimeType.includes('json')" size="1.25rem" weight="fill" class="text-gray-400" />
               <PhFileZip v-else-if="f.mimeType.includes('zip')" size="1.25rem" weight="fill" class="text-gray-400" />
               <PhFile v-else size="1.25rem" weight="fill" class="text-gray-400" />
@@ -1217,6 +1292,30 @@ onUnmounted(() => {
           <div class="flex justify-end mt-3">
             <button @click="moveTargetOpen = false"
               class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <!-- 大文件单击确认: 防止误点 100MB+ 文件白下载 -->
+  <Teleport to="body">
+    <Transition name="modal">
+      <div v-if="confirmOpenFile" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div class="absolute inset-0 bg-black/30" @click="confirmOpenFile = null" />
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 text-center">
+          <p class="text-sm text-gray-700 mb-4 break-all">
+            打开 {{ confirmOpenFile.filename }} ({{ formatSize(confirmOpenFile.size) }})
+          </p>
+          <div class="flex gap-2 justify-center">
+            <button @click="confirmOpenFile = null"
+              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+              取消
+            </button>
+            <button @click="confirmOpenAndOpen"
+              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark">
+              打开
+            </button>
           </div>
         </div>
       </div>

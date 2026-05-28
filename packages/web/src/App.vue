@@ -17,10 +17,12 @@ import { useTheme } from '@/composables/useTheme';
 import { useToast } from '@/composables/useToast';
 import { useImagePreview } from '@/composables/useImagePreview';
 import ImagePreview from '@/components/ImagePreview.vue';
+import VideoPreview from '@/components/VideoPreview.vue';
 import MediaContextMenu from '@/components/MediaContextMenu.vue';
 import DragGhost from '@/components/DragGhost.vue';
 import AttachmentDownloadDock from '@/components/AttachmentDownloadDock.vue';
 import { addTask as addAttachmentTask, updateProgress as updateAttachmentProgress, markSuccess as markAttachmentSuccess, markFailed as markAttachmentFailed, markCancelled as markAttachmentCancelled } from '@/composables/useAttachmentTasks';
+import { openedAttachments } from '@/utils/openedAttachments';
 
 const route = useRoute();
 const router = useRouter();
@@ -40,9 +42,7 @@ const { show: showToast } = useToast();
 desk?.onAttachmentProgress?.((data: { url: string; received: number; total: number }) => {
   updateAttachmentProgress(data.url, data.received, data.total);
 });
-// renderer 端记录"已成功打开过的 URL", 二次点击跳过 dock 直接 toast.
-// 跟 main 端的 attachmentCache 同生命周期(重启都清), 一致性自然保证.
-const openedAttachments = new Set<string>();
+// 已打开过的 URL Set 从 utils 共享(资源页 Resources 也用同一份做大文件 confirm 检测)
 
 // 主题切换时同步换 favicon（含 .ico 和 .png 两条 link）
 watch(currentTheme, (t) => {
@@ -217,6 +217,11 @@ const { open: openImagePreview } = useImagePreview();
 
 onMounted(async () => {
   initAudioBubbleHandler();
+  // 把 localStorage 中存的下载目录推给 main, will-download 用它. 没设过的话 main 默认 ~/Downloads
+  try {
+    const dlDir = localStorage.getItem('quink_download_dir');
+    if (dlDir) desk?.syncDownloadPath?.(dlDir);
+  } catch {}
   const user = await auth.fetchMe();
   appReady.value = true;
   if (!user) return;
@@ -510,6 +515,9 @@ watch(() => auth.user, (user) => {
 
   <!-- 全局图片预览(单例,各 view 通过 useImagePreview composable open / close) -->
   <ImagePreview />
+
+  <!-- 全局视频预览(单例,资源页 list view 点视频 / 笔记 video 链接共享) -->
+  <VideoPreview />
 
   <!-- 全局右键菜单:.note-content 内的图片 / 音频 a 标签右键下载 -->
   <MediaContextMenu />

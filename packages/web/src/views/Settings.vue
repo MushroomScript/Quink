@@ -20,6 +20,29 @@ const nickname = ref('');
 const avatarPreview = ref('');
 const uploadingAvatar = ref(false);
 
+// 下载目录 (本地配置, 不进 prefs 走 server preferences 因为 path 是设备本地的).
+// 手机/网页端没有 quinkDesktop, 整块隐藏.
+const isElectron = !!(window as any).quinkDesktop?.isElectron;
+const downloadDir = ref<string>(localStorage.getItem('quink_download_dir') || '');
+const defaultDownloadDir = ref<string>('');
+async function pickDownloadDir(): Promise<void> {
+  const desk = (window as any).quinkDesktop;
+  if (!desk?.pickDirectory) return;
+  const picked = await desk.pickDirectory();
+  if (!picked) return;
+  downloadDir.value = picked;
+  localStorage.setItem('quink_download_dir', picked);
+  desk.syncDownloadPath?.(picked);
+}
+function resetDownloadDir(): void {
+  const desk = (window as any).quinkDesktop;
+  downloadDir.value = '';
+  localStorage.removeItem('quink_download_dir');
+  // 路径为空时 main 端 currentDownloadDir 用默认 app.getPath('downloads'), 这里推空字符串 main 会忽略
+  // 改成主动推默认路径让 main 立刻切换
+  if (defaultDownloadDir.value) desk?.syncDownloadPath?.(defaultDownloadDir.value);
+}
+
 // ── Preferences ──
 // 偏好统一在一个 reactive 对象，新加字段只需在这里加默认值 + 在模板里加 UI，
 // load / save / watch 通过遍历 prefs 字段自动覆盖
@@ -199,7 +222,12 @@ const tabs = [
   { id: 'about', label: '关于' },
 ];
 
-onMounted(() => {
+onMounted(async () => {
+  // 拿系统默认下载目录的真实路径 (Windows 跟 *nix 表达不同), Settings 显示用
+  try {
+    const desk = (window as any).quinkDesktop;
+    if (desk?.getDefaultDownloadDir) defaultDownloadDir.value = await desk.getDefaultDownloadDir();
+  } catch {}
   if (auth.user) {
     nickname.value = auth.user.nickname;
     avatarPreview.value = auth.user.avatar || '';
@@ -413,19 +441,23 @@ function goBack() {
 </script>
 
 <template>
-  <div class="px-4 md:px-8 py-8 select-none" @keydown="handleShortcutKeydown">
-    <!-- Tabs -->
-    <div class="flex flex-wrap gap-1 border-b border-gray-200 mb-6">
+  <div class="px-4 md:px-8 pb-8 select-none" @keydown="handleShortcutKeydown">
+    <!-- Tabs (sticky 锁顶, 跟资源页 toolbar 同款: -mx 抵消 root padding 占全宽, bg 半透明, 顶部 box-shadow 分隔) -->
+    <div class="sticky top-0 z-10 -mx-4 md:-mx-8 px-4 md:px-8 pt-[8px] mb-6 flex flex-wrap gap-1 border-b border-gray-200 bg-gray-50"
+      style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <button
         v-for="tab in tabs"
         :key="tab.id"
         @click="activeTab = tab.id"
-        class="px-4 py-2.5 text-sm transition-colors border-b-2 -mb-px whitespace-nowrap"
+        class="px-4 py-2.5 text-sm transition-colors border-b-2 -mb-px whitespace-nowrap grid"
         :class="activeTab === tab.id
-          ? 'border-primary text-primary font-medium'
+          ? 'border-primary text-primary'
           : 'border-transparent text-gray-500 hover:text-gray-700'"
       >
-        {{ tab.label }}
+        <!-- 用 grid 双 span 叠加: 占位 span(粗体, invisible) 撑出宽度永远按粗体算,
+             显示 span 按当前选中状态切 font-weight, 不影响 layout, 解决"选中后挤右边 1px"抖动 -->
+        <span class="invisible font-medium col-start-1 row-start-1">{{ tab.label }}</span>
+        <span class="col-start-1 row-start-1" :class="activeTab === tab.id ? 'font-medium' : ''">{{ tab.label }}</span>
       </button>
     </div>
 
@@ -562,6 +594,29 @@ function goBack() {
               <option :value="180">180 天</option>
               <option :value="0">永久保留</option>
             </select>
+          </div>
+        </div>
+        <!-- 下载目录 (本地配置, localStorage 存, 不跨设备同步因为 path 跟 OS 相关).
+             非 Electron (手机/网页端) 没有 quinkDesktop, 浏览器自己处理下载, 隐藏整块 -->
+        <div v-if="isElectron" class="pt-2 border-t border-gray-100">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="text-sm text-gray-700 font-medium">下载文件夹</div>
+              <div class="text-xs text-gray-400 mt-0.5 truncate"
+                :title="downloadDir || defaultDownloadDir">
+                {{ downloadDir || defaultDownloadDir }}
+              </div>
+            </div>
+            <div class="shrink-0 flex items-center gap-2">
+              <button v-if="downloadDir" @click="resetDownloadDir"
+                class="px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
+                title="恢复到系统默认下载目录">
+                恢复默认
+              </button>
+              <button @click="pickDownloadDir" class="px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+                更改
+              </button>
+            </div>
           </div>
         </div>
         <!-- 自动生成标签 -->

@@ -101,6 +101,16 @@ console.log(`
 
 serve({ fetch: app.fetch, port: PORT, hostname: '0.0.0.0' });
 
+// 异步给升级前已上传但还没 thumb 的 HEIC 文件批量补 .thumb.jpg. 不阻塞启动
+(async () => {
+  const [{ backfillHeicThumbs }, { resolve: resolvePath }] = await Promise.all([
+    import('./utils/heicThumb.js'),
+    import('path'),
+  ]);
+  const dir = resolvePath(process.cwd(), 'uploads');
+  backfillHeicThumbs(dir).catch((e) => console.warn('[backfillHeicThumbs]', e?.message));
+})();
+
 // 启动 + 每 6h 跑一次全量清理 (用户改 trashRetentionDays 时另在 PATCH /me 处单独触发该用户的清理, 见 cleanup.ts)
 import { cleanAllTrash } from './cleanup.js';
 cleanAllTrash();

@@ -13,6 +13,7 @@
     "@vueuse/core": "^12.5.0",
     "dayjs": "^1.11.13",
     "echarts": "^6.1.0",
+    "pdfjs-dist": "^5.7.284",
     "pinia": "^3.0.0",
     "pinyin-pro": "^3.28.1",
     "vditor": "^3.11.2",
