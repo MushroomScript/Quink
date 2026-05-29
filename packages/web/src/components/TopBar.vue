@@ -257,11 +257,14 @@ function doSearch(immediate = false) {
     // 资源/标签页只设 searchQuery,各 view 自己 watch 过滤,不走笔记 fetchNotes
     if (searchScope.value !== 'notes') return;
     // 用户主动改了 filterTypes (跟当前 view 默认不同) 才走 types 路径覆盖 view 自带的 filterType;
-    // 默认状态下保留 view 设的 filterType, 让 fetchNotes 按 store.filterType 单类型过滤
+    // 默认状态下保留 view 设的 filterType, 让 fetchNotes 按 store.filterType 单类型过滤.
+    // 回到默认时必须显式把 store.filterType 设回 view 默认值: 之前用户加额外 type 时 filterType 已被设为 '',
+    // 若不恢复, 用户取消额外 type / 点"清除全部筛选" / ESC 后 fetchNotes 既不带 type 也不带 types, 列表仍混杂.
     const defaultTypes = getDefaultFilterTypes();
     const typesChanged = filterTypes.value.length !== defaultTypes.length
       || !filterTypes.value.every(t => defaultTypes.includes(t));
     if (typesChanged) store.filterType = '';
+    else store.filterType = defaultTypes[0] || '';
     store.fetchNotes({
       tags: filterTags.value.length ? filterTags.value.join(',') : undefined,
       types: typesChanged ? filterTypes.value.join(',') : undefined,
@@ -350,8 +353,18 @@ function clearAll() {
 }
 
 async function toggleFilters() {
-  showFilters.value = !showFilters.value;
-  if (showFilters.value && allTags.value.length === 0) {
+  // 收起筛选面板 = 清状态 (跟 ESC 行为一致): 用户点漏斗"关筛选"的语义就是"恢复默认",
+  // 不要留 filterTypes / filterTags / filterDateFrom 等残留导致列表仍混杂
+  if (showFilters.value) {
+    showFilters.value = false;
+    searchText.value = '';
+    store.searchQuery = '';
+    showTagSuggestions.value = false;
+    clearFilters();
+    return;
+  }
+  showFilters.value = true;
+  if (allTags.value.length === 0) {
     try { const res = await api.getTags(); allTags.value = res.data; } catch {}
   }
 }
