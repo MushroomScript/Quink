@@ -130,6 +130,10 @@ try { sqlite.exec('ALTER TABLE files ADD COLUMN filename_history TEXT'); } catch
 // 用 WHERE LIKE 限制只 update 还残留前缀的 row,后续启动 LIKE 不匹配自然跳过,反复跑无害。
 try { sqlite.exec(`UPDATE files SET url = REPLACE(url, '/api/uploads/', '') WHERE url LIKE '/api/uploads/%'`); } catch {}
 try { sqlite.exec(`UPDATE notes SET content = REPLACE(content, '/api/uploads/', '') WHERE content LIKE '%/api/uploads/%'`); } catch {}
+// Migrate: 老笔记从 note/snippet 转成 todo 时, PATCH 路由只改 type 不碰 todo_status, 字段保持 NULL,
+// 导致 sidebar 徽章 (严格 = 'pending') 漏算; 前端 Todos.vue (!= 'done') 又算上, 两边数字对不齐.
+// 路由已修(转 todo 时自动补 'pending'), 此处一次性修存量 NULL → 'pending'. WHERE 限制反复跑无害.
+try { sqlite.exec(`UPDATE notes SET todo_status = 'pending' WHERE type = 'todo' AND todo_status IS NULL`); } catch {}
 // Migrate: notes.content_pinyin (拼音搜索支持: 全拼 + 首字母拼接串,搜索时 LIKE %query% 命中)
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN content_pinyin TEXT'); } catch {}
 // 一次性回填 + 升级重算: PINYIN_SCHEMA_VERSION 每次 toPinyinSearchable 算法升级时 +1,

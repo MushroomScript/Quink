@@ -234,7 +234,7 @@ onUnmounted(() => {
         <component :is="item.icon" size="1.125rem" weight="fill" />
         <span>{{ item.label }}</span>
         <span v-if="item.label === '待办' && stats.pendingTodos > 0 && auth.user?.preferences?.showTodoBadge !== false"
-          class="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full">
+          class="ml-auto inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1 bg-red-400/70 text-white text-[0.6875rem] leading-[1.125rem] font-semibold tabular-nums rounded-full">
           {{ stats.pendingTodos > 99 ? '99+' : stats.pendingTodos }}
         </span>
       </router-link>

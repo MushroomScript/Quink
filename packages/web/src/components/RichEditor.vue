@@ -36,6 +36,9 @@ const props = withDefaults(defineProps<{
   showAi?: boolean;
   showFullscreenBtn?: boolean;
   hintText?: string;
+  // 保存按钮 padding 规格: 默认走 rem-based (pt-[0.32rem] pb-[0.43rem]) 对齐其他 modal 按钮的中文 baseline 居中规则.
+  // Capture 快捷弹窗传 true 保留旧 py-1.5 (蘑菇要求快捷弹窗不动). 详见 commit d58382d / 47bb87d.
+  compactSubmit?: boolean;
 }>(), {
   initialContent: '',
   initialType: 'note',
@@ -51,6 +54,7 @@ const props = withDefaults(defineProps<{
   maxHeight: 320,
   showFullscreenBtn: true,
   hintText: '',
+  compactSubmit: false,
 });
 
 const isFullscreen = ref(props.initialFullscreen);
@@ -713,7 +717,8 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         </button>
         <slot name="submit-button">
           <button @click="handleSubmit"
-            class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            class="px-4 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            :class="compactSubmit ? 'py-1.5' : 'pt-[0.32rem] pb-[0.43rem]'">
             {{ submitLabel }}
           </button>
         </slot>

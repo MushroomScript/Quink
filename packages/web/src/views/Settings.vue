@@ -6,6 +6,7 @@ import { useToast } from '@/composables/useToast';
 import { api } from '@/api';
 import { collapseLeave, snapshotCards } from '@/utils/cardLeave';
 import { useTheme } from '@/composables/useTheme';
+import ToggleSwitch from '@/components/ToggleSwitch.vue';
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -608,12 +609,7 @@ function goBack() {
             <div class="text-sm text-gray-700 font-medium">待办未完成数字提示</div>
             <div class="text-xs text-gray-400 mt-0.5">侧边栏「待办」后显示未完成数量的红色徽标</div>
           </div>
-          <button @click="prefs.showTodoBadge = !prefs.showTodoBadge"
-            class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4"
-            :class="prefs.showTodoBadge ? 'bg-primary' : 'bg-gray-300'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
-              :class="prefs.showTodoBadge ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
+          <ToggleSwitch v-model="prefs.showTodoBadge" class="ml-4" />
         </div>
         <!-- 回收站保留天数 -->
         <div class="pt-2 border-t border-gray-100">
@@ -686,12 +682,7 @@ function goBack() {
               <div class="text-xs text-gray-600">录音时自动转写文字</div>
               <div class="text-[11px] text-gray-400">开启后录音保存时自动调讯飞转写，AI 对话可引用语音内容</div>
             </div>
-            <button @click="prefs.autoTranscribeVoice = !prefs.autoTranscribeVoice"
-              class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4"
-              :class="prefs.autoTranscribeVoice ? 'bg-primary' : 'bg-gray-300'">
-              <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
-                :class="prefs.autoTranscribeVoice ? 'translate-x-6' : 'translate-x-1'" />
-            </button>
+            <ToggleSwitch v-model="prefs.autoTranscribeVoice" class="ml-4" />
           </div>
         </div>
 
@@ -865,10 +856,10 @@ function goBack() {
           </div>
           <div v-if="configError" class="text-red-500 text-xs bg-red-50 rounded-lg px-3 py-2">{{ configError }}</div>
           <div class="flex gap-2">
-            <button @click="saveConfig" :disabled="saving" class="px-4 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-50" style="background: rgb(var(--c-accent))">
+            <button @click="saveConfig" :disabled="saving" class="px-4 pt-[0.32rem] pb-[0.43rem] text-white text-xs font-medium rounded-lg disabled:opacity-50" style="background: rgb(var(--c-accent))">
               {{ saving ? '保存中...' : '保存' }}
             </button>
-            <button @click="editingConfig = null; configError = ''" class="px-4 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">取消</button>
+            <button @click="editingConfig = null; configError = ''" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs text-gray-500 rounded-lg hover:bg-gray-100">取消</button>
           </div>
         </div>
       </div>
@@ -896,15 +887,11 @@ function goBack() {
             :class="editingPromptFeature === f.key ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-500 hover:bg-gray-100'">
             <span>{{ f.label }}</span>
             <span v-if="aiPrompts[f.key]?.isCustom" class="text-[10px]">*</span>
-            <!-- 3 个 auto_* feature 后面带迷你开关 (autoTag / autoCategorize / autoSummary).
-                 @click.stop 阻止冒泡 → 点开关不切 tab; 点 button 其他区域正常切 tab -->
-            <span v-if="featureToggleKey[f.key]" @click.stop="flipAutoToggle(f.key)" role="switch"
-              :title="getAutoToggle(f.key) ? '自动开启 - 点击关闭' : '已关闭 - 点击开启'"
-              class="inline-flex h-3 w-6 items-center rounded-full transition-colors cursor-pointer align-middle shrink-0"
-              :class="getAutoToggle(f.key) ? 'bg-primary' : 'bg-gray-300'">
-              <span class="inline-block h-2 w-2 rounded-full bg-white shadow transition-transform"
-                :class="getAutoToggle(f.key) ? 'translate-x-3' : 'translate-x-0.5'" />
-            </span>
+            <!-- 3 个 auto_* feature 后面带迷你开关. @click.stop 阻止冒泡: 点开关不切 tab; 点 button 其他区域正常切 tab.
+                 用 :model-value + @update:model-value 而非 v-model 是因为状态读/写都走 getAutoToggle/flipAutoToggle (prefs key 映射). -->
+            <ToggleSwitch v-if="featureToggleKey[f.key]" size="sm"
+              :model-value="getAutoToggle(f.key)" @update:model-value="flipAutoToggle(f.key)" @click.stop
+              :title="getAutoToggle(f.key) ? '自动开启 - 点击关闭' : '已关闭 - 点击开启'" />
           </button>
         </div>
         <div v-if="editingPromptFeature">
@@ -912,10 +899,10 @@ function goBack() {
             class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs leading-relaxed outline-none focus:border-primary font-mono resize-none text-gray-600" />
           <p class="text-xs text-gray-400 mt-1">用 {content} 表示笔记内容，{context} 表示上下文</p>
           <div class="flex gap-2 mt-3 items-center">
-            <button @click="savePrompt" :disabled="saving" class="px-4 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-50" style="background: rgb(var(--c-accent))">
+            <button @click="savePrompt" :disabled="saving" class="px-4 pt-[0.32rem] pb-[0.43rem] text-white text-xs font-medium rounded-lg disabled:opacity-50" style="background: rgb(var(--c-accent))">
               {{ saving ? '保存中...' : '保存' }}
             </button>
-            <button @click="resetPrompt(editingPromptFeature)" class="px-4 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">恢复默认</button>
+            <button @click="resetPrompt(editingPromptFeature)" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs text-gray-500 rounded-lg hover:bg-gray-100">恢复默认</button>
             <!-- 仅 auto_summary tab 显示触发阈值, 跟保存/恢复同行右侧 (蘑菇 2026-05-29: 从偏好设置挪过来集中) -->
             <div v-if="editingPromptFeature === 'auto_summary'" class="flex items-center gap-2 ml-2">
               <span class="text-xs text-gray-400 shrink-0">长度小于</span>

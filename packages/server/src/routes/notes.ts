@@ -225,6 +225,11 @@ app.patch('/:id', async (c) => {
   if (data.category !== undefined) updates.category = data.category;
   if (data.tags !== undefined) updates.tags = data.tags;
   if (data.type !== undefined) updates.type = data.type;
+  // 老笔记从 note/snippet 改成 todo 时, 若原 todoStatus 为 NULL, 自动补 'pending', 跟 POST 新建 todo 语义对齐.
+  // 用户显式传 todoStatus 时尊重用户 (走下面 if). 原本已有 todoStatus(如 'done' 从 todo→note→todo 复用)也不动.
+  if (data.type === 'todo' && existing.todoStatus == null && data.todoStatus === undefined) {
+    updates.todoStatus = 'pending';
+  }
   if (data.todoStatus !== undefined) updates.todoStatus = data.todoStatus;
   if (data.todoDue !== undefined) updates.todoDue = data.todoDue;
   if (data.pinned !== undefined) updates.pinned = data.pinned;

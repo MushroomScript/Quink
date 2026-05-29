@@ -24,6 +24,8 @@ Quink web 端渲染相关坑：DOM 操作 / CSS 布局 / Vue 模板 / HMR / mark
 
 - **sticky 元素切换 relative ↔ fixed 那一瞬间, 内容亚像素抖动 1-2px**: sticky 元素从"跟随文档流"切到"钉住"时浏览器重新计算渲染层, 亚像素位置(如 23.7px)在切换瞬间四舍五入到 24px, 文字位置抖一两像素。**修法**: sticky 元素加 `transform: translateZ(0)` + `will-change: transform`, 强制从挂载起就在独立 GPU 合成层, 切换时不需要动态创建 layer, 亚像素位置一直稳定。范例: `Trash.vue` sticky toolbar inline style。**注意**: `transform` 会让该元素成为 `position: fixed` 子元素的 containing block, 所以只在叶子节点(没 fixed 子代)上用; 全屏 fixed modal 之类的祖先用 transform 会困住子代(详见动画段同名坑)。
 
+- **跨用户字号设置(prefs.fontSize 改 `<html>` 的 font-size)下"固定高度容器内文字居中"用 `h-[N] + leading-[N]` 而不是 `h-[N] + leading-none + items-center`**: 后者让浏览器算 `(容器高 - 字号)/2` 作为居中偏移, **rem 单位经过用户字号 scale 后 round 到整数 px, 容器和字号 round 后的差值奇偶在不同字号下变化** → 差是偶数(2/4/6...)精确居中, 差是奇数(3/5/7...) round 到 .5px 然后偏 0.5-1px。`leading-[N]` 让 line-box 高度 = 容器高度, 字符在 line-box 内的位置由字体 baseline 决定, 字体设计师保证跨字号比例一致 → 不依赖减法 round。**配套规则**: 容器和字号都用 rem 单位(`h-[1.125rem]` / `text-[0.6875rem]`)跟用户字号同步缩放, **混用 rem 容器 + px 子元素是跨字号比例失调的根源**(rem 跟字号 scale, px 不动 → 比例变化)。**只适用于字符居中**: toggle 圆球 / icon 等几何块没有 baseline, flex items-center 已是几何居中最优, 跨字号完美对齐物理上做不到(Element Plus / Naive UI 同样有这个问题, 接受 18 字号完美 + 其他字号微偏 <1px 是合理折中)。**vs 浏览器 zoom (Ctrl+/-)**: zoom 是 paint 层等比 scale, layout 数学关系不变, 不会引入这种 round 奇偶问题。范例: `Sidebar.vue` 待办未完成数字徽章; `ToggleSwitch.vue` 迷你 size 接受跨字号微偏。详见 commit 47bb87d / d58382d 按钮 padding rem-based 同根因。
+
 ## Popover / Teleport / Stacking context
 
 - **下拉/popover 在编辑器旁边总被盖住**：编辑器（Vditor 等）经常创建 stacking context，子组件的 z-[9999] 不起作用。解决方案：**默认走 `<Teleport to="body">` + `position: fixed` + 动态算位置**。范例：TopBar 的标签建议下拉、batchMove 下拉。
