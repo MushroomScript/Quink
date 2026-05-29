@@ -60,6 +60,19 @@ const prefs = reactive({
   aiPersonaCustom: '',
   xfyun: { appId: '', apiKey: '', apiSecret: '' },
 });
+// 文本/数字输入框: 本地 ref + @blur 比对真变了才写回 prefs.
+// 否则 v-model 直绑 prefs.xxx → 输入过程每个字符都触发 watch deep → 防抖保存 → 频繁后端请求 + 频繁 toast.
+// 失焦时若 local !== prefs[key] 才写回, 触发原 watch 走防抖保存路径. 同步是单向 prefs → local, 只在 onMounted 拷完字段后做一次.
+const localXfyunAppId = ref('');
+const localXfyunApiKey = ref('');
+const localXfyunApiSecret = ref('');
+const localAiPersonaCustom = ref('');
+const localAutoSummaryMinLen = ref(200);
+// 模板里 ref 自动 unwrap, 所以第一参数收到的是值不是 ref 本身
+function commitField(value: any, target: any, key: string) {
+  if (value !== target[key]) target[key] = value;
+}
+
 const personas: Record<string, { label: string; description: string }> = {
   concise: { label: '简洁高效', description: '极简回复，一句话说清' },
   friendly: { label: '亲切友好', description: '温暖有礼，像朋友聊天' },
@@ -242,6 +255,12 @@ onMounted(async () => {
     if (userPrefs.shortcuts) {
       shortcuts.value = { ...shortcuts.value, ...userPrefs.shortcuts };
     }
+    // 同步本地 ref (放 prefsLoaded=true 之前, 不触发 watch); 5 个文本/数字输入框 @blur 才写回 prefs
+    localXfyunAppId.value = prefs.xfyun.appId;
+    localXfyunApiKey.value = prefs.xfyun.apiKey;
+    localXfyunApiSecret.value = prefs.xfyun.apiSecret;
+    localAiPersonaCustom.value = prefs.aiPersonaCustom;
+    localAutoSummaryMinLen.value = prefs.autoSummaryMinLen;
   }
   loadAiData();
   // 延到下一个 tick 再开启 watch,避免初始化赋值触发自动保存
@@ -641,7 +660,8 @@ function goBack() {
         </div>
         <div v-if="prefs.autoSummary" class="flex items-center gap-2">
           <span class="text-xs text-gray-400 shrink-0">最少字符数</span>
-          <input v-model.number="prefs.autoSummaryMinLen" type="number" min="10" max="500" step="10"
+          <input v-model.number="localAutoSummaryMinLen" @blur="commitField(localAutoSummaryMinLen, prefs, 'autoSummaryMinLen')"
+            type="number" min="10" max="500" step="10"
             class="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs outline-none bg-white text-center" />
           <span class="text-xs text-gray-300">少于此长度不生成摘要</span>
         </div>
@@ -652,15 +672,18 @@ function goBack() {
           <div class="space-y-1.5">
             <div class="flex items-center gap-2">
               <span class="text-xs text-gray-500 w-16 shrink-0">APPID</span>
-              <input v-model="prefs.xfyun.appId" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+              <input v-model="localXfyunAppId" @blur="commitField(localXfyunAppId, prefs.xfyun, 'appId')"
+                class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
             <div class="flex items-center gap-2">
               <span class="text-xs text-gray-500 w-16 shrink-0">APIKey</span>
-              <input v-model="prefs.xfyun.apiKey" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+              <input v-model="localXfyunApiKey" @blur="commitField(localXfyunApiKey, prefs.xfyun, 'apiKey')"
+                class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
             <div class="flex items-center gap-2">
               <span class="text-xs text-gray-500 w-16 shrink-0">APISecret</span>
-              <input v-model="prefs.xfyun.apiSecret" type="password" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+              <input v-model="localXfyunApiSecret" @blur="commitField(localXfyunApiSecret, prefs.xfyun, 'apiSecret')"
+                type="password" class="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
           </div>
           <!-- 自动转写 -->
@@ -692,7 +715,9 @@ function goBack() {
                 <div class="text-[11px] mt-0.5 opacity-70">{{ p.description }}</div>
               </button>
             </div>
-            <textarea v-if="prefs.aiPersona === 'custom'" v-model="prefs.aiPersonaCustom" rows="3" placeholder="输入自定义人格提示词..."
+            <textarea v-if="prefs.aiPersona === 'custom'" v-model="localAiPersonaCustom"
+              @blur="commitField(localAiPersonaCustom, prefs, 'aiPersonaCustom')"
+              rows="3" placeholder="输入自定义人格提示词..."
               class="w-full mt-2 px-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
           </div>
           <!-- Token 上限 -->
