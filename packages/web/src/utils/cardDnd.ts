@@ -149,13 +149,13 @@ async function handleDrop(target: string, ids: string[]) {
     for (const id of ids) {
       try { await store.updateNote(id, { type } as any); } catch {}
     }
-    if (store.selectMode) store.clearSelection();
+    if (store.selectMode) store.exitSelectMode();
   } else if (target.startsWith('cat:')) {
     const name = target.slice(4);
     for (const id of ids) {
       try { await store.updateNote(id, { category: name } as any); } catch {}
     }
-    if (store.selectMode) store.clearSelection();
+    if (store.selectMode) store.exitSelectMode();
   } else if (target === 'action:trash') {
     // 软删除走确认弹窗: 派事件让 Sidebar 处理 (跟之前 HTML5 模式一致)
     window.dispatchEvent(new CustomEvent('quink-drop-trash', { detail: ids }));
@@ -172,7 +172,7 @@ async function handleDrop(target: string, ids: string[]) {
     sessionStorage.setItem('quink_ai_pending_drop', JSON.stringify({ kind: 'current', ids }));
     window.dispatchEvent(new CustomEvent('quink-ai-drop', { detail: { kind: 'current', ids } }));
   }
-  if (store.selectMode) store.clearSelection();
+  if (store.selectMode) store.exitSelectMode();
 }
 
 function reset() {

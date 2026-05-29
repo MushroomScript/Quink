@@ -20,11 +20,11 @@ async function onSubmit(data: { html: string; type: string; tags: string[] }) {
   if (submitting.value) return;
   submitting.value = true;
   try {
-    await store.createNote(data.html, data.type, data.tags.length ? data.tags : undefined);
+    const note = await store.createNote(data.html, data.type, data.tags.length ? data.tags : undefined);
     editorRef.value?.clearContent();
     toast.show('已保存');
-    // AI 异步处理完后刷新,拉回标签和分类
-    setTimeout(() => store.fetchNotes(), 4000);
+    // AI 异步打标签/分类/摘要, 后台轮询单条直到 aiProcessed=true 后 mutate 进本地 (不触发 rebuild)
+    store.pollNoteAiResult(note.id);
   } finally { submitting.value = false; }
 }
 </script>

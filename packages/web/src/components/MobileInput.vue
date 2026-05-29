@@ -18,11 +18,12 @@ async function submit() {
   if (!text || submitting.value) return;
   submitting.value = true;
   try {
-    await store.createNote(text, props.defaultType);
+    const note = await store.createNote(text, props.defaultType);
     content.value = '';
     showToast.value = true;
     setTimeout(() => (showToast.value = false), 1500);
-    setTimeout(() => store.fetchNotes(), 3000);
+    // AI 异步打标签/分类/摘要, 后台轮询单条直到 aiProcessed=true 后 mutate 进本地 (不触发 rebuild)
+    store.pollNoteAiResult(note.id);
   } finally { submitting.value = false; }
 }
 </script>

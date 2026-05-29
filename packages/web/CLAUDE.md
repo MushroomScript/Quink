@@ -85,6 +85,21 @@ view A 触发跳转 → view B 落地并自动应用筛选 chip 的模式。当�
 cp -r node_modules/vditor/dist packages/web/public/vditor/dist
 ```
 
+## 创建笔记 + AI 异步回填
+
+后端 `POST /api/notes` 立即返回（`aiProcessed=false`），同时后台异步跑 `processNoteWithAi`（自动标签 / 分类 / 摘要），完成后 SQL UPDATE 设 `aiProcessed=true`。AI 耗时取决于配置：云端 API 1-3s，本地 Ollama 3-30s。
+
+**前端创建流程**（NoteInput / MobileInput / Capture 都走这条）：
+
+1. `store.createNote(...)` —— POST 创建后**插入到 `notes.value` 中"所有置顶之后第一位"**（用 `findIndex(!pinned)`），reassign 整个数组让 useMasonry 走 rebuild。**不能 unshift 到 [0]**，否则新非置顶卡片会比置顶卡片还前，后续 AI 回填 / 任何 fetchNotes 重排都会跳到正确位置造成视觉跳变
+2. `store.pollNoteAiResult(id)` —— 立即开始轮询单条 GET `/api/notes/:id`，退避 2/3/5/8/12s 累积 30s。命中 `aiProcessed=true` 时 `Object.assign(notes.value[idx], fresh)` mutate 字段（保引用），NoteCard props deep watch 自动重渲染 tags/category/summary。**不触发 useMasonry rebuild**，无重排闪烁
+
+**不要** 用固定 `setTimeout(() => store.fetchNotes(), 4000)`：
+- 时长 race（云模型够 4s，本地 Ollama 不够 → AI 标签永远拿不到）
+- fetchNotes 全量拉取 + reassign 触发 useMasonry rebuild（30+ 卡片场景明显）
+
+**Electron 多窗口路径**（Capture 快捷窗口 / capture.html 通过 `save-note` IPC）：通过 `quink-note-created` 事件让主窗口同步，事件 detail 必须带 `id`，主窗口 listener 收到 id 走 pollNoteAiResult，没 id 才回退 fetchNotes。具体 IPC 见 `packages/desktop/CLAUDE.md` 的 `note-saved` / `save-note` 通道。
+
 ## 移动端
 
 - 通过 Tailwind `md:` 断点（768px）做响应式。

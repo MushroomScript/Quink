@@ -516,8 +516,11 @@ ipcMain.handle('save-note', async (_event, content: string, type: string) => {
     hideCaptureWindow();
 
     if (mainWindow && !mainWindow.isDestroyed()) {
+      // 带 noteId 时主窗口 listener 走单条 AI 结果轮询 patch (不重排), 不带则回退全量 fetchNotes
+      const noteId = data.data?.id;
+      const detail = noteId ? `, { detail: { id: ${JSON.stringify(noteId)} } }` : '';
       mainWindow.webContents.executeJavaScript(
-        `window.dispatchEvent(new CustomEvent('quink-note-created'))`
+        `window.dispatchEvent(new CustomEvent('quink-note-created'${detail}))`
       ).catch(() => {});
     }
 
@@ -703,7 +706,7 @@ ipcMain.on('win-close', (_event) => {
   if (win) win.close();
 });
 
-ipcMain.on('note-saved', () => {
+ipcMain.on('note-saved', (_event, noteId?: string) => {
   // toast 显示在快捷弹窗原来的中心位置
   const bounds = captureWindow?.getBounds();
   if (bounds) {
@@ -712,8 +715,10 @@ ipcMain.on('note-saved', () => {
     showToast('已保存');
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
+    // 带 noteId 时主窗口 listener 走单条 AI 结果轮询 patch (不重排), 不带则回退全量 fetchNotes
+    const detail = noteId ? `, { detail: { id: ${JSON.stringify(noteId)} } }` : '';
     mainWindow.webContents.executeJavaScript(
-      `window.dispatchEvent(new CustomEvent('quink-note-created'))`
+      `window.dispatchEvent(new CustomEvent('quink-note-created'${detail}))`
     ).catch(() => {});
   }
 });

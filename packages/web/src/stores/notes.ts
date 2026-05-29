@@ -95,7 +95,16 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function createNote(content: string, type: string = 'note', tags?: string[]) {
     const res = await api.createNote({ content, type, tags });
-    notes.value.unshift(res.data);
+    // 后端按 pinned DESC, updated_at DESC 排, 新非置顶笔记直接插到所有置顶之后的第一位.
+    // 后续 pollNoteAiResult 走 mutate Object.assign 不重排, 初始位置就是最终位置 ── 否则
+    // unshift 到 [0] 会先 "比置顶还前", 视觉上需要等到下一次全量 fetchNotes 才修正.
+    // reassign 数组 (而非 splice mutate) 让 useMasonry 走 reassign rebuild 全量重排;
+    // 不能用 splice mutate ── useMasonry append 路径假定新元素在末尾, 会拿错卡片 (composables/CLAUDE.md 坑 6)
+    const insertIdx = notes.value.findIndex((n) => !n.pinned);
+    const next = [...notes.value];
+    if (insertIdx === -1) next.push(res.data);
+    else next.splice(insertIdx, 0, res.data);
+    notes.value = next;
     total.value++;
     return res.data;
   }
@@ -168,18 +177,56 @@ export const useNotesStore = defineStore('notes', () => {
     }
   }
 
+  // 底层: 批量把指定 id 的 todo 改成目标 status, 跳过 type!='todo' / 已是目标状态的;
+  // 走本地 updateNote 包装 (Object.assign 字段 + 引用不变), pending/done 两个 computed 重算后
+  // useMasonry 各自走 strict shrink splice / append 增量动画, 不需要 fetchNotes 重拉
+  async function setTodoStatus(ids: string[], status: 'done' | 'pending'): Promise<number> {
+    const targets = ids
+      .map((id) => notes.value.find((n) => n.id === id))
+      .filter((n): n is NonNullable<typeof n> => !!n && n.type === 'todo' && n.todoStatus !== status);
+    if (!targets.length) return 0;
+    await Promise.all(
+      targets.map((n) => updateNote(n.id, { todoStatus: status } as any).catch((e) => console.error('[setTodoStatus]', n.id, e)))
+    );
+    return targets.length;
+  }
+
   async function toggleTodo(id: string) {
     const note = notes.value.find((n) => n.id === id);
-    if (note && note.type === 'todo') {
-      const newStatus = note.todoStatus === 'done' ? 'pending' : 'done';
-      await updateNote(id, { todoStatus: newStatus as any });
+    if (!note || note.type !== 'todo') return;
+    await setTodoStatus([id], note.todoStatus === 'done' ? 'pending' : 'done');
+  }
+
+  // 创建后轮询单条笔记的 AI 结果, 命中 aiProcessed=true 时 Object.assign 进本地引用 (mutate 不触发 useMasonry rebuild,
+  // NoteCard 通过 props deep watch 自动重渲染 tags/category/summary).
+  // 退避序列 2/3/5/8/12s 累积 30s: 云端 API 1-3s 第一轮大概率命中, 本地 Ollama 3-30s 第二三轮命中, 超 30s 静默放弃.
+  // 失败 (404 / 网络) 即停, 不重试, 避免被删除的笔记一直轮询.
+  async function pollNoteAiResult(id: string) {
+    const delays = [2000, 3000, 5000, 8000, 12000];
+    for (const d of delays) {
+      await new Promise((r) => setTimeout(r, d));
+      try {
+        const res = await api.getNote(id);
+        const fresh = res.data;
+        if (fresh.aiProcessed) {
+          const idx = notes.value.findIndex((n) => n.id === id);
+          if (idx >= 0) Object.assign(notes.value[idx], fresh);
+          return;
+        }
+      } catch (e) {
+        console.error('[pollNoteAiResult]', id, e);
+        return;
+      }
     }
   }
 
-  // 监听桌面端快捷输入保存事件，自动刷新
+  // 监听桌面端快捷输入保存事件: 带 detail.id 时走轻量轮询 patch 单条 (跟 NoteInput/MobileInput 同路径),
+  // 不带 id 时回退到全量 fetchNotes (向后兼容老路径 / 未来扩展)
   if (typeof window !== 'undefined') {
-    window.addEventListener('quink-note-created', () => {
-      fetchNotes();
+    window.addEventListener('quink-note-created', (e: any) => {
+      const id = e?.detail?.id;
+      if (id) pollNoteAiResult(id);
+      else fetchNotes();
     });
   }
 
@@ -201,21 +248,26 @@ export const useNotesStore = defineStore('notes', () => {
     for (const n of notes.value) selectedIds.value.add(n.id);
   }
 
-  function clearSelection() {
+  // 退多选模式: 一次批量操作完成后调用, 既清选中又退模式. 让 UI 回到正常视图, 避免操作完成后
+  // 留在 "已选 0 项" 的空模式 (所有 batch 按钮变 no-op 看着 awkward). 拖动批量操作 (cardDnd /
+  // Sidebar doTrash) 也走这条路径, 跟 batch 函数语义一致.
+  function exitSelectMode() {
+    selectMode.value = false;
     selectedIds.value.clear();
   }
 
   // 批量操作统一走 Promise.all 并发 + 失败 console.error (跟 Trash batch ops / Sidebar.doTrash 同模式)
+  // 所有 batch 函数操作前调 exitSelectMode 让 UI 立即退出多选 (await 期间用户看到正常视图)
   async function batchDelete() {
     const ids = Array.from(selectedIds.value);
-    selectedIds.value.clear();
+    exitSelectMode();
     await Promise.all(ids.map(id => api.deleteNote(id).catch(e => console.error('[batchDelete]', id, e))));
     await fetchNotes();
   }
 
   async function batchMove(category: string) {
     const ids = Array.from(selectedIds.value);
-    selectedIds.value.clear();
+    exitSelectMode();
     await Promise.all(ids.map(id => api.updateNote(id, { category } as any).catch(e => console.error('[batchMove]', id, e))));
     await fetchNotes();
   }
@@ -223,16 +275,23 @@ export const useNotesStore = defineStore('notes', () => {
   // 批量改 type: todoStatus 字段不动 (todo→snippet/note 时 DB 仍保留, 转回 todo 时复用)
   async function batchUpdateType(type: 'note' | 'snippet' | 'todo') {
     const ids = Array.from(selectedIds.value);
-    selectedIds.value.clear();
+    exitSelectMode();
     await Promise.all(ids.map(id => api.updateNote(id, { type } as any).catch(e => console.error('[batchUpdateType]', id, e))));
     await fetchNotes();
+  }
+
+  // 批量改 todoStatus: 从 selectedIds 取 id 后复用 setTodoStatus, 返回实际改动数 (UI 用来显示 toast)
+  async function batchSetTodoStatus(status: 'done' | 'pending'): Promise<number> {
+    const ids = Array.from(selectedIds.value);
+    exitSelectMode();
+    return setTodoStatus(ids, status);
   }
 
   // 批量加标签: 合并到现有 tags (去重), 不覆盖
   async function batchAddTags(tagsToAdd: string[]) {
     if (!tagsToAdd.length) return;
     const ids = Array.from(selectedIds.value);
-    selectedIds.value.clear();
+    exitSelectMode();
     await Promise.all(ids.map(id => {
       const note = notes.value.find(n => n.id === id);
       const existing = note?.tags || [];
@@ -261,6 +320,7 @@ export const useNotesStore = defineStore('notes', () => {
     groupedByDate,
     fetchNotes,
     createNote,
+    pollNoteAiResult,
     updateNote,
     deleteNote,
     undoDelete,
@@ -271,10 +331,11 @@ export const useNotesStore = defineStore('notes', () => {
     toggleSelectMode,
     toggleSelect,
     selectAll,
-    clearSelection,
+    exitSelectMode,
     batchDelete,
     batchMove,
     batchUpdateType,
+    batchSetTodoStatus,
     batchAddTags,
   };
 });

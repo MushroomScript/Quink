@@ -68,7 +68,7 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 |---|---|---|
 | `save-note` | renderer → main (invoke) | 保存笔记（快捷记录用） |
 | `hide-window` | renderer → main (send) | renderer 主动让 main 隐藏当前窗口 |
-| `note-saved` | renderer → main (send) | 通知 main 显示"已保存" toast |
+| `note-saved` | renderer → main (send) | 通知 main 显示"已保存" toast + 转发 `quink-note-created` 给主窗口 (可选带 `noteId` 让主窗口走单条 AI 结果轮询 patch, 不带回退全量 fetchNotes) |
 | `content-ready` | renderer → main (send) | Vditor 等异步组件加载完，main 才 show 窗口 |
 | `sync-theme` | renderer → main (send) | 主窗口切主题时通知 main，main 销毁快捷窗口 + 更新缓存 |
 | `sync-font-size` | renderer → main (send) | 主窗口改字体时通知 main，main 调整 Capture 窗口尺寸 + 转发到快捷窗口 |

@@ -48,6 +48,12 @@ function pickBatchType(type: 'note' | 'snippet' | 'todo') {
   showBatchType.value = false;
 }
 
+// 待办页专属批量改 todoStatus: 已是目标状态的项静默跳过 (store 内过滤), toast 只报本次实际改动数
+async function doBatchSetTodoStatus(status: 'done' | 'pending') {
+  const n = await store.batchSetTodoStatus(status);
+  toast.show(status === 'done' ? `已完成 ${n} 项` : `已标记未完成 ${n} 项`, 'success');
+}
+
 // 批量"加标签" popover (input + 现有标签建议下拉 + 已选 chip + 确认按钮)
 const showBatchTags = ref(false);
 const batchTagsBtn = ref<HTMLElement>();
@@ -93,7 +99,7 @@ function onBatchTagInputEnter() {
 }
 async function confirmBatchTags() {
   if (!batchTagsSelected.value.length) return;
-  // 先把状态快照(store.batchAddTags 内会 clear selectedIds), 再 await; 失败时 console.error 不静默
+  // 先把状态快照(store.batchAddTags 内会 exitSelectMode 清空 selectedIds), 再 await; 失败时 console.error 不静默
   const tags = [...batchTagsSelected.value];
   try {
     await store.batchAddTags(tags);
@@ -585,7 +591,16 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
       <button @click="store.selectAll()" class="text-xs text-primary hover:underline">全选</button>
       <button @click="store.toggleSelectMode()" class="text-xs text-gray-400 hover:underline">退出选择</button>
       <div class="ml-auto flex items-center gap-2">
-        <!-- 顺序: 移至类型 → 移动分类 → 加标签 → 删除 (跨类型操作前置, 跟分类语义优先级一致) -->
+        <!-- 顺序: (待办页) 标记已完成 / 标记未完成 → 移至类型 → 移动分类 → 加标签 → 删除 (跨类型操作前置, 跟分类语义优先级一致) -->
+        <!-- 待办页专属: 批量改 todoStatus, 已是目标状态 / 非 todo 项静默跳过 -->
+        <button v-if="store.filterType === 'todo'" @click="doBatchSetTodoStatus('done')"
+          class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          标记已完成
+        </button>
+        <button v-if="store.filterType === 'todo'" @click="doBatchSetTodoStatus('pending')"
+          class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          标记未完成
+        </button>
         <button ref="batchTypeBtn" @click="toggleBatchType"
           class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
           移至类型

@@ -323,7 +323,7 @@ const typeColor: Record<string, string> = {
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhArrowCounterClockwise v-if="note.todoStatus === 'done'" size="0.875rem" weight="fill" style="margin-top: 2px" />
             <PhCheck v-else size="0.875rem" weight="fill" style="margin-top: 2px" />
-            <span>{{ note.todoStatus === 'done' ? '撤销完成' : '标记完成' }}</span>
+            <span>{{ note.todoStatus === 'done' ? '标记未完成' : '标记已完成' }}</span>
           </button>
           <button @click.stop="enterSelectMode()"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">

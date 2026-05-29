@@ -103,6 +103,7 @@ pnpm run dev:desktop
 - **暗色主题全适配**：所有硬编码颜色必须在 style.css 加 `[data-theme="dark"]` 覆盖。
 - **搜索高亮**统一用全局琥珀色（`#fbbf24` / `#d97706`），柠檬主题例外用紫色（避免黄底黄字）。
 - **批量操作用乐观更新**：`恢复所有` / `清空回收站` 等批量 API 调用，**必须先改 UI 触发动画再 await API**。否则若 `Promise.all` 中任一 reject，整个 Promise.all reject → 空 catch 吞掉 → 数据变更（如 `notes.value = []`）不执行 → **动画不触发**。乐观更新代价是 API 失败时 server 数据不一致（UI 已清空 server 还有），下次刷新会自动同步；用 `console.error` 留痕。范例：`Trash.vue` 的 `doRestoreAll` / `doEmptyAll`。
+- **批量操作完成自动退多选**：所有 store batch 函数（`batchDelete` / `batchMove` / `batchUpdateType` / `batchSetTodoStatus` / `batchAddTags`）以及拖动批量（cardDnd / Sidebar.doTrash）操作开始时即调 `store.exitSelectMode()`（清选中 + 退多选模式），await 期间 UI 已回到正常视图。理由：操作完成后选中已空，留在 selectMode 里所有 batch 按钮变 no-op，看着 awkward；连续批量场景极少，多一次点"多选"成本可接受。Trash / Resources 用本地 `selectMode` ref（不复用 store），自己也跟同样规则（`selectMode.value = false`）。
 
 ## 编码规范
 

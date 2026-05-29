@@ -100,6 +100,13 @@ react-masonry-css 用 `i % N` round-robin，简单但**列高不平衡**（长�
 
 **配套要求：store 操作 `notes.value` 时语义必须跟读写方式一致。** 尤其 `deleteNote` **不能**用 `notes.value = notes.value.filter(...)` —— `filter()` 返回新数组 + `=` 是 reassign，会被 useMasonry 误判为筛选 → 走 rebuild → 跨列重排闪烁。必须用 `findIndex + splice` 走 mutate。
 
+**反向坑：往数组中间插入元素必须 reassign 不能 splice mutate**。`createNote` 把新非置顶笔记插到"所有置顶之后第一位"（避免初始位置在 [0] 比置顶还前），如果用 `notes.value.splice(insertIdx, 0, newNote)` mutate：
+- newItems === oldItems → 走 mutation 路径
+- length 增长 1 + firstId 没变（首位还是原置顶）→ 走 append 分支
+- append 分支假定新元素**在数组末尾**（loadMore 模式），把 `newItems[lastLength]` 当新卡片加到最矮列 —— 但 newItems[lastLength] 实际是 splice 后原本在 lastLength 位置的元素（旧的），**拿错卡片重复显示在末尾列**
+
+修法：`createNote` 用 `const next = [...notes.value]; next.splice(idx, 0, newNote); notes.value = next` reassign，让 useMasonry 走 rebuild 全量重排。代价是触发一次 rebuild（与原 unshift 走 firstChanged rebuild 同代价），但位置正确。**任何"往中间插入"的场景都得 reassign**，append 分支只能服务尾部追加。
+
 ### 配合 store 的动态 pageSize
 
 每个 view 在 setup 里 watch `columnCount` → 同步 `store.pageSize = n * 10`。3 列 30、4 列 40、5 列 50，刚好首屏 10 行。`store.fetchNotes` 用 `pageSize.value` 替代硬编码 limit。

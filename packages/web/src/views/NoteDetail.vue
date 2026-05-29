@@ -275,7 +275,7 @@ onUnmounted(() => {
               class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
               <PhArrowCounterClockwise v-if="note.todoStatus === 'done'" size="0.875rem" weight="fill" />
               <PhCheck v-else size="0.875rem" weight="fill" />
-              <span>{{ note.todoStatus === 'done' ? '撤销完成' : '标记完成' }}</span>
+              <span>{{ note.todoStatus === 'done' ? '标记未完成' : '标记已完成' }}</span>
             </button>
             <div class="border-t border-gray-100 my-0.5"></div>
             <!-- 移至类型: 当前 type 不显示, 避免"移至自身"无效项 -->

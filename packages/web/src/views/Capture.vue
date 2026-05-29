@@ -27,15 +27,15 @@ async function onSubmit(data: { html: string; type: string; tags: string[] }) {
   if (submitting.value) return;
   submitting.value = true;
   try {
-    await store.createNote(data.html, data.type, data.tags.length ? data.tags : undefined);
+    const created = await store.createNote(data.html, data.type, data.tags.length ? data.tags : undefined);
     editorRef.value?.clearContent();
 
-    // 通知主窗口刷新
-    window.dispatchEvent(new CustomEvent('quink-note-created'));
+    // 通知主窗口刷新 (带 id 让主窗口走单条轮询 patch 而不是全量 fetchNotes; 浏览器场景同 window 内 store listener 也收到)
+    window.dispatchEvent(new CustomEvent('quink-note-created', { detail: { id: created.id } }));
 
-    // 先关闭弹窗,再通知主进程显示 toast
+    // 先关闭弹窗,再通知主进程显示 toast (id 用于 main 转发给主窗口)
     try { (window as any).quink?.hideWindow(); } catch {}
-    try { (window as any).quink?.noteSaved?.(); } catch {}
+    try { (window as any).quink?.noteSaved?.(created.id); } catch {}
   } catch (err: any) {
     toastMsg.value = '保存失败: ' + err.message;
     showToast.value = true;

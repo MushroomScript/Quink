@@ -135,7 +135,7 @@ async function doTrash() {
   }
   // Promise.all 并发 (跟 Trash 的 doRestoreAll / doBatchRestore 等批量操作风格统一)
   await Promise.all(trashIds.value.map(id => notesStore.deleteNote(id).catch(e => console.error('[doTrash]', id, e))));
-  if (notesStore.selectMode) notesStore.clearSelection();
+  if (notesStore.selectMode) notesStore.exitSelectMode();
   trashIds.value = [];
   confirmTrash.value = false;
   if (snapshots.length === 0) return;
