@@ -170,15 +170,17 @@ const titleCount = computed(() => {
 });
 const hideSearch = computed(() => !!route.meta.hideSearch);
 const hideRefresh = computed(() => !!route.meta.hideRefresh);
-// 资源/标签页搜索语义不同(搜文件 / 搜标签),不走笔记 fetchNotes,只设 store.searchQuery 让 view 自己 watch
+// 资源/标签/回收站搜索语义不同(搜文件/搜标签/搜回收站内容),不走笔记 fetchNotes,只设 store.searchQuery 让 view 自己 watch
 const searchScope = computed(() => {
   if (route.path === '/resources') return 'files';
   if (route.path === '/tags') return 'tags';
+  if (route.path === '/trash') return 'trash';
   return 'notes';
 });
 const searchPlaceholder = computed(() => {
   if (searchScope.value === 'files') return '搜索文件';
   if (searchScope.value === 'tags') return '搜索标签';
+  if (searchScope.value === 'trash') return '搜索回收站';
   return '搜索...      Ctrl + F';
 });
 const hasFilters = computed(() => {
@@ -527,7 +529,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <button v-else @click="toggleFilters" class="p-1.5 rounded-lg transition-colors hidden md:block"
           :class="[
             showFilters || hasFilters ? 'bg-primary-light text-primary-dark' : 'hover:bg-gray-100 text-gray-400 hover:text-gray-600',
-            searchScope === 'tags' ? 'invisible pointer-events-none' : '',
+            searchScope === 'tags' || searchScope === 'trash' ? 'invisible pointer-events-none' : '',
           ]">
           <PhFunnel size="1rem" weight="fill" />
         </button>

@@ -11,15 +11,65 @@ import { resolveMarkdownFileUrls, injectMissingFileFallback } from '@/utils/file
 import { useMasonry } from '@/composables/useMasonry';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useAuthStore } from '@/stores/auth';
+import { useNotesStore } from '@/stores/notes';
+import { pinyinMatch, highlightTextByPinyin } from '@/utils/pinyin';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
 
 const auth = useAuthStore();
+const store = useNotesStore();
 const hoveredId = ref<string | null>(null);
+// 拆双 ref: allNotes 原始全集 (load 一次拉全), notes 过滤后用于显示 (useMasonry 只 watch 这个).
+// 搜索 → notes = filter(allNotes) reassign 走 rebuild; 删除/恢复 → 双 splice mutation 保住 useMasonry
+// 的 splice 优化路径, 否则 rebuild 会让 staying 卡片跨列重排, TransitionGroup 误触发 onLeave →
+// 看着像"其他卡片跟着被删的一起飞向 sidebar" (Trash 用 flyToNavLeave 视觉特别明显, 详见 composables/CLAUDE.md 坑 6)
+const allNotes = ref<Note[]>([]);
 const notes = ref<Note[]>([]);
 const pageCount = computed(() => notes.value.length);
 provide('pageCount', pageCount);
+
+// 搜索: TopBar 把搜索词写入 store.searchQuery (trash 路径不走 fetchNotes), view 自己 watch 过滤;
+// 过滤维度 = content + category + tag, 走 pinyinMatch 支持拼音 (跟 Tags / Resources 一致)
+function applyFilter() {
+  const q = store.searchQuery?.trim();
+  if (!q) {
+    notes.value = [...allNotes.value];
+    return;
+  }
+  notes.value = allNotes.value.filter(n => {
+    if (pinyinMatch(n.content || '', q)) return true;
+    if (n.category && pinyinMatch(n.category, q)) return true;
+    if (n.tags && (n.tags as string[]).some((t: string) => pinyinMatch(t, q))) return true;
+    return false;
+  });
+}
+watch(() => store.searchQuery, applyFilter);
+
+// 搜索高亮: content 已是 HTML, 走"标签 vs 文本"分流再套 mark (跟 NoteCard 同模式), 否则 mark 注入到属性里破坏 HTML;
+// category / tag 是纯文本直接套, 接受 tag 名含 < 等 HTML 字符可能导致渲染异常的边角情况 (实际几乎不会).
+// 高亮用全局 .search-highlight 样式 (style.css:537), 主题色跟着换
+function renderContentHl(id: string, raw: string): string {
+  const html = rendered.value[id] || raw;
+  const q = store.searchQuery?.trim();
+  if (!q) return html;
+  return html.replace(/(<[^>]+>)|([^<]+)/g, (_: string, tag: string, text: string) =>
+    tag ? tag : highlightTextByPinyin(text, q)
+  );
+}
+function highlightText(text: string): string {
+  const q = store.searchQuery?.trim();
+  if (!q) return text;
+  return highlightTextByPinyin(text, q);
+}
+
+// 双 splice helper: 删除/恢复 时让显示和原始数据同步, 同时让 useMasonry 走 mutation 优化路径
+function removeFromBoth(id: string) {
+  let idx = notes.value.findIndex(n => n.id === id);
+  if (idx >= 0) notes.value.splice(idx, 1);
+  idx = allNotes.value.findIndex(n => n.id === id);
+  if (idx >= 0) allNotes.value.splice(idx, 1);
+}
 
 // 多选模式 (Ctrl/Meta 单击触发, 跟主界面 NoteCard 一致), 但用 view 局部 state 不复用 store.selectMode
 // — store 那套是给主界面 notes 列表用的, Trash 是独立 notes ref
@@ -78,10 +128,11 @@ async function load() {
   loading.value = true;
   try {
     const res = await api.getTrash();
-    notes.value = res.data;
+    allNotes.value = res.data;
     for (const n of res.data) {
       try { rendered.value[n.id] = injectMissingFileFallback(await Vditor.md2html(resolveMarkdownFileUrls(n.content), { cdn: '/vditor' } as any)); } catch { rendered.value[n.id] = n.content; }
     }
+    applyFilter();
   } catch {}
   loading.value = false;
 }
@@ -102,19 +153,19 @@ async function doRestore() {
   leaveMode = 'restore';
   try {
     await api.restoreNote(id);
-    // 必须 findIndex + splice mutate, 不能用 filter 重新赋值: 后者是 reassign → useMasonry watch
-    // 走 rebuild 分支 → 跨列重排 → 其他卡片在原 col 触发 leave (误调 flyToNavLeave 飞向 sidebar) +
-    // 新 col 触发 enter → 视觉上"所有卡片跟着被恢复那张一起飞". 范例: stores/notes.ts deleteNote 同改法
-    const idx = notes.value.findIndex(n => n.id === id);
-    if (idx >= 0) notes.value.splice(idx, 1);
+    // 双 splice mutate (helper 包装): 显示用 notes + 原始 allNotes 同步移除.
+    // 不用 filter 重赋值: reassign → useMasonry rebuild → 跨列重排 → 误调 flyToNavLeave 飞向 sidebar
+    removeFromBoth(id);
   } catch {}
 }
 
 async function doRestoreAll() {
   confirmRestoreAll.value = false;
   leaveMode = 'restore';
-  const restoringIds = notes.value.map(n => n.id);
+  // 恢复所有 = 全集 (用 allNotes 不用 notes), 跟按钮文案语义一致, 搜索状态下也是清空整个回收站
+  const restoringIds = allNotes.value.map(n => n.id);
   notes.value = [];
+  allNotes.value = [];
   try {
     await Promise.all(restoringIds.map(id => api.restoreNote(id)));
   } catch (err) {
@@ -129,16 +180,17 @@ async function doPermanentDelete() {
   leaveMode = 'delete';
   try {
     await api.permanentDeleteNote(id);
-    // 同 doRestore: 必须 splice mutate 防止 useMasonry rebuild 跨列重排误触发其他卡片动画
-    const idx = notes.value.findIndex(n => n.id === id);
-    if (idx >= 0) notes.value.splice(idx, 1);
+    // 同 doRestore: 双 splice mutate 防止 useMasonry rebuild 跨列重排误触发其他卡片动画
+    removeFromBoth(id);
   } catch {}
 }
 
 async function doEmptyAll() {
   confirmEmpty.value = false;
   leaveMode = 'delete';
+  // 清空 = 全集 (跟恢复所有同语义)
   notes.value = [];
+  allNotes.value = [];
   try {
     await api.emptyTrash();
   } catch (err) {
@@ -160,10 +212,7 @@ async function doBatchRestore() {
   if (!ids.length) return;
   snapshotCards();
   leaveMode = 'restore';
-  for (const id of ids) {
-    const idx = notes.value.findIndex(n => n.id === id);
-    if (idx >= 0) notes.value.splice(idx, 1);
-  }
+  for (const id of ids) removeFromBoth(id);
   selectMode.value = false;
   await Promise.all(ids.map(id => api.restoreNote(id).catch(e => console.error('[batchRestore]', id, e))));
 }
@@ -174,10 +223,7 @@ async function doBatchDelete() {
   if (!ids.length) return;
   snapshotCards();
   leaveMode = 'delete';
-  for (const id of ids) {
-    const idx = notes.value.findIndex(n => n.id === id);
-    if (idx >= 0) notes.value.splice(idx, 1);
-  }
+  for (const id of ids) removeFromBoth(id);
   selectMode.value = false;
   await Promise.all(ids.map(id => api.permanentDeleteNote(id).catch(e => console.error('[batchDelete]', id, e))));
 }
@@ -215,7 +261,8 @@ function onLeave(el: Element, done: () => void) {
     <!-- toolbar 完全套用 TopBar batch action bar 的 class (px-4 md:px-6 py-2 + border-t border-gray-100 + bg-gray-50/80),
          多余的 sticky 部分 (sticky top-0 z-10 -mx + mb-4 + justify-between) 是 Trash 独有需求 (Trash 在 main 内, TopBar batch bar 在 header 内不需要 sticky).
          根 div 顶部 padding 必须去掉 (改 pb-6 只留底部) 否则 sticky 不立即钉住. 资源页加同款多选时复用这套 class. -->
-    <div v-if="notes.length > 0"
+    <!-- v-if 用 allNotes.length: 搜索没结果时也保留工具栏, 让用户能继续退出搜索 / 多选 / 恢复所有 -->
+    <div v-if="allNotes.length > 0"
       class="sticky top-0 z-10 -mx-4 md:-mx-8 px-4 md:px-6 pt-[8px] pb-[10px] mb-4 flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/80"
       style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <p v-if="!selectMode" class="text-xs text-gray-400">{{ notes.length }} 条已删除的内容</p>
@@ -252,12 +299,16 @@ function onLeave(el: Element, done: () => void) {
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <template v-else>
-      <div v-if="notes.length === 0" class="text-center py-16">
+      <!-- 空状态分两种: 回收站本身为空 vs 搜索没匹配 -->
+      <div v-if="allNotes.length === 0" class="text-center py-16">
         <div class="mb-3 flex justify-center text-gray-300">
           <PhTrash size="3rem" weight="fill" />
         </div>
         <p class="text-gray-500 text-sm">回收站是空的</p>
         <p class="text-gray-400 text-xs mt-1">删除的内容会在这里保留30天</p>
+      </div>
+      <div v-else-if="notes.length === 0" class="text-center py-16">
+        <p class="text-gray-500 text-lg">没有匹配的内容</p>
       </div>
 
       <div class="notes-masonry">
@@ -280,7 +331,7 @@ function onLeave(el: Element, done: () => void) {
                 <span class="text-[11px] px-2 py-0.5 rounded-full font-medium select-none" :class="typeColor[n.type]">
                   {{ typeLabels[n.type] }}
                 </span>
-                <span v-if="n.category" class="text-xs text-gray-400">{{ n.category }}</span>
+                <span v-if="n.category" class="text-xs text-gray-400" v-html="highlightText(n.category)" />
                 <span
                   class="ml-auto text-[11px] cursor-default transition-colors"
                   :class="hoveredId === n.id && daysLeftTooltip(n) ? 'text-red-400' : 'text-gray-400'"
@@ -291,21 +342,20 @@ function onLeave(el: Element, done: () => void) {
                 </span>
               </div>
               <div class="text-gray-500 note-content">
-                <div class="vditor-reset line-clamp-4" v-html="rendered[n.id] || n.content" />
+                <div class="vditor-reset line-clamp-4" v-html="renderContentHl(n.id, n.content)" />
               </div>
               <!-- 标签放在内容下方 (跟 NoteCard 一致) -->
               <div v-if="n.tags && (n.tags as string[]).length > 0" class="flex flex-wrap gap-1.5 mt-2">
-                <span v-for="tag in (n.tags as string[])" :key="tag" class="text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                  #{{ tag }}
-                </span>
+                <span v-for="tag in (n.tags as string[])" :key="tag" class="text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full"
+                  v-html="'#' + highlightText(tag)" />
               </div>
             </div>
             <!-- selectMode 时隐藏底部单条按钮区, 避免"选中"和"单条操作"语义冲突 -->
             <div v-if="!selectMode" class="flex items-center gap-1 px-3 py-2 border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button @click.stop="confirmRestoreId = n.id" class="px-3 py-1 text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
+              <button @click.stop="confirmRestoreId = n.id" class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
                 恢复
               </button>
-              <button @click.stop="confirmDeleteId = n.id" class="px-3 py-1 text-xs ml-auto rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+              <button @click.stop="confirmDeleteId = n.id" class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs ml-auto rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
                 永久删除
               </button>
             </div>
@@ -339,7 +389,7 @@ function onLeave(el: Element, done: () => void) {
         <div class="absolute inset-0 bg-black/30" @click="confirmEmpty = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">清空回收站</p>
-          <p class="text-xs text-gray-400 mb-4">将永久删除所有 {{ notes.length }} 条内容，不可恢复</p>
+          <p class="text-xs text-gray-400 mb-4">将永久删除所有 {{ allNotes.length }} 条内容，不可恢复</p>
           <div class="flex gap-2 justify-center">
             <button @click="confirmEmpty = false" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="doEmptyAll" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">清空</button>
@@ -373,7 +423,7 @@ function onLeave(el: Element, done: () => void) {
         <div class="absolute inset-0 bg-black/30" @click="confirmRestoreAll = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">恢复所有</p>
-          <p class="text-xs text-gray-400 mb-4">将恢复回收站中全部 {{ notes.length }} 条内容</p>
+          <p class="text-xs text-gray-400 mb-4">将恢复回收站中全部 {{ allNotes.length }} 条内容</p>
           <div class="flex gap-2 justify-center">
             <button @click="confirmRestoreAll = false" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="doRestoreAll" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复所有</button>

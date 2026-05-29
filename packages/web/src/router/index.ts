@@ -62,7 +62,7 @@ const router = createRouter({
       path: '/trash',
       name: 'trash',
       component: () => import('@/views/Trash.vue'),
-      meta: { title: '回收站', hideSearch: true },
+      meta: { title: '回收站' },
     },
     {
       path: '/settings',
