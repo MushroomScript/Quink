@@ -6,6 +6,7 @@ import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { hashPassword, verifyPassword, signToken, authMiddleware } from '../auth.js';
 import { cleanTrashForUser } from '../cleanup.js';
+import { DEFAULT_CATEGORIES } from '../ai/prompts.js';
 
 const app = new Hono();
 
@@ -54,6 +55,15 @@ app.post('/register', async (c) => {
   };
 
   await db.insert(schema.users).values(user);
+  // seed 默认大类 (工作/学习/生活/其他). 自动分类 prompt 用 {categories} 占位, AI 从这个列表里选 (有"其他"兜底),
+  // 不能编新分类. 老用户不补种 (蘑菇 2026-05-29 决定); 失败容忍, 用户后续手动加分类也行
+  await Promise.all(
+    DEFAULT_CATEGORIES.map((name, idx) =>
+      db.insert(schema.categories).values({
+        userId: user.id, name, parentId: null, icon: null, sortOrder: idx,
+      }).catch(err => console.error('[register] seed category failed:', name, err))
+    )
+  );
   const token = signToken(user.id);
 
   return c.json({

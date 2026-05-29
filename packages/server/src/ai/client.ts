@@ -418,18 +418,34 @@ export async function autoTag(userId: string, content: string): Promise<string[]
 
 /**
  * Run auto-classify on a note. Returns category string.
+ *
+ * 新策略 (蘑菇 2026-05-29): {categories} 占位符注入用户当前所有分类名 (新用户注册时 seed 4 个默认大类),
+ * AI 必须从列表里选, 后端校验返回不在列表就 null (防 AI 编造). 之前是 prompt 写死 9 个细分类 +
+ * processNoteWithAi 看到 AI 返回新分类就自动 insert → 分类列表无限膨胀.
  */
 export async function autoClassify(userId: string, content: string): Promise<string | null> {
   const config = await getConfigForFeature(userId, 'auto_classify');
   if (!config) return null;
 
-  const prompt = await getPrompt(userId, 'auto_classify');
   const text = cleanContent(content);
   if (text.length < 5) return null;
 
+  // 查用户当前所有分类名, 拼成"工作、学习、生活、其他"形式塞进 prompt; 0 分类直接跳过分类 (老用户没 seed)
+  const cats = await db.select({ name: schema.categories.name }).from(schema.categories)
+    .where(eq(schema.categories.userId, userId)).all();
+  const catNames = cats.map(c => c.name);
+  if (catNames.length === 0) return null;
+  const catList = catNames.join('、');
+
+  const prompt = await getPrompt(userId, 'auto_classify');
+
   try {
-    const result = await callAi(config, '你是一个分类助手，只返回分类名称。', prompt.replace('{content}', text));
-    return result.trim().replace(/["""]/g, '') || null;
+    const result = await callAi(config, '你是一个分类助手，只返回分类名称。',
+      prompt.replace('{categories}', catList).replace('{content}', text));
+    const picked = result.trim().replace(/["""]/g, '');
+    // 校验: AI 返回值必须在当前分类列表里, 否则 null (防 AI 编造新分类污染 categories 表)
+    if (!picked || !catNames.includes(picked)) return null;
+    return picked;
   } catch (err) {
     console.error('Auto-classify failed:', err);
     return null;
@@ -438,19 +454,20 @@ export async function autoClassify(userId: string, content: string): Promise<str
 
 /**
  * Generate a one-line summary for a note.
+ *
+ * 2026-05-29 蘑菇: 升级为一等公民 feature (加入 AI_FEATURES) — 独立绑定 AI 配置, 用 getPrompt 取用户自定义,
+ * 不再硬编码 prompt / 不再复用 auto_tag 配置.
  */
 export async function autoSummary(userId: string, content: string): Promise<string | null> {
-  const config = await getConfigForFeature(userId, 'auto_tag'); // 复用标签的配置（便宜模型）
+  const config = await getConfigForFeature(userId, 'auto_summary');
   if (!config) return null;
 
+  const prompt = await getPrompt(userId, 'auto_summary');
   const text = cleanContent(content);
   if (text.length < 20) return null;
 
   try {
-    const result = await callAi(config,
-      '你是一个摘要助手，用一句话（不超过30字）概括以下内容的核心。只返回摘要文本，不要加引号或其他标记。',
-      text
-    );
+    const result = await callAi(config, '你是一个摘要助手，只返回摘要文本。', prompt.replace('{content}', text));
     return result.trim().slice(0, 50) || null;
   } catch (err) {
     console.error('Auto-summary failed:', err);

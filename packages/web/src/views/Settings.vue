@@ -50,6 +50,7 @@ const prefs = reactive({
   theme: 'blueberry',
   fontSize: 14,
   autoTag: true,
+  autoCategorize: true,
   autoSummary: true,
   autoSummaryMinLen: 200,
   autoTranscribeVoice: false,
@@ -113,11 +114,28 @@ const aiProviderOptions = [
 const aiFeatures = [
   { key: 'auto_tag', label: '自动标签' },
   { key: 'auto_classify', label: '自动分类' },
+  { key: 'auto_summary', label: '自动摘要' },
   { key: 'polish', label: 'AI 润色' },
   { key: 'expand', label: 'AI 扩充' },
   { key: 'write', label: 'AI 写文' },
   { key: 'chat', label: 'AI 对话' },
 ];
+
+// 3 个 auto_* feature 在提示词 tab 栏上带迷你开关 (蘑菇 2026-05-29 改: 开关从偏好设置搬到这里).
+// 其他 feature (polish/expand/write/chat) 没开关 —— 它们是用户主动触发的, 没"自动开关"语义.
+const featureToggleKey: Record<string, 'autoTag' | 'autoCategorize' | 'autoSummary'> = {
+  auto_tag: 'autoTag',
+  auto_classify: 'autoCategorize',
+  auto_summary: 'autoSummary',
+};
+function getAutoToggle(featureKey: string): boolean {
+  const k = featureToggleKey[featureKey];
+  return k ? (prefs[k] as boolean) : false;
+}
+function flipAutoToggle(featureKey: string) {
+  const k = featureToggleKey[featureKey];
+  if (k) prefs[k] = !prefs[k];
+}
 
 async function loadAiData() {
   try {
@@ -638,33 +656,9 @@ function goBack() {
             </div>
           </div>
         </div>
-        <!-- 自动生成标签 -->
-        <div class="flex items-center justify-between pt-2 border-t border-gray-100">
-          <div class="text-sm text-gray-700 font-medium">自动生成标签</div>
-          <button @click="prefs.autoTag = !prefs.autoTag"
-            class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4"
-            :class="prefs.autoTag ? 'bg-primary' : 'bg-gray-300'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
-              :class="prefs.autoTag ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-        <!-- 自动生成摘要 -->
-        <div class="flex items-center justify-between pt-2 border-t border-gray-100">
-          <div class="text-sm text-gray-700 font-medium">自动生成摘要</div>
-          <button @click="prefs.autoSummary = !prefs.autoSummary"
-            class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4"
-            :class="prefs.autoSummary ? 'bg-primary' : 'bg-gray-300'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
-              :class="prefs.autoSummary ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-        <div v-if="prefs.autoSummary" class="flex items-center gap-2">
-          <span class="text-xs text-gray-400 shrink-0">最少字符数</span>
-          <input v-model.number="localAutoSummaryMinLen" @blur="commitField(localAutoSummaryMinLen, prefs, 'autoSummaryMinLen')"
-            type="number" min="10" max="500" step="10"
-            class="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs outline-none bg-white text-center" />
-          <span class="text-xs text-gray-300">少于此长度不生成摘要</span>
-        </div>
+        <!-- 自动标签 / 自动分类 / 自动摘要 3 个开关已搬到"AI 模型 → 提示词" tab 栏;
+             "自动摘要 · 最少字符数"已挪到提示词编辑区 (auto_summary tab 选中时显示在恢复默认按钮右侧).
+             2026-05-29 蘑菇改 -->
         <!-- 讯飞语音识别 -->
         <div class="pt-2 border-t border-gray-100 space-y-2">
           <div class="text-sm text-gray-700 font-medium">语音识别（讯飞）</div>
@@ -898,21 +892,38 @@ function goBack() {
         <h3 class="text-sm font-medium text-gray-800 mb-4">提示词</h3>
         <div class="flex gap-1 mb-4 flex-wrap">
           <button v-for="f in aiFeatures" :key="f.key" @click="startEditPrompt(f.key)"
-            class="px-3 py-1.5 rounded-lg text-xs transition-colors"
+            class="px-3 py-1.5 rounded-lg text-xs transition-colors inline-flex items-center gap-1.5"
             :class="editingPromptFeature === f.key ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-500 hover:bg-gray-100'">
-            {{ f.label }}
-            <span v-if="aiPrompts[f.key]?.isCustom" class="ml-1 text-[10px]">*</span>
+            <span>{{ f.label }}</span>
+            <span v-if="aiPrompts[f.key]?.isCustom" class="text-[10px]">*</span>
+            <!-- 3 个 auto_* feature 后面带迷你开关 (autoTag / autoCategorize / autoSummary).
+                 @click.stop 阻止冒泡 → 点开关不切 tab; 点 button 其他区域正常切 tab -->
+            <span v-if="featureToggleKey[f.key]" @click.stop="flipAutoToggle(f.key)" role="switch"
+              :title="getAutoToggle(f.key) ? '自动开启 - 点击关闭' : '已关闭 - 点击开启'"
+              class="inline-flex h-3 w-6 items-center rounded-full transition-colors cursor-pointer align-middle shrink-0"
+              :class="getAutoToggle(f.key) ? 'bg-primary' : 'bg-gray-300'">
+              <span class="inline-block h-2 w-2 rounded-full bg-white shadow transition-transform"
+                :class="getAutoToggle(f.key) ? 'translate-x-3' : 'translate-x-0.5'" />
+            </span>
           </button>
         </div>
         <div v-if="editingPromptFeature">
           <textarea v-model="editingPromptText" rows="8" spellcheck="false"
             class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs leading-relaxed outline-none focus:border-primary font-mono resize-none text-gray-600" />
           <p class="text-xs text-gray-400 mt-1">用 {content} 表示笔记内容，{context} 表示上下文</p>
-          <div class="flex gap-2 mt-3">
+          <div class="flex gap-2 mt-3 items-center">
             <button @click="savePrompt" :disabled="saving" class="px-4 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-50" style="background: rgb(var(--c-accent))">
               {{ saving ? '保存中...' : '保存' }}
             </button>
             <button @click="resetPrompt(editingPromptFeature)" class="px-4 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">恢复默认</button>
+            <!-- 仅 auto_summary tab 显示触发阈值, 跟保存/恢复同行右侧 (蘑菇 2026-05-29: 从偏好设置挪过来集中) -->
+            <div v-if="editingPromptFeature === 'auto_summary'" class="flex items-center gap-2 ml-2">
+              <span class="text-xs text-gray-400 shrink-0">长度小于</span>
+              <input v-model.number="localAutoSummaryMinLen" @blur="commitField(localAutoSummaryMinLen, prefs, 'autoSummaryMinLen')"
+                type="number" min="10" max="500" step="10"
+                class="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs outline-none bg-white text-center" />
+              <span class="text-xs text-gray-400 shrink-0">不生成摘要</span>
+            </div>
           </div>
         </div>
         <div v-else class="text-center py-6 text-gray-400 text-xs">点击上方功能标签查看和编辑提示词</div>

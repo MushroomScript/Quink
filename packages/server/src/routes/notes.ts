@@ -261,6 +261,7 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
     const prefs = (user as any)?.preferences || {};
     const tagEnabled = prefs.autoTag !== false;
     const summaryEnabled = prefs.autoSummary !== false;
+    const categorizeEnabled = prefs.autoCategorize !== false;
     const summaryMinLen = prefs.autoSummaryMinLen || 200;
 
     // 摘要长度判断: 排除图片/音频/视频/文档等附件 markdown,只看纯文字长度.
@@ -274,23 +275,15 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
     const [tags, category, summary] = await Promise.all([
       // 用户已自己写了标签 → 直接用; 关了自动标签 → 留空; 否则 AI 生成
       existingTags.length > 0 ? Promise.resolve(existingTags) : (tagEnabled ? autoTag(userId, content) : Promise.resolve([] as string[])),
-      autoClassify(userId, content),
+      categorizeEnabled ? autoClassify(userId, content) : Promise.resolve(null),
       summaryEnabled && plainTextLen >= summaryMinLen ? autoSummary(userId, content) : Promise.resolve(null),
     ]);
 
     const updates: Record<string, any> = { aiProcessed: true };
     if (tags.length > 0 && existingTags.length === 0) updates.tags = tags;
-    if (category) {
-      updates.category = category;
-      // 自动创建分类（如果不存在）
-      const existing = await db.select().from(schema.categories)
-        .where(and(eq(schema.categories.userId, userId), eq(schema.categories.name, category))).get();
-      if (!existing) {
-        await db.insert(schema.categories).values({
-          userId, name: category, parentId: null, icon: null, sortOrder: 0,
-        }).catch(() => {}); // 忽略重复
-      }
-    }
+    // 不再"AI 返回新分类就自动 insert" (2026-05-29). autoClassify 已经在内部用 {categories} 限定 + 校验,
+    // 返回值要么在 categories 表里要么是 null. category 表只在注册 seed / 用户手动添加时增长.
+    if (category) updates.category = category;
     if (summary) updates.summary = summary;
 
     await db.update(schema.notes).set(updates).where(eq(schema.notes.id, noteId));

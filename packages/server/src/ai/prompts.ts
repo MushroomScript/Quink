@@ -1,14 +1,20 @@
-export const AI_FEATURES = ['auto_tag', 'auto_classify', 'polish', 'expand', 'write', 'chat'] as const;
+export const AI_FEATURES = ['auto_tag', 'auto_classify', 'auto_summary', 'polish', 'expand', 'write', 'chat'] as const;
 export type AiFeature = typeof AI_FEATURES[number];
 
 export const AI_FEATURE_LABELS: Record<AiFeature, string> = {
   auto_tag: '自动标签',
   auto_classify: '自动分类',
+  auto_summary: '自动摘要',
   polish: 'AI 润色',
   expand: 'AI 扩充',
   write: 'AI 写文',
   chat: 'AI 对话',
 };
+
+// 新用户注册时 seed 的默认大类. 之前自动分类 prompt 里硬编码 9 个细分类 (编程/思路 等), AI 容易编造新分类, 后端
+// processNoteWithAi 还自动 insert → 分类列表无限膨胀. 改方案: prompt 用 {categories} 占位符注入用户当前
+// 分类, AI 必须从列表里选 (有"其他"兜底), 后端校验返回不在列表就 null. 老用户不补种 (蘑菇决定).
+export const DEFAULT_CATEGORIES: readonly string[] = ['工作', '学习', '生活', '其他'];
 
 export const DEFAULT_PROMPTS: Record<AiFeature, string> = {
   auto_tag: `分析以下笔记内容，提取 3-5 个最相关的关键标签。
@@ -21,11 +27,23 @@ export const DEFAULT_PROMPTS: Record<AiFeature, string> = {
 笔记内容：
 {content}`,
 
-  auto_classify: `分析以下笔记内容，判断它最适合的分类。
-可选分类：编程/思路、编程/踩坑、编程/命令、编程/部署、待办、生活、工作、学习、其他
+  auto_classify: `分析以下笔记内容，从"已有分类"中选择最匹配的一个。
+
+已有分类：{categories}
+
 要求：
-- 仅返回一个分类名称
-- 不要返回任何其他内容
+- 只能从上方"已有分类"中选择，不要编造新分类
+- 仅返回分类名称本身，不要加引号、标点或其他文字
+- 如果内容完全无法判断（例如只有空白、乱码），返回空字符串
+
+笔记内容：
+{content}`,
+
+  auto_summary: `用一句话（不超过30字）概括以下内容的核心。
+要求：
+- 只返回摘要文本本身
+- 不加引号或其他标记
+- 严格控制在30字以内
 
 笔记内容：
 {content}`,
