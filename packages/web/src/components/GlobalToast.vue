@@ -1,38 +1,56 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { useToast } from '@/composables/useToast';
 const { toasts, dismiss, pause, resume } = useToast();
 
-// toast 顶部跟搜索栏顶部对齐 (桌面端); 移动端搜索栏隐藏时落到 TopBar Main bar 顶部
-// 用 ResizeObserver 监听 TopBar 高度变化, window resize 兜底 Electron 标题栏 mount / 断点切换
+// 容器顶部实时对齐搜索栏顶部. 用 rAF 持续校正, 覆盖 TopBar 高度变化 / Electron
+// 标题栏延迟 mount / 主题切换字体高度差 / filter bar 展开 / 首屏 layout 抖动 等
+// 所有 searchBox 位置变化场景. 只在有 toast 时跑, 避免空转.
+// 移动端搜索栏 display:none (offsetParent 为 null), 退回 header top + 8.
 const topOffset = ref('14px');
-let resizeObs: ResizeObserver | null = null;
+let rafId: number | null = null;
 
-function updateOffset() {
+function measureOffset(): string {
   const searchBox = document.querySelector('[data-search-box]') as HTMLElement | null;
-  // searchBox display:none (hidden md:block) 在 mobile 下 bbox 为 0, 退回 header top + 8
   if (searchBox && searchBox.offsetParent !== null) {
-    topOffset.value = `${searchBox.getBoundingClientRect().top}px`;
-    return;
+    return `${searchBox.getBoundingClientRect().top}px`;
   }
   const header = document.querySelector('header');
-  if (header) topOffset.value = `${header.getBoundingClientRect().top + 8}px`;
+  if (header) return `${header.getBoundingClientRect().top + 8}px`;
+  return '14px';
 }
 
-onMounted(() => {
-  updateOffset();
-  const header = document.querySelector('header');
-  if (header) {
-    resizeObs = new ResizeObserver(updateOffset);
-    resizeObs.observe(header);
+function tick() {
+  const next = measureOffset();
+  if (next !== topOffset.value) topOffset.value = next;
+  rafId = requestAnimationFrame(tick);
+}
+
+function startTracking() {
+  if (rafId !== null) return;
+  rafId = requestAnimationFrame(tick);
+}
+
+function stopTracking() {
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
   }
-  window.addEventListener('resize', updateOffset);
+}
+
+// 有 toast → 开启 rAF; 无 toast → 停. 数组从 0 跳到 N 的瞬间立刻校正一次,
+// 避免新 toast 出现时还停留在上一次缓存值上.
+watch(() => toasts.value.length, (len) => {
+  if (len > 0) startTracking();
+  else stopTracking();
 });
 
-onUnmounted(() => {
-  resizeObs?.disconnect();
-  window.removeEventListener('resize', updateOffset);
+onMounted(() => {
+  topOffset.value = measureOffset();
+  if (toasts.value.length > 0) startTracking();
 });
+
+onUnmounted(stopTracking);
 
 async function onAction(id: number, handler: () => void | Promise<void>) {
   // 先关 toast 再跑 handler: 避免 await 期间用户多点导致重复 restore
@@ -70,15 +88,16 @@ function onHoverLeave(id: number, hasAction: boolean) {
     class="fixed left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 items-center pointer-events-none"
     :style="{ top: topOffset }"
     enter-active-class="transition-[opacity,transform] duration-300 ease-out"
-    enter-from-class="opacity-0 -translate-y-8"
-    enter-to-class="opacity-100 translate-y-0"
+    enter-from-class="!opacity-0 -translate-y-8"
+    enter-to-class="translate-y-0"
     leave-active-class="absolute transition-[opacity,transform] duration-300 ease-in"
-    leave-from-class="opacity-100 translate-y-0"
-    leave-to-class="opacity-0 -translate-y-8"
+    leave-from-class="translate-y-0"
+    leave-to-class="!opacity-0 -translate-y-8"
     move-class="transition-transform duration-300 ease-out"
   >
     <div v-for="t in toasts" :key="t.id"
-      class="px-4 py-1.5 rounded-full text-sm font-medium text-white select-none shadow-lg flex items-center gap-3"
+      class="px-4 py-1.5 rounded-full text-sm font-medium text-white select-none shadow-lg flex items-center gap-3 transform-gpu"
+      :style="{ opacity: 0.75 }"
       :class="[
         t.action ? 'pointer-events-auto' : 'pointer-events-none',
         t.kind === 'error' ? 'bg-red-500' : 'bg-primary',
