@@ -156,7 +156,7 @@
       const raw = input.value.trim();
       if (!raw) return;
       saveBtn.disabled = true;
-      saveBtn.textContent = '保存中...';
+      saveBtn.textContent = '保存中';
       // 转成 HTML 格式，和 Web 端 Tiptap 输出保持一致
       const content = raw.split('\n').map(line => '<p>' + (line || '<br>') + '</p>').join('');
       const result = await window.quink.saveNote(content, types[currentTypeIdx]);

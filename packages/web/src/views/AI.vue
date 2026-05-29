@@ -856,7 +856,7 @@ async function retryLastMessage() {
               <span class="animate-bounce" style="animation-delay: 150ms">·</span>
               <span class="animate-bounce" style="animation-delay: 300ms">·</span>
             </span>
-            思考中
+            思考中...
           </div>
         </div>
 

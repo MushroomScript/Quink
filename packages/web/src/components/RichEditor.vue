@@ -560,7 +560,7 @@ async function startVoiceRecord() {
       if (!voiceChunks.length) return;
 
       // 暂存 blob,弹窗让用户命名后才上传
-      // voiceUploading 在此覆盖"命名中+上传中"整个等待阶段,防止用户期间再按录音
+      // voiceUploading 在此覆盖"命名中+上传中..."整个等待阶段,防止用户期间再按录音
       pendingVoiceBlob.value = new Blob(voiceChunks, { type: picked.baseMime });
       pendingVoiceDur.value = dur;
       pendingVoiceExt.value = picked.ext;
@@ -763,11 +763,11 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
           <button v-if="!aiResult" @click="runAi" :disabled="aiProcessing"
             class="px-4 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-50 transition-colors"
             style="background: rgb(var(--c-accent))">
-            {{ aiProcessing ? '处理中...' : '开始' }}
+            {{ aiProcessing ? '处理中' : '开始' }}
           </button>
           <template v-else>
             <button @click="applyAiResult" class="px-4 py-1.5 text-white text-xs font-medium rounded-lg transition-colors" style="background: rgb(var(--c-accent))">应用</button>
-            <button @click="runAi" :disabled="aiProcessing" class="px-4 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">{{ aiProcessing ? '处理中...' : '重新生成' }}</button>
+            <button @click="runAi" :disabled="aiProcessing" class="px-4 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">{{ aiProcessing ? '处理中' : '重新生成' }}</button>
           </template>
         </div>
       </div>

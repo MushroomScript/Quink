@@ -8,9 +8,7 @@ import { resolveMarkdownFileUrls, injectMissingFileFallback } from '@/utils/file
 
 // setup 顶层同步设主题（在 Vue 第一次 render 前），让窗口 show 时就是正确主题色
 document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry');
-// 同步用户字体大小,让 rem 单位元素跟主窗口一致
-const savedFontSize = localStorage.getItem('quink_font_size');
-if (savedFontSize) document.documentElement.style.fontSize = savedFontSize + 'px';
+// 显示比例 (zoom) 由 Electron 主进程 webContents.setZoomFactor 统一控制, renderer 不再操作 fontSize
 
 const auth = useAuthStore();
 const query = ref('');
@@ -136,12 +134,7 @@ onMounted(async () => {
   document.documentElement.setAttribute('data-theme', theme);
   document.addEventListener('keydown', onGlobalKeydown);
   setTimeout(() => inputEl.value?.focus(), 500);
-  // 用户在主窗口改字体后实时同步(AiChat 窗口尺寸不动,只调 html font-size)
-  try {
-    (window as any).quink?.onFontSizeChanged?.((size: number) => {
-      document.documentElement.style.fontSize = size + 'px';
-    });
-  } catch {}
+  // zoom 同步: 主窗口改显示比例时主进程直接 setZoomFactor 应用到 AiChat 窗口, renderer 不再需要监听 + 自行操作 fontSize
 });
 
 onUnmounted(() => { document.removeEventListener('keydown', onGlobalKeydown); });

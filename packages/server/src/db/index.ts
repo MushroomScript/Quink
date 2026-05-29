@@ -134,6 +134,23 @@ try { sqlite.exec(`UPDATE notes SET content = REPLACE(content, '/api/uploads/', 
 // 导致 sidebar 徽章 (严格 = 'pending') 漏算; 前端 Todos.vue (!= 'done') 又算上, 两边数字对不齐.
 // 路由已修(转 todo 时自动补 'pending'), 此处一次性修存量 NULL → 'pending'. WHERE 限制反复跑无害.
 try { sqlite.exec(`UPDATE notes SET todo_status = 'pending' WHERE type = 'todo' AND todo_status IS NULL`); } catch {}
+// Migrate: preferences.fontSize (12-22 px, 老的 rem-based 字号缩放) → preferences.zoomLevel (75-200 %, 新的 Electron setZoomFactor 缩放)
+// 改 zoom 后所有元素同比 scale, 永久解决跨字号 round 奇偶对齐问题. 老 fontSize 按比例映射到最近的新档位 (8 档 75/80/90/100/110/125/150/200)
+// WHERE 限制只动还有 fontSize 字段且没 zoomLevel 字段的 row, 反复跑无害
+try { sqlite.exec(`UPDATE users SET preferences = json_set(json_remove(preferences, '$.fontSize'), '$.zoomLevel',
+  CASE json_extract(preferences, '$.fontSize')
+    WHEN 12 THEN 75
+    WHEN 13 THEN 80
+    WHEN 14 THEN 90
+    WHEN 15 THEN 90
+    WHEN 16 THEN 100
+    WHEN 17 THEN 110
+    WHEN 18 THEN 110
+    WHEN 20 THEN 125
+    WHEN 22 THEN 125
+    ELSE 100
+  END
+) WHERE json_extract(preferences, '$.fontSize') IS NOT NULL AND json_extract(preferences, '$.zoomLevel') IS NULL`); } catch {}
 // Migrate: notes.content_pinyin (拼音搜索支持: 全拼 + 首字母拼接串,搜索时 LIKE %query% 命中)
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN content_pinyin TEXT'); } catch {}
 // 一次性回填 + 升级重算: PINYIN_SCHEMA_VERSION 每次 toPinyinSearchable 算法升级时 +1,

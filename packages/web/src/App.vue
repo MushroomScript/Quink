@@ -199,10 +199,11 @@ function applyUserPreferences(user: any) {
     document.documentElement.setAttribute('data-theme', prefs.theme);
     localStorage.setItem('quink_theme', prefs.theme);
   }
-  if (prefs.fontSize) {
-    document.documentElement.style.fontSize = prefs.fontSize + 'px';
-    localStorage.setItem('quink_font_size', String(prefs.fontSize));
-  }
+  // Electron 端: 调主进程 setZoomFactor 应用 zoom (所有窗口同步); Web/PWA 端 Phase 2 加 CSS zoom 兜底.
+  // localStorage 缓存让 inline script + 创建快捷窗口前 ensureCurrentZoomLevel 拿得到上次值, 避开服务端慢启动 / preferences 不完整 race.
+  const zl = prefs.zoomLevel || 100;
+  localStorage.setItem('quink_zoom_level', String(zl));
+  try { (window as any).quinkDesktop?.syncZoom?.(zl); } catch {}
 }
 
 // HMR 友好：模块级保存上次挂的副作用，重 mount 时先清理旧的，避免 capture 阶段旧 handler

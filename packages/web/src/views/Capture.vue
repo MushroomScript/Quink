@@ -7,14 +7,8 @@ import RichEditor from '@/components/RichEditor.vue';
 // setup 顶层同步设主题（在 Vue 第一次 render 前），让窗口 show 时就是正确主题色，
 // 避免暗色主题用户首次打开看到白色闪烁
 document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry');
-// 同步用户字体大小(主窗口和 Capture 共享 localStorage),让 rem 单位的元素一致。
-// 同时打 data-font-size 给 CSS 用(对 12px 单独做"保存/停止"按钮的字形居中微调)
-function applyFontSize(size: string | number) {
-  document.documentElement.style.fontSize = size + 'px';
-  document.documentElement.setAttribute('data-font-size', String(size));
-}
-const savedFontSize = localStorage.getItem('quink_font_size');
-if (savedFontSize) applyFontSize(savedFontSize);
+// 显示比例 (zoom) 由 Electron 主进程 webContents.setZoomFactor 统一控制, renderer 不再操作 fontSize
+// 老 data-font-size attribute 也不再设置 (zoom 模式下无需"对 12px 单独微调"这种字号相关的 CSS hack)
 
 const store = useNotesStore();
 const auth = useAuthStore();

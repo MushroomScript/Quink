@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld('quinkDesktop', {
   syncToken: (token: string | null) => ipcRenderer.send('sync-token', token),
   reloadShortcuts: () => ipcRenderer.send('reload-shortcuts'),
   syncTheme: (theme: string) => ipcRenderer.send('sync-theme', theme),
-  syncFontSize: (size: number) => ipcRenderer.send('sync-font-size', size),
+  syncZoom: (level: number) => ipcRenderer.send('sync-zoom', level),
   // 下载目录: renderer 启动时把 localStorage 中的下载路径推给 main, will-download 用它
   syncDownloadPath: (dir: string) => ipcRenderer.send('sync-download-path', dir),
   // 设置页选目录: 弹系统目录选择对话框, 返回路径或 null

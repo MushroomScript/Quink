@@ -49,7 +49,7 @@ function resetDownloadDir(): void {
 // load / save / watch 通过遍历 prefs 字段自动覆盖
 const prefs = reactive({
   theme: 'blueberry',
-  fontSize: 14,
+  zoomLevel: 100,
   autoTag: true,
   autoCategorize: true,
   autoSummary: true,
@@ -365,8 +365,10 @@ async function saveProfile() {
 let prefsLoaded = false;
 
 // 拼一份完整 preferences：保留 userPrefs 中未托管的字段（aiBindings、shortcuts 等），prefs 顶层覆盖之
+// 同时清理老 fontSize 字段 (zoom 改造后 prefs.zoomLevel 是真值, 防止 buildPrefs 把老 fontSize 又带回 DB)
 function buildPrefs() {
-  return { ...(auth.user?.preferences || {}), ...prefs };
+  const { fontSize: _legacy, ...rest } = (auth.user?.preferences || {}) as any;
+  return { ...rest, ...prefs };
 }
 
 async function savePreferences(silent = false) {
@@ -376,10 +378,10 @@ async function savePreferences(silent = false) {
     document.documentElement.setAttribute('data-theme', prefs.theme);
     localStorage.setItem('quink_theme', prefs.theme);
     try { (window as any).quinkDesktop?.syncTheme?.(prefs.theme); } catch {}
-    document.documentElement.style.fontSize = prefs.fontSize + 'px';
-    localStorage.setItem('quink_font_size', String(prefs.fontSize));
-    // 通知 Electron 主进程: 调整 Capture 窗口高度 + 转发到 capture/aichat renderer 同步字体
-    try { (window as any).quinkDesktop?.syncFontSize?.(prefs.fontSize); } catch {}
+    // Electron 端: 主进程 setZoomFactor 应用到所有 3 个窗口 + 调整 Capture 窗口尺寸;
+    // localStorage 缓存让 ensureCurrentZoomLevel / inline script 拿得到上次值
+    localStorage.setItem('quink_zoom_level', String(prefs.zoomLevel));
+    try { (window as any).quinkDesktop?.syncZoom?.(prefs.zoomLevel); } catch {}
     if (!silent) showMsg('已保存');
   } catch (err: any) {
     showMsg('保存失败: ' + err.message, 'error');
@@ -543,9 +545,11 @@ function goBack() {
         <button
           @click="saveProfile"
           :disabled="saving"
-          class="px-5 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark disabled:opacity-50"
+          class="px-5 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark disabled:opacity-50 inline-grid place-items-center"
         >
-          {{ saving ? '保存中...' : '保存' }}
+          <!-- grid stack: invisible span 永远撑 "保存中" 宽度防按钮抖, 可见 span 显示当前文字 -->
+          <span class="col-start-1 row-start-1 invisible">保存中</span>
+          <span class="col-start-1 row-start-1">{{ saving ? '保存中' : '保存' }}</span>
         </button>
       </div>
 
@@ -561,8 +565,9 @@ function goBack() {
           <input v-model="newPwd" type="password" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary" placeholder="至少6位" />
         </div>
         <div v-if="pwdMsg" class="text-xs" :class="pwdMsg.includes('成功') ? 'text-green-600' : 'text-red-500'">{{ pwdMsg }}</div>
-        <button @click="changePassword" :disabled="saving" class="px-5 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark disabled:opacity-50">
-          {{ saving ? '修改中...' : '修改密码' }}
+        <button @click="changePassword" :disabled="saving" class="px-5 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark disabled:opacity-50 inline-grid place-items-center">
+          <span class="col-start-1 row-start-1 invisible">修改密码</span>
+          <span class="col-start-1 row-start-1">{{ saving ? '修改中' : '修改密码' }}</span>
         </button>
       </div>
     </div>
@@ -590,17 +595,16 @@ function goBack() {
           </div>
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">字体大小</label>
-          <select v-model.number="prefs.fontSize" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none">
-            <option value="12">12px</option>
-            <option value="13">13px</option>
-            <option value="14">14px</option>
-            <option value="15">15px</option>
-            <option value="16">16px（默认）</option>
-            <option value="17">17px</option>
-            <option value="18">18px</option>
-            <option value="20">20px</option>
-            <option value="22">22px</option>
+          <label class="block text-xs font-medium text-gray-500 mb-1">显示比例</label>
+          <select v-model.number="prefs.zoomLevel" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none">
+            <option value="75">75%</option>
+            <option value="80">80%</option>
+            <option value="90">90%</option>
+            <option value="100">100%（默认）</option>
+            <option value="110">110%</option>
+            <option value="125">125%</option>
+            <option value="150">150%</option>
+            <option value="200">200%</option>
           </select>
         </div>
         <!-- 待办未完成数字提示 -->
@@ -782,8 +786,9 @@ function goBack() {
           <!-- Fixed shortcuts -->
         </div>
 
-        <button @click="saveShortcuts" :disabled="saving" class="mt-4 px-5 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark disabled:opacity-50">
-          {{ saving ? '保存中...' : '保存' }}
+        <button @click="saveShortcuts" :disabled="saving" class="mt-4 px-5 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark disabled:opacity-50 inline-grid place-items-center">
+          <span class="col-start-1 row-start-1 invisible">保存中</span>
+          <span class="col-start-1 row-start-1">{{ saving ? '保存中' : '保存' }}</span>
         </button>
       </div>
     </div>
@@ -811,7 +816,7 @@ function goBack() {
               <div class="text-xs text-gray-400">{{ cfg.provider }} · {{ cfg.model }}</div>
             </div>
             <button @click="testConfig(cfg.id)" class="text-xs text-gray-400 hover:text-gray-600 px-2">
-              {{ testingId === cfg.id ? (testResult || '测试中...') : '测试' }}
+              {{ testingId === cfg.id ? (testResult || '测试中') : '测试' }}
             </button>
             <button @click="startEditConfig(cfg)" class="text-xs text-gray-400 hover:text-gray-600">编辑</button>
             <button @click="deleteConfig(cfg.id)" class="text-xs text-gray-400 hover:text-red-500">删除</button>
@@ -856,8 +861,9 @@ function goBack() {
           </div>
           <div v-if="configError" class="text-red-500 text-xs bg-red-50 rounded-lg px-3 py-2">{{ configError }}</div>
           <div class="flex gap-2">
-            <button @click="saveConfig" :disabled="saving" class="px-4 pt-[0.32rem] pb-[0.43rem] text-white text-xs font-medium rounded-lg disabled:opacity-50" style="background: rgb(var(--c-accent))">
-              {{ saving ? '保存中...' : '保存' }}
+            <button @click="saveConfig" :disabled="saving" class="px-4 pt-[0.32rem] pb-[0.43rem] text-white text-xs font-medium rounded-lg disabled:opacity-50 inline-grid place-items-center" style="background: rgb(var(--c-accent))">
+              <span class="col-start-1 row-start-1 invisible">保存中</span>
+              <span class="col-start-1 row-start-1">{{ saving ? '保存中' : '保存' }}</span>
             </button>
             <button @click="editingConfig = null; configError = ''" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs text-gray-500 rounded-lg hover:bg-gray-100">取消</button>
           </div>
@@ -886,7 +892,6 @@ function goBack() {
             class="px-3 py-1.5 rounded-lg text-xs transition-colors inline-flex items-center gap-1.5"
             :class="editingPromptFeature === f.key ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-500 hover:bg-gray-100'">
             <span>{{ f.label }}</span>
-            <span v-if="aiPrompts[f.key]?.isCustom" class="text-[10px]">*</span>
             <!-- 3 个 auto_* feature 后面带迷你开关. @click.stop 阻止冒泡: 点开关不切 tab; 点 button 其他区域正常切 tab.
                  用 :model-value + @update:model-value 而非 v-model 是因为状态读/写都走 getAutoToggle/flipAutoToggle (prefs key 映射). -->
             <ToggleSwitch v-if="featureToggleKey[f.key]" size="sm"
@@ -899,8 +904,9 @@ function goBack() {
             class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs leading-relaxed outline-none focus:border-primary font-mono resize-none text-gray-600" />
           <p class="text-xs text-gray-400 mt-1">用 {content} 表示笔记内容，{context} 表示上下文</p>
           <div class="flex gap-2 mt-3 items-center">
-            <button @click="savePrompt" :disabled="saving" class="px-4 pt-[0.32rem] pb-[0.43rem] text-white text-xs font-medium rounded-lg disabled:opacity-50" style="background: rgb(var(--c-accent))">
-              {{ saving ? '保存中...' : '保存' }}
+            <button @click="savePrompt" :disabled="saving" class="px-4 pt-[0.32rem] pb-[0.43rem] text-white text-xs font-medium rounded-lg disabled:opacity-50 inline-grid place-items-center" style="background: rgb(var(--c-accent))">
+              <span class="col-start-1 row-start-1 invisible">保存中</span>
+              <span class="col-start-1 row-start-1">{{ saving ? '保存中' : '保存' }}</span>
             </button>
             <button @click="resetPrompt(editingPromptFeature)" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs text-gray-500 rounded-lg hover:bg-gray-100">恢复默认</button>
             <!-- 仅 auto_summary tab 显示触发阈值, 跟保存/恢复同行右侧 (蘑菇 2026-05-29: 从偏好设置挪过来集中) -->
@@ -925,7 +931,7 @@ function goBack() {
         <p class="text-sm text-gray-500">将所有笔记导出为 Markdown 文件 + 附件，打包成 ZIP。</p>
         <button @click="handleExport" :disabled="exporting"
           class="px-4 py-2 text-sm font-medium rounded-lg transition-colors" style="background: rgb(var(--c-accent) / 0.1); color: rgb(var(--c-accent))">
-          {{ exporting ? '导出中...' : '导出 ZIP' }}
+          {{ exporting ? '导出中' : '导出 ZIP' }}
         </button>
       </div>
       <!-- Import -->
@@ -935,7 +941,7 @@ function goBack() {
         <button @click="triggerImport" :disabled="importing"
           class="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
           style="background: rgb(var(--c-accent) / 0.1); color: rgb(var(--c-accent))">
-          {{ importing ? '导入中...' : '选择 ZIP 文件导入' }}
+          {{ importing ? '导入中' : '选择 ZIP 文件导入' }}
         </button>
         <p v-if="importResult" class="text-xs" :class="importResult.startsWith('成功') ? 'text-green-600' : 'text-red-500'">{{ importResult }}</p>
       </div>

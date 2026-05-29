@@ -71,14 +71,13 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 | `note-saved` | renderer → main (send) | 通知 main 显示"已保存" toast + 转发 `quink-note-created` 给主窗口 (可选带 `noteId` 让主窗口走单条 AI 结果轮询 patch, 不带回退全量 fetchNotes) |
 | `content-ready` | renderer → main (send) | Vditor 等异步组件加载完，main 才 show 窗口 |
 | `sync-theme` | renderer → main (send) | 主窗口切主题时通知 main，main 销毁快捷窗口 + 更新缓存 |
-| `sync-font-size` | renderer → main (send) | 主窗口改字体时通知 main，main 调整 Capture 窗口尺寸 + 转发到快捷窗口 |
+| `sync-zoom` | renderer → main (send) | 主窗口改"显示比例"时通知 main，main 调 `webContents.setZoomFactor(level/100)` 给 3 个窗口（main / Capture / AiChat）+ 调整 Capture 窗口物理尺寸。参数 `level` 是百分比整数（75-200）。**取代老 `sync-font-size`**（rem-based 字号缩放 → Electron 原生 zoom，跨字号对齐永久解决，详见 RENDERING-PITFALLS.md）|
 | `sync-download-path` | renderer → main (send) | 设置页改下载目录时把路径推给 main，will-download 用 `currentDownloadDir` 直接 setSavePath（不弹对话框） |
 | `pick-directory` | renderer → main (invoke) | 设置页选下载目录时调，main 弹 `dialog.showOpenDialog({properties:['openDirectory','createDirectory']})`，返回路径或 null |
 | `get-default-download-dir` | renderer → main (invoke) | 设置页显示"系统默认"路径时调，main 返回 `app.getPath('downloads')` 的真实绝对路径 |
 | `reload-shortcuts` | renderer → main (send) | 用户修改快捷键后重新注册 |
 | `window-shown` | main → renderer (send) | 通知 renderer 窗口刚显示（用于聚焦输入框、同步主题等） |
 | `window-hidden` | main → renderer (send) | 通知 renderer 窗口被隐藏 |
-| `font-size-changed` | main → renderer (send) | 通知 Capture / AiChat renderer 更新 document fontSize（用户在主窗口改了字体） |
 | `open-attachment` | renderer → main (invoke) | 用系统默认应用打开附件 URL（fetch 到 OS 临时目录 → `shell.openPath`）。原因：直接让浏览器跟随 `<a href="/api/uploads/xxx.md">` 跳走时，Electron 内嵌 chromium 对 `text/markdown` 等 mime 显示空白页 |
 | `cancel-attachment` | renderer → main (invoke) | 取消正在下载的附件。main 端在 `attachmentControllers: Map<url, AbortController>` 找到对应 controller 调 `abort()`，被取消的 `open-attachment` 走 catch 分支返回 `{ success: false, cancelled: true }`（区别于停滞超时 → `{ success: false, error: '下载停滞...' }`）。renderer 据此决定是否弹 toast（cancelled 不弹） |
 | `pdf-thumb-cache:get` | renderer → main (invoke) | 查 PDF 首页缩略图持久化缓存。返回 `Buffer` 或 `null`。目录 `userData/pdf-thumb-cache/<basename(url)>.jpg` |

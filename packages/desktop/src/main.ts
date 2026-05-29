@@ -47,8 +47,9 @@ let nativeModuleRef: any = null;
 let currentTheme = 'blueberry';
 // 下载目录: 默认 ~/Downloads, renderer 端 (Settings 配置) 通过 IPC sync-download-path 推到这里
 let currentDownloadDir = app.getPath('downloads');
-// 当前用户字体大小(默认 16 跟 Settings.vue prefs 一致),用于 Capture 窗口高度按比例缩放
-let currentFontSize = 16;
+// 当前用户显示比例 (默认 100%, 8 档 75/80/90/100/110/125/150/200), 用于 Capture 窗口尺寸按比例缩放
+// + 通过 webContents.setZoomFactor(level/100) 应用到 3 个窗口. zoom 跟老 fontSize 的区别详见根 RENDERING-PITFALLS.md.
+let currentZoomLevel = 100;
 
 const themeCachePath = () => path.join(app.getPath('userData'), 'theme-cache.json');
 function readCachedTheme(): string {
@@ -368,7 +369,7 @@ function showMainWindow() {
 // ──────────────────────────────────
 function createCaptureWindow() {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
-  const { width, height } = getCaptureSize(currentFontSize);
+  const { width, height } = getCaptureSize(currentZoomLevel);
 
   captureWindow = new BrowserWindow({
     width,
@@ -415,7 +416,7 @@ function createCaptureWindow() {
 async function toggleCaptureWindow() {
   if (!captureWindow) {
     await ensureCurrentTheme(); // 创建前同步主题，保证 backgroundColor 用最新值
-    await ensureCurrentFontSize(); // 同步字体大小,保证窗口初始 height 正确
+    await ensureCurrentZoomLevel(); // 同步显示比例,保证窗口初始 height 正确
     createCaptureWindow();
     // 等内容（Vditor）加载完再 show，避免用户看到布局跳变
     // 带 1500ms 超时兜底，防止 'content-ready' 未触发时窗口一直不显示
@@ -750,12 +751,17 @@ ipcMain.handle('pick-directory', async (event): Promise<string | null> => {
   return result.filePaths[0];
 });
 
-// 用户改字体大小: 调整 currentFontSize + Capture 窗口尺寸 (宽+高) + 通知所有快捷窗口同步 html font-size
-ipcMain.on('sync-font-size', (_event, size: number) => {
-  if (!size || size < 12 || size > 22) return;
-  currentFontSize = size;
+// 用户改显示比例: 调整 currentZoomLevel + Capture 窗口尺寸 (宽+高) + 给所有 3 个窗口 setZoomFactor.
+// zoom 是 paint 层等比 scale, renderer 不再需要监听 font-size-changed 自己改 fontSize. setZoomFactor 在 webContents 上幂等可重复设.
+ipcMain.on('sync-zoom', (_event, level: number) => {
+  if (!level || level < 75 || level > 200) return;
+  currentZoomLevel = level;
+  const factor = level / 100;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.setZoomFactor(factor);
+  }
   if (captureWindow && !captureWindow.isDestroyed()) {
-    const { width: w, height: h } = getCaptureSize(size);
+    const { width: w, height: h } = getCaptureSize(level);
     const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
     // 先放开 min/max 限制再 setBounds,否则锁死的尺寸不让改
     captureWindow.setMinimumSize(w, h);
@@ -766,11 +772,11 @@ ipcMain.on('sync-font-size', (_event, size: number) => {
       width: w,
       height: h,
     });
-    captureWindow.webContents.send('font-size-changed', size);
+    captureWindow.webContents.setZoomFactor(factor);
   }
-  // AiChat 用户可自由 resize,只同步字号不改窗口尺寸
+  // AiChat 用户可自由 resize,只 setZoomFactor 不改窗口尺寸
   if (aiChatWindow && !aiChatWindow.isDestroyed()) {
-    aiChatWindow.webContents.send('font-size-changed', size);
+    aiChatWindow.webContents.setZoomFactor(factor);
   }
 });
 
@@ -816,23 +822,23 @@ async function ensureCurrentTheme() {
   } catch {}
 }
 
-// 从主窗口 localStorage 同步用户字体大小,创建 Capture 前调用
-async function ensureCurrentFontSize() {
+// 从主窗口 localStorage 同步用户显示比例,创建 Capture 前调用
+async function ensureCurrentZoomLevel() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
     const s = await mainWindow.webContents.executeJavaScript(
-      `localStorage.getItem('quink_font_size')`
+      `localStorage.getItem('quink_zoom_level')`
     );
     const n = Number(s);
-    if (n && n >= 12 && n <= 22) currentFontSize = n;
+    if (n && n >= 75 && n <= 200) currentZoomLevel = n;
   } catch {}
 }
 
-// Capture 窗口尺寸按字体比例缩放: 650×155 是默认 16px 字体时的基准。
-// 宽度也得跟着缩,否则字号 22 时 toolbar 按钮宽超过窗口宽 → 工具栏换行。
-// 12 → 487×116, 16 → 650×155, 22 → 894×213。
-function getCaptureSize(fontSize: number): { width: number; height: number } {
-  const factor = fontSize / 16;
+// Capture 窗口尺寸按 zoom 比例缩放: 650×155 是默认 100% 时的基准。
+// 宽度也得跟着缩,否则 150% 时 toolbar 按钮宽超过窗口宽 → 工具栏换行。
+// 75 → 487×116, 100 → 650×155, 150 → 975×232。
+function getCaptureSize(zoomLevel: number): { width: number; height: number } {
+  const factor = zoomLevel / 100;
   return { width: Math.round(650 * factor), height: Math.round(155 * factor) };
 }
 
