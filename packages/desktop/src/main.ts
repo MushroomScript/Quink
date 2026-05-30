@@ -851,12 +851,33 @@ function applyZoomToWebContents(wc: Electron.WebContents, factor: number) {
   wc.setZoomLevel(0);
   wc.setZoomFactor(factor);
 }
+
+// 主窗口物理尺寸跟 zoom 联动: 基准按屏幕宽高比算 (跟屏幕比例一致),
+// 100% = 屏幕 60% 宽 × 等比高 (16:9 屏 → 60%×60%/16*9). zoom 变化时强制 setBounds 居中
+// (覆盖用户拖动的自定义尺寸, 接受 trade-off 换"窗口跟 zoom 等比缩放" + "不出现内容大窗口小的留白").
+// cap 屏幕 95% 防超屏 (200% zoom 在小屏可能算超出).
+function applyMainWindowZoomSize(zoomLevel: number) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const factor = zoomLevel / 100;
+  const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
+  // 100% 基准: 屏幕 60% 宽, 高度按屏幕宽高比等比. 避免硬编码 1280×860 让窗口在不同分辨率下比例不协调
+  const baseW = Math.round(screenW * 0.6);
+  const baseH = Math.round(baseW * (screenH / screenW));
+  const W = Math.min(Math.round(baseW * factor), Math.round(screenW * 0.95));
+  const H = Math.min(Math.round(baseH * factor), Math.round(screenH * 0.95));
+  // 居中 (从中间向四周扩展, 不是从右下角)
+  const x = Math.round((screenW - W) / 2);
+  const y = Math.round((screenH - H) / 2);
+  mainWindow.setMinimumSize(W, H);
+  mainWindow.setBounds({ x, y, width: W, height: H });
+}
 ipcMain.on('sync-zoom', (_event, level: number) => {
   if (!level || level < 75 || level > 200) return;
   currentZoomLevel = level;
   const factor = level / 100;
   if (mainWindow && !mainWindow.isDestroyed()) {
     applyZoomToWebContents(mainWindow.webContents, factor);
+    applyMainWindowZoomSize(level);
   }
   if (captureWindow && !captureWindow.isDestroyed()) {
     const { width: w, height: h } = getCaptureSize(level);

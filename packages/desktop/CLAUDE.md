@@ -152,6 +152,20 @@ Quink web 是 SPA，App.vue 是根组件挂 `#app`。**所有 BrowserWindow 都�
 
 修法：App.vue `onMounted` 的 wheel hook + `onZoomStep` listener 都包 `if (!isShortcutWindow)` —— 用 `location.pathname` 判断（`route.name` 在 mount 时机不可靠）。当前判 `['/capture', '/ai-chat', '/float']` 不算主窗口。
 
+### 5. 主窗口物理尺寸跟 zoom 联动 + 居中，防 sidebar 收起 / toolbar 换行 / 留白
+
+主窗口 `setZoomFactor` 后 viewport CSS px = 物理 px / factor。200% zoom 时 1280 物理 → **640 CSS px < Tailwind md: breakpoint (768)** → 触发响应式抽屉模式（sidebar 自动收起）；编辑器 toolbar 按 CSS px 换行同理。
+
+修法：`main.ts` 的 `applyMainWindowZoomSize(zoomLevel)` 给 mainWindow `setBounds` 按 factor 联动 + 居中位置：
+
+- **基准按屏幕宽高比算**：baseW = screenW × 0.6，baseH = baseW × (screenH / screenW)。跟屏幕 ratio 一致，避免硬编码 1280×860 让窗口在 16:9 / 16:10 / 21:9 屏感觉比例不协调
+- W = baseW × factor，H = baseH × factor
+- cap 到屏幕 95% 防超屏（小屏 1366×768 用 200% zoom 算超出物理尺寸）
+- **居中位置**：x = (screenW - W) / 2，y = (screenH - H) / 2（从中间向四周扩展，**不是从右下角扩展**保留原 x,y）
+- `setMinimumSize` 同时设为相同 W,H（用户后续拖小到挤压 sidebar 的可能性消除）
+
+**trade-off**：zoom 变化**覆盖用户拖动的自定义尺寸**。接受这个换 "窗口跟 zoom 等比缩放" + "不出现 zoom 减小后内容缩小但窗口仍大的留白"。
+
 ## chrome-devtools-mcp 调试 Electron
 
 Electron 启动时加 `--remote-debugging-port=9222`，Chrome DevTools Protocol 暴露在 `http://127.0.0.1:9222`。配合 `chrome-devtools-mcp` MCP server 可以让 Claude 直接操作 Electron 内的页面（evaluate_script / click / press_key / take_screenshot / 注入 MutationObserver 等）。
