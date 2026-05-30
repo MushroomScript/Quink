@@ -693,42 +693,6 @@ function goBack() {
             <ToggleSwitch v-model="prefs.autoTranscribeVoice" class="ml-4" />
           </div>
         </div>
-
-        <!-- AI 对话设置 -->
-        <div class="pt-2 border-t border-gray-100 space-y-3">
-          <div class="text-sm text-gray-700 font-medium">AI 对话</div>
-          <!-- 人格选择 -->
-          <div>
-            <div class="text-xs text-gray-600 mb-1.5">AI 人格风格</div>
-            <div class="grid grid-cols-2 gap-1.5">
-              <button v-for="(p, key) in personas" :key="key" @click="prefs.aiPersona = key"
-                class="px-3 py-2 rounded-lg text-left text-xs transition-colors border"
-                :class="prefs.aiPersona === key ? 'border-primary bg-primary-light text-primary-dark font-medium' : 'border-gray-200 text-gray-500 hover:bg-gray-50'">
-                <div class="font-medium">{{ p.label }}</div>
-                <div class="text-[11px] mt-0.5 opacity-70">{{ p.description }}</div>
-              </button>
-            </div>
-            <textarea v-if="prefs.aiPersona === 'custom'" v-model="localAiPersonaCustom"
-              @blur="commitField(localAiPersonaCustom, prefs, 'aiPersonaCustom')"
-              rows="3" placeholder="输入自定义人格提示词..."
-              class="w-full mt-2 px-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
-          </div>
-          <!-- Token 上限 -->
-          <div class="flex items-center justify-between">
-            <div class="text-xs text-gray-600">上下文 Token 上限</div>
-            <select v-model.number="prefs.aiChatMaxTokens" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30">
-              <option :value="4096">4K</option>
-              <option :value="8192">8K</option>
-              <option :value="16384">16K</option>
-              <option :value="32768">32K</option>
-              <option :value="65536">64K</option>
-              <option :value="131072">128K</option>
-              <option :value="262144">256K</option>
-              <option :value="524288">512K</option>
-              <option :value="1048576">1M</option>
-            </select>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -924,6 +888,42 @@ function goBack() {
           </div>
         </div>
         <div v-else class="text-center py-6 text-gray-400 text-xs">点击上方功能标签查看和编辑提示词</div>
+      </div>
+
+      <!-- AI 对话 (人格 + Token 上限, 从偏好设置挪过来) -->
+      <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-3">
+        <h3 class="text-sm font-medium text-gray-800">AI 对话</h3>
+        <!-- 人格选择 -->
+        <div>
+          <div class="text-xs text-gray-600 mb-1.5">AI 人格风格</div>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button v-for="(p, key) in personas" :key="key" @click="prefs.aiPersona = key"
+              class="px-3 py-2 rounded-lg text-left text-xs transition-colors border"
+              :class="prefs.aiPersona === key ? 'border-primary bg-primary-light text-primary-dark font-medium' : 'border-gray-200 text-gray-500 hover:bg-gray-50'">
+              <div class="font-medium">{{ p.label }}</div>
+              <div class="text-[11px] mt-0.5 opacity-70">{{ p.description }}</div>
+            </button>
+          </div>
+          <textarea v-if="prefs.aiPersona === 'custom'" v-model="localAiPersonaCustom"
+            @blur="commitField(localAiPersonaCustom, prefs, 'aiPersonaCustom')"
+            rows="3" placeholder="输入自定义人格提示词..."
+            class="w-full mt-2 px-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+        </div>
+        <!-- Token 上限 -->
+        <div class="flex items-center justify-between">
+          <div class="text-xs text-gray-600">上下文 Token 上限</div>
+          <select v-model.number="prefs.aiChatMaxTokens" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30">
+            <option :value="4096">4K</option>
+            <option :value="8192">8K</option>
+            <option :value="16384">16K</option>
+            <option :value="32768">32K</option>
+            <option :value="65536">64K</option>
+            <option :value="131072">128K</option>
+            <option :value="262144">256K</option>
+            <option :value="524288">512K</option>
+            <option :value="1048576">1M</option>
+          </select>
+        </div>
       </div>
     </div>
 
