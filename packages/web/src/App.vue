@@ -199,11 +199,20 @@ function applyUserPreferences(user: any) {
     document.documentElement.setAttribute('data-theme', prefs.theme);
     localStorage.setItem('quink_theme', prefs.theme);
   }
-  // Electron 端: 调主进程 setZoomFactor 应用 zoom (所有窗口同步); Web/PWA 端 Phase 2 加 CSS zoom 兜底.
-  // localStorage 缓存让 inline script + 创建快捷窗口前 ensureCurrentZoomLevel 拿得到上次值, 避开服务端慢启动 / preferences 不完整 race.
-  const zl = prefs.zoomLevel || 100;
-  localStorage.setItem('quink_zoom_level', String(zl));
-  try { (window as any).quinkDesktop?.syncZoom?.(zl); } catch {}
+  applyZoomLevel(prefs.zoomLevel || 100);
+}
+
+// 显示比例 8 档 + 应用逻辑. Ctrl+滚轮 hook 和 Settings 保存都复用本 helper.
+// Electron 端: 主进程 setZoomFactor 给 3 个窗口同步; Web/PWA 端: CSS zoom (二选一, 双方同设会双重缩放).
+// localStorage 缓存让 inline script + 创建快捷窗口前 ensureCurrentZoomLevel 拿得到上次值, 避开服务端慢启动 / preferences 不完整 race.
+const ZOOM_STEPS = [75, 80, 90, 100, 110, 125, 150, 200];
+function applyZoomLevel(level: number) {
+  localStorage.setItem('quink_zoom_level', String(level));
+  if ((window as any).quinkDesktop?.isElectron) {
+    try { (window as any).quinkDesktop.syncZoom(level); } catch {}
+  } else {
+    (document.documentElement.style as any).zoom = (level / 100).toString();
+  }
 }
 
 // HMR 友好：模块级保存上次挂的副作用，重 mount 时先清理旧的，避免 capture 阶段旧 handler
@@ -212,7 +221,10 @@ let prevRefClickHandler: ((e: MouseEvent) => void) | null = null;
 let prevImgClickHandler: ((e: MouseEvent) => void) | null = null;
 let prevCopyHandler: ((e: ClipboardEvent) => void) | null = null;
 let prevCtrlAHandler: ((e: KeyboardEvent) => void) | null = null;
+let prevWheelHandler: ((e: WheelEvent) => void) | null = null;
 let prevWindowOpen: typeof window.open | null = null;
+let lastWheelTime = 0;
+let zoomSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 const { open: openImagePreview } = useImagePreview();
 
@@ -233,7 +245,44 @@ onMounted(async () => {
   if (prevImgClickHandler) document.removeEventListener('click', prevImgClickHandler, true);
   if (prevCopyHandler) document.removeEventListener('copy', prevCopyHandler);
   if (prevCtrlAHandler) document.removeEventListener('keydown', prevCtrlAHandler, true);
+  if (prevWheelHandler) window.removeEventListener('wheel', prevWheelHandler, { capture: true } as any);
   if (prevWindowOpen) window.open = prevWindowOpen;
+
+  // Ctrl+滚轮 hook → 调 Quink "显示比例" (8 档切换), 替代浏览器/Electron 自带 zoom 防叠加.
+  // Chrome 触摸板 pinch zoom 也派 wheel + ctrlKey=true → 同一个 hook 接住, bonus 体验.
+  // Ctrl+/-/0 浏览器级 shortcut 网页无法 hook (preventDefault 失效), 接受叠加, 蘑菇用 wheel 就行.
+  // capture + passive:false 才能 preventDefault 阻止默认 zoom; 100ms 节流防一次滚动多档.
+  // 防抖 500ms 写后端 (UI 立即响应 syncZoom / CSS zoom, 不等 API).
+  const onWheel = (e: WheelEvent) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const now = Date.now();
+    if (now - lastWheelTime < 100) return;
+    lastWheelTime = now;
+
+    const current = auth.user?.preferences?.zoomLevel || 100;
+    let idx = ZOOM_STEPS.indexOf(current);
+    if (idx === -1) {
+      // 当前值不在 8 档 (老数据 / 手动改), 找最接近的档位起跳
+      idx = 0;
+      for (let i = 1; i < ZOOM_STEPS.length; i++) {
+        if (Math.abs(ZOOM_STEPS[i] - current) < Math.abs(ZOOM_STEPS[idx] - current)) idx = i;
+      }
+    }
+    // deltaY > 0 滚下 = 缩小; < 0 滚上 = 放大. Math.max/min 卡边界
+    const nextIdx = e.deltaY > 0 ? Math.max(0, idx - 1) : Math.min(ZOOM_STEPS.length - 1, idx + 1);
+    const next = ZOOM_STEPS[nextIdx];
+    if (next === current) return;
+
+    applyZoomLevel(next);
+    if (auth.user?.preferences) auth.user.preferences.zoomLevel = next;
+    if (zoomSaveTimer) clearTimeout(zoomSaveTimer);
+    zoomSaveTimer = setTimeout(() => {
+      auth.updateProfile({ preferences: { ...(auth.user?.preferences || {}), zoomLevel: next } });
+    }, 500);
+  };
+  window.addEventListener('wheel', onWheel, { passive: false, capture: true });
+  prevWheelHandler = onWheel;
 
   // 全局拦截 note-content 内 img 单击 → 弹图片预览(同一笔记的所有图作为一组,可左右切换)
   // 必须 capture + stopPropagation:否则 NoteCard 的 click handler 也会收到,误触发"进入详情"

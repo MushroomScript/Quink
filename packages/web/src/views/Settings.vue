@@ -378,10 +378,14 @@ async function savePreferences(silent = false) {
     document.documentElement.setAttribute('data-theme', prefs.theme);
     localStorage.setItem('quink_theme', prefs.theme);
     try { (window as any).quinkDesktop?.syncTheme?.(prefs.theme); } catch {}
-    // Electron 端: 主进程 setZoomFactor 应用到所有 3 个窗口 + 调整 Capture 窗口尺寸;
+    // Electron 端: 主进程 setZoomFactor 应用到所有 3 个窗口 + 调整 Capture 窗口尺寸; Web/PWA 端用 CSS zoom (二选一, 双方同设会双重缩放).
     // localStorage 缓存让 ensureCurrentZoomLevel / inline script 拿得到上次值
     localStorage.setItem('quink_zoom_level', String(prefs.zoomLevel));
-    try { (window as any).quinkDesktop?.syncZoom?.(prefs.zoomLevel); } catch {}
+    if ((window as any).quinkDesktop?.isElectron) {
+      try { (window as any).quinkDesktop.syncZoom(prefs.zoomLevel); } catch {}
+    } else {
+      (document.documentElement.style as any).zoom = (prefs.zoomLevel / 100).toString();
+    }
     if (!silent) showMsg('已保存');
   } catch (err: any) {
     showMsg('保存失败: ' + err.message, 'error');

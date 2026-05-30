@@ -23,9 +23,15 @@
         document.documentElement.setAttribute('data-theme', theme);
         var BG = {blueberry:'#f4f5fc',lavender:'#f6f4fc',mint:'#f2fbf7',peach:'#fdf5f3',lemon:'#fcfaf0',cloud:'#f5f6f8',dark:'#131318'};
         document.documentElement.style.background = BG[theme] || '#f4f5fc';
-        // 清理老版本 quink_font_size localStorage 残留, 防 Electron setZoomFactor 跟 rem fontSize 双重缩放
-        // (Phase 1 改造: Electron 主进程 setZoomFactor 控制显示比例, renderer 不再操作 fontSize. Web/PWA 端 Phase 2 加 CSS zoom)
+        // 清理老版本 quink_font_size localStorage 残留 (Phase 1 fontSize → zoomLevel 字段重命名)
         localStorage.removeItem('quink_font_size');
+        // 显示比例: 仅 Web/PWA 端用 CSS zoom (Electron 主进程已通过 setZoomFactor 控制, 双方同设会双重缩放).
+        // preload 注入 quinkDesktop.isElectron=true 早于 inline script, 所以这里判得到.
+        // 走 inline script 跟主题色防闪烁同一时机, 避免首屏 100% paint 一帧再跳到用户设置比例.
+        if (!window.quinkDesktop || !window.quinkDesktop.isElectron) {
+          var zoomLevel = localStorage.getItem('quink_zoom_level');
+          if (zoomLevel) document.documentElement.style.zoom = (Number(zoomLevel) / 100).toString();
+        }
         // favicon 同步切到当前主题，避免启动瞬间标签页图标是默认 blueberry
         var links = document.querySelectorAll('link[rel="icon"]');
         links.forEach(function(link) {
