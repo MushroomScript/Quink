@@ -34,48 +34,11 @@ schema 定义 4 个值：`note / todo / snippet / link`（看 `packages/server/s
 
 ## 卡片拖放（pointer events，非 HTML5 DnD）
 
-NoteCard 拖到 sidebar（改 type / 改 category / 删除 / 加进 AI）走自定义 `utils/cardDnd.ts`，**不用 HTML5 DnD**。
-
-**为什么不用 HTML5 DnD**：Chromium 在 DnD 期间彻底拦截 wheel 事件（即使 capture phase + preventDefault 也拿不到），导致拖动卡片到 sidebar 时**无法用滚轮滚到更多目标**。换 pointer events 之后 wheel 正常派发。
-
-**dropzone 协议**：drop 目标 DOM 元素加 `data-drop-target="xxx"`，值约定：
-
-| 值 | 含义 |
-|---|---|
-| `type:note` / `type:snippet` / `type:todo` | 改卡片 type |
-| `cat:<分类名>` | 改 category |
-| `action:trash` | 软删除（cardDnd 派 `quink-drop-trash` 事件让 Sidebar 弹确认 modal） |
-| `action:ai` | 拖到 sidebar AI 项 — 直接松手 = 跳 /ai 新对话；停留 400ms 自动 navigate /ai（拖动不释放，鼠标继续拖到 conv） |
-| `conv:<convId>` | /ai 页面内拖到指定对话 |
-| `ai-page` | /ai 页面兜底（chat area / 输入框区域） |
-
-**触发**：NoteCard `@pointerdown` 调 `startCardDrag(e, { ids, type, category, text })`。selectMode + 当前卡片在选中集 + size≥2 → ids 是整批；否则单条。type chip 在非 selectMode 充当 drag handle（让正文 select-text 不被 DnD 抢）。
-
-**视觉**：`dragState.hoverTarget` 给 dropzone 加 `drop-target-active` class；`<DragGhost />`（App.vue 全局挂载）fixed 跟随鼠标。
-
-**same-type / same-cat 跳过**：单条且 from === to 时 hoverTarget=null（视觉/语义都拒绝）；多条混合 type 时 fromType=null 始终接受。
-
-**AI 拖入兜底**：cardDnd 同时派 window 事件 + sessionStorage 中转（`quink_ai_pending_drop`）。AI mount 前丢失的事件由 onMounted/onActivated 读 sessionStorage 兜底；listener 收到也 removeItem 避免 onActivated 切回重复消费（已踩坑）。
-
-**胶囊 audio anchor 例外**：NoteCard `onPointerDown` 内检查 e.target 是不是 audio anchor，是 → return 让 `audio.ts` 的 pointer 监听接管 seek 拖动。
-
-实现文件：`utils/cardDnd.ts` / `components/DragGhost.vue` / `NoteCard.vue` / `Sidebar.vue` / `AI.vue`。
+NoteCard 拖到 sidebar / AI 走自定义 `utils/cardDnd.ts`，不用 HTML5 DnD（Chromium DnD 期间拦截 wheel 拿不到滚轮）。dropzone 协议 + 触发 + 视觉 + AI 拖入兜底 + 胶囊 audio anchor 例外详见 **`CARDDND.md`**。改 `cardDnd.ts` / `DragGhost.vue` / `NoteCard.vue` 拖动 / `Sidebar.vue` drop target / `AI.vue` 拖入兜底前先读那里。
 
 ## 跨视图筛选跳转
 
-view A 触发跳转 → view B 落地并自动应用筛选 chip 的模式。当前 2 条线（Stats 热力图 → 灵感页按日期；Inspiration tag → 灵感页按标签），都走同一套：
-
-1. **触发方**：`router.push({ path: 目标 view, query: { 筛选键: 值 } })`
-2. **目标 view 的 `onActivated`**：读 `route.query.筛选键`，命中则**只设 `store.filterType = ''` + 派事件**（`dispatchEvent('quink-filter-XXX', { detail: 值 })`），**不要自己 `fetchNotes`**
-3. **TopBar `onMounted`** 监听 `quink-filter-XXX`：设对应筛选状态（chip / 日期 / types 全选）+ `showFilters = true` + `doSearch(true)` 统一拉数据
-
-**关键约定**：onActivated 不主动 fetchNotes，让 TopBar 统一负责。否则会"onActivated 拉一次 + TopBar doSearch 又拉一次"= 后端 2 倍请求 + UI 数据填充 2 次闪烁 + TransitionGroup 动画打断。
-
-**注意顺序**：TopBar 的 `watch(route.path)` 会先清空旧筛选，目标 view 的 `onActivated` 必须**在路由切完后**派事件才能盖回。当前两条线都走 onActivated 这条路径，顺序天然对。
-
-**mount 顺序依赖（⚠️ 改 App.vue 布局时注意）**：派事件模式要求 TopBar 比 RouterView 先 mount，否则 onMounted 注册监听器之前事件就派完了，监听器收不到 → 跨视图跳转**静默失效**（无报错，但 chip 不显示、数据不刷新，看到的是旧内容）。当前 `App.vue` 里 `<TopBar />` 写在 `<RouterView />` 前（line ~437/439），顺序天然对。如果挪布局把 TopBar 挪到 RouterView 后面，D2 / tag query 都会裂。
-
-涉及文件：`Stats.vue`（cell click）/ `Inspiration.vue`（query 分支）/ `TopBar.vue`（事件监听）。加新跳转线时三处都要补。
+view A 触发跳转 → view B 落地并自动应用筛选 chip 的模式。当前 2 条线（Stats 热力图 → 灵感页按日期；Inspiration tag → 灵感页按标签），都走同一套：触发方 `router.push({ query })` → 目标 view `onActivated` 派事件 → TopBar `onMounted` 监听 + 统一拉数据。**onActivated 不能自己 fetchNotes**（否则双拉双闪烁），**TopBar 必须比 RouterView 先 mount**（否则跨视图跳转静默失效）。详见 **`CROSS-VIEW-NAV.md`**。加新跳转线 / 改 App.vue 顶层布局前先读那里。
 
 ## Vditor 静态文件
 
@@ -108,31 +71,16 @@ cp -r node_modules/vditor/dist packages/web/public/vditor/dist
 
 ## 文件 url helper（裸名约定）
 
-DB `files.url` 字段 + 笔记 `content` 里 markdown link 的 url 都只存**裸文件名**（如 `xxx.png`），不带 `/api/uploads/` 前缀（后端约定，详见 `packages/server/CLAUDE.md`）。前端渲染层用 `src/utils/fileUrl.ts` 五个 helper 拼/剥前缀 + 缩略图：
+DB `files.url` 字段 + 笔记 `content` 里 markdown link 的 url 都只存**裸文件名**（如 `xxx.png`），不带 `/api/uploads/` 前缀（后端约定，详见 `packages/server/CLAUDE.md`）。前端渲染层用 `src/utils/fileUrl.ts` 的 helper 拼/剥前缀：
 
 - **`resolveFileUrl(url)`** —— 直接拼路径，用于 `<img :src>` / `<a :href>` / `<audio :src>` 等元素属性
 - **`resolveMarkdownFileUrls(md)`** —— markdown 字符串预处理（用于 `Vditor.md2html` 前）。把 `[xxx](裸名.ext)` 拼成 `[xxx](/api/uploads/裸名.ext)`。识别规则：括号内不含 URL 特殊字符（`/`/`?`/`#`/`:`）且含扩展名 `.ext` 才拼，不会误伤外链/引用链接 `(?ref=xxx)`/内部路由 `(/note/abc)`
 - **`stripMarkdownFileUrls(md)`** —— 编辑器 `getValue` 后用，把 absolute path 剥回裸名
-- **`resolveFileThumbUrl(url)`** —— 拼缩略图路径 `/api/uploads/<裸名>.thumb.jpg`（后端 sharp 上传时生成，详见 `packages/server/CLAUDE.md`）
-- **`thumbErrorFallback(e, originalUrl)`** —— `<img @error>` 一次性降级原图（dataset 标记防原图也 404 时无限循环）
+- **`resolveFileThumbUrl(url)` + `thumbErrorFallback(e, originalUrl)`** —— 静态图片缩略图 URL + `<img @error>` 一次性降级原图。详见根 **`THUMBNAILS.md`**
 
 新增 markdown 渲染入口必须套前 3 个 helper，否则文件链接 404。当前渲染入口：`NoteCard.vue` / `NoteDetail.vue` / `Trash.vue` / `AI.vue` / `AiChat.vue` / `App.vue`（引用预览）/ `RichEditor.vue`。
 
-### 静态图片显示约定（头像 / 资源缩略图 / 笔记小图）
-
-**显示 < 200px 的图片必须走 thumb URL + onError 降级**，否则浏览器对 4MB+ 原图一步 downsample 到 36/80/128 px 会显出明显锐化感（CSS `zoom != 100%` 时更严重）。模板范例：
-
-```vue
-<img :src="resolveFileThumbUrl(url)"
-  @error="thumbErrorFallback($event, resolveFileUrl(url))"
-  class="..." />
-```
-
-**别用 `background-image: url(...)`**：Chromium 对 background-image 的 downsample 路径质量比 `<img>` 差一档。头像如果非要圆形用 `<img class="rounded-full object-cover">`。
-
-历史已上传图片没 thumb 文件 → 浏览器 404 → `thumbErrorFallback` 切回原图，**不裂图但也无改善**。蘑菇要全量 backfill 可以加 `backfillImageThumbs` server 启动时扫一遍，类似已有 `backfillHeicThumbs`。
-
-当前调用点：`Settings.vue`（头像）/ `Sidebar.vue`（头像）/ `Resources.vue`（grid + list 缩略图）。新增图片显示位置（卡片小图预览、笔记 metadata 缩略图等）也按这套来。
+新增静态图片显示场景（头像 / 缩略图 / 卡片小图预览）必须用后 2 个 helper + `<img>`（**不要用 background-image**），详见根 **`THUMBNAILS.md`**。
 
 ### RichEditor 双向转换
 

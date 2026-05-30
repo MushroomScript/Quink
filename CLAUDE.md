@@ -21,8 +21,12 @@
 | 根 `CLAUDE.md`（本文件） | 全局指引、跨包约定、高频规则 | 自动 |
 | 根 `ICONS.md` | 图标系统约定 | 手动（改图标时来读） |
 | 根 `RENDERING-PITFALLS.md` | 渲染相关坑（DOM/CSS/Vue/HMR/markdown/Vditor/动画/鼠标事件） | 手动（改 UI / markdown / 编辑器 / 列表动画时来读） |
-| `packages/server/CLAUDE.md` | 后端专属（认证 / AI 系统 / 数据库 / 文件上传后端逻辑 / 重命名同步） | 在该 package 工作时自动 |
+| 根 `THUMBNAILS.md` | 静态图片缩略图体系（sharp 后端生成 / thumb URL helper / 显示约定） | 手动（改头像 / 资源缩略图 / upload.ts sharp / 加新图片显示场景时来读） |
+| `packages/server/CLAUDE.md` | 后端专属（认证 / 数据库 / 文件上传后端逻辑 / 重命名同步） | 在该 package 工作时自动 |
+| `packages/server/src/ai/CLAUDE.md` | AI 系统（多配置 / FC v2 / 自动处理 / `{categories}` 占位 / 弱模型适配 / chat prompt / label 透传） | 在该子目录工作时自动 |
 | `packages/web/CLAUDE.md` | 前端专属（主题系统 / 移动端 / Vditor 静态文件 / 笔记类型→view 映射 / 文件 url helper） | 在该 package 工作时自动 |
+| `packages/web/CARDDND.md` | 卡片拖放 DnD 协议（dropzone 表 / pointer events / AI 拖入兜底 / audio anchor 例外） | 手动（改 NoteCard / Sidebar / cardDnd / AI 拖入相关时来读） |
+| `packages/web/CROSS-VIEW-NAV.md` | 跨视图筛选跳转（onActivated 派事件 + TopBar 监听三步约定 / mount 顺序依赖） | 手动（加新跳转线 / 改 App.vue 顶层布局时来读） |
 | `packages/desktop/CLAUDE.md` | Electron 主进程坑（OS 窗口动画 / 快捷窗口防闪烁 / IPC 契约 / chrome-devtools-mcp 调试） | 在该 package 工作时自动 |
 | `packages/web/src/utils/CLAUDE.md` | 卡片列表 leave 动画体系（`cardLeave.ts` + TransitionGroup 多个坑） | 在该子目录工作时自动 |
 | `packages/web/src/composables/CLAUDE.md` | 瀑布流 + 无限滚动体系（`useMasonry` + `useInfiniteScroll`） | 在该子目录工作时自动 |
@@ -125,6 +129,10 @@ pnpm run dev:desktop
 
 - **图标系统** —— `@phosphor-icons/vue`、PhXCircle vs PhX、weight/size 规则、v-html 内嵌、视觉中心偏移 nudge。详见 **`ICONS.md`**。改图标相关代码前先读那里
 - **渲染坑** —— DOM / CSS / Vue 模板 / HMR / markdown 渲染 / Vditor 编辑器 / TransitionGroup 动画 / 拖动鼠标事件。详见 **`RENDERING-PITFALLS.md`**。改 UI / markdown / 编辑器 / 列表动画前先去那里查
+- **静态图片缩略图** —— sharp / libheif 后端生成 `.thumb.jpg` / 前端 `<img>` thumb URL + onError 降级 / 别用 background-image。详见 **`THUMBNAILS.md`**。改头像 / 资源缩略图 / upload.ts sharp 行为 / 加新图片显示场景前先读那里
+- **AI 系统（后端）** —— 多配置 / 按功能绑定 / FC v2 / `{categories}` 占位 / 弱模型适配 / chat prompt 三大块 / 引用 label 透传。详见 `packages/server/src/ai/CLAUDE.md`（在该子目录工作时自动加载）
+- **卡片拖放（DnD）** —— pointer events 不用 HTML5 DnD / dropzone 协议表 / AI 拖入兜底 / audio anchor 例外。详见 **`packages/web/CARDDND.md`**。改 NoteCard 拖动 / Sidebar drop target / cardDnd / AI 拖入相关前先读那里
+- **跨视图筛选跳转** —— onActivated 派事件 + TopBar 监听三步约定 / mount 顺序依赖（TopBar 必须比 RouterView 先 mount，否则跳转静默失效）。详见 **`packages/web/CROSS-VIEW-NAV.md`**。加新跳转线 / 改 App.vue 顶层布局前先读那里
 - **markdown 显示态** —— 笔记 markdown 渲染统一走"外层 `.note-content` + 内层 `.vditor-reset` 嵌套 v-html"的结构（**方案 C**），复用 Vditor 编辑器的 CSS 让显示态视觉跟编辑态完全一致。涉及 7 个文件：`NoteCard.vue` / `NoteDetail.vue` / `Trash.vue` / `App.vue`（引用预览）/ `AI.vue` / `AiChat.vue`。详见 `RENDERING-PITFALLS.md` 的"markdown 渲染"段
 - **Electron 快捷窗口（Capture / AiChat）** —— Win11 OS 窗口动画 / 主题闪烁 4 层防御 / `currentTheme` 缓存同步 / 持久窗口 vs 销毁重建策略 / IPC 契约。详见 **`packages/desktop/CLAUDE.md`**。改 desktop 主进程或动 `Capture.vue` / `AiChat.vue` / `RichEditor.vue` / `index.html` 前先读那里
 - **文件资源（url 裸名约定 + 重命名同步）** —— DB 存裸名，前端渲染层用 `packages/web/src/utils/fileUrl.ts` 的 helper 拼 `/api/uploads/` 前缀。后端逻辑详见 `packages/server/CLAUDE.md`，前端 helper 用法详见 `packages/web/CLAUDE.md`
