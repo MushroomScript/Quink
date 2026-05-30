@@ -10,12 +10,14 @@ import {
   clipboard,
   dialog,
   session,
+  webContents,
 } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { createTrayIcon } from './tray-icon';
 import { registerShortcut, unregisterAll, startHook, stopHook, onKeydown } from './shortcuts';
+import * as attachmentTasksStore from './attachmentTasksStore';
 
 const API_BASE = `http://localhost:${process.env.QUINK_PORT || '38999'}`;
 const WEB_URL = `http://localhost:${process.env.QUINK_WEB_PORT || '24888'}`;
@@ -397,6 +399,7 @@ function createCaptureWindow() {
 
   // 加载 Web 端的快捷输入页面
   captureWindow.loadURL(`${WEB_URL}/capture`);
+  hookZoomChanged(captureWindow);
 
   // 延迟绑定 blur，避免刚 show 就被 hide
   let blurEnabled = false;
@@ -556,12 +559,14 @@ ipcMain.handle('open-attachment', async (event, url: string) => {
     // cancelled 标志区分"用户主动取消"vs"下载停滞超时", 提到 try 块外让 catch 能访问
     let cancelledByUser = false;
     try {
-      // 缓存命中: 文件还在临时目录就直接 openPath, 跳过 fetch
-      // cached: true 让 renderer 知道不需要走悬浮 dock(没下载过程, 直接 toast 即可)
+      // 缓存命中: 文件还在临时目录就直接 openPath, 跳过 fetch.
+      // task 可能不存在 (App.vue 走 openedAttachments 静默分支) 或处于 downloading (reopen 流程),
+      // markSuccessByUrl 内部按 status=downloading 过滤, 没 task / 已 success 都是 no-op
       const cached = attachmentCache.get(fullUrl);
       if (cached && fs.existsSync(cached)) {
         const err = await shell.openPath(cached);
         if (err) throw new Error(err);
+        attachmentTasksStore.markSuccessByUrl(fullUrl);
         return { success: true, cached: true };
       }
 
@@ -586,15 +591,14 @@ ipcMain.handle('open-attachment', async (event, url: string) => {
         chunks.push(value);
         received += value.length;
         lastProgressAt = Date.now();
-        if (lastProgressAt - lastEmitAt > PROGRESS_THROTTLE_MS && !sender.isDestroyed()) {
+        if (lastProgressAt - lastEmitAt > PROGRESS_THROTTLE_MS) {
           lastEmitAt = lastProgressAt;
-          sender.send('attachment-progress', { url: fullUrl, received, total });
+          // 进度走 store 广播 (所有窗口同步) 替代原 sender.send 单点推
+          attachmentTasksStore.updateProgressByUrl(fullUrl, received, total);
         }
       }
-      // 最终 100% 状态推一次(throttle 可能丢了最后一帧)
-      if (!sender.isDestroyed()) {
-        sender.send('attachment-progress', { url: fullUrl, received, total: total || received });
-      }
+      // 最终 100% 状态推一次 (throttle 可能丢了最后一帧)
+      attachmentTasksStore.updateProgressByUrl(fullUrl, received, total || received);
 
       const buffer = Buffer.concat(chunks);
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'quink-attachment-'));
@@ -604,14 +608,22 @@ ipcMain.handle('open-attachment', async (event, url: string) => {
       attachmentCache.set(fullUrl, filePath);
       const err = await shell.openPath(filePath);
       if (err) throw new Error(err);
+      attachmentTasksStore.markSuccessByUrl(fullUrl);
       return { success: true };
     } catch (e: any) {
       // AbortError 两个来源: 用户主动 cancel(cancelledByUser=true) / stall 超时. 前者不算错误
       if (e?.name === 'AbortError' || /abort/i.test(e?.message || '')) {
-        if (cancelledByUser) return { success: false, cancelled: true };
-        return { success: false, error: `下载停滞(${ATTACHMENT_STALL_MS / 1000} 秒无响应)` };
+        if (cancelledByUser) {
+          attachmentTasksStore.removeByUrl(fullUrl);
+          return { success: false, cancelled: true };
+        }
+        const stallErr = `下载停滞(${ATTACHMENT_STALL_MS / 1000} 秒无响应)`;
+        attachmentTasksStore.markFailedByUrl(fullUrl, stallErr);
+        return { success: false, error: stallErr };
       }
-      return { success: false, error: e?.message || String(e) };
+      const errMsg = e?.message || String(e);
+      attachmentTasksStore.markFailedByUrl(fullUrl, errMsg);
+      return { success: false, error: errMsg };
     } finally {
       if (stallChecker) clearInterval(stallChecker);
       attachmentInflight.delete(fullUrl);
@@ -684,6 +696,73 @@ ipcMain.handle('cancel-attachment', (_event, url: string) => {
   return { success: true };
 });
 
+// ===== 全局附件传输任务 (跨窗口共享, attachmentTasksStore 维护) =====
+// 任何 BrowserWindow 都通过这套 IPC 改 task 状态, store 内 broadcast 给所有 webContents 同步.
+ipcMain.handle('attachment-tasks:get', () => attachmentTasksStore.getAll());
+
+// add: 入参 task 完整字段; 返回 main 端实际使用的 id (同 URL download 会复用已有 id, 不一定等于入参 id)
+ipcMain.handle('attachment-tasks:add', (_e, task: attachmentTasksStore.PersistedTask) =>
+  attachmentTasksStore.add(task)
+);
+
+ipcMain.on('attachment-tasks:update-progress', (_e, payload: { id: string; received: number; total: number }) =>
+  attachmentTasksStore.updateProgress(payload.id, payload.received, payload.total)
+);
+
+ipcMain.on('attachment-tasks:mark-success', (_e, id: string) => attachmentTasksStore.markSuccessById(id));
+ipcMain.on('attachment-tasks:mark-failed', (_e, payload: { id: string; error: string }) =>
+  attachmentTasksStore.markFailedById(payload.id, payload.error)
+);
+ipcMain.on('attachment-tasks:remove', (_e, id: string) => attachmentTasksStore.removeById(id));
+ipcMain.on('attachment-tasks:clear-completed', () => attachmentTasksStore.clearCompleted());
+
+// close: abort 所有 inflight (download main 端自己 abort; upload broadcast 让发起 renderer abort 本地 controller) + 清空
+ipcMain.on('attachment-tasks:close', () => {
+  // 1. abort main 端所有 inflight download fetch
+  for (const url of attachmentTasksStore.getInflightDownloadUrls()) {
+    const ctrl = attachmentControllers.get(url);
+    if (ctrl) {
+      (ctrl as any).__cancelMark?.();
+      try { ctrl.abort(); } catch {}
+    }
+  }
+  // 2. broadcast 让所有 renderer 检查本地 upload AbortController Map abort
+  const uploadIds = attachmentTasksStore.getInflightUploadIds();
+  for (const wc of webContents.getAllWebContents()) {
+    if (wc.isDestroyed()) continue;
+    try { wc.send('attachment-tasks:abort-uploads', uploadIds); } catch {}
+  }
+  // 3. 清空 + broadcast sync
+  attachmentTasksStore.closeAll();
+});
+
+// cancel: 跟 close 类似但仅对一条. download → main abort fetch; upload → broadcast 让 renderer abort
+ipcMain.on('attachment-tasks:cancel', (_e, id: string) => {
+  const all = attachmentTasksStore.getAll();
+  const t = all.find((x) => x.id === id);
+  if (!t) return;
+  if (t.status !== 'downloading') {
+    attachmentTasksStore.removeById(id);
+    return;
+  }
+  if (t.kind === 'download') {
+    // 跟 cancel-attachment IPC 同逻辑, 但走 store 的状态
+    const ctrl = attachmentControllers.get(t.url);
+    if (ctrl) {
+      (ctrl as any).__cancelMark?.();
+      try { ctrl.abort(); } catch {}
+    }
+    // fetch 的 catch 分支会调 store.removeByUrl, 这里不重复
+  } else {
+    // upload: broadcast 让所有窗口检查本地 controller, 发起者 abort 后调 removeById
+    for (const wc of webContents.getAllWebContents()) {
+      if (wc.isDestroyed()) continue;
+      try { wc.send('attachment-tasks:abort-uploads', [id]); } catch {}
+    }
+    attachmentTasksStore.removeById(id);
+  }
+});
+
 ipcMain.on('hide-window', (_event) => {
   const win = BrowserWindow.fromWebContents(_event.sender);
   if (win) win.hide();
@@ -724,6 +803,19 @@ ipcMain.on('note-saved', (_event, noteId?: string) => {
   }
 });
 
+// Capture/AiChat 快捷窗口里 Ctrl+滚轮 → Chromium 触发 webContents 'zoom-changed' 事件 (见 createCaptureWindow /
+// createAiChatWindow 中的 hookZoomChanged). main 端 preventDefault 阻 Chromium 内置 layout zoom (renderer 的 DOM
+// preventDefault 阻不了), 然后转发给主窗口 onZoomStep 走完整 applyZoomLevel + 保存 prefs 链路
+function hookZoomChanged(win: BrowserWindow) {
+  win.webContents.on('zoom-changed', (e, direction) => {
+    e.preventDefault();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // direction in=放大 (deltaY < 0), out=缩小 (deltaY > 0). 用 ±100 给主窗口 stepZoom 走一档
+      mainWindow.webContents.send('zoom-step', direction === 'in' ? -100 : 100);
+    }
+  });
+}
+
 ipcMain.on('sync-token', (_event, token: string | null) => {
   authToken = token;
   if (token) {
@@ -752,13 +844,19 @@ ipcMain.handle('pick-directory', async (event): Promise<string | null> => {
 });
 
 // 用户改显示比例: 调整 currentZoomLevel + Capture 窗口尺寸 (宽+高) + 给所有 3 个窗口 setZoomFactor.
-// zoom 是 paint 层等比 scale, renderer 不再需要监听 font-size-changed 自己改 fontSize. setZoomFactor 在 webContents 上幂等可重复设.
+// zoom 是 paint 层等比 scale, renderer 不再需要监听 font-size-changed 自己改 fontSize.
+// 关键: 先 setZoomLevel(0) 清掉 Chromium per-origin 持久化 zoom (Ctrl+滚轮在快捷窗口里会改 origin zoom),
+// 否则 setZoomFactor(1.0) 调成功了但 origin 层级仍是 1.1/2.0 等残留, 实际 zoom 不变. 顺序 setZoomLevel 必须在 setZoomFactor 之前
+function applyZoomToWebContents(wc: Electron.WebContents, factor: number) {
+  wc.setZoomLevel(0);
+  wc.setZoomFactor(factor);
+}
 ipcMain.on('sync-zoom', (_event, level: number) => {
   if (!level || level < 75 || level > 200) return;
   currentZoomLevel = level;
   const factor = level / 100;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.setZoomFactor(factor);
+    applyZoomToWebContents(mainWindow.webContents, factor);
   }
   if (captureWindow && !captureWindow.isDestroyed()) {
     const { width: w, height: h } = getCaptureSize(level);
@@ -772,11 +870,21 @@ ipcMain.on('sync-zoom', (_event, level: number) => {
       width: w,
       height: h,
     });
-    captureWindow.webContents.setZoomFactor(factor);
+    applyZoomToWebContents(captureWindow.webContents, factor);
   }
-  // AiChat 用户可自由 resize,只 setZoomFactor 不改窗口尺寸
+  // AiChat 跟 Capture 一样按基准 × factor 重置物理尺寸 + 内容 zoom (覆盖用户拖动的自定义尺寸).
+  // 区别: 仍可 resize (不锁 max), 用户改 zoom 后可继续拖大. minWidth/minHeight 也按 factor 缩.
   if (aiChatWindow && !aiChatWindow.isDestroyed()) {
-    aiChatWindow.webContents.setZoomFactor(factor);
+    const { width: w, height: h, minWidth, minHeight } = getAiChatSize(level);
+    const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+    aiChatWindow.setMinimumSize(minWidth, minHeight);
+    aiChatWindow.setBounds({
+      x: Math.round(screenWidth / 2 - w / 2),
+      y: Math.round(screenHeight * 0.15),
+      width: w,
+      height: h,
+    });
+    applyZoomToWebContents(aiChatWindow.webContents, factor);
   }
 });
 
@@ -842,6 +950,19 @@ function getCaptureSize(zoomLevel: number): { width: number; height: number } {
   return { width: Math.round(650 * factor), height: Math.round(155 * factor) };
 }
 
+// AiChat 窗口尺寸按 zoom 比例缩放: 480×560 是默认 100% 基准, minWidth/minHeight 400 同样缩放.
+// 跟 Capture 不同: AiChat 仍可 resize (不锁 max), 但每次 sync-zoom 都 setBounds 按基准 × factor 重置,
+// 用户上次拖动的自定义尺寸会被覆盖. trade-off: 接受这个为了 zoom 联动窗口
+function getAiChatSize(zoomLevel: number): { width: number; height: number; minWidth: number; minHeight: number } {
+  const factor = zoomLevel / 100;
+  return {
+    width: Math.round(480 * factor),
+    height: Math.round(560 * factor),
+    minWidth: Math.round(400 * factor),
+    minHeight: Math.round(400 * factor),
+  };
+}
+
 ipcMain.on('reload-shortcuts', () => {
   loadUserShortcuts().then(() => {
     applyShortcuts();
@@ -868,6 +989,8 @@ if (!gotLock) {
 }
 
 app.whenReady().then(() => {
+  // 加载持久化的附件传输任务历史 (跨 session 恢复 success/failed 终态)
+  attachmentTasksStore.load();
   // 注册全局下载处理: Electron 默认 <a download> / video controls 下载会直接存到 ~/Downloads,
   // 不弹"另存为"对话框. 蘑菇要求"不弹窗 + 设置里指定目录", 这里直接 setSavePath 到 currentDownloadDir.
   // currentDownloadDir 由 renderer 端启动时 IPC sync-download-path 推过来 (localStorage 配置), 默认 ~/Downloads
@@ -917,11 +1040,12 @@ app.on('will-quit', () => {
 // ──────────────────────────────────
 function createAiChatWindow() {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+  const { width, height, minWidth, minHeight } = getAiChatSize(currentZoomLevel);
 
   aiChatWindow = new BrowserWindow({
-    width: 480,
-    height: 560,
-    x: Math.round(screenWidth / 2 - 240),
+    width,
+    height,
+    x: Math.round(screenWidth / 2 - width / 2),
     y: Math.round(screenHeight * 0.15),
     frame: false,
     resizable: true,
@@ -931,8 +1055,8 @@ function createAiChatWindow() {
     transparent: false,
     backgroundColor: THEME_BG[currentTheme] || '#ffffff',
     roundedCorners: true,
-    minWidth: 400,
-    minHeight: 400,
+    minWidth,
+    minHeight,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -941,6 +1065,7 @@ function createAiChatWindow() {
   });
 
   aiChatWindow.loadURL(`${WEB_URL}/ai-chat`);
+  hookZoomChanged(aiChatWindow);
 
   let blurEnabled = false;
   aiChatWindow.on('show', () => {

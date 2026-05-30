@@ -21,7 +21,7 @@ import VideoPreview from '@/components/VideoPreview.vue';
 import MediaContextMenu from '@/components/MediaContextMenu.vue';
 import DragGhost from '@/components/DragGhost.vue';
 import AttachmentDownloadDock from '@/components/AttachmentDownloadDock.vue';
-import { addTask as addAttachmentTask, updateProgress as updateAttachmentProgress, markSuccess as markAttachmentSuccess, markFailed as markAttachmentFailed, markCancelled as markAttachmentCancelled } from '@/composables/useAttachmentTasks';
+import { addTask as addAttachmentTask } from '@/composables/useAttachmentTasks';
 import { openedAttachments } from '@/utils/openedAttachments';
 
 const route = useRoute();
@@ -38,10 +38,7 @@ const currentTheme = useTheme();
 const { show: showToast } = useToast();
 
 // 附件下载: 进度走悬浮 dock(AttachmentDownloadDock + useAttachmentTasks), 仅在最终 success/failed 弹 toast.
-// 不再用单条 toast 滚动文案的旧方案(每 100ms 推一次会堆叠 N 条).
-desk?.onAttachmentProgress?.((data: { url: string; received: number; total: number }) => {
-  updateAttachmentProgress(data.url, data.received, data.total);
-});
+// 进度推送由 main 端 attachmentTasksStore broadcastProgress → useAttachmentTasks 自己监听 attachment-tasks:progress, 这里不再需要桥接.
 // 已打开过的 URL Set 从 utils 共享(资源页 Resources 也用同一份做大文件 confirm 检测)
 
 // 主题切换时同步换 favicon（含 .ico 和 .png 两条 link）
@@ -253,9 +250,9 @@ onMounted(async () => {
   // Ctrl+/-/0 浏览器级 shortcut 网页无法 hook (preventDefault 失效), 接受叠加, 蘑菇用 wheel 就行.
   // capture + passive:false 才能 preventDefault 阻止默认 zoom; 100ms 节流防一次滚动多档.
   // 防抖 500ms 写后端 (UI 立即响应 syncZoom / CSS zoom, 不等 API).
-  const onWheel = (e: WheelEvent) => {
-    if (!e.ctrlKey) return;
-    e.preventDefault();
+  //
+  // stepZoom 抽出来给两个入口共用: 主窗口本地 wheel + 快捷窗口 IPC 转发的 zoom-step 事件
+  const stepZoom = (deltaY: number) => {
     const now = Date.now();
     if (now - lastWheelTime < 100) return;
     lastWheelTime = now;
@@ -270,7 +267,7 @@ onMounted(async () => {
       }
     }
     // deltaY > 0 滚下 = 缩小; < 0 滚上 = 放大. Math.max/min 卡边界
-    const nextIdx = e.deltaY > 0 ? Math.max(0, idx - 1) : Math.min(ZOOM_STEPS.length - 1, idx + 1);
+    const nextIdx = deltaY > 0 ? Math.max(0, idx - 1) : Math.min(ZOOM_STEPS.length - 1, idx + 1);
     const next = ZOOM_STEPS[nextIdx];
     if (next === current) return;
 
@@ -281,8 +278,21 @@ onMounted(async () => {
       auth.updateProfile({ preferences: { ...(auth.user?.preferences || {}), zoomLevel: next } });
     }, 500);
   };
-  window.addEventListener('wheel', onWheel, { passive: false, capture: true });
-  prevWheelHandler = onWheel;
+  const onWheel = (e: WheelEvent) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    stepZoom(e.deltaY);
+  };
+  // 只在主窗口注册 wheel hook 和 onZoomStep listener. App.vue 在 Capture/AiChat 窗口里也会 mount
+  // (同 SPA 根组件), 那俩窗口的 Ctrl+滚轮要走 main 端 webContents 'zoom-changed' 拦截 + 转发到主窗口的路径,
+  // 不能让 Capture 自己的 App.vue 也跑一遍 onWheel/stepZoom (会绕过 main 端 IPC + 直接调 syncZoom 把所有窗口 zoom).
+  // 用 location.pathname 判断 (route.name 在 mount 时机可能未 ready / 不可靠), 主窗口加载 / 或 /notes 等; 快捷窗口固定 /capture /ai-chat /float
+  const isShortcutWindow = ['/capture', '/ai-chat', '/float'].some(p => location.pathname === p);
+  if (!isShortcutWindow) {
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    prevWheelHandler = onWheel;
+    desk?.onZoomStep?.((deltaY: number) => stepZoom(deltaY));
+  }
 
   // 全局拦截 note-content 内 img 单击 → 弹图片预览(同一笔记的所有图作为一组,可左右切换)
   // 必须 capture + stopPropagation:否则 NoteCard 的 click handler 也会收到,误触发"进入详情"
@@ -339,17 +349,15 @@ onMounted(async () => {
           }
           return;
         }
-        // 第一次打开: 走 dock 全流程
-        addAttachmentTask(fullUrl, filename);
+        // 第一次打开: 走 dock 全流程. main 端 open-attachment 自己调 store.markSuccessByUrl / markFailedByUrl / removeByUrl,
+        // sync 事件会推到本地 ref 更新 dock, 这里只负责 toast + 标记 openedAttachments 让下次跳过 dock.
+        // await: addAttachmentTask 异步, 等 main 端 store add 完成再 invoke open-attachment 防 race (两个 IPC 不同 channel 无顺序保证)
+        await addAttachmentTask(fullUrl, filename);
         const result = await desk.openAttachment(fullUrl);
         if (result?.success) {
-          markAttachmentSuccess(fullUrl);
           openedAttachments.add(fullUrl);
           showToast(`已打开 ${filename}`, 'success', 1500);
-        } else if (result?.cancelled) {
-          markAttachmentCancelled(fullUrl);
-        } else {
-          markAttachmentFailed(fullUrl, result?.error || '未知错误');
+        } else if (!result?.cancelled) {
           showToast(`打开失败: ${result?.error || '未知错误'}`, 'error', 3000);
         }
       } else {

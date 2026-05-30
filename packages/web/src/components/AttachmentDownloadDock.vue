@@ -8,8 +8,12 @@ import {
   dismissTask,
   clearCompleted,
   closeDock,
+  addDownloadTask,
   type AttachmentTask,
 } from '@/composables/useAttachmentTasks';
+import { useToast } from '@/composables/useToast';
+
+const toast = useToast();
 
 const completedCount = computed(() =>
   tasks.value.filter((t) => t.status !== 'downloading').length
@@ -49,12 +53,37 @@ function onTaskAction(t: AttachmentTask): void {
   if (t.status === 'downloading') cancelTask(t.id);
   else dismissTask(t.id);
 }
+
+// 已下载完成的 task 可点击再次打开. cache 命中(main 端 attachmentCache + temp 文件还在)秒开;
+// miss(进程重启 attachmentCache 丢了 / OS 清了 temp) → 重新走完整下载流程, 进度条会再走一遍.
+// addDownloadTask 复用同 URL 让 main store 重置状态, 跟着 open-attachment IPC 触发 main 端 fetch.
+// main 端自己调 store.markSuccessByUrl / markFailedByUrl, 本地 sync 自动更新, 这里只管 toast.
+function canReopen(t: AttachmentTask): boolean {
+  return t.kind === 'download' && t.status === 'success';
+}
+async function onReopenTask(t: AttachmentTask): Promise<void> {
+  if (!canReopen(t)) return;
+  const desk = (window as any).quinkDesktop;
+  if (!desk?.openAttachment) return;
+  // await: 等 main 端 store reset task 状态 (downloading) 再 invoke open-attachment, 否则 main 内部 markSuccessByUrl 可能比 add 先到 store 找不到 task
+  await addDownloadTask(t.url, t.filename);
+  try {
+    const result = await desk.openAttachment(t.url);
+    if (result?.success) {
+      toast.show(`已打开 ${t.filename}`);
+    } else if (!result?.cancelled) {
+      toast.show(`打开失败: ${result?.error || '未知错误'}`, 'error');
+    }
+  } catch (e: any) {
+    toast.show(`打开失败: ${e?.message || '未知错误'}`, 'error');
+  }
+}
 </script>
 
 <template>
   <Transition name="dock-fade">
     <div
-      v-if="dockVisible && tasks.length > 0"
+      v-if="dockVisible"
       class="fixed left-1/2 -translate-x-1/2 z-[110] w-[380px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden"
       style="bottom: 24px"
     >
@@ -86,13 +115,21 @@ function onTaskAction(t: AttachmentTask): void {
         </div>
       </div>
 
+      <!-- 空状态: 用户从 sidebar 头像菜单主动打开但当前无任务 (自动弹出场景一定有 task, 走不到这里) -->
+      <div v-if="tasks.length === 0" class="px-3 py-6 text-center text-xs text-gray-400">
+        暂无传输任务
+      </div>
       <!-- 滚动列表: max-height 3 条高度. 一 li 约 60.5px(首个) / 61.5px(divide-y border-top),
            3 行 = 60.5 + 61.5*2 = 183.5px. 超过 3 行触发滚动, 让 dock 高度稳定在 ~214px(含 top bar 30px) -->
-      <ul class="divide-y divide-gray-50 overflow-y-auto" style="max-height: 184px">
+      <ul v-else class="divide-y divide-gray-50 overflow-y-auto" style="max-height: 184px">
+        <!-- success 状态的 download task 整行可点击触发 onReopenTask, 其他状态不响应 li click -->
         <li
           v-for="t in tasks"
           :key="t.id"
-          class="px-3 py-2"
+          class="px-3 py-2 transition-colors"
+          :class="canReopen(t) ? 'cursor-pointer hover:bg-gray-50' : ''"
+          :title="canReopen(t) ? '再次打开' : ''"
+          @click="canReopen(t) && onReopenTask(t)"
         >
           <!-- 上行: kind icon + 文件名 + 状态按钮 -->
           <div class="flex items-center justify-between gap-2 mb-1">
@@ -106,8 +143,9 @@ function onTaskAction(t: AttachmentTask): void {
               <PhCheck size="0.875rem" weight="bold" />
             </span>
             <PhWarning v-else-if="t.status === 'failed'" size="0.875rem" weight="fill" class="shrink-0 text-red-500" title="失败" />
+            <!-- @click.stop 防点 X 时冒泡触发 li 上的 onReopenTask -->
             <button
-              @click="onTaskAction(t)"
+              @click.stop="onTaskAction(t)"
               class="shrink-0 p-1 rounded text-gray-400 hover:bg-red-50 hover:text-red-500"
               :title="actionLabel(t)"
             >

@@ -71,7 +71,8 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 | `note-saved` | renderer → main (send) | 通知 main 显示"已保存" toast + 转发 `quink-note-created` 给主窗口 (可选带 `noteId` 让主窗口走单条 AI 结果轮询 patch, 不带回退全量 fetchNotes) |
 | `content-ready` | renderer → main (send) | Vditor 等异步组件加载完，main 才 show 窗口 |
 | `sync-theme` | renderer → main (send) | 主窗口切主题时通知 main，main 销毁快捷窗口 + 更新缓存 |
-| `sync-zoom` | renderer → main (send) | 主窗口改"显示比例"时通知 main，main 调 `webContents.setZoomFactor(level/100)` 给 3 个窗口（main / Capture / AiChat）+ 调整 Capture 窗口物理尺寸。参数 `level` 是百分比整数（75-200）。**取代老 `sync-font-size`**（rem-based 字号缩放 → Electron 原生 zoom，跨字号对齐永久解决，详见 RENDERING-PITFALLS.md）|
+| `sync-zoom` | renderer → main (send) | 主窗口改"显示比例"时通知 main，main 给 3 个窗口（main / Capture / AiChat）setZoomLevel(0)+setZoomFactor + 调整 Capture/AiChat 物理尺寸。详见下方"全局显示比例（zoom）"段 |
+| `zoom-step` | main → renderer (send to mainWindow) | 快捷窗口里 Ctrl+滚轮 触发 main 端 webContents 'zoom-changed' 拦截后，转发 ±100 deltaY 给主窗口走完整 stepZoom 路径 |
 | `sync-download-path` | renderer → main (send) | 设置页改下载目录时把路径推给 main，will-download 用 `currentDownloadDir` 直接 setSavePath（不弹对话框） |
 | `pick-directory` | renderer → main (invoke) | 设置页选下载目录时调，main 弹 `dialog.showOpenDialog({properties:['openDirectory','createDirectory']})`，返回路径或 null |
 | `get-default-download-dir` | renderer → main (invoke) | 设置页显示"系统默认"路径时调，main 返回 `app.getPath('downloads')` 的真实绝对路径 |
@@ -84,6 +85,72 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 | `video-thumb-cache:get` | renderer → main (invoke) | 查视频首帧缩略图持久化缓存。返回 `Buffer` 或 `null`。目录 `userData/video-thumb-cache/<basename(url)>.jpg` |
 | `video-thumb-cache:put` | renderer → main (invoke) | 写视频首帧 jpeg 到磁盘缓存。参数 `(url, ArrayBuffer)`，返回 `boolean` |
 | `pdf-thumb-cache:put` | renderer → main (invoke) | 写 PDF 缩略图 jpeg 到磁盘缓存。参数 `(url, ArrayBuffer)`，返回 `boolean` |
+| `attachment-tasks:get` | renderer → main (invoke) | 拉取全量传输任务列表（启动时同步用）。返回 `PersistedTask[]` |
+| `attachment-tasks:add` | renderer → main (invoke) | 新增 task。main 端 `attachmentTasksStore.add` 内部对同 URL download 复用同条 (重置为 downloading)，返回实际使用的 id (可能跟入参不同) |
+| `attachment-tasks:update-progress` | renderer → main (send) | 推上传进度 `{id, received, total}`。main 端 store 不 persist downloading 状态，只 broadcast `attachment-tasks:progress` |
+| `attachment-tasks:mark-success` | renderer → main (send) | 标记 task 完成（id 入参）。main 端 persist + broadcast sync |
+| `attachment-tasks:mark-failed` | renderer → main (send) | 标记 task 失败 `{id, error}` |
+| `attachment-tasks:remove` | renderer → main (send) | 从列表移除（dismiss / cancelled 共用） |
+| `attachment-tasks:cancel` | renderer → main (send) | 取消进行中任务。main 端 download 走 abort fetch；upload broadcast `attachment-tasks:abort-uploads` 让发起 renderer 端 abort 本地 controller |
+| `attachment-tasks:clear-completed` | renderer → main (send) | 清空所有 success/failed/cancelled 任务，保留 downloading |
+| `attachment-tasks:close` | renderer → main (send) | 强力关闭：abort 所有 inflight + 清空列表 + broadcast |
+| `attachment-tasks:sync` | main → renderer (send) | 全量推送 task 列表 (add / mark / remove / clear / close 后触发)。所有 webContents 都收到 |
+| `attachment-tasks:progress` | main → renderer (send) | 单条进度推送 `{id, received, total}` (高频，避免每次广播全量) |
+| `attachment-tasks:abort-uploads` | main → renderer (send) | cancel / close 时让本地有 upload AbortController 的窗口 abort 本地 xhr/fetch |
+
+## 全局附件传输任务（attachmentTasksStore）
+
+跨 BrowserWindow 共享的 task 状态唯一来源在 main 端 `attachmentTasksStore.ts`，跨 session 持久化到 `userData/attachment-tasks.json`（仅终态 success/failed/cancelled，downloading 不写盘）。最多 50 条历史，超出 LRU 丢最旧。
+
+**why**：主 / Capture / AiChat 是独立 BrowserWindow，各自的 Vue app + module-level ref 不共享；localStorage 也不跨 origin（主窗口 http://localhost:24888 vs Capture/AiChat file://）。所以走 main 端中心化 IPC。
+
+**职责分工**：
+- main 端 `attachmentTasksStore`：tasks 数组唯一来源 + persist + broadcast；download 取消由 main 端 abort fetch（`attachmentControllers` Map）
+- renderer 端 `useAttachmentTasks`：thin client，`tasks ref` 由 `attachment-tasks:sync` 维护；保留本地 `localAbortControllers` Map 给 upload 用（AbortController 跨进程不能传，main 端不存它）；接口签名（addDownloadTask / markSuccess / cancelTask 等）保持稳定，内部全部 IPC 化
+
+**Web 端 fallback**：浏览器场景 `quinkDesktop.attachmentTasks` 不存在，useAttachmentTasks 走本地 ref + localStorage 路径（保留旧实现），单窗口无共享需求。
+
+**改这套时注意**：
+- 改 task 字段结构（PersistedTask 加字段）要同时改 main store / renderer composable / preload 三处
+- 进度高频更新走单条 progress 事件（不广播全量），改 add/mark/remove 都广播全量 sync
+- AbortController 必须留 renderer（跨进程无法序列化），cancel 走 broadcast 协议而非"main 直接 abort upload"
+
+## 全局显示比例（zoom）
+
+主窗口改"显示比例" → main 端 sync-zoom IPC 给 3 窗口同步缩放（内容 + 物理尺寸）。改 zoom 路径前必读以下 4 个坑。
+
+### 1. `setZoomFactor` 单独用不行，必须 `setZoomLevel(0)` + `setZoomFactor(factor)` 配对
+
+Chromium 给 webContents 维护**per-origin 持久化 zoom level**（Ctrl+滚轮触发的 layout zoom 改的就是它）。`setZoomFactor(1.0)` 是 transient 设置，**被 per-origin level 覆盖**：用户在 Capture 里 Ctrl+滚轮把 origin zoom 改到 1.1，之后 `setZoomFactor(1.0)` 调成功但实际 dpr 仍 1.1。
+
+修法：`main.ts` 的 `applyZoomToWebContents(wc, factor)` helper 先 `wc.setZoomLevel(0)` 清 per-origin 缓存，再 `wc.setZoomFactor(factor)`。**顺序不能反**。所有给 webContents 设 zoom 的地方都走这个 helper。
+
+### 2. 快捷窗口里 Ctrl+滚轮要走 main 端 `webContents.on('zoom-changed')` 拦截，**不能用 renderer wheel hook**
+
+DOM `WheelEvent.preventDefault()` 在 renderer 里**阻止不了 Chromium 内置 layout zoom**（layout zoom 是浏览器内部行为，不经 DOM 默认动作路径）。如果在 Capture/AiChat 用 `window.addEventListener('wheel', ...)` + `preventDefault` 想拦 Ctrl+滚轮，结果是：
+- DOM preventDefault 阻止默认 scroll（无效，Ctrl+滚轮本来也不滚）
+- Chromium 内置 layout zoom **仍然触发**（factor 变了一档）
+- renderer hook 转发 IPC → main → 又设一次 zoom
+- **内容缩放两次 / 物理窗口缩放一次** → 视觉错位
+
+正确做法：`main.ts` 的 `hookZoomChanged(win)` 监听 `win.webContents.on('zoom-changed', (e, direction) => { e.preventDefault(); ... })`。**这个 `e.preventDefault()` 是 Electron event，能真正阻 Chromium 内置 zoom**。然后转发 `zoom-step` 事件给主窗口走完整 `stepZoom` 链路。
+
+createCaptureWindow / createAiChatWindow 都调一次 `hookZoomChanged(win)`。
+
+### 3. AiChat zoom 联动尺寸跟 Capture 一样（但保留 resize）
+
+Capture：minWidth=maxWidth=getCaptureSize(zoomLevel) 锁死尺寸。
+AiChat：minWidth=minHeight=getAiChatSize(zoomLevel) 只锁最小（用户仍可拖大），sync-zoom 时按基准 × factor 重置 bounds 覆盖用户拖动的自定义尺寸。
+
+`createAiChatWindow` 用 `getAiChatSize(currentZoomLevel)` 算初始尺寸 + 居中位置按当前 zoom factor 算。
+
+### 4. App.vue 在 Capture/AiChat 窗口也会 mount，wheel hook 必须 guard
+
+Quink web 是 SPA，App.vue 是根组件挂 `#app`。**所有 BrowserWindow 都加载同一个 SPA**，App.vue 在主窗口 / Capture / AiChat 各 mount 一份（独立 webContents → 独立 Vue app 实例）。
+
+主窗口的 App.vue `onMounted` 注册的 Ctrl+滚轮 hook 也会在 Capture/AiChat 的 App.vue 实例里跑。结果是快捷窗口的 Ctrl+滚轮触发**两次** stepZoom（Capture 自己的 App.vue + main 转发到主窗口的 App.vue），双触发跳两档。
+
+修法：App.vue `onMounted` 的 wheel hook + `onZoomStep` listener 都包 `if (!isShortcutWindow)` —— 用 `location.pathname` 判断（`route.name` 在 mount 时机不可靠）。当前判 `['/capture', '/ai-chat', '/float']` 不算主窗口。
 
 ## chrome-devtools-mcp 调试 Electron
 

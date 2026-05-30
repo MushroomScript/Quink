@@ -51,6 +51,8 @@ function onEditorReady() {
 
 const notLoggedIn = ref(false);
 
+// Ctrl+滚轮 zoom 由 main 端 webContents.on('zoom-changed') 统一拦截 (renderer 的 wheel preventDefault
+// 阻止不了 Chromium 内置 layout zoom, 会导致 zoom 变两次). 这里不再注册 wheel hook
 onMounted(async () => {
   const user = await auth.fetchMe();
   if (!user) notLoggedIn.value = true;

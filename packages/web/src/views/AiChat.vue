@@ -127,6 +127,8 @@ function onGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
+// Ctrl+滚轮 zoom 由 main 端 webContents.on('zoom-changed') 拦截 (preventDefault 阻 Chromium 内置 layout zoom),
+// 不在 renderer 注册 wheel hook 避免 zoom 双触发
 onMounted(async () => {
   const user = await auth.fetchMe();
   if (!user) notLoggedIn.value = true;
@@ -137,7 +139,9 @@ onMounted(async () => {
   // zoom 同步: 主窗口改显示比例时主进程直接 setZoomFactor 应用到 AiChat 窗口, renderer 不再需要监听 + 自行操作 fontSize
 });
 
-onUnmounted(() => { document.removeEventListener('keydown', onGlobalKeydown); });
+onUnmounted(() => {
+  document.removeEventListener('keydown', onGlobalKeydown);
+});
 </script>
 
 <template>

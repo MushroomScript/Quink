@@ -432,9 +432,10 @@ async function uploadFiles(fileList: File[]) {
   if (!fileList.length) return;
   // 每个文件单独走 dock task (进度独立可见 + 可单独取消). Promise.all 并发上传.
   // 完成总数后弹 toast 汇总成功/失败. 进度过程不再用 toast(dock 里已经有)
-  const results = await Promise.all(fileList.map(file => {
+  const results = await Promise.all(fileList.map(async (file) => {
     const ctrl = new AbortController();
-    const taskId = addUploadTask(file.name, file.size, ctrl);
+    // await: addUploadTask 现在异步 (Electron 走 IPC 让 main 端 store add 完成再返回), 保证后续 updateProgressById 时 task 已存在
+    const taskId = await addUploadTask(file.name, file.size, ctrl);
     return api.uploadFile(file, 'file', {
       folderId: currentFolderId.value,
       signal: ctrl.signal,

@@ -32,5 +32,38 @@ contextBridge.exposeInMainWorld('quinkDesktop', {
     ipcRenderer.removeAllListeners('attachment-progress');
     ipcRenderer.on('attachment-progress', (_e, data) => cb(data));
   },
+  // 快捷窗口 Ctrl+滚轮转发的 deltaY (main 转给主窗口). App.vue 注册后跟自己的 onWheel 同样处理 zoom 调档.
+  // removeAllListeners 防 HMR 累积
+  onZoomStep: (cb: (deltaY: number) => void) => {
+    ipcRenderer.removeAllListeners('zoom-step');
+    ipcRenderer.on('zoom-step', (_e, deltaY: number) => cb(deltaY));
+  },
+  // 全局附件传输任务 (跨窗口共享 + 跨 session 持久化). 状态唯一来源在 main, 这里都是薄封装.
+  attachmentTasks: {
+    get: () => ipcRenderer.invoke('attachment-tasks:get'),
+    add: (task: any) => ipcRenderer.invoke('attachment-tasks:add', task),
+    updateProgress: (id: string, received: number, total: number) =>
+      ipcRenderer.send('attachment-tasks:update-progress', { id, received, total }),
+    markSuccess: (id: string) => ipcRenderer.send('attachment-tasks:mark-success', id),
+    markFailed: (id: string, error: string) =>
+      ipcRenderer.send('attachment-tasks:mark-failed', { id, error }),
+    remove: (id: string) => ipcRenderer.send('attachment-tasks:remove', id),
+    cancel: (id: string) => ipcRenderer.send('attachment-tasks:cancel', id),
+    clearCompleted: () => ipcRenderer.send('attachment-tasks:clear-completed'),
+    close: () => ipcRenderer.send('attachment-tasks:close'),
+    // main → renderer 事件 (full sync / 单条 progress / abort uploads 请求)
+    onSync: (cb: (tasks: any[]) => void) => {
+      ipcRenderer.removeAllListeners('attachment-tasks:sync');
+      ipcRenderer.on('attachment-tasks:sync', (_e, tasks) => cb(tasks));
+    },
+    onProgress: (cb: (p: { id: string; received: number; total: number }) => void) => {
+      ipcRenderer.removeAllListeners('attachment-tasks:progress');
+      ipcRenderer.on('attachment-tasks:progress', (_e, p) => cb(p));
+    },
+    onAbortUploads: (cb: (ids: string[]) => void) => {
+      ipcRenderer.removeAllListeners('attachment-tasks:abort-uploads');
+      ipcRenderer.on('attachment-tasks:abort-uploads', (_e, ids) => cb(ids));
+    },
+  },
   isElectron: true,
 });

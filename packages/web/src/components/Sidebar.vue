@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, markRaw } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, markRaw } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useNotesStore } from '@/stores/notes';
@@ -8,6 +8,7 @@ import { useEscToClose } from '@/composables/useEscToClose';
 import { useToast } from '@/composables/useToast';
 import { dragState } from '@/utils/cardDnd';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
+import { tasks as transferTasks, dockVisible as transferDockVisible } from '@/composables/useAttachmentTasks';
 import {
   PhLightbulb,
   PhNotePencil,
@@ -22,6 +23,7 @@ import {
   PhCaretDown,
   PhGear,
   PhSignOut,
+  PhArrowsDownUp,
 } from '@phosphor-icons/vue';
 
 const router = useRouter();
@@ -162,6 +164,16 @@ function toggleUserMenu() { showUserMenu.value = !showUserMenu.value; }
 function closeUserMenu() { showUserMenu.value = false; }
 function goSettings() { closeUserMenu(); router.push('/settings'); }
 function handleLogout() { closeUserMenu(); auth.logout(); router.push('/login'); }
+
+// 头像菜单里的"传输列表"入口: 仅有任务时显示菜单项(跟 dock v-if 一致), badge 显示进行中数量.
+// 点击 = 强制 dockVisible=true 把已 dismiss 的 dock 拉回来, 用户能继续看进度 / 已完成结果.
+const transferDownloadingCount = computed(() =>
+  transferTasks.value.filter((t) => t.status === 'downloading').length
+);
+function openTransferDock() {
+  closeUserMenu();
+  transferDockVisible.value = true;
+}
 function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() : '?'; }
 
 // 拖到回收站时 cardDnd 派 quink-drop-trash 事件, Sidebar 这里弹确认 modal (避开把 confirm UI 塞 utils/)
@@ -211,6 +223,19 @@ onUnmounted(() => {
         enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-75 ease-in"
         leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
         <div v-if="showUserMenu" class="absolute left-3 right-3 top-full mt-1 bg-sidebar-light rounded-xl shadow-xl z-50 py-1" style="border: 1px solid var(--sb-border)">
+          <!-- 传输列表: 常驻入口, 永远可点. 无任务时点开 dock 显示空状态 -->
+          <button @click="openTransferDock"
+            class="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition-colors"
+            style="color: var(--sb-text)"
+            @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--sb-hover)'"
+            @mouseleave="($event.currentTarget as HTMLElement).style.background = 'transparent'">
+            <PhArrowsDownUp size="1rem" weight="fill" /><span>传输列表</span>
+            <span v-if="transferDownloadingCount > 0"
+              class="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-medium rounded-full bg-primary text-white tabular-nums">
+              {{ transferDownloadingCount }}
+            </span>
+          </button>
+          <div style="border-top: 1px solid var(--sb-border); margin: 4px 0"></div>
           <button @click="goSettings" class="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition-colors"
             style="color: var(--sb-text)" @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--sb-hover)'" @mouseleave="($event.currentTarget as HTMLElement).style.background = 'transparent'">
             <PhGear size="1rem" weight="fill" /><span>设置</span>
