@@ -4,7 +4,7 @@ import { api, isLoggedIn } from '@/api';
 import { useNotesStore } from '@/stores/notes';
 import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
 import { useImagePreview } from '@/composables/useImagePreview';
-import { resolveFileUrl } from '@/utils/fileUrl';
+import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import { pinyinMatch } from '@/utils/pinyin';
 import AudioPlayer from '@/components/AudioPlayer.vue';
 import PdfThumbnail from '@/components/PdfThumbnail.vue';
@@ -1038,7 +1038,9 @@ onUnmounted(() => {
               </div>
               <!-- HEIC 独立判断(OS 经常把 .heic mime 标成 octet-stream 不走 isImage), 用 heic2any 转 jpeg -->
               <HeicImage v-if="isHeic(f)" :src="resolveFileUrl(f.url)" :alt="f.filename" />
-              <img v-else-if="isImage(f)" :src="resolveFileUrl(f.url)" :alt="f.filename"
+              <!-- 缩略图: src 走后端 sharp thumb (长边 600), thumb 没生成时 @error 一次性降级原图 -->
+              <img v-else-if="isImage(f)" :src="resolveFileThumbUrl(f.url)" :alt="f.filename"
+                @error="thumbErrorFallback($event, resolveFileUrl(f.url))"
                 class="w-full h-full object-cover" :class="!selectMode ? 'cursor-zoom-in' : ''" />
               <!-- 视频缩略图: 走 VideoThumbnail 组件(canvas 截首帧 + 双层缓存), 缓存命中后不挂 <video> 元素.
                    点击走 onCardClick isVideo 分支 → openVideoPreview 全屏 modal -->
@@ -1143,7 +1145,8 @@ onUnmounted(() => {
             </div>
             <div class="w-9 h-9 shrink-0 bg-gray-50 rounded flex items-center justify-center overflow-hidden">
               <HeicImage v-if="isHeic(f)" :src="resolveFileUrl(f.url)" :alt="f.filename" />
-              <img v-else-if="isImage(f)" :src="resolveFileUrl(f.url)" :alt="f.filename"
+              <img v-else-if="isImage(f)" :src="resolveFileThumbUrl(f.url)" :alt="f.filename"
+                @error="thumbErrorFallback($event, resolveFileUrl(f.url))"
                 class="w-full h-full object-cover" :class="!selectMode ? 'cursor-zoom-in' : ''" />
               <!-- 视频缩略: 走 VideoThumbnail 组件(同 grid). list view 用 cover 填满 36×36 + 小 play icon -->
               <VideoThumbnail v-else-if="isVideo(f)" :src="resolveFileUrl(f.url)" fit="cover" />

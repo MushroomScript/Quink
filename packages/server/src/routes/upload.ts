@@ -10,6 +10,7 @@ import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { toPinyinSearchable } from '../utils/pinyin.js';
 import { isHeicFilename, generateHeicThumb, heicThumbPath, backfillHeicThumbs } from '../utils/heicThumb.js';
+import { isThumbableImage, generateImageThumb } from '../utils/imageThumb.js';
 
 const UPLOAD_DIR = resolve(process.cwd(), 'uploads');
 
@@ -71,18 +72,18 @@ function sanitizeName(name: string): string {
   return s;
 }
 
-// 拼磁盘文件名 + 冲突检测（同秒多次上传时追加 _2/_3）
-function buildFilename(displayName: string, ext: string): { filename: string; displayFilename: string } {
-  const safe = sanitizeName(displayName);
+// 拼唯一磁盘文件名 + 冲突检测（同秒多次上传时追加 _2/_3）.
+// 入参 safeName 必须已 sanitize（小写字母/数字/中文等安全字符）. 调用方按需自己组装 displayFilename
+function buildUniqueFilename(safeName: string, ext: string): string {
   const datePrefix = dayjs().format('YYYY-MM-DD_HHmmss');
-  const base = `${datePrefix}_${safe}`;
+  const base = `${datePrefix}_${safeName}`;
   let filename = `${base}.${ext}`;
   let counter = 2;
   while (existsSync(resolve(UPLOAD_DIR, filename))) {
     filename = `${base}_${counter}.${ext}`;
     counter++;
   }
-  return { filename, displayFilename: `${safe}.${ext}` };
+  return filename;
 }
 
 function nameFromOriginal(originalName: string): string {
@@ -110,8 +111,18 @@ app.post('/avatar', async (c) => {
   }
 
   const ext = getExt(file.type, file.name);
-  const { filename } = buildFilename('avatar', ext);
-  writeFileSync(resolve(UPLOAD_DIR, filename), Buffer.from(await file.arrayBuffer()));
+  const filename = buildUniqueFilename('avatar', ext);
+  const diskPath = resolve(UPLOAD_DIR, filename);
+  writeFileSync(diskPath, Buffer.from(await file.arrayBuffer()));
+
+  // 同步生成 thumb (头像 2MB 上限 + sharp 处理 < 300ms 可接受). 失败 swallow, 前端 onError 兜底原图
+  if (isThumbableImage(filename)) {
+    try {
+      await generateImageThumb(diskPath);
+    } catch (e: any) {
+      console.warn('[upload] avatar thumb generation failed:', filename, e?.message);
+    }
+  }
 
   return c.json({ data: { url: `/api/uploads/${filename}` } }, 201);
 });
@@ -138,7 +149,9 @@ app.post('/file', async (c) => {
     ? displayNameField
     : nameFromOriginal(file.name);
 
-  const { filename, displayFilename } = buildFilename(rawName, ext);
+  const safeName = sanitizeName(rawName);
+  const filename = buildUniqueFilename(safeName, ext);
+  const displayFilename = `${safeName}.${ext}`;
   const diskPath = resolve(UPLOAD_DIR, filename);
   writeFileSync(diskPath, Buffer.from(await file.arrayBuffer()));
 
@@ -149,6 +162,14 @@ app.post('/file', async (c) => {
       await generateHeicThumb(diskPath);
     } catch (e: any) {
       console.warn('[upload] HEIC thumb generation failed:', filename, e?.message);
+    }
+  } else if (isThumbableImage(filename)) {
+    // 普通图片 (jpg/png/webp/gif) 同步生成 sharp thumb. resources 缩略图 + 笔记里嵌图都受益.
+    // 大图 sharp 处理 200-500ms 阻塞上传响应, 单次上传可接受. 失败 swallow, 前端 onError 兜底原图
+    try {
+      await generateImageThumb(diskPath);
+    } catch (e: any) {
+      console.warn('[upload] image thumb generation failed:', filename, e?.message);
     }
   }
 

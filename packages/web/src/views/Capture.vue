@@ -58,23 +58,15 @@ onMounted(async () => {
   document.documentElement.setAttribute('data-theme', theme);
   document.addEventListener('keydown', onKeydown);
 
-  // 每次窗口显示时同步主题 + 字体 + 聚焦编辑器
+  // 每次窗口显示时同步主题 + 聚焦编辑器 (字号方案已切到 Electron zoom, 不需要前端 applyFontSize)
   try {
     (window as any).quink?.onWindowShown?.(() => {
       // 同步读 localStorage(不闪烁)
       const t = localStorage.getItem('quink_theme') || 'blueberry';
       document.documentElement.setAttribute('data-theme', t);
-      const fs = localStorage.getItem('quink_font_size');
-      if (fs) applyFontSize(fs);
       setTimeout(() => {
         document.querySelector<HTMLElement>('.vditor-ir [contenteditable]')?.focus();
       }, 50);
-    });
-  } catch {}
-  // 用户在主窗口改字体后,主进程主动通知,实时应用
-  try {
-    (window as any).quink?.onFontSizeChanged?.((size: number) => {
-      applyFontSize(size);
     });
   } catch {}
 });

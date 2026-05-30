@@ -7,6 +7,7 @@ import { api } from '@/api';
 import { collapseLeave, snapshotCards } from '@/utils/cardLeave';
 import { useTheme } from '@/composables/useTheme';
 import ToggleSwitch from '@/components/ToggleSwitch.vue';
+import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -511,10 +512,15 @@ function goBack() {
         <!-- Avatar -->
         <div class="flex items-center gap-5">
           <button @click="triggerAvatarUpload" class="relative group shrink-0" :disabled="uploadingAvatar">
-            <div
+            <!-- 用 <img> 而非 background-image: Chromium 对 <img> 的 downsample 路径质量更高 (大头像缩 80px 不会看着锐化).
+                 src 走 thumb URL, thumb 没生成时 @error 一次性降级到原图. draggable=false 防按住头像意外触发 OS 拖图 -->
+            <img
               v-if="avatarPreview"
-              class="w-20 h-20 rounded-full bg-cover bg-center border-2 border-gray-100"
-              :style="{ backgroundImage: `url(${avatarPreview})` }"
+              :src="resolveFileThumbUrl(avatarPreview)"
+              @error="thumbErrorFallback($event, resolveFileUrl(avatarPreview))"
+              draggable="false"
+              alt="头像"
+              class="w-20 h-20 rounded-full object-cover border-2 border-gray-100"
             />
             <div
               v-else

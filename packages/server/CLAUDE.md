@@ -36,8 +36,13 @@ SQLite + 启动时自动迁移（`db/index.ts` 中 `CREATE TABLE IF NOT EXISTS` 
 ## 文件上传
 
 - 上传接口 `/api/upload/file`，静态服务 `/api/uploads/*`。文件存在 `packages/server/uploads/` 并在 `files` 表登记。最大 100MB。头像上传接口 `/api/upload/avatar`（2MB 限制）。
-- **磁盘真实文件名 vs DB display name 分离**：`buildFilename` 函数（`routes/upload.ts`）把"防重名后缀"加在磁盘文件名上（`语音备忘_1.m4a`），DB 的 `filename` 字段存的是用户输入的 display name（`语音备忘.m4a`）。前端看到的 + markdown link label 用 displayName。url 永远指向磁盘真实名，重命名 displayName 不影响 url。
+- **磁盘真实文件名 vs DB display name 分离**：`buildUniqueFilename(safeName, ext)` 函数（`routes/upload.ts`）拼"日期前缀 + safeName + 防重名 counter"作为磁盘文件名（`2026-05-30_xxx_语音备忘_2.m4a`）。`/file` 调用方自己 `sanitizeName(rawName)` + 组装 `displayFilename = ${safe}.${ext}` 存 DB `files.filename`（如 `语音备忘.m4a`）。`/avatar` 不进 DB 不组装 displayFilename。前端看到的 + markdown link label 用 displayName。url 永远指向磁盘真实名，重命名 displayName 不影响 url。
 - **url 字段裸名约定**：DB `files.url` 字段 + 笔记 `content` 里 markdown link 的 url 都只存裸文件名（如 `xxx.png`），不带 `/api/uploads/` 前缀，前端渲染层拼前缀（详见 `packages/web/CLAUDE.md` 的"文件 url helper"段）。新格式（裸名）和老格式（带前缀）都要兼容——DB 启动时一次性 `REPLACE` 迁移过；后端接收 url 做 disk path resolve 时也要兼容剥前缀（如 `ai-config.ts` transcribe-async：`audioUrl.replace(/^\/api\/uploads\//, '').replace(/^uploads\//, '')`）。
+- **缩略图自动生成（sharp / libheif）**：上传图片时同步生成 `<裸名>.thumb.jpg`（长边 600 / jpeg 80 / EXIF 旋转），用于头像 / 资源缩略图 / 笔记小图显示，缓解大图一步 CSS downsample 的锐化感。两条路径同命名约定（共用 `xxx.ext.thumb.jpg`，路径不冲突）：
+    - **普通图片**（jpg/png/webp/gif）：`utils/imageThumb.ts` 的 `generateImageThumb` 用 sharp。`/avatar` + `/file` 写盘后都同步 await（sharp 处理 < 500ms，单次上传可接受），失败 swallow + console.warn 不影响响应。判断走 `isThumbableImage(filename)`（含 `.thumb.` 自身的跳过防递归）
+    - **HEIC**：`utils/heicThumb.ts` 的 `generateHeicThumb` 用 libheif-js（wasm-bundle）+ jpeg-js，纯 JS / WASM 不依赖系统 libvips，参见 `heicThumb.ts` 头部注释
+    - 历史文件没 thumb → 前端 `<img @error>` 一次性降级原图（fileUrl helper 提供）。**不在 server 启动时全量 backfill**，避免卡启动；HEIC 例外（已有 `backfillHeicThumbs`）
+    - 加新调用点（新上传接口 / 新文件类型）参照现有 isThumbableImage + try/await 模式. 改 sharp 行为或长边阈值修 `imageThumb.ts` 顶部常量
 
 ## 文件重命名
 

@@ -12,6 +12,26 @@ export function resolveFileUrl(url: string | null | undefined): string {
   return '/api/uploads/' + url;
 }
 
+// 缩略图 URL: 上传时后端 sharp 生成 <裸名>.thumb.jpg (长边 600). 头像 / 资源缩略图 / 笔记小图用.
+// 命名跟 heicThumb 一致. 历史文件没 thumb → 浏览器 404 → 调用方 <img @error> 降级到原图.
+// 外链 (http(s)/blob/data) 无法 thumb, 原样返回让调用方按原图渲染.
+export function resolveFileThumbUrl(url: string | null | undefined): string {
+  if (!url) return '';
+  if (/^(https?|data|blob):/.test(url)) return url;
+  const bare = url.startsWith('/api/uploads/') ? url.slice('/api/uploads/'.length) : url.replace(/^\/+/, '');
+  if (!bare) return '';
+  return '/api/uploads/' + bare + '.thumb.jpg';
+}
+
+// <img :src="resolveFileThumbUrl(url)" @error="thumbErrorFallback($event, resolveFileUrl(url))">
+// thumb 404 (历史文件 / sharp 失败) 时一次性切回原图; dataset 标记防原图也 404 无限循环.
+export function thumbErrorFallback(e: Event, originalUrl: string): void {
+  const t = e.target as HTMLImageElement;
+  if (t.dataset.thumbFallback === '1') return;
+  t.dataset.thumbFallback = '1';
+  t.src = originalUrl;
+}
+
 // markdown 渲染入口预处理: 把 `](xxx.ext)` 这种"括号内裸文件名"拼成 `](/api/uploads/xxx.ext)`,
 // 让 md2html 后生成的 <a href> / <img src> / <audio src> 都是绝对路径,点击下载/预览正常。
 //

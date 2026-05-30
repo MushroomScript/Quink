@@ -7,6 +7,7 @@ import { api, isLoggedIn, type Category } from '@/api';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useToast } from '@/composables/useToast';
 import { dragState } from '@/utils/cardDnd';
+import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import {
   PhLightbulb,
   PhNotePencil,
@@ -191,7 +192,11 @@ onUnmounted(() => {
       <button @click="toggleUserMenu"
         class="flex items-center gap-3 w-full rounded-xl px-3 py-2.5 transition-colors text-left"
         style="color: var(--sb-text)" @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--sb-hover)'" @mouseleave="($event.currentTarget as HTMLElement).style.background = 'transparent'">
-        <div v-if="auth.avatar" class="w-9 h-9 rounded-full bg-cover bg-center shrink-0" :style="{ backgroundImage: `url(${auth.avatar})` }" />
+        <!-- <img> 走 thumb URL; @error 一次性降级原图. 比 background-image 路径 downsample 质量好 -->
+        <img v-if="auth.avatar" :src="resolveFileThumbUrl(auth.avatar)"
+          @error="thumbErrorFallback($event, resolveFileUrl(auth.avatar))"
+          draggable="false" alt="头像"
+          class="w-9 h-9 rounded-full object-cover shrink-0" />
         <div v-else class="w-9 h-9 rounded-full bg-primary/30 text-primary flex items-center justify-center text-sm font-bold shrink-0">
           {{ getInitial(auth.nickname) }}
         </div>

@@ -108,13 +108,31 @@ cp -r node_modules/vditor/dist packages/web/public/vditor/dist
 
 ## 文件 url helper（裸名约定）
 
-DB `files.url` 字段 + 笔记 `content` 里 markdown link 的 url 都只存**裸文件名**（如 `xxx.png`），不带 `/api/uploads/` 前缀（后端约定，详见 `packages/server/CLAUDE.md`）。前端渲染层用 `src/utils/fileUrl.ts` 三个 helper 拼/剥前缀：
+DB `files.url` 字段 + 笔记 `content` 里 markdown link 的 url 都只存**裸文件名**（如 `xxx.png`），不带 `/api/uploads/` 前缀（后端约定，详见 `packages/server/CLAUDE.md`）。前端渲染层用 `src/utils/fileUrl.ts` 五个 helper 拼/剥前缀 + 缩略图：
 
 - **`resolveFileUrl(url)`** —— 直接拼路径，用于 `<img :src>` / `<a :href>` / `<audio :src>` 等元素属性
 - **`resolveMarkdownFileUrls(md)`** —— markdown 字符串预处理（用于 `Vditor.md2html` 前）。把 `[xxx](裸名.ext)` 拼成 `[xxx](/api/uploads/裸名.ext)`。识别规则：括号内不含 URL 特殊字符（`/`/`?`/`#`/`:`）且含扩展名 `.ext` 才拼，不会误伤外链/引用链接 `(?ref=xxx)`/内部路由 `(/note/abc)`
 - **`stripMarkdownFileUrls(md)`** —— 编辑器 `getValue` 后用，把 absolute path 剥回裸名
+- **`resolveFileThumbUrl(url)`** —— 拼缩略图路径 `/api/uploads/<裸名>.thumb.jpg`（后端 sharp 上传时生成，详见 `packages/server/CLAUDE.md`）
+- **`thumbErrorFallback(e, originalUrl)`** —— `<img @error>` 一次性降级原图（dataset 标记防原图也 404 时无限循环）
 
-新增 markdown 渲染入口必须套这两个 helper，否则文件链接 404。当前渲染入口：`NoteCard.vue` / `NoteDetail.vue` / `Trash.vue` / `AI.vue` / `AiChat.vue` / `App.vue`（引用预览）/ `RichEditor.vue`。
+新增 markdown 渲染入口必须套前 3 个 helper，否则文件链接 404。当前渲染入口：`NoteCard.vue` / `NoteDetail.vue` / `Trash.vue` / `AI.vue` / `AiChat.vue` / `App.vue`（引用预览）/ `RichEditor.vue`。
+
+### 静态图片显示约定（头像 / 资源缩略图 / 笔记小图）
+
+**显示 < 200px 的图片必须走 thumb URL + onError 降级**，否则浏览器对 4MB+ 原图一步 downsample 到 36/80/128 px 会显出明显锐化感（CSS `zoom != 100%` 时更严重）。模板范例：
+
+```vue
+<img :src="resolveFileThumbUrl(url)"
+  @error="thumbErrorFallback($event, resolveFileUrl(url))"
+  class="..." />
+```
+
+**别用 `background-image: url(...)`**：Chromium 对 background-image 的 downsample 路径质量比 `<img>` 差一档。头像如果非要圆形用 `<img class="rounded-full object-cover">`。
+
+历史已上传图片没 thumb 文件 → 浏览器 404 → `thumbErrorFallback` 切回原图，**不裂图但也无改善**。蘑菇要全量 backfill 可以加 `backfillImageThumbs` server 启动时扫一遍，类似已有 `backfillHeicThumbs`。
+
+当前调用点：`Settings.vue`（头像）/ `Sidebar.vue`（头像）/ `Resources.vue`（grid + list 缩略图）。新增图片显示位置（卡片小图预览、笔记 metadata 缩略图等）也按这套来。
 
 ### RichEditor 双向转换
 
