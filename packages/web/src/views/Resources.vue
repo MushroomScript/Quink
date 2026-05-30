@@ -862,23 +862,23 @@ onUnmounted(() => {
         <p class="text-xs text-primary-dark font-medium">已选 {{ selectedIds.size }} 项</p>
         <div class="flex items-center gap-2">
           <button @click="selectAllFiles" :disabled="filtered.length === 0 || selectedIds.size === filtered.length"
-            class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            class="px-3 py-1 text-xs rounded-lg font-medium bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             全选
           </button>
           <button @click="moveTargetOpen = true" :disabled="!selectedIds.size"
-            class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             移动到...
           </button>
           <button @click="cutSelected" :disabled="!selectedIds.size"
-            class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             剪切
           </button>
           <button @click="confirmBatchDelete = true" :disabled="!selectedIds.size"
-            class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            class="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             批量删除
           </button>
           <button @click="selectMode = false"
-            class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors">
+            class="px-3 py-1 text-xs rounded-lg font-medium bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors">
             退出
           </button>
         </div>
@@ -888,7 +888,7 @@ onUnmounted(() => {
         <div class="flex items-center gap-2 flex-wrap">
           <div class="flex gap-1">
             <button v-for="f in filters" :key="f.value" @click="store.fileCategory = f.value as any"
-              class="px-3 pt-[0.19rem] pb-[0.31rem] rounded-lg text-xs transition-colors"
+              class="px-3 py-1 rounded-lg text-xs transition-colors"
               :class="store.fileCategory === f.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-500 hover:bg-gray-100'">
               {{ f.label }}
             </button>
@@ -911,26 +911,26 @@ onUnmounted(() => {
         <div class="flex items-center gap-2">
           <button v-if="cutBuffer" @click="pasteHere"
             :disabled="cutBuffer.sourceFolderId === currentFolderId"
-            class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors inline-flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors inline-flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
             :title="cutBuffer.sourceFolderId === currentFolderId ? '当前已是剪切来源目录, 切到其他目录可粘贴' : ''">
             粘贴 ({{ cutBuffer.ids.length }})
           </button>
           <button v-if="store.fileDateFrom || store.fileDateTo" @click="clearDateFilter"
-            class="text-xs font-medium px-3 pt-[0.19rem] pb-[0.31rem] rounded-lg text-red-600 bg-red-100 hover:bg-red-200 inline-flex items-center gap-1 transition-colors">
+            class="text-xs font-medium px-3 py-1 rounded-lg text-red-600 bg-red-100 hover:bg-red-200 inline-flex items-center gap-1 transition-colors">
             <PhXCircle size="0.875rem" weight="fill" />
             <span>清除时间筛选</span>
           </button>
           <button @click="selectMode = true"
-            class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors">
+            class="px-3 py-1 text-xs rounded-lg font-medium bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors">
             选择
           </button>
           <button @click="startCreateFolder"
-            class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors inline-flex items-center gap-1">
+            class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors inline-flex items-center gap-1">
             <PhFolderPlus size="0.875rem" weight="fill" />
             新建文件夹
           </button>
           <button @click="triggerUpload"
-            class="px-4 pt-[0.32rem] pb-[0.43rem] bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark transition-colors">
+            class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark transition-colors">
             上传文件
           </button>
         </div>
@@ -1218,9 +1218,9 @@ onUnmounted(() => {
             class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary mb-4" />
           <div class="flex gap-2 justify-end">
             <button @click="renameTarget = null"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="doRename"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark">保存</button>
+              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark">保存</button>
           </div>
         </div>
       </div>
@@ -1236,8 +1236,8 @@ onUnmounted(() => {
           <p class="text-sm text-gray-700 mb-1">删除文件</p>
           <p class="text-xs text-gray-400 mb-4">删除后不可恢复</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmDeleteId = ''" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doDeleteFile" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+            <button @click="confirmDeleteId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doDeleteFile" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
           </div>
         </div>
       </div>
@@ -1253,8 +1253,8 @@ onUnmounted(() => {
           <p class="text-sm text-gray-700 mb-1">批量删除</p>
           <p class="text-xs text-gray-400 mb-4">将永久删除选中的 {{ selectedIds.size }} 个文件，不可恢复</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmBatchDelete = false" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doBatchDelete" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+            <button @click="confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doBatchDelete" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
           </div>
         </div>
       </div>
@@ -1273,9 +1273,9 @@ onUnmounted(() => {
             class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary mb-4" />
           <div class="flex gap-2 justify-end">
             <button @click="createFolderOpen = false"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="doCreateFolder" :disabled="!createFolderName.trim()"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark disabled:opacity-40">创建</button>
+              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark disabled:opacity-40">创建</button>
           </div>
         </div>
       </div>
@@ -1294,9 +1294,9 @@ onUnmounted(() => {
             class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary mb-4" />
           <div class="flex gap-2 justify-end">
             <button @click="renameFolderTarget = null"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="doRenameFolder"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark">保存</button>
+              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark">保存</button>
           </div>
         </div>
       </div>
@@ -1318,8 +1318,8 @@ onUnmounted(() => {
             <span>同时删除文件夹内所有文件和子文件夹</span>
           </label>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmDeleteFolderId = ''" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doDeleteFolder" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+            <button @click="confirmDeleteFolderId = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doDeleteFolder" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
           </div>
         </div>
       </div>
@@ -1355,7 +1355,7 @@ onUnmounted(() => {
           </div>
           <div class="flex justify-end mt-3">
             <button @click="moveTargetOpen = false"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
           </div>
         </div>
       </div>
@@ -1373,11 +1373,11 @@ onUnmounted(() => {
           </p>
           <div class="flex gap-2 justify-center">
             <button @click="confirmOpenFile = null"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
               取消
             </button>
             <button @click="confirmOpenAndOpen"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark">
+              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-primary hover:bg-primary-dark">
               打开
             </button>
           </div>

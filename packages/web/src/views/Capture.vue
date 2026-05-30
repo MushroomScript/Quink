@@ -95,7 +95,7 @@ onUnmounted(() => {
 
     <!-- Editor -->
     <div v-else class="capture-editor-host flex-1 overflow-hidden bg-white rounded-xl shadow-2xl">
-      <RichEditor ref="editorRef" @submit="onSubmit" @ready="onEditorReady" :show-ai="false" :show-fullscreen-btn="false" :compact-submit="true" :max-height="80" :min-height="60" hint-text="Esc 关闭 | Ctrl+Enter 保存" placeholder="快速记录你的想法..." />
+      <RichEditor ref="editorRef" @submit="onSubmit" @ready="onEditorReady" :show-ai="false" :show-fullscreen-btn="false" :max-height="80" :min-height="60" hint-text="Esc 关闭 | Ctrl+Enter 保存" placeholder="快速记录你的想法..." />
     </div>
 
     <!-- Toast -->

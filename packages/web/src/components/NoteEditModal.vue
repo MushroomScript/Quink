@@ -145,11 +145,11 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', onKeydown, true)
             <p class="text-xs text-gray-400 mb-5">关闭后未保存的修改将丢失</p>
             <div class="flex gap-3 justify-center">
               <button @click="showConfirm = false"
-                class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+                class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
                 继续编辑
               </button>
               <button @click="confirmDiscard"
-                class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white transition-colors"
+                class="px-4 py-1.5 text-xs rounded-lg text-white transition-colors"
                 style="background: rgb(var(--c-accent-dark))">
                 放弃修改
               </button>

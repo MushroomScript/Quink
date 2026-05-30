@@ -234,7 +234,7 @@ onUnmounted(() => {
         <component :is="item.icon" size="1.125rem" weight="fill" />
         <span>{{ item.label }}</span>
         <span v-if="item.label === '待办' && stats.pendingTodos > 0 && auth.user?.preferences?.showTodoBadge !== false"
-          class="ml-auto inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1 bg-red-400/70 text-white text-[0.6875rem] leading-[1.125rem] font-semibold tabular-nums rounded-full">
+          class="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full">
           {{ stats.pendingTodos > 99 ? '99+' : stats.pendingTodos }}
         </span>
       </router-link>
@@ -307,9 +307,9 @@ onUnmounted(() => {
             class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
           <div class="flex gap-2 mt-4 justify-end">
             <button @click="showAddCategory = false; newCategoryName = ''"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="addCategory"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium"
+              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium"
               style="background: rgb(var(--c-accent-dark))">添加</button>
           </div>
         </div>
@@ -324,8 +324,8 @@ onUnmounted(() => {
           <p class="text-sm text-gray-700 mb-1">删除内容</p>
           <p class="text-xs text-gray-400 mb-4">将 {{ trashIds.length }} 条内容移至回收站</p>
           <div class="flex gap-2 justify-center">
-            <button @click="cancelTrash" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doTrash" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+            <button @click="cancelTrash" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doTrash" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
           </div>
         </div>
       </div>
@@ -340,9 +340,9 @@ onUnmounted(() => {
           <p class="text-xs text-gray-400 mb-4">「{{ deletingCategoryName }}」及关联笔记的分类将被清除</p>
           <div class="flex gap-2 justify-center">
             <button @click="showDeleteConfirm = false"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+              class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="deleteCategory(deletingCategoryId!)"
-              class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+              class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
           </div>
         </div>
       </div>

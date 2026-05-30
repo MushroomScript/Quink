@@ -865,11 +865,11 @@ function goBack() {
           </div>
           <div v-if="configError" class="text-red-500 text-xs bg-red-50 rounded-lg px-3 py-2">{{ configError }}</div>
           <div class="flex gap-2">
-            <button @click="saveConfig" :disabled="saving" class="px-4 pt-[0.32rem] pb-[0.43rem] text-white text-xs font-medium rounded-lg disabled:opacity-50 inline-grid place-items-center" style="background: rgb(var(--c-accent))">
+            <button @click="saveConfig" :disabled="saving" class="px-4 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-50 inline-grid place-items-center" style="background: rgb(var(--c-accent))">
               <span class="col-start-1 row-start-1 invisible">保存中</span>
               <span class="col-start-1 row-start-1">{{ saving ? '保存中' : '保存' }}</span>
             </button>
-            <button @click="editingConfig = null; configError = ''" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs text-gray-500 rounded-lg hover:bg-gray-100">取消</button>
+            <button @click="editingConfig = null; configError = ''" class="px-4 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">取消</button>
           </div>
         </div>
       </div>
@@ -908,11 +908,11 @@ function goBack() {
             class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs leading-relaxed outline-none focus:border-primary font-mono resize-none text-gray-600" />
           <p class="text-xs text-gray-400 mt-1">用 {content} 表示笔记内容，{context} 表示上下文</p>
           <div class="flex gap-2 mt-3 items-center">
-            <button @click="savePrompt" :disabled="saving" class="px-4 pt-[0.32rem] pb-[0.43rem] text-white text-xs font-medium rounded-lg disabled:opacity-50 inline-grid place-items-center" style="background: rgb(var(--c-accent))">
+            <button @click="savePrompt" :disabled="saving" class="px-4 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-50 inline-grid place-items-center" style="background: rgb(var(--c-accent))">
               <span class="col-start-1 row-start-1 invisible">保存中</span>
               <span class="col-start-1 row-start-1">{{ saving ? '保存中' : '保存' }}</span>
             </button>
-            <button @click="resetPrompt(editingPromptFeature)" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs text-gray-500 rounded-lg hover:bg-gray-100">恢复默认</button>
+            <button @click="resetPrompt(editingPromptFeature)" class="px-4 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">恢复默认</button>
             <!-- 仅 auto_summary tab 显示触发阈值, 跟保存/恢复同行右侧 (蘑菇 2026-05-29: 从偏好设置挪过来集中) -->
             <div v-if="editingPromptFeature === 'auto_summary'" class="flex items-center gap-2 ml-2">
               <span class="text-xs text-gray-400 shrink-0">长度小于</span>

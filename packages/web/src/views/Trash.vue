@@ -270,26 +270,26 @@ function onLeave(el: Element, done: () => void) {
       <div class="flex items-center gap-2">
         <template v-if="selectMode">
           <button @click="confirmBatchRestore = true" :disabled="!selectedIds.size"
-            class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:opacity-80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:opacity-80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             批量恢复
           </button>
           <button @click="confirmBatchDelete = true" :disabled="!selectedIds.size"
-            class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            class="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             批量永久删除
           </button>
-          <button @click="selectMode = false" class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors">
+          <button @click="selectMode = false" class="px-3 py-1 text-xs rounded-lg font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors">
             退出
           </button>
         </template>
         <template v-else>
-          <button @click="confirmRestoreAll = true" class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:opacity-80 transition-colors">
+          <button @click="confirmRestoreAll = true" class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:opacity-80 transition-colors">
             恢复所有
           </button>
-          <button @click="confirmEmpty = true" class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+          <button @click="confirmEmpty = true" class="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
             清空回收站
           </button>
           <button @click="selectMode = true"
-            class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs rounded-lg font-medium bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors">
+            class="px-3 py-1 text-xs rounded-lg font-medium bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors">
             多选
           </button>
         </template>
@@ -352,10 +352,10 @@ function onLeave(el: Element, done: () => void) {
             </div>
             <!-- selectMode 时隐藏底部单条按钮区, 避免"选中"和"单条操作"语义冲突 -->
             <div v-if="!selectMode" class="flex items-center gap-1 px-3 py-2 border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button @click.stop="confirmRestoreId = n.id" class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
+              <button @click.stop="confirmRestoreId = n.id" class="px-3 py-1 text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
                 恢复
               </button>
-              <button @click.stop="confirmDeleteId = n.id" class="px-3 pt-[0.19rem] pb-[0.31rem] text-xs ml-auto rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+              <button @click.stop="confirmDeleteId = n.id" class="px-3 py-1 text-xs ml-auto rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
                 永久删除
               </button>
             </div>
@@ -374,8 +374,8 @@ function onLeave(el: Element, done: () => void) {
           <p class="text-sm text-gray-700 mb-1">永久删除</p>
           <p class="text-xs text-gray-400 mb-4">此操作不可恢复</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmDeleteId = ''" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doPermanentDelete" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">永久删除</button>
+            <button @click="confirmDeleteId = ''" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doPermanentDelete" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">永久删除</button>
           </div>
         </div>
       </div>
@@ -391,8 +391,8 @@ function onLeave(el: Element, done: () => void) {
           <p class="text-sm text-gray-700 mb-1">清空回收站</p>
           <p class="text-xs text-gray-400 mb-4">将永久删除所有 {{ allNotes.length }} 条内容，不可恢复</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmEmpty = false" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doEmptyAll" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">清空</button>
+            <button @click="confirmEmpty = false" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doEmptyAll" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">清空</button>
           </div>
         </div>
       </div>
@@ -408,8 +408,8 @@ function onLeave(el: Element, done: () => void) {
           <p class="text-sm text-gray-700 mb-1">恢复内容</p>
           <p class="text-xs text-gray-400 mb-4">将从回收站恢复此条内容</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmRestoreId = ''" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doRestore" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复</button>
+            <button @click="confirmRestoreId = ''" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doRestore" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复</button>
           </div>
         </div>
       </div>
@@ -425,8 +425,8 @@ function onLeave(el: Element, done: () => void) {
           <p class="text-sm text-gray-700 mb-1">恢复所有</p>
           <p class="text-xs text-gray-400 mb-4">将恢复回收站中全部 {{ allNotes.length }} 条内容</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmRestoreAll = false" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doRestoreAll" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复所有</button>
+            <button @click="confirmRestoreAll = false" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doRestoreAll" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复所有</button>
           </div>
         </div>
       </div>
@@ -442,8 +442,8 @@ function onLeave(el: Element, done: () => void) {
           <p class="text-sm text-gray-700 mb-1">批量恢复</p>
           <p class="text-xs text-gray-400 mb-4">将恢复选中的 {{ selectedIds.size }} 条内容</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmBatchRestore = false" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doBatchRestore" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复</button>
+            <button @click="confirmBatchRestore = false" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doBatchRestore" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg text-white font-medium transition-colors" style="background: rgb(var(--c-accent))">恢复</button>
           </div>
         </div>
       </div>
@@ -459,8 +459,8 @@ function onLeave(el: Element, done: () => void) {
           <p class="text-sm text-gray-700 mb-1">批量永久删除</p>
           <p class="text-xs text-gray-400 mb-4">将永久删除选中的 {{ selectedIds.size }} 条内容，不可恢复</p>
           <div class="flex gap-2 justify-center">
-            <button @click="confirmBatchDelete = false" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="doBatchDelete" class="inline-flex items-center justify-center px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">永久删除</button>
+            <button @click="confirmBatchDelete = false" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+            <button @click="doBatchDelete" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">永久删除</button>
           </div>
         </div>
       </div>

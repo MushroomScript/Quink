@@ -142,8 +142,8 @@ watch(() => visibleTags.value.length, () => snapshotCards(), { flush: 'sync' });
             <p class="text-sm text-gray-700 mb-1">删除标签 #{{ confirmDeleteTag }}</p>
             <p class="text-xs text-gray-400 mb-4">将从所有内容中移除此标签</p>
             <div class="flex gap-2 justify-center">
-              <button @click="confirmDeleteTag = ''" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-              <button @click="doDeleteTag" class="px-4 pt-[0.32rem] pb-[0.43rem] text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+              <button @click="confirmDeleteTag = ''" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+              <button @click="doDeleteTag" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
             </div>
           </div>
         </div>
