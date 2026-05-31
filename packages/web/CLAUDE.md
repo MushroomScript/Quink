@@ -82,6 +82,24 @@ DB `files.url` 字段 + 笔记 `content` 里 markdown link 的 url 都只存**�
 
 新增静态图片显示场景（头像 / 缩略图 / 卡片小图预览）必须用后 2 个 helper + `<img>`（**不要用 background-image**），详见根 **`THUMBNAILS.md`**。
 
+### 文件不存在的兜底（用户从 Resources 删了原文件后）
+
+3 类资源各有兜底，**全部集中在 App.vue 全局 listener / utils/audio.ts**，加新 markdown 渲染入口**不需要**再套额外 helper：
+
+| 资源 | 失败提示 | 实现位置 |
+|---|---|---|
+| 图片 `<img>` | 红色 `⚠ 文件不存在：alt` 占位 span（视觉常驻） | App.vue capture-phase `error` listener 拦截 `<img src="/api/uploads/*">` 加载失败 → `replaceWith` span |
+| 音频胶囊 `<audio>` | toast `录音文件不存在` | utils/audio.ts 的 `audio.error` handler |
+| 普通文件 `<a>` | toast `文件不存在: xxx`（**不进传输 dock**） | App.vue click handler 先 HEAD 预检，404 直接 toast return；只有 HEAD 通过才走 `addAttachmentTask` + `desk.openAttachment` |
+
+**关键点**：
+
+- `error` 事件**不冒泡**（只在 target 触发），全局拦截必须 `capture: true` 才收得到
+- inline `onerror="..."` 字符串注入在严格 CSP（`script-src 'self'`）下被拦，全局 listener 是 CSP 友好替代
+- `<a>` 元素没有 `onerror`（HTML 标准只对加载资源的元素生效），普通文件兜底必须主动 HEAD 检查
+- 桌面端的 `desk.openAttachment` IPC 即使 404 也会让 main 端 `markFailedByUrl` 把这条标 failed → 为避免 dock 里出现失败垃圾记录，renderer 端必须**先 HEAD 拦截**才决定是否走 dock 流程
+- App.vue 的 missing img listener 跟 `prevImgClickHandler` 同套 HMR 缓存模式（`prevMissingImgErrHandler` 模块级 let + onMounted 时清旧的）
+
 ### RichEditor 双向转换
 
 Vditor IR 模式编辑器内部直接读 markdown href 给 `<img src>` / `<a href>`，不走 helper —— 如果裸名直接渲染浏览器会拼当前页 URL → 404 → 图片预览全裂图。**修法**：编辑器内 markdown 用 absolute path，保存出去剥前缀回裸名。RichEditor.vue 5 处包装：

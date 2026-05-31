@@ -22,7 +22,7 @@ import {
   PhCheckSquare,
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
-import { resolveMarkdownFileUrls, injectMissingFileFallback } from '@/utils/fileUrl';
+import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -49,7 +49,6 @@ async function renderContent(content: string): Promise<string> {
     md = resolveMarkdownFileUrls(md);  // 文件链接裸名拼 /api/uploads/ 前缀
     let html = await Vditor.md2html(md, { cdn: '/vditor' } as any);
     html = injectRefLinkIcons(html);
-    html = injectMissingFileFallback(html);
     // 详情页 task list checkbox 可点击: lute 默认输出 disabled,浏览器对 disabled input 不触发 click 事件。
     // 用 DOM API 稳剥(regex 易漏: 属性顺序 / 空值 disabled="" / 自闭合斜杠 等变体)
     const tmp = document.createElement('div');

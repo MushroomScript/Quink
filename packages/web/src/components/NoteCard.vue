@@ -19,7 +19,7 @@ import {
   PhTrash,
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
-import { resolveMarkdownFileUrls, injectMissingFileFallback } from '@/utils/fileUrl';
+import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import { highlightTextByPinyin } from '@/utils/pinyin';
 import { startCardDrag, dragState } from '@/utils/cardDnd';
 
@@ -220,7 +220,6 @@ watchEffect(async (onCleanup) => {
     const withFiles = resolveMarkdownFileUrls(processed);
     let html = await Vditor.md2html(withFiles, { cdn: '/vditor' } as any);
     html = injectRefLinkIcons(html);
-    html = injectMissingFileFallback(html);
     // 列表卡片 task list checkbox 可点击: lute 默认输出 disabled,浏览器对 disabled input 不触发 click 事件。
     // 跟 NoteDetail 同处理 —— DOM 剥 disabled(regex 易漏: 属性顺序 / 空值 / 自闭合斜杠 等变体)
     {

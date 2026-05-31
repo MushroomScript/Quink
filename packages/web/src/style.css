@@ -316,7 +316,7 @@ body.resources-dragging * {
   -webkit-user-select: none !important;
 }
 
-/* 笔记里引用的资源文件被删除后的占位 (由 utils/fileUrl.ts injectMissingFileFallback inject 给 <img onerror>).
+/* 笔记里引用的资源文件被删除后的占位 (由 App.vue 全局 error capture listener 把失败的 <img src="/api/uploads/*"> replaceWith 此 span).
    红色边框 + 浅红底 + 警告语义, 让用户清楚知道这个引用断了 */
 .quink-missing-file {
   display: inline-flex;

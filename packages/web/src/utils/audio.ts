@@ -1,3 +1,5 @@
+import { useToast } from '@/composables/useToast';
+
 const AUDIO_EXTS = /\.(webm|mp3|wav|ogg|m4a)(\?.*)?$/i;
 
 type AudioState = 'idle' | 'loading' | 'playing' | 'paused';
@@ -142,6 +144,9 @@ function bindAudioEvents(audio: HTMLAudioElement, el: HTMLElement) {
       currentAudio = null;
       currentEl = null;
     }
+    // audio.error 最常见原因 = 源 404 (后端文件被删). 网络/解码失败极少 (本地后端).
+    // 用户视角统一"录音文件不存在", 比"加载失败"明确
+    useToast().show('录音文件不存在', 'error', 2500);
   });
 }
 

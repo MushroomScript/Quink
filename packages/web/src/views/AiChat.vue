@@ -4,7 +4,7 @@ import { useAuthStore } from '@/stores/auth';
 import { api, isLoggedIn } from '@/api';
 import Vditor from 'vditor';
 import { PhSparkle, PhStop, PhPaperPlaneTilt } from '@phosphor-icons/vue';
-import { resolveMarkdownFileUrls, injectMissingFileFallback } from '@/utils/fileUrl';
+import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 
 // setup 顶层同步设主题（在 Vue 第一次 render 前），让窗口 show 时就是正确主题色
 document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry');
@@ -94,7 +94,7 @@ async function sendMessage() {
 
     let html: string | undefined;
     const renderText = stripOuterCodeFence(parseThinking(fullContent).answer || fullContent);
-    try { html = injectMissingFileFallback(await Vditor.md2html(resolveMarkdownFileUrls(renderText), { cdn: '/vditor' } as any)); } catch {}
+    try { html = await Vditor.md2html(resolveMarkdownFileUrls(renderText), { cdn: '/vditor' } as any); } catch {}
     messages.value.push({ id: aiMsgId || 'ai', role: 'assistant', content: fullContent, html });
     streamingContent.value = '';
   } catch (err: any) {

@@ -12,7 +12,7 @@ import NoteEditModal from '@/components/NoteEditModal.vue';
 import GlobalToast from '@/components/GlobalToast.vue';
 import { PhMinus, PhSquare, PhX, PhXCircle, PhCaretLeft } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
-import { resolveMarkdownFileUrls, injectMissingFileFallback } from '@/utils/fileUrl';
+import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import { useTheme } from '@/composables/useTheme';
 import { useToast } from '@/composables/useToast';
 import { useImagePreview } from '@/composables/useImagePreview';
@@ -138,7 +138,6 @@ async function openRefPreview(noteId: string) {
     const withFiles = resolveMarkdownFileUrls(processed);  // 文件链接裸名拼前缀
     let html = await Vditor.md2html(withFiles, { cdn: '/vditor' } as any);
     html = injectRefLinkIcons(html);
-    html = injectMissingFileFallback(html);
     refPreviewStack.value.push({ note: res.data, html });
 
     if (!refPreviewEscHandler) {
@@ -186,6 +185,13 @@ function extractRefId(el: HTMLElement): string | null {
   } catch { return null; }
 }
 
+// 桌面端 open-attachment IPC 返回的 error 是 `HTTP 404` / `HTTP 500` 等裸状态文本.
+// 404 = 后端文件被删, 用户看到"HTTP 404"不知所云; 美化成"文件不存在: xxx" 跟 Web fallback 文案一致
+function friendlyAttachmentError(err: string | undefined, filename: string): string {
+  if (err && /HTTP 404/i.test(err)) return `文件不存在: ${filename}`;
+  return `打开失败: ${err || '未知错误'}`;
+}
+
 function applyUserPreferences(user: any) {
   if (!user) return;
   const prefs = user.preferences || {};
@@ -216,6 +222,7 @@ function applyZoomLevel(level: number) {
 // 抢先 stopImmediatePropagation 调用旧闭包里的 openRefPreview（操作旧响应式状态，新 UI 看不到预览）。
 let prevRefClickHandler: ((e: MouseEvent) => void) | null = null;
 let prevImgClickHandler: ((e: MouseEvent) => void) | null = null;
+let prevMissingImgErrHandler: ((e: Event) => void) | null = null;
 let prevCopyHandler: ((e: ClipboardEvent) => void) | null = null;
 let prevCtrlAHandler: ((e: KeyboardEvent) => void) | null = null;
 let prevWheelHandler: ((e: WheelEvent) => void) | null = null;
@@ -240,6 +247,7 @@ onMounted(async () => {
   // 清理 HMR 残留
   if (prevRefClickHandler) document.removeEventListener('click', prevRefClickHandler, true);
   if (prevImgClickHandler) document.removeEventListener('click', prevImgClickHandler, true);
+  if (prevMissingImgErrHandler) document.removeEventListener('error', prevMissingImgErrHandler, true);
   if (prevCopyHandler) document.removeEventListener('copy', prevCopyHandler);
   if (prevCtrlAHandler) document.removeEventListener('keydown', prevCtrlAHandler, true);
   if (prevWheelHandler) window.removeEventListener('wheel', prevWheelHandler, { capture: true } as any);
@@ -315,6 +323,29 @@ onMounted(async () => {
   document.addEventListener('click', imgHandler, true);
   prevImgClickHandler = imgHandler;
 
+  // 全局拦截 <img src="/api/uploads/*"> 加载失败 → replaceWith 红色"⚠ 文件不存在：xxx" 占位 span.
+  // capture phase: error 事件默认不冒泡 (仅在 target 触发), 必须 capture 才能在 document 层收到所有 img 失败.
+  // 用全局 listener 而非 md2html 后处理时给每个 <img> 加 inline onerror= 的好处:
+  // - CSP script-src 严格策略下 inline JS 被拦, 全局 listener 不依赖 inline
+  // - 不用在每个渲染入口 (NoteCard/NoteDetail/Trash/AI/AiChat/App ref 预览) 都套一层 helper, 一次注册全覆盖
+  // dataset.quinkMissingDone 防重复处理 (v-html 重新渲染后 img 重新挂上 src 会再次触发 error)
+  const missingImgErrHandler = (e: Event) => {
+    const t = e.target as HTMLElement | null;
+    if (!t || t.tagName !== 'IMG') return;
+    const img = t as HTMLImageElement;
+    const src = img.getAttribute('src') || '';
+    if (!src.startsWith('/api/uploads/')) return;
+    if (img.dataset.quinkMissingDone === '1') return;
+    img.dataset.quinkMissingDone = '1';
+    const alt = img.getAttribute('alt') || '图片';
+    const span = document.createElement('span');
+    span.className = 'quink-missing-file';
+    span.textContent = '⚠ 文件不存在：' + alt;
+    img.replaceWith(span);
+  };
+  document.addEventListener('error', missingImgErrHandler, true);
+  prevMissingImgErrHandler = missingImgErrHandler;
+
   // 全局拦截引用链接单击 → 弹预览(不走路由,不打开新标签)
   // 同时拦截 /api/uploads/* 附件链接 → 桌面端调系统默认应用打开,web 端走浏览器下载。
   // 否则浏览器跟随 a.href 跳走,Electron 内嵌 chromium 对 text/markdown 等 mime 显示空白页。
@@ -336,6 +367,23 @@ onMounted(async () => {
       e.stopImmediatePropagation();
       const fullUrl = new URL(href, location.origin).toString();
       const filename = decodeURIComponent(href.split('/').pop() || '附件');
+
+      // 统一先 HEAD 检查 → 404 / 网络错误直接 toast, 不进传输 dock (避免 dock 闪一下 failed 状态留个垃圾记录).
+      // 缓存命中 (之前成功打开过) 跳过 HEAD: main 端会直接 openPath 临时文件, 不再 fetch.
+      const isCached = !!(desk?.openAttachment) && openedAttachments.has(fullUrl);
+      if (!isCached) {
+        try {
+          const head = await fetch(href, { method: 'HEAD' });
+          if (!head.ok) {
+            showToast(head.status === 404 ? `文件不存在: ${filename}` : `打开失败: HTTP ${head.status}`, 'error', 3000);
+            return;
+          }
+        } catch {
+          showToast('打开失败: 网络错误', 'error', 3000);
+          return;
+        }
+      }
+
       if (desk?.openAttachment) {
         // renderer 端 cache: 之前成功打开过这个 URL → 跳过 dock 直接 invoke + toast.
         // 跟 main 端 attachmentCache 同生命周期(都是进程内 Map, 重启都清), 不会出现 renderer 觉得
@@ -345,7 +393,7 @@ onMounted(async () => {
           if (result?.success) {
             showToast(`已打开 ${filename}`, 'success', 1500);
           } else {
-            showToast(`打开失败: ${result?.error || '未知错误'}`, 'error', 3000);
+            showToast(friendlyAttachmentError(result?.error, filename), 'error', 3000);
           }
           return;
         }
@@ -358,10 +406,10 @@ onMounted(async () => {
           openedAttachments.add(fullUrl);
           showToast(`已打开 ${filename}`, 'success', 1500);
         } else if (!result?.cancelled) {
-          showToast(`打开失败: ${result?.error || '未知错误'}`, 'error', 3000);
+          showToast(friendlyAttachmentError(result?.error, filename), 'error', 3000);
         }
       } else {
-        // Web 端 fallback: 用 a.download 触发浏览器原生下载
+        // Web 端 fallback: HEAD 已通过, 用 a.download 触发浏览器原生下载
         const link = document.createElement('a');
         link.href = href;
         link.download = '';
