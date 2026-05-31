@@ -87,13 +87,13 @@ react-masonry-css 用 `i % N` round-robin,简单但**列高不平衡**(长内容
 
 estimateHeight 假设纯文本(`80 + lines*22`, 最多 4 行),不算 markdown 渲染 / 图片 / 音频。含图卡片估算 ~150 真实 542,误差 3 倍以上。结果 col2 真实最高 2244 反被算成最矮 1426 → 后续 loadMore 把新卡片继续往 col2 倒 → 列高越扯越歪(反馈循环)。
 
-实现:`useMasonry(getItems, rootRef?)` 接受 `rootRef: Ref<HTMLElement | null>`(指向 `.notes-masonry`)。`measureRealHeights()` 通过 `rootRef.value.querySelectorAll(':scope > .masonry-col-wrapper > .masonry-col')` 拿真实 offsetHeight。触发时机:
+实现:`useMasonry(getItems, rootRef?)` 接受 `rootRef: Ref<HTMLElement | null>`(指向 `.notes-masonry`)。`measureRealHeights()` 通过 `rootRef.value.querySelectorAll(':scope > .masonry-col-wrapper > .masonry-col')` 拿真实列 offsetHeight。`measureCardHeights()` 通过 `rootRef.value.querySelectorAll('[data-note-id]')` 拿单卡真实 offsetHeight (NoteCard wrapper 自带 `:data-note-id="note.id"`,新加 view 类型时如果不复用 NoteCard 记得自己加)。触发时机:
 
-- **rebuild 后 nextTick**(首屏 / 换 view / resize) —— DOM mount 后用真实值刷新 colHeights
+- **rebuild 中**(首屏 / 换 view / resize / refresh 重排) —— 直接读每张卡的真实 DOM 高度做 pickShortest, 没 DOM 的新卡 fallback estimateHeight。**关键**: 不能仅在 rebuild *后* nextTick syncRealHeights — 那时 columns 分配已定型, syncRealHeights 只更新 colHeights 数值,无法改卡分配, 列高仍按估算偏差的结果展示
 - **删除后 nextTick** —— estimateHeight 减回不精确,真实重测一次
-- **append 前**(loadMore) —— 直接读真实高当 baseline,新加项还没 mount 用 estimateHeight 临时预测
+- **append 前**(loadMore) —— 直接读真实列高当 baseline, 新加项还没 mount 用 estimateHeight 临时预测
 
-estimateHeight 保留兜底:rebuild 时还没 DOM,只能先估算分配,nextTick 后再修正。
+estimateHeight 仅做兜底: rebuild 时如果 DOM 上还没有对应 id 的卡(全新数据)才用估算分配,有 DOM 的优先用真实高度。
 
 **前 N 张所有列都是 0,行为自然退化成 round-robin → 第一行仍是最新 N 张("靠上越新"成立)**,之后按真实高度平衡。
 
@@ -127,6 +127,11 @@ selector 兼容老结构 `.notes-masonry > .masonry-col`(Trash 没用 useInfinit
 - append 分支假定新元素**在数组末尾**（loadMore 模式），把 `newItems[lastLength]` 当新卡片加到最矮列 —— 但 newItems[lastLength] 实际是 splice 后原本在 lastLength 位置的元素（旧的），**拿错卡片重复显示在末尾列**
 
 修法：`createNote` 用 `const next = [...notes.value]; next.splice(idx, 0, newNote); notes.value = next` reassign，让 useMasonry 走 rebuild 全量重排。代价是触发一次 rebuild（与原 unshift 走 firstChanged rebuild 同代价），但位置正确。**任何"往中间插入"的场景都得 reassign**，append 分支只能服务尾部追加。
+
+**refresh 必须走 mutate 不能 reassign**(顶部刷新按钮 = `fetchNotes(undefined, { keepCount: true })`):
+- 翻到 N 条 + 列高已平衡后按 refresh, 如果 `vs.notes = res.data` reassign → useMasonry 走 rebuild → 即使用真实 DOM 高度做 pickShortest, 卡片按 server 返回顺序依次分配, 最矮列选择跟原来不一定一样 → 部分卡跨列搬, 实测 diff 从 20 飙到 89-414
+- 改成 mutate: 按 id `Object.assign` 更新现有字段 + `splice` 移除消失的 id, 不替换数组引用 → useMasonry 走 mutate 路径不 rebuild → 卡位置零变动, diff 完全保持
+- **代价**: 别处新增的 id (其他设备 / Capture 弹窗) refresh 期间不出现在本地, 等下次 onActivated reset (整个 view 重新激活时) 拉到。refresh 语义就是"刷新现有", 不是"看新增", 这个 trade-off 可接受
 
 ### 配合 store 的动态 pageSize
 

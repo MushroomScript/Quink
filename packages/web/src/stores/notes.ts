@@ -135,15 +135,31 @@ export const useNotesStore = defineStore('notes', () => {
         // 用 push() 追加到现有数组,不替换 ref —— 否则 TransitionGroup 把整个数组视为新引用,
         // 重建所有 DOM 节点导致容器短暂塌缩,滚动位置回到顶部
         vs.notes.push(...newOnes);
+      } else if (opts.keepCount) {
+        // Mutate 模式: 按 id 更新现有字段 + 移除消失的, 不替换数组引用. useMasonry 走 mutate
+        // 路径 (newItems === oldItems, 走 splice 优化) → columns 不重建 → 卡片零跨列移动.
+        // reassign 版 (上面 else 分支) 即使 rebuild 用真实高度也会让最矮列选择跟原来不同 →
+        // 部分卡跨列搬, 实测 diff=89; mutate 版可达 diff=0.
+        // 代价: 别处新增的 id 不出现在本地 (接受 — 别人在其他设备/Capture 弹窗新建的笔记
+        // 等下次 onActivated reset 时才看到; refresh 语义是"刷新现有", 不是"看新增")
+        const freshMap = new Map(res.data.map(n => [n.id, n]));
+        // 1. 删除消失的 id (从尾往前 splice 防 index 漂移)
+        for (let i = vs.notes.length - 1; i >= 0; i--) {
+          if (!freshMap.has(vs.notes[i].id)) vs.notes.splice(i, 1);
+        }
+        // 2. 更新现有 id 的字段 (Object.assign 保引用, NoteCard props deep watch 拿到新值)
+        for (const note of vs.notes) {
+          const fresh = freshMap.get(note.id);
+          if (fresh) Object.assign(note, fresh);
+        }
       } else {
         vs.notes = res.data;
       }
       vs.total = res.pagination.total;
       if (opts.keepCount) {
         // 重算 currentPage 让 loadMore 接得上:已加载 90 条 pageSize 30 → currentPage=3,
-        // 下次 loadMore 拉 page=4. 用 res.data.length 而非 notes.length 是因为 server 可能
-        // 返回少于请求(total 缩水时,如别处删了 note)
-        vs.currentPage = Math.max(1, Math.ceil(res.data.length / pageSize.value));
+        // 下次 loadMore 拉 page=4. 用 vs.notes.length (mutate 后实际剩余) 而非 res.data.length
+        vs.currentPage = Math.max(1, Math.ceil(vs.notes.length / pageSize.value));
       }
     } finally {
       loading.value = false;

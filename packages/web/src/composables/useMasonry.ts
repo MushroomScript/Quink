@@ -93,17 +93,35 @@ export function useMasonry<T extends { id: string }>(
     for (let i = 0; i < colHeights.length; i++) colHeights[i] = real[i];
   }
 
+  // 拿当前 DOM 上所有 NoteCard 真实高度 (id → offsetHeight). NoteCard wrapper 带 [data-note-id].
+  // 用于 rebuild 时 pickShortest 用真实高度而非 estimateHeight, 避免 refresh keepCount 全量替换
+  // 走 rebuild 后用估算重排导致列高失衡 (实测 diff 从 20 飙到 414).
+  function measureCardHeights(): Map<string, number> {
+    const map = new Map<string, number>();
+    const root = rootRef?.value;
+    if (!root) return map;
+    root.querySelectorAll<HTMLElement>('[data-note-id]').forEach((el) => {
+      const id = el.dataset.noteId;
+      if (id) map.set(id, el.offsetHeight);
+    });
+    return map;
+  }
+
   function rebuild() {
     const n = columnCount.value;
     const cols: T[][] = Array.from({ length: n }, () => []);
     resetColHeights(n);
+    // 复用 DOM 上已存在的卡片真实高度; 新卡(没 DOM)走 estimateHeight 兜底.
+    // refresh keepCount 场景下大部分卡 id 不变 → 真实高度命中率高 → 重排后列高跟之前接近.
+    const realMap = measureCardHeights();
     getItems().forEach((item) => {
       const idx = pickShortestCol(colHeights);
       cols[idx].push(item);
-      colHeights[idx] += estimateHeight(item);
+      const id = (item as any).id;
+      colHeights[idx] += realMap.get(id) ?? estimateHeight(item);
     });
     columns.value = cols;
-    // rebuild 后下一帧用真实 DOM 高度刷新, 修正 estimateHeight 偏差
+    // 即使 rebuild 用了真实高度, append 新卡的 estimate 偏差仍可能积累, nextTick 再 sync 一次
     nextTick(syncRealHeights);
   }
 

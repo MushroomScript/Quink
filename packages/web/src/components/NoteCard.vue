@@ -260,6 +260,7 @@ const typeColor: Record<string, string> = {
   <!-- 非 selectMode: 仅 type chip 是拖动 handle (其他地方鼠标按住选文字); selectMode: 整卡片可拖 (多选批量移动).
        自定义拖动 (cardDnd.ts), 非 HTML5 DnD: selectMode 时整卡片 @pointerdown; 非 selectMode 时 type chip @pointerdown -->
   <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group relative card-draggable"
+    :data-note-id="note.id"
     :class="{ 'ring-2 ring-primary/50': note.pinned, 'ring-2 ring-primary': store.selectedIds.has(note.id), 'opacity-50': isDragging }"
     @pointerdown="store.selectMode ? onPointerDown($event) : undefined">
     <div class="px-3 py-2.5 md:px-4 md:py-3 cursor-pointer" @click="handleClick" @mousedown="onMouseDown">
