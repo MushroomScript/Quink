@@ -187,9 +187,59 @@ function onDropTrashEvent(e: CustomEvent) {
 function onAiExpand() {
   if (route.path !== '/ai') router.push('/ai');
 }
+
+// 分类区高度可拖拽 (sidebar 底部分类列表的 maxHeight, 上方 nav 是 flex-1 自动让出/吃掉空间).
+// 默认 160 (max-h-40 兼容值), 持久化到 localStorage.
+// UX: 鼠标悬停 handle 300ms 才"激活" (cursor 变 row-resize + 视觉高亮 + 允许 pointerdown 拖),
+// 防鼠标只是路过 sidebar 误触发拖动. 拖动结束后回未激活态, 下次再拖要重新 hover 300ms
+const CATEGORY_HEIGHT_KEY = 'quink_sidebar_category_height';
+const HOVER_ACTIVATE_MS = 300;
+const categoryHeight = ref(160);
+const resizeReady = ref(false);
+let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+let isDragging = false;
+let resizeStartY = 0;
+let resizeStartH = 0;
+function onHandleEnter() {
+  if (hoverTimer) clearTimeout(hoverTimer);
+  hoverTimer = setTimeout(() => { resizeReady.value = true; hoverTimer = null; }, HOVER_ACTIVATE_MS);
+}
+function onHandleLeave() {
+  if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+  if (!isDragging) resizeReady.value = false;
+}
+function onCategoryResizeStart(e: PointerEvent) {
+  if (!resizeReady.value) return; // 未激活不响应 pointerdown
+  e.preventDefault();
+  isDragging = true;
+  resizeStartY = e.clientY;
+  resizeStartH = categoryHeight.value;
+  document.body.style.cursor = 'row-resize';
+  document.body.style.userSelect = 'none';
+  window.addEventListener('pointermove', onCategoryResizeMove);
+  window.addEventListener('pointerup', onCategoryResizeEnd, { once: true });
+}
+function onCategoryResizeMove(e: PointerEvent) {
+  // 向上拖 (clientY 减小) → 分类区变高
+  const delta = resizeStartY - e.clientY;
+  categoryHeight.value = Math.max(40, Math.min(800, resizeStartH + delta));
+}
+function onCategoryResizeEnd() {
+  isDragging = false;
+  resizeReady.value = false; // 拖完回未激活态, 下次再拖需重新 hover 300ms
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  window.removeEventListener('pointermove', onCategoryResizeMove);
+  try { localStorage.setItem(CATEGORY_HEIGHT_KEY, String(categoryHeight.value)); } catch {}
+}
+
 onMounted(() => {
   window.addEventListener('quink-drop-trash', onDropTrashEvent as EventListener);
   window.addEventListener('quink-ai-expand', onAiExpand);
+  try {
+    const saved = Number(localStorage.getItem(CATEGORY_HEIGHT_KEY));
+    if (saved >= 40 && saved <= 800) categoryHeight.value = saved;
+  } catch {}
 });
 onUnmounted(() => {
   window.removeEventListener('quink-drop-trash', onDropTrashEvent as EventListener);
@@ -282,8 +332,14 @@ onUnmounted(() => {
       </router-link>
     </nav>
 
-    <!-- Categories -->
-    <div class="px-3 py-2" style="border-top: 1px solid var(--sb-border)">
+    <!-- Categories: 原 border-top 改成 4px 可拖拽 handle. 鼠标悬停 300ms 才激活拖动, 防鼠标路过误触发 -->
+    <div class="category-resize-handle"
+      :class="{ 'is-ready': resizeReady }"
+      @pointerenter="onHandleEnter"
+      @pointerleave="onHandleLeave"
+      @pointerdown="onCategoryResizeStart"
+      :title="resizeReady ? '拖动调整分类区高度' : ''" />
+    <div class="px-3 py-2">
       <div class="flex items-center justify-between px-3 mb-1">
         <span class="text-[11px] font-medium" style="color: var(--sb-dim)">分类</span>
         <button @click="showAddCategory = true" class="text-xs" style="color: var(--sb-dim)" title="新增分类">+</button>
@@ -292,7 +348,8 @@ onUnmounted(() => {
       <div v-if="categories.length === 0 && !showAddCategory" class="px-3 py-2">
         <span class="text-[11px]" style="color: var(--sb-dim); opacity: 0.5">暂无分类</span>
       </div>
-      <div v-else class="space-y-0.5 max-h-40 overflow-y-auto">
+      <div v-else class="space-y-0.5 overflow-y-auto"
+        :style="{ maxHeight: categoryHeight + 'px' }">
         <div v-for="cat in categories" :key="cat.id"
           @click="filterByCategory(cat.name)"
           :data-drop-target="'cat:' + cat.name"
@@ -391,5 +448,31 @@ onUnmounted(() => {
   outline: 2px dashed rgb(var(--c-accent));
   outline-offset: -2px;
   background: rgba(var(--c-accent), 0.08) !important;
+}
+/* 分类区拖拽 handle: 4px 高, 默认显一根 1px 分割线 (跟原 border-top 视觉一致, 不可拖).
+   .is-ready (悬停 300ms 后激活): cursor 变 row-resize + 整 4px 显主题色提示可拖.
+   touch-action:none 防移动端误触发滚动. 不用 :hover 是为了配合 hover 300ms 防误触发 */
+.category-resize-handle {
+  height: 4px;
+  position: relative;
+  touch-action: none;
+}
+.category-resize-handle::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--sb-border);
+  transition: background 0.15s ease, height 0.15s ease;
+}
+.category-resize-handle.is-ready {
+  cursor: row-resize;
+}
+.category-resize-handle.is-ready::before {
+  height: 4px;
+  top: 0;
+  background: rgb(var(--c-accent) / 0.5);
 }
 </style>
