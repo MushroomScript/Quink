@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, markRaw, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, markRaw } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useNotesStore } from '@/stores/notes';
@@ -188,44 +188,35 @@ function onAiExpand() {
   if (route.path !== '/ai') router.push('/ai');
 }
 
-// 分类区高度可拖拽 (sidebar 底部分类列表的 maxHeight, 上方 nav 是 flex-1 自动让出/吃掉空间).
-// 默认 160 (max-h-40 兼容值), 持久化到 localStorage.
-// UX: 鼠标悬停 handle 300ms 才"激活" (cursor 变 row-resize + 视觉高亮 + 允许 pointerdown 拖),
-// 防鼠标只是路过 sidebar 误触发拖动. 拖动结束后回未激活态, 下次再拖要重新 hover 300ms
+// 分类区高度拖拽. 蘑菇规则:
+//   - nav (上半部分入口) 全程完整显示, 不允许被压缩
+//   - nav 跟 handle 之间是 spacer (间隙), 拖 handle 上移让 spacer 缩
+//   - spacer = 0 时 handle 不能再上 (nav 不允许被压挤)
+//   - 拖 handle 下移让分类区缩, 但 min 保证至少 1 行分类显示
 const CATEGORY_HEIGHT_KEY = 'quink_sidebar_category_height';
-const HOVER_ACTIVATE_MS = 300;
-// 分类区下方固定区域 (handle 4 + 分类标题块 padding+内容约 36) 留出的高度. 拖动算可用 max 时减掉.
-const CATEGORY_FIXED_OVERHEAD = 40;
-// nav 至少留这么多 px 可见 (大约 2-3 nav 项 + 滚动条, 防完全被压没看不见入口)
-const NAV_MIN_RESERVE = 80;
+// 分类区下方固定区域 (handle 6 + 分类标题块 padding+内容约 36) 留出的高度
+const CATEGORY_FIXED_OVERHEAD = 42;
+// 分类区最小高度: 至少显示一行分类项. 一行分类 = py-1.5 (12px) + line-height ~14 + text-xs ≈ 26-28
+const CATEGORY_MIN_H = 28;
 const categoryHeight = ref(160);
-const resizeReady = ref(false);
 const sidebarEl = ref<HTMLElement | null>(null);
 const userBlockEl = ref<HTMLElement | null>(null);
-let hoverTimer: ReturnType<typeof setTimeout> | null = null;
-let isDragging = false;
+const navEl = ref<HTMLElement | null>(null);
 let resizeStartY = 0;
 let resizeStartH = 0;
-// 算分类区允许的最大高度: sidebar 总高 - user 区 - 分类区下方固定区域 - nav 保底.
-// 不算 nav 真实 scrollHeight 是因为 nav overflow-y-auto, 即使内容多也可压缩可滚, 只要留够保底.
+let sidebarRO: ResizeObserver | null = null;
+// 算分类区允许的最大高度: viewport - sidebar.top - userH - navH (nav 全显示需要的高度) - 固定区.
+// nav 用 scrollHeight 拿"自然高度" (即使被 flex 容器压缩, scrollHeight 仍是完整内容高度).
 function getMaxCategoryHeight(): number {
   if (!sidebarEl.value) return 800;
-  const sidebarH = sidebarEl.value.clientHeight;
+  const sidebarTop = sidebarEl.value.getBoundingClientRect().top;
+  const availH = window.innerHeight - sidebarTop;
   const userH = userBlockEl.value?.offsetHeight || 0;
-  return Math.max(40, sidebarH - userH - CATEGORY_FIXED_OVERHEAD - NAV_MIN_RESERVE);
-}
-function onHandleEnter() {
-  if (hoverTimer) clearTimeout(hoverTimer);
-  hoverTimer = setTimeout(() => { resizeReady.value = true; hoverTimer = null; }, HOVER_ACTIVATE_MS);
-}
-function onHandleLeave() {
-  if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
-  if (!isDragging) resizeReady.value = false;
+  const navH = navEl.value?.scrollHeight || 0;
+  return Math.max(CATEGORY_MIN_H, availH - userH - navH - CATEGORY_FIXED_OVERHEAD);
 }
 function onCategoryResizeStart(e: PointerEvent) {
-  if (!resizeReady.value) return; // 未激活不响应 pointerdown
   e.preventDefault();
-  isDragging = true;
   resizeStartY = e.clientY;
   resizeStartH = categoryHeight.value;
   document.body.style.cursor = 'row-resize';
@@ -236,14 +227,12 @@ function onCategoryResizeStart(e: PointerEvent) {
 function onCategoryResizeMove(e: PointerEvent) {
   // 向上拖 (clientY 减小) → 分类区变高
   const delta = resizeStartY - e.clientY;
-  // 动态 max: 用 sidebar 实际剩余空间算上限, 防止用户拖出"假高度"超过 sidebar 可承载范围
-  // → sidebar 被撑出父容器外被裁, 分类列表下面项目滚不到 (蘑菇报的 bug)
+  // dynamic max = spacer 用完时的极限 (nav 不允许压缩);
+  // dynamic min = CATEGORY_MIN_H (至少 1 行).
   const dynamicMax = getMaxCategoryHeight();
-  categoryHeight.value = Math.max(40, Math.min(dynamicMax, resizeStartH + delta));
+  categoryHeight.value = Math.max(CATEGORY_MIN_H, Math.min(dynamicMax, resizeStartH + delta));
 }
 function onCategoryResizeEnd() {
-  isDragging = false;
-  resizeReady.value = false; // 拖完回未激活态, 下次再拖需重新 hover 300ms
   document.body.style.cursor = '';
   document.body.style.userSelect = '';
   window.removeEventListener('pointermove', onCategoryResizeMove);
@@ -255,23 +244,30 @@ onMounted(() => {
   window.addEventListener('quink-ai-expand', onAiExpand);
   try {
     const saved = Number(localStorage.getItem(CATEGORY_HEIGHT_KEY));
-    if (saved >= 40 && saved <= 800) categoryHeight.value = saved;
+    if (saved >= CATEGORY_MIN_H && saved <= 800) categoryHeight.value = saved;
   } catch {}
-  // 等 DOM ready 后 clamp 一下: 持久值可能超过当前 sidebar 实际可用空间 (用户上次拖到大窗口的值,
-  // 这次小窗口/换屏开起来值还在). 不 clamp 就还原 bug. nextTick 等 aside ref 挂上.
-  nextTick(() => {
-    const maxH = getMaxCategoryHeight();
-    if (categoryHeight.value > maxH) categoryHeight.value = maxH;
-  });
+  // ResizeObserver 监听 sidebar 真实大小, layout 稳定 + 窗口缩放都触发 clamp.
+  // 之前用 nextTick 只触发一次, 但 Vue nextTick 是 microtask 在 flex 布局之前 → sidebar.clientHeight
+  // 拿到 0 或半成品值 → dynamicMax 算错 → 把 categoryHeight clamp 到不合理的小值 (蘑菇报: 拖了无效,
+  // 列表内容滚不到 — 因为 maxHeight 被错误 clamp 到 40 卡死).
+  // ResizeObserver 等真正 layout 完成才 fire, 而且窗口缩放时也持续 clamp.
+  if (sidebarEl.value) {
+    sidebarRO = new ResizeObserver(() => {
+      const maxH = getMaxCategoryHeight();
+      if (categoryHeight.value > maxH) categoryHeight.value = maxH;
+    });
+    sidebarRO.observe(sidebarEl.value);
+  }
 });
 onUnmounted(() => {
   window.removeEventListener('quink-drop-trash', onDropTrashEvent as EventListener);
   window.removeEventListener('quink-ai-expand', onAiExpand);
+  sidebarRO?.disconnect();
 });
 </script>
 
 <template>
-  <aside ref="sidebarEl" class="w-60 bg-sidebar flex flex-col min-h-full shrink-0" style="border-right: 1px solid var(--sb-border); box-shadow: 1px 0 4px rgba(0,0,0,0.04)">
+  <aside ref="sidebarEl" class="w-60 bg-sidebar flex flex-col min-h-full max-h-full shrink-0 overflow-hidden" style="border-right: 1px solid var(--sb-border); box-shadow: 1px 0 4px rgba(0,0,0,0.04)">
     <!-- User -->
     <div ref="userBlockEl" class="relative px-3 py-4" style="border-bottom: 1px solid var(--sb-border)">
       <button @click="toggleUserMenu"
@@ -321,9 +317,9 @@ onUnmounted(() => {
       </Transition>
     </div>
 
-    <!-- Nav: min-h-0 让 flex-1 能被分类区拖大时压缩 (默认 min-height:auto 会按 nav 内容撑住, 分类区
-         拖大会把 sidebar 撑出父容器). overflow-y-auto 已经给内容可滚, 压缩到 < 内容高度也 OK. -->
-    <nav class="flex-1 min-h-0 px-3 py-3 space-y-0.5 overflow-y-auto">
+    <!-- Nav: 自然高度全显示 (shrink-0 不压缩 + 无 overflow-y). 蘑菇规则: nav 所有入口必须始终可见,
+         不允许被分类区拖大时压缩 / 内部滚动. spacer 跟分类区的 height 互补占满剩余空间 -->
+    <nav ref="navEl" class="shrink-0 px-3 py-3 space-y-0.5">
       <!-- Main nav (前 3 项有 dropType: 拖卡片到此改 type); 拖动状态机 (cardDnd) 通过 [data-drop-target] 属性识别 -->
       <router-link v-for="item in mainNav" :key="item.path" :to="item.path"
         :data-nav-path="item.path"
@@ -356,14 +352,15 @@ onUnmounted(() => {
       </router-link>
     </nav>
 
-    <!-- Categories: 原 border-top 改成 4px 可拖拽 handle. 鼠标悬停 300ms 才激活拖动, 防鼠标路过误触发 -->
+    <!-- Spacer: 占 nav 跟 handle 之间的间隙. 用户拖 handle 上 → spacer 缩 (handle 上移逼近 nav 底部);
+         spacer = 0 时 dynamic max 阻止再上拖 (nav 必须完整显示, 不允许压挤). -->
+    <div class="flex-1"></div>
+
+    <!-- Categories: 原 border-top 改成 6px 可拖拽 handle. cursor 默认 row-resize, pointerdown 立即拖 -->
     <div class="category-resize-handle"
-      :class="{ 'is-ready': resizeReady }"
-      @pointerenter="onHandleEnter"
-      @pointerleave="onHandleLeave"
       @pointerdown="onCategoryResizeStart"
-      :title="resizeReady ? '拖动调整分类区高度' : ''" />
-    <div class="px-3 py-2">
+      title="拖动调整分类区高度" />
+    <div class="px-3 py-2 shrink-0">
       <div class="flex items-center justify-between px-3 mb-1">
         <span class="text-[11px] font-medium" style="color: var(--sb-dim)">分类</span>
         <button @click="showAddCategory = true" class="text-xs" style="color: var(--sb-dim)" title="新增分类">+</button>
@@ -373,7 +370,7 @@ onUnmounted(() => {
         <span class="text-[11px]" style="color: var(--sb-dim); opacity: 0.5">暂无分类</span>
       </div>
       <div v-else class="space-y-0.5 overflow-y-auto"
-        :style="{ maxHeight: categoryHeight + 'px' }">
+        :style="{ height: categoryHeight + 'px' }">
         <div v-for="cat in categories" :key="cat.id"
           @click="filterByCategory(cat.name)"
           :data-drop-target="'cat:' + cat.name"
@@ -473,12 +470,13 @@ onUnmounted(() => {
   outline-offset: -2px;
   background: rgba(var(--c-accent), 0.08) !important;
 }
-/* 分类区拖拽 handle: 4px 高, 默认显一根 1px 分割线 (跟原 border-top 视觉一致, 不可拖).
-   .is-ready (悬停 300ms 后激活): cursor 变 row-resize + 整 4px 显主题色提示可拖.
-   touch-action:none 防移动端误触发滚动. 不用 :hover 是为了配合 hover 300ms 防误触发 */
+/* 分类区拖拽 handle: 6px 高 + 默认 cursor: row-resize 让鼠标一进来就知道可拖.
+   ::before 一根 2px 横线作 default 视觉 (比原 1px sb-border 明显, 用户能看出"这里是分隔可拖区"),
+   hover 时变 3px + 半透明主题色加深做视觉反馈. touch-action:none 防移动端误触发滚动. */
 .category-resize-handle {
-  height: 4px;
+  height: 6px;
   position: relative;
+  cursor: row-resize;
   touch-action: none;
 }
 .category-resize-handle::before {
@@ -487,16 +485,13 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   top: 50%;
-  height: 1px;
+  transform: translateY(-50%);
+  height: 2px;
   background: var(--sb-border);
   transition: background 0.15s ease, height 0.15s ease;
 }
-.category-resize-handle.is-ready {
-  cursor: row-resize;
-}
-.category-resize-handle.is-ready::before {
-  height: 4px;
-  top: 0;
-  background: rgb(var(--c-accent) / 0.5);
+.category-resize-handle:hover::before {
+  height: 3px;
+  background: rgb(var(--c-accent) / 0.4);
 }
 </style>
