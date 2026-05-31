@@ -855,6 +855,8 @@ function applyZoomToWebContents(wc: Electron.WebContents, factor: number) {
 // 主窗口物理尺寸跟 zoom 联动:
 //   - setBounds 按用户当前窗口 × (newFactor / oldFactor) 缩放, 保留用户拖动的相对尺寸
 //   - setMinimumSize 按 CSS px 基准 × factor 算 (跟 zoom 走), 不同 zoom 下 viewport CSS px 一致
+//   - 锚点策略: 鼠标在窗口内 → 以鼠标为锚点 (鼠标下的 DOM 点缩放后仍在鼠标下, 仿浏览器 Ctrl+滚轮);
+//     鼠标不在窗口内 (如快捷窗口 Ctrl+滚轮转发) → 回退屏幕居中
 // 启动时 lastMainZoom=100, current=createMainWindow 的 1280×860 当 "标准值" 基准. 之后用户每次改 zoom
 // 按当前实际窗口缩放, 不再用屏幕 60% 等硬基准
 let lastMainZoom = 100;
@@ -868,24 +870,44 @@ function applyMainWindowZoomSize(zoomLevel: number) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const factor = zoomLevel / 100;
   const lastFactor = lastMainZoom / 100;
+  const ratio = factor / lastFactor;
   const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
   const cur = mainWindow.getBounds();
   // setBounds 按用户当前窗口 × ratio 缩放, 但保证 ≥ MIN_CSS × factor (防 zoom 缩小时 sidebar 分类显示不下)
   const minW = Math.round(MAIN_MIN_CSS_W * factor);
   const minH = Math.round(MAIN_MIN_CSS_W * (screenH / screenW) * MAIN_MIN_H_BONUS * factor);
-  let W = Math.max(Math.round(cur.width * (factor / lastFactor)), minW);
-  let H = Math.max(Math.round(cur.height * (factor / lastFactor)), minH);
+  let W = Math.max(Math.round(cur.width * ratio), minW);
+  let H = Math.max(Math.round(cur.height * ratio), minH);
   // cap 屏幕 95% 防超屏
   W = Math.min(W, Math.round(screenW * 0.95));
   H = Math.min(H, Math.round(screenH * 0.95));
-  // 居中 (从中间向四周, 不是右下角)
-  const x = Math.round((screenW - W) / 2);
-  const y = Math.round((screenH - H) / 2);
+  // 鼠标锚点: 鼠标在窗口内时, 让缩放后鼠标下的 DOM 点仍在鼠标下.
+  // 推导: 鼠标相对旧窗口的物理 px 偏移 dx → 同一 DOM 点相对新窗口的物理 px 偏移 = dx × ratio
+  //   (因为 DOM 点的 CSS px 不变, 物理 px = CSS px × factor, 所以缩放后物理偏移按 ratio 走)
+  //   → 新窗口 x' = cursor.x - dx × ratio, 保证鼠标位置 cursor.x = x' + dx × ratio
+  const cursor = screen.getCursorScreenPoint();
+  const inWindow = cursor.x >= cur.x && cursor.x <= cur.x + cur.width &&
+                   cursor.y >= cur.y && cursor.y <= cur.y + cur.height;
+  let x: number, y: number;
+  if (inWindow) {
+    x = Math.round(cursor.x - (cursor.x - cur.x) * ratio);
+    y = Math.round(cursor.y - (cursor.y - cur.y) * ratio);
+    // cap 到屏幕内 (锚点可能让窗口跑出屏幕, 优先保证窗口在屏幕里, 牺牲一点锚点精度)
+    x = Math.max(0, Math.min(x, screenW - W));
+    y = Math.max(0, Math.min(y, screenH - H));
+  } else {
+    // 鼠标不在窗口内 (快捷窗口 Ctrl+滚轮转发的 zoom-step), 回退居中
+    x = Math.round((screenW - W) / 2);
+    y = Math.round((screenH - H) / 2);
+  }
   // setMinimumSize cap 到 W/H 防 OS 冲突 (min 不能 > 当前 bounds, 上面 cap 触发屏幕 95% 时 W/H 可能 < MIN_CSS × factor)
   mainWindow.setMinimumSize(Math.min(minW, W), Math.min(minH, H));
   mainWindow.setBounds({ x, y, width: W, height: H });
   lastMainZoom = zoomLevel;
 }
+// renderer 端的 CSS transform 平滑动画 (App.vue stepZoom) 是 GPU 合成层 paint scale, 会盖住底下的
+// layout 变化 (瀑布流 ResizeObserver 重排 / sidebar 抽屉断点 / TopBar resize) - 用户视觉上只看到 transform
+// scale 平滑过渡, 看不到 layout 抖动. 所以这里裸调两个 set API 即可, 不再用 setOpacity 遮蔽 (透明会被用户感知).
 ipcMain.on('sync-zoom', (_event, level: number) => {
   if (!level || level < 75 || level > 200) return;
   currentZoomLevel = level;

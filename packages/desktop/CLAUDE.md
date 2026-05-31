@@ -152,7 +152,7 @@ Quink web 是 SPA，App.vue 是根组件挂 `#app`。**所有 BrowserWindow 都�
 
 修法：App.vue `onMounted` 的 wheel hook + `onZoomStep` listener 都包 `if (!isShortcutWindow)` —— 用 `location.pathname` 判断（`route.name` 在 mount 时机不可靠）。当前判 `['/capture', '/ai-chat', '/float']` 不算主窗口。
 
-### 5. 主窗口物理尺寸跟 zoom 联动 + 居中，防 sidebar 收起 / toolbar 换行 / 留白
+### 5. 主窗口物理尺寸跟 zoom 联动 + 鼠标锚点，防 sidebar 收起 / toolbar 换行 / 留白
 
 主窗口 `setZoomFactor` 后 viewport CSS px = 物理 px / factor。200% zoom 时 1280 物理 → **640 CSS px < Tailwind md: breakpoint (768)** → 触发响应式抽屉模式（sidebar 自动收起）；编辑器 toolbar 按 CSS px 换行同理。
 
@@ -164,18 +164,34 @@ Quink web 是 SPA，App.vue 是根组件挂 `#app`。**所有 BrowserWindow 都�
 
 **setBounds（按用户当前窗口缩放，但保证 ≥ MIN_CSS × factor）**：
 - 记 `lastMainZoom` 模块级变量（初始 100，每次 sync-zoom 后更新）
-- W = `max(currentBounds.width × (newFactor / oldFactor), MAIN_MIN_CSS_W × factor)`
+- ratio = newFactor / oldFactor
+- W = `max(currentBounds.width × ratio, MAIN_MIN_CSS_W × factor)`
 - H = `max(currentBounds.height × ratio, MAIN_MIN_CSS_H × factor)`
 - 启动时 currentBounds = createMainWindow 设的 1280×860 当首次基准
 - 之后用户每次改 zoom 按**当前实际窗口**缩放（用户拖大窗口后改 zoom，按拖大后的尺寸 × ratio）
 - cap 到屏幕 95% 防超屏
-- 居中位置 x = (screenW - W) / 2，y = (screenH - H) / 2（从中间向四周扩展，不是从右下角）
+
+**鼠标锚点位置（仿浏览器 Ctrl+滚轮）**：
+- `screen.getCursorScreenPoint()` 拿全局鼠标坐标
+- 鼠标在窗口内时：`x' = cursor.x - (cursor.x - cur.x) × ratio`，`y'` 同理。推导：鼠标相对窗口的物理 px 偏移 dx → 同一 DOM 点缩放后相对新窗口的物理 px 偏移 = dx × ratio（DOM 点 CSS px 不变，物理 px = CSS px × factor）→ 新窗口 x' = cursor.x - dx × ratio 保证鼠标位置不变下面的 DOM 点也不动
+- 鼠标不在窗口内（如快捷窗口 Ctrl+滚轮转发的 zoom-step）→ 回退屏幕居中 `x = (screenW - W) / 2`
+- cap 到屏幕内 `x = clamp(x, 0, screenW - W)`（锚点可能让窗口跑出屏幕，优先窗口在屏幕里，牺牲一点锚点精度）
 
 **setMinimumSize**：
 - minW = MIN_CSS_W × factor，minH = MIN_CSS_H × factor
 - cap 到 setBounds 的 W/H 防 OS 冲突（屏幕 95% cap 触发时 W/H 可能 < MIN_CSS × factor，min 不能 > 当前 bounds 否则 Electron 报错）
 
 **trade-off**：zoom 变化时按当前窗口缩放，用户的拖动比例**保留**。但 zoom 100→200 时窗口物理也按 2× 放大（避免"内容大窗口小"），拖大的窗口下 200% 时可能撑满屏被 cap 到 95%。
+
+### 6. zoom 视觉反馈：renderer CSS transform 平滑过渡，不能用 setOpacity 遮蔽
+
+主窗口 `setZoomFactor` 是 instant 但 `setBounds` 走 OS DWM 窗口动画 ~100-200ms，两个 API 不同步导致 viewport CSS px 在 18ms 内**跌一下涨回去**（实测 1191 → 1072 → 1191）触发瀑布流 ResizeObserver 重排 / sidebar 抽屉断点 / TopBar resize 一连串 layout 抖动，肉眼看像"刷新一下"。
+
+修法：renderer 端 `App.vue` 的 `stepZoom` 在 wheel 触发时立即用 CSS `transform: scale(next/current)` 做 80ms 平滑过渡，`transform-origin` 设为鼠标 viewport 坐标（鼠标锚点视觉反馈，跟 main 端 setBounds 鼠标锚点对齐）。transform 是 GPU 合成层 paint scale，会**盖住底下的 layout 抖动**，用户视觉只看到 scale 平滑动画。80ms 后 clear transform（`transition:none` + 强制 reflow 防 clear 自身被动画化反弹），此时 main 端 paint 已对齐目标 scale，视觉一致。
+
+**坑：不能用 `setOpacity(0/1)` 遮蔽中间帧**。早期方案是 main 端 `setOpacity(0)` 包住 `setBounds` + `setZoomFactor`，80ms 后 `setOpacity(1)`。理论上完美遮蔽 layout 抖动，但**蘑菇实测会看到"窗口消失一下又出现"**，80ms 透明对人眼是可感知的。`transform` GPU paint scale 才是真正不可见的盖法。
+
+**快捷窗口 Ctrl+滚轮转发的 zoom-step 没鼠标位置**：renderer 端 `onZoomStep` 用主窗口中心当 transform-origin (`window.innerWidth/2, innerHeight/2`)，main 端 `applyMainWindowZoomSize` 取到的 cursor 也不在主窗口内 → 自动回退居中，两边对齐。
 
 ## chrome-devtools-mcp 调试 Electron
 
