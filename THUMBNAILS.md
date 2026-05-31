@@ -84,6 +84,16 @@ HEIC 有 `backfillHeicThumbs(uploadsDir)`，server 启动时调一次扫历史 H
 - **`resolveFileThumbUrl(url)`** —— 输入裸名或 absolute path，返回 `/api/uploads/<裸名>.thumb.jpg`。外链（http(s) / blob / data）原样返回让调用方按原图渲染
 - **`thumbErrorFallback(e, originalUrl)`** —— `<img @error>` handler，一次性切回原图。用 `dataset.thumbFallback` 标记防原图本身也 404 时无限循环触发 error
 
+### 跟全局 missing img listener 的协议
+
+`App.vue` 装了 capture-phase `error` listener，拦所有 `<img src="/api/uploads/*">` 加载失败 → `replaceWith` 红色"⚠ 文件不存在"占位 span（用于笔记里引用了被删除的文件这种场景）。
+
+**关键约束**：该 listener **必须跳过 `.thumb.jpg` 后缀**，否则缩略图 404 时全局 listener 在 capture phase 抢在局部 `@error` 之前直接替换 `<img>` 元素 → `thumbErrorFallback` 即使 fire，DOM 元素已被替换走，原图永远加载不到 → 所有没生成 thumb 的图片全显示"文件不存在"，user 看着像数据全丢了。
+
+流程链：thumb 404 → 全局 listener 跳过（src 以 `.thumb.jpg` 结尾）→ 局部 `@error` 把 src 切回原图 → 原图 200 OK 正常显示。原图也 404 时再次触发 error，那次 src 已是原图（不是 `.thumb.jpg`）→ 全局 listener 接管显示占位，闭环。
+
+改 App.vue 的 missing img listener / 加新缩略图调用点 / 给图片加任何全局 error 拦截前，**先确认这条约束没被破坏**。
+
 ### 标准模板
 
 ```vue

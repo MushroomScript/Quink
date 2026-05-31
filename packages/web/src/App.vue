@@ -286,6 +286,10 @@ onMounted(async () => {
     const img = t as HTMLImageElement;
     const src = img.getAttribute('src') || '';
     if (!src.startsWith('/api/uploads/')) return;
+    // .thumb.jpg 404 不等于"文件不存在": 后端 sharp 未生成 thumb 是常见情况(老文件 / sharp 失败 / 刚上传).
+    // 让局部 @error="thumbErrorFallback" 把 src 切回原图, 原图也 404 时浏览器会再次触发 error,
+    // 那次 src 已是原图(不带 .thumb.jpg), capture listener 接管显示占位
+    if (src.endsWith('.thumb.jpg')) return;
     if (img.dataset.quinkMissingDone === '1') return;
     img.dataset.quinkMissingDone = '1';
     const alt = img.getAttribute('alt') || '图片';

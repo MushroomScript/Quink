@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, provide, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, provide, watch, nextTick } from 'vue';
 import { api, isLoggedIn } from '@/api';
 import { useNotesStore } from '@/stores/notes';
 import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
@@ -294,16 +294,69 @@ const filteredFolders = computed(() => {
   return folders.value.filter(f => pinyinMatch(f.name, q));
 });
 // 跳转到 file/folder 所在的父目录 (用于搜索结果的"打开所在位置")
+// focusedItemKey: 搜索"打开所在位置"跳转后, 用虚线 outline 圈住目标项, 下一次任意 click 清除.
+// 命名空间用 'file-' / 'folder-' 前缀避开 id 重叠
+const focusedItemKey = ref<string | null>(null);
+
 function openFileLocation(f: FileItem) {
   store.searchQuery = '';
   currentFolderId.value = f.folderId;
   selectedIds.value.clear();
+  focusedItemKey.value = 'file-' + f.id;
+  scrollFocusedIntoView(`[data-file-id="${f.id}"]`);
 }
 function openFolderLocation(folder: FolderItem) {
   store.searchQuery = '';
   currentFolderId.value = folder.parentId;
   selectedIds.value.clear();
+  focusedItemKey.value = 'folder-' + folder.id;
+  scrollFocusedIntoView(`[data-drop-folder="${folder.id}"]`);
 }
+
+// 切目录 + filter 重算后, 把目标卡片 scroll 到 main 视口中央 (元素端点附近时退化为贴顶/贴底).
+// 难点: TransitionGroup move (FLIP) 给重排 element 加 transform 让它从旧位置 transition 到新位置.
+// 期间 getBoundingClientRect 返回 transformed 位置 (~300ms 内是旧位置), scrollIntoView 误判元素在视口内不滚.
+// 解法: 同步块内临时 cancel transform → 读真实 rect → 算 scrollTop → 恢复 transform → 触发 main.scrollTo.
+// 同一同步任务内 reset + restore, 浏览器不会渲染中间帧, element 视觉无 jump
+function scrollFocusedIntoView(selector: string) {
+  nextTick(() => {
+    const el = document.querySelector(selector) as HTMLElement | null;
+    const main = document.querySelector('main');
+    if (!el || !main) return;
+    const origTransform = el.style.transform;
+    const origTransition = el.style.transition;
+    el.style.transition = 'none';
+    el.style.transform = 'none';
+    const rect = el.getBoundingClientRect();
+    const mainRect = main.getBoundingClientRect();
+    // element 在 main 内容空间的中心 y
+    const centerInScroll = rect.top - mainRect.top + main.scrollTop + el.offsetHeight / 2;
+    const target = centerInScroll - main.clientHeight / 2;
+    el.style.transform = origTransform;
+    el.style.transition = origTransition;
+    const max = main.scrollHeight - main.clientHeight;
+    main.scrollTo({ top: Math.max(0, Math.min(target, max)), behavior: 'smooth' });
+  });
+}
+
+// 全局 click 清除虚线圈. "打开所在位置"按钮用 @click.stop 不冒到 document,
+// nextTick 再装是保险层(免有 reactive flush 后立即触发的 click 被吞)
+let focusClearHandler: ((e: MouseEvent) => void) | null = null;
+function detachFocusClear() {
+  if (focusClearHandler) {
+    document.removeEventListener('click', focusClearHandler);
+    focusClearHandler = null;
+  }
+}
+watch(focusedItemKey, (v) => {
+  detachFocusClear();
+  if (!v) return;
+  nextTick(() => {
+    focusClearHandler = () => { focusedItemKey.value = null; };
+    document.addEventListener('click', focusClearHandler);
+  });
+});
+onUnmounted(detachFocusClear);
 
 // 当前 folder 及其 parentId (用于 ".." 上级卡片). 根目录时 currentFolder = null, 不显示 ".."
 const currentFolder = computed(() => folders.value.find(f => f.id === currentFolderId.value) || null);
@@ -993,7 +1046,10 @@ onUnmounted(() => {
           <!-- Folders 先 (跟文件卡片完全同尺寸 h-32 preview + 信息 + actions) -->
           <div v-for="folder in filteredFolders" :key="'folder-' + folder.id" :data-drop-folder="folder.id"
             class="bg-white rounded-xl border overflow-hidden group hover:shadow-md transition-all duration-300 cursor-pointer"
-            :class="dragState.active && dragState.hoverDropTarget === folder.id ? 'border-primary ring-2 ring-primary' : 'border-gray-200'"
+            :class="[
+              dragState.active && dragState.hoverDropTarget === folder.id ? 'border-primary ring-2 ring-primary' : 'border-gray-200',
+              focusedItemKey === 'folder-' + folder.id ? 'focus-ring' : ''
+            ]"
             @click="onFolderClick($event, folder)" @pointerdown="onFolderPointerDown($event, folder)">
             <div class="h-32 bg-gray-50 flex items-center justify-center overflow-hidden">
               <PhFolderSimple size="3rem" weight="fill" class="text-primary-dark/70" />
@@ -1026,9 +1082,12 @@ onUnmounted(() => {
           </div>
 
           <!-- Files 后 (跟 folders 同 grid 内, 紧挨, 不另起一行) -->
-          <div v-for="f in filtered" :key="f.id"
+          <div v-for="f in filtered" :key="f.id" :data-file-id="f.id"
             class="bg-white rounded-xl border overflow-hidden group hover:shadow-md transition-all duration-300 cursor-default"
-            :class="selectedIds.has(f.id) ? 'border-primary ring-2 ring-primary' : 'border-gray-200'"
+            :class="[
+              selectedIds.has(f.id) ? 'border-primary ring-2 ring-primary' : 'border-gray-200',
+              focusedItemKey === 'file-' + f.id ? 'focus-ring' : ''
+            ]"
             @click="onCardClick($event, f)" @pointerdown="onFilePointerDown($event, f)">
             <div class="h-32 bg-gray-50 flex items-center justify-center overflow-hidden relative">
               <div v-if="selectMode" class="absolute top-2 left-2 z-10 w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
@@ -1101,7 +1160,10 @@ onUnmounted(() => {
           <!-- Folders 先. 表格风格: 缩略图 | 名称(flex-1) | hover icons(w-120 右对齐) | 大小 | 类型 | 日期 -->
           <div v-for="folder in filteredFolders" :key="'folder-' + folder.id" :data-drop-folder="folder.id"
             class="bg-white rounded-lg border px-3 py-2 group hover:shadow-sm transition-all duration-200 cursor-pointer flex items-center gap-3"
-            :class="dragState.active && dragState.hoverDropTarget === folder.id ? 'border-primary ring-2 ring-primary bg-primary-light/30' : 'border-gray-200'"
+            :class="[
+              dragState.active && dragState.hoverDropTarget === folder.id ? 'border-primary ring-2 ring-primary bg-primary-light/30' : 'border-gray-200',
+              focusedItemKey === 'folder-' + folder.id ? 'focus-ring' : ''
+            ]"
             @click="onFolderClick($event, folder)" @pointerdown="onFolderPointerDown($event, folder)">
             <!-- 用 36×36 容器装 icon, 让文件夹行高跟文件行(36×36 缩略图)对齐 -->
             <div class="w-9 h-9 shrink-0 bg-gray-50 rounded flex items-center justify-center">
@@ -1134,9 +1196,12 @@ onUnmounted(() => {
             <div class="flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">{{ formatDate(folder.createdAt) }}</div>
           </div>
           <!-- Files 后 -->
-          <div v-for="f in filtered" :key="f.id"
+          <div v-for="f in filtered" :key="f.id" :data-file-id="f.id"
             class="bg-white rounded-lg border px-3 py-2 group hover:shadow-sm transition-all duration-200 cursor-default flex items-center gap-3"
-            :class="selectedIds.has(f.id) ? 'border-primary ring-2 ring-primary' : 'border-gray-200'"
+            :class="[
+              selectedIds.has(f.id) ? 'border-primary ring-2 ring-primary' : 'border-gray-200',
+              focusedItemKey === 'file-' + f.id ? 'focus-ring' : ''
+            ]"
             @click="onCardClick($event, f)" @pointerdown="onFilePointerDown($event, f)">
             <div v-if="selectMode" class="w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
               :class="selectedIds.has(f.id) ? 'bg-primary border-primary' : 'border-gray-400 bg-white'">
@@ -1400,5 +1465,13 @@ onUnmounted(() => {
 .ext-drop-enter-from,
 .ext-drop-leave-to {
   opacity: 0;
+}
+
+/* 搜索"打开所在位置"跳转后, 目标卡片虚线 outline 高亮.
+   用 CSS 变量直接取主题色, 不靠 Tailwind outline-{color} utility
+   (Tailwind JIT 没扫到该项目其他地方用过 outline 颜色, 不可靠) */
+.focus-ring {
+  outline: 2px dashed rgb(var(--c-accent));
+  outline-offset: 2px;
 }
 </style>
