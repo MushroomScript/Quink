@@ -211,6 +211,11 @@ function applyUserPreferences(user: any) {
 function applyZoomLevel(level: number) {
   localStorage.setItem('quink_zoom_level', String(level));
   if ((window as any).quinkDesktop?.isElectron) {
+    // Electron 路径: 走 syncZoom IPC, main 端 setZoomFactor 设 webContents zoom. 同时清掉 CSS zoom 残留,
+    // 防 web → Electron 切换时 documentElement.style.zoom 残留跟 setZoomFactor 双重缩放.
+    // 快捷窗口的 syncZoom 是 no-op stub (preload.ts) — 它们的 zoom 由主窗口 sync-zoom IPC 触达, 不需要
+    // 自己 IPC. 但 isElectron=true 让这分支跑, 走过清 CSS zoom 那一行就足够防双重.
+    (document.documentElement.style as any).zoom = '';
     try { (window as any).quinkDesktop.syncZoom(level); } catch {}
   } else {
     (document.documentElement.style as any).zoom = (level / 100).toString();

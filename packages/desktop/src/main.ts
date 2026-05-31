@@ -403,6 +403,14 @@ function createCaptureWindow() {
   // 加载 Web 端的快捷输入页面
   captureWindow.loadURL(`${WEB_URL}/capture`);
   hookZoomChanged(captureWindow);
+  // 新窗口 webContents zoom factor 默认 1.0, 物理 size 跟着 currentZoomLevel 算 (getCaptureSize),
+  // 不显式 setZoomFactor 会导致物理跟 factor 不匹配 → 内容跟窗口边框不对齐.
+  // did-finish-load 而非 dom-ready: 后者 setZoomFactor 可能被 navigation 完成时 reset, did-finish-load
+  // 是最终 load 完, setZoomFactor 持久生效
+  captureWindow.webContents.once('did-finish-load', () => {
+    if (!captureWindow || captureWindow.isDestroyed()) return;
+    applyZoomToWebContents(captureWindow.webContents, currentZoomLevel / 100);
+  });
 
   // 延迟绑定 blur，避免刚 show 就被 hide
   let blurEnabled = false;
@@ -449,9 +457,14 @@ async function toggleCaptureWindow() {
       );
     } catch {}
     // 强制重新对齐 bounds + zoom: hide 期间用户改 zoom (sync-zoom IPC) 时窗口在 hide 状态,
-    // OS 可能延迟/忽略 setBounds → 下次 show 时窗口物理是旧的但 zoom factor 是新的 → 内容跟边框不对齐.
-    // 每次 show 前 align 一次, 用最新 currentZoomLevel 重新算 bounds + setZoomFactor 保证对齐.
+    // OS 对 hidden window 的 setBounds + setZoomFactor 可能延迟/忽略 → 下次 show 时窗口物理或 dpr
+    // 是旧的 → 内容跟边框不对齐 / dpr 跟物理不匹配 (蘑菇报: 100% 正常, <100% 多空白, >100% 显示不完整).
+    // 双层 align:
+    //   1. show 前 align (优化, 让 show 时窗口尽量对, 避免可见 size 闪烁)
+    //   2. once('show') 内 align (兜底, show 事件 fire 时窗口已 visible, setBounds + setZoomFactor
+    //      可靠生效, 任何 hide 期间没生效的状态此时被强制对齐)
     alignCaptureToZoom(currentZoomLevel);
+    captureWindow.once('show', () => alignCaptureToZoom(currentZoomLevel));
     captureWindow.show();
     captureWindow.focus();
     captureWindow.webContents.send('window-shown');
@@ -874,6 +887,10 @@ function applyMainWindowZoomSize(zoomLevel: number) {
   const factor = zoomLevel / 100;
   const lastFactor = lastMainZoom / 100;
   const ratio = factor / lastFactor;
+  // F5 / 重复 syncZoom 时 ratio === 1 (实际未缩放): 跳过 setBounds 保持窗口当前位置/大小,
+  // 否则用户拖到非中央的窗口会被强制居中 (蘑菇报: F5 后窗口归位最中间).
+  // setMinimumSize 上次设过的也还在 (lastMainZoom 不变意味着 minW/minH 也没变), 跳过 OK.
+  if (Math.abs(ratio - 1) < 0.001) return;
   const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
   const cur = mainWindow.getBounds();
   // setBounds 按用户当前窗口 × ratio 缩放, 但保证 ≥ MIN_CSS × factor (防 zoom 缩小时 sidebar 分类显示不下)
@@ -1115,6 +1132,11 @@ function createAiChatWindow() {
 
   aiChatWindow.loadURL(`${WEB_URL}/ai-chat`);
   hookZoomChanged(aiChatWindow);
+  // 同 createCaptureWindow: did-finish-load 后显式 setZoomFactor, 防新窗口 factor 默认 1.0 跟物理不匹配
+  aiChatWindow.webContents.once('did-finish-load', () => {
+    if (!aiChatWindow || aiChatWindow.isDestroyed()) return;
+    applyZoomToWebContents(aiChatWindow.webContents, currentZoomLevel / 100);
+  });
 
   let blurEnabled = false;
   aiChatWindow.on('show', () => {
@@ -1147,8 +1169,9 @@ async function toggleAiChatWindow() {
         `document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry')`
       );
     } catch {}
-    // 同 captureWindow: 每次 show 前 align 一次防 hide 期间 sync-zoom 的 setBounds 被 OS 延迟丢失
+    // 同 captureWindow 双层 align: show 前优化 + once('show') 兜底 (hide 期间 OS 可能延迟 setBounds / setZoomFactor)
     alignAiChatToZoom(currentZoomLevel);
+    aiChatWindow.once('show', () => alignAiChatToZoom(currentZoomLevel));
     aiChatWindow.show();
     aiChatWindow.focus();
   }

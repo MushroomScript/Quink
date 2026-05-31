@@ -90,6 +90,16 @@ pnpm run dev:desktop
 - **Slash command `/playwright-e2e`**（qaskills 装的，在 `~/.claude/commands/playwright-e2e/`）—— 写 Playwright 测试代码时按业界 best practice（getByRole 选 selector / Page Object Model / auto-waiting / 测试隔离）。**未来真要写持久化测试时用**
 - **Slash command `/ship`**（项目级，在 `.claude/commands/ship/SKILL.md`）—— 一组改动完成后的收尾流程：看工作树 → 划 TODO 完成项 → 必要时同步 CLAUDE.md / RENDERING-PITFALLS.md → 写 commit message → stage + commit。蘑菇说 "commit"/"更新 todo 然后 commit" 等都触发。TODO.MD 不进 commit
 
+### Claude 工作约定（严格遵守）
+
+- **能用 MCP 测的 Claude 自己测**，不要让蘑菇手动验证。验证清单上的步骤如果能用 chrome-devtools-mcp（页面 evaluate / 注入 listener / 看 viewport/dpr/CSS）、playwright-mcp、sqlite-mcp 测的，直接执行测，把结果给蘑菇看。只有需要真人视觉判断 / 物理设备操作（OS 拖窗口、按全局快捷键、看 OS 窗口装饰等 MCP 拿不到的）才让蘑菇验证。
+- **改完 main.ts / preload.ts 等需要 Electron 重启的代码 Claude 自己重启**，不要让蘑菇手动重启。重启流程：
+  1. `taskkill /F /IM electron.exe`（PowerShell `Get-Process electron | Stop-Process -Force` 也行）—— 关旧 Electron 进程
+  2. `pnpm --filter @quink/desktop exec tsc` —— 重新编译 desktop ts (dev 脚本只 build 不 watch, 手动 tsc 必要)
+  3. `pnpm --filter @quink/desktop exec electron . --remote-debugging-port=9222` 用 Bash `run_in_background: true` 启动新 Electron
+  4. 等 ~3s 让 Electron + 主窗口 ready, 再 chrome-devtools-mcp list_pages 验证
+- 改完后只让蘑菇做"必须真人介入"的事（按全局快捷键 / 视觉确认 / 拖窗口测物理边界），不要让他做"Claude 本可以测的"事。
+
 ## 核心约定（跨包全局）
 
 - 所有 UI 文案使用中文。

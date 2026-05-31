@@ -62,6 +62,22 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 
 **如果真的需要让 popup 溢出 Capture 窗口**：唯一方法是新建一个无边框 + 透明 + alwaysOnTop 的 BrowserWindow 当 popup 用，每次 hover 时创建 / setPosition / show / hide。工作量大（~100 行 IPC + 窗口管理），不建议为单个 tooltip 这么做。
 
+## preload 双轨：`preload-main.ts` 跟 `preload.ts`
+
+- **主窗口**（`createMainWindow`）用 `preload-main.ts` → 暴露 `quinkDesktop`，包含全部 IPC 接口（30+ method：syncToken / syncZoom / attachmentTasks / pickDirectory / openAttachment 等）
+- **快捷窗口**（Capture / AiChat / Float）用 `preload.ts` → 暴露 **`quink`** 命名空间（快捷窗口专属：saveNote / hideWindow / notifyContentReady / attachmentTasks 等）+ **简化版 `quinkDesktop`**（仅 `isElectron: true` + `syncToken/syncZoom/reloadShortcuts` 三个 no-op stub）
+
+**为什么简化版 quinkDesktop 而不是"不暴露"**：web 端共享代码（App.vue / stores/auth.ts）用 `window.quinkDesktop?.isElectron` 判断当前是不是 Electron 环境走特定路径（比如 applyZoomLevel 走 syncZoom IPC 而非 CSS zoom）。如果快捷窗口完全不暴露 quinkDesktop，那 `?.isElectron` 是 undefined → 走 web fallback 路径（CSS zoom）→ 跟 main 端 setZoomFactor 双重缩放（蘑菇报过：80% 多空白，125% 截断 = 双重缩放产物）。
+
+**为什么 no-op stub 而不是真转发 IPC**：快捷窗口的 zoom 由主窗口 sync-zoom IPC 触达，token 由主窗口启动时一次注入全进程共享，shortcut 由主窗口 reloadShortcuts 触发。快捷窗口里 mount 时这些动作是冗余的（不该影响其他窗口）。no-op 让 web 端代码走 Electron 分支但不产生副作用。
+
+**未来加新 `quinkDesktop` API 时判断 shortcut 端要不要也加**：
+- 如果**新 API 是动作类**（renderer 主动触发某种 IPC 改 main 状态）：考虑 shortcut window 是否真的需要触发这个动作。如果不需要 → `preload.ts` 加 no-op stub 即可（防 web 端代码访问 undefined 抛错）；如果需要 → 完整实现到 `preload.ts`，但通常应该走 `quink` 命名空间专属（区分场景）
+- 如果**新 API 是订阅类**（main → renderer 推送事件）：通常 shortcut window 不订阅（除非有跨窗口同步需求，如 attachmentTasks），不加 stub 也没问题
+- 如果**新 API 改变 web 端代码路径判断**（用 `quinkDesktop?.xxx` 做 if 分支）：必须加 stub 防 shortcut window 走错分支（同上面双重缩放教训）
+
+**调用方写法约束**：所有外部调 `window.quinkDesktop?.xxx()` 都要用**双层 optional chaining** `?.xxx?.()`：第一层防 `quinkDesktop` 不存在（web/PWA 环境），第二层防 `quinkDesktop` truthy 但 method undefined（preload 版本不一致 / API 没注入）。范例：`stores/auth.ts` 的 `syncTokenToDesktop` / `reloadShortcuts`。
+
 ## IPC 契约
 
 | 通道名 | 方向 | 用途 |

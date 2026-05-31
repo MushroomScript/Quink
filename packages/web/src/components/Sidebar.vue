@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, markRaw } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, markRaw, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useNotesStore } from '@/stores/notes';
@@ -194,12 +194,26 @@ function onAiExpand() {
 // 防鼠标只是路过 sidebar 误触发拖动. 拖动结束后回未激活态, 下次再拖要重新 hover 300ms
 const CATEGORY_HEIGHT_KEY = 'quink_sidebar_category_height';
 const HOVER_ACTIVATE_MS = 300;
+// 分类区下方固定区域 (handle 4 + 分类标题块 padding+内容约 36) 留出的高度. 拖动算可用 max 时减掉.
+const CATEGORY_FIXED_OVERHEAD = 40;
+// nav 至少留这么多 px 可见 (大约 2-3 nav 项 + 滚动条, 防完全被压没看不见入口)
+const NAV_MIN_RESERVE = 80;
 const categoryHeight = ref(160);
 const resizeReady = ref(false);
+const sidebarEl = ref<HTMLElement | null>(null);
+const userBlockEl = ref<HTMLElement | null>(null);
 let hoverTimer: ReturnType<typeof setTimeout> | null = null;
 let isDragging = false;
 let resizeStartY = 0;
 let resizeStartH = 0;
+// 算分类区允许的最大高度: sidebar 总高 - user 区 - 分类区下方固定区域 - nav 保底.
+// 不算 nav 真实 scrollHeight 是因为 nav overflow-y-auto, 即使内容多也可压缩可滚, 只要留够保底.
+function getMaxCategoryHeight(): number {
+  if (!sidebarEl.value) return 800;
+  const sidebarH = sidebarEl.value.clientHeight;
+  const userH = userBlockEl.value?.offsetHeight || 0;
+  return Math.max(40, sidebarH - userH - CATEGORY_FIXED_OVERHEAD - NAV_MIN_RESERVE);
+}
 function onHandleEnter() {
   if (hoverTimer) clearTimeout(hoverTimer);
   hoverTimer = setTimeout(() => { resizeReady.value = true; hoverTimer = null; }, HOVER_ACTIVATE_MS);
@@ -222,7 +236,10 @@ function onCategoryResizeStart(e: PointerEvent) {
 function onCategoryResizeMove(e: PointerEvent) {
   // 向上拖 (clientY 减小) → 分类区变高
   const delta = resizeStartY - e.clientY;
-  categoryHeight.value = Math.max(40, Math.min(800, resizeStartH + delta));
+  // 动态 max: 用 sidebar 实际剩余空间算上限, 防止用户拖出"假高度"超过 sidebar 可承载范围
+  // → sidebar 被撑出父容器外被裁, 分类列表下面项目滚不到 (蘑菇报的 bug)
+  const dynamicMax = getMaxCategoryHeight();
+  categoryHeight.value = Math.max(40, Math.min(dynamicMax, resizeStartH + delta));
 }
 function onCategoryResizeEnd() {
   isDragging = false;
@@ -240,6 +257,12 @@ onMounted(() => {
     const saved = Number(localStorage.getItem(CATEGORY_HEIGHT_KEY));
     if (saved >= 40 && saved <= 800) categoryHeight.value = saved;
   } catch {}
+  // 等 DOM ready 后 clamp 一下: 持久值可能超过当前 sidebar 实际可用空间 (用户上次拖到大窗口的值,
+  // 这次小窗口/换屏开起来值还在). 不 clamp 就还原 bug. nextTick 等 aside ref 挂上.
+  nextTick(() => {
+    const maxH = getMaxCategoryHeight();
+    if (categoryHeight.value > maxH) categoryHeight.value = maxH;
+  });
 });
 onUnmounted(() => {
   window.removeEventListener('quink-drop-trash', onDropTrashEvent as EventListener);
@@ -248,9 +271,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <aside class="w-60 bg-sidebar flex flex-col min-h-full shrink-0" style="border-right: 1px solid var(--sb-border); box-shadow: 1px 0 4px rgba(0,0,0,0.04)">
+  <aside ref="sidebarEl" class="w-60 bg-sidebar flex flex-col min-h-full shrink-0" style="border-right: 1px solid var(--sb-border); box-shadow: 1px 0 4px rgba(0,0,0,0.04)">
     <!-- User -->
-    <div class="relative px-3 py-4" style="border-bottom: 1px solid var(--sb-border)">
+    <div ref="userBlockEl" class="relative px-3 py-4" style="border-bottom: 1px solid var(--sb-border)">
       <button @click="toggleUserMenu"
         class="flex items-center gap-3 w-full rounded-xl px-3 py-2.5 transition-colors text-left"
         style="color: var(--sb-text)" @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--sb-hover)'" @mouseleave="($event.currentTarget as HTMLElement).style.background = 'transparent'">
@@ -298,8 +321,9 @@ onUnmounted(() => {
       </Transition>
     </div>
 
-    <!-- Nav -->
-    <nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+    <!-- Nav: min-h-0 让 flex-1 能被分类区拖大时压缩 (默认 min-height:auto 会按 nav 内容撑住, 分类区
+         拖大会把 sidebar 撑出父容器). overflow-y-auto 已经给内容可滚, 压缩到 < 内容高度也 OK. -->
+    <nav class="flex-1 min-h-0 px-3 py-3 space-y-0.5 overflow-y-auto">
       <!-- Main nav (前 3 项有 dropType: 拖卡片到此改 type); 拖动状态机 (cardDnd) 通过 [data-drop-target] 属性识别 -->
       <router-link v-for="item in mainNav" :key="item.path" :to="item.path"
         :data-nav-path="item.path"

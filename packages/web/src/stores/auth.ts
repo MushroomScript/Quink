@@ -13,7 +13,10 @@ declare global {
 }
 
 function syncTokenToDesktop(token: string | null) {
-  window.quinkDesktop?.syncToken(token);
+  // 双层 optional chaining: `?.syncToken?.()` 防止 quinkDesktop truthy 但 syncToken undefined 触发
+  // TypeError → fetchMe catch 把 user 设 null → "请先登录" 假象 (preload.ts 历史踩过). 现在
+  // shortcut preload 也注入了 syncToken no-op 不会出问题, 但 ?.()  保险防未来类似 footgun.
+  window.quinkDesktop?.syncToken?.(token);
 }
 
 export const useAuthStore = defineStore('auth', () => {
@@ -72,9 +75,9 @@ export const useAuthStore = defineStore('auth', () => {
     // null 防御: updateProfile 一般在已登录状态调, user.value 应不为 null, 但万一是 null 走整体赋值兜底.
     if (user.value) Object.assign(user.value, res.data);
     else user.value = res.data;
-    // 如果更新了快捷键，通知桌面端重新注册
+    // 如果更新了快捷键，通知桌面端重新注册. 双层 ?. 同 syncTokenToDesktop, 防 truthy + undefined 抛错
     if (data.preferences?.shortcuts) {
-      window.quinkDesktop?.reloadShortcuts();
+      window.quinkDesktop?.reloadShortcuts?.();
     }
     return res.data;
   }
