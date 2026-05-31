@@ -66,7 +66,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function updateProfile(data: { nickname?: string; avatar?: string; preferences?: Record<string, any> }) {
     const res = await api.updateProfile(data);
-    user.value = res.data;
+    // mutate 保引用: 之前整体替换 user.value = res.data 会让所有 watch user 的组件重跑 (实测改 zoom
+    // 500ms 后 data-theme 都被 setAttribute 一次同值无视觉但走 Vue diff). Object.assign 同字段 in-place
+    // 更新, Vue 仍能追踪到字段变化但保留对象引用, 依赖 user 引用稳定的 computed/watch 不再误触发.
+    // null 防御: updateProfile 一般在已登录状态调, user.value 应不为 null, 但万一是 null 走整体赋值兜底.
+    if (user.value) Object.assign(user.value, res.data);
+    else user.value = res.data;
     // 如果更新了快捷键，通知桌面端重新注册
     if (data.preferences?.shortcuts) {
       window.quinkDesktop?.reloadShortcuts();
