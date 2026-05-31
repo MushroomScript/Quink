@@ -71,8 +71,7 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 | `note-saved` | renderer → main (send) | 通知 main 显示"已保存" toast + 转发 `quink-note-created` 给主窗口 (可选带 `noteId` 让主窗口走单条 AI 结果轮询 patch, 不带回退全量 fetchNotes) |
 | `content-ready` | renderer → main (send) | Vditor 等异步组件加载完，main 才 show 窗口 |
 | `sync-theme` | renderer → main (send) | 主窗口切主题时通知 main，main 销毁快捷窗口 + 更新缓存 |
-| `sync-zoom` | renderer → main (send) | 主窗口改"显示比例"时通知 main，main 给 3 个窗口（main / Capture / AiChat）setZoomLevel(0)+setZoomFactor + 调整 Capture/AiChat 物理尺寸。详见下方"全局显示比例（zoom）"段 |
-| `zoom-step` | main → renderer (send to mainWindow) | 快捷窗口里 Ctrl+滚轮 触发 main 端 webContents 'zoom-changed' 拦截后，转发 ±100 deltaY 给主窗口走完整 stepZoom 路径 |
+| `sync-zoom` | renderer → main (send) | Settings 改"显示比例"时通知 main，main 给 3 个窗口（main / Capture / AiChat）setZoomLevel(0)+setZoomFactor + 调整主窗口物理尺寸 + Capture/AiChat align。详见下方"全局显示比例（zoom）"段 |
 | `sync-download-path` | renderer → main (send) | 设置页改下载目录时把路径推给 main，will-download 用 `currentDownloadDir` 直接 setSavePath（不弹对话框） |
 | `pick-directory` | renderer → main (invoke) | 设置页选下载目录时调，main 弹 `dialog.showOpenDialog({properties:['openDirectory','createDirectory']})`，返回路径或 null |
 | `get-default-download-dir` | renderer → main (invoke) | 设置页显示"系统默认"路径时调，main 返回 `app.getPath('downloads')` 的真实绝对路径 |
@@ -117,25 +116,21 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 
 ## 全局显示比例（zoom）
 
-主窗口改"显示比例" → main 端 sync-zoom IPC 给 3 窗口同步缩放（内容 + 物理尺寸）。改 zoom 路径前必读以下 4 个坑。
+zoom 入口**只有 Settings 页**。用户改"显示比例" → renderer `applyZoomLevel` → `syncZoom` IPC → main 端给 3 个窗口同步（setZoomFactor + 主窗口 setBounds + Capture/AiChat align）。Ctrl+滚轮被静默忽略（见坑 2）。改 zoom 路径前必读以下 5 个坑。
 
 ### 1. `setZoomFactor` 单独用不行，必须 `setZoomLevel(0)` + `setZoomFactor(factor)` 配对
 
-Chromium 给 webContents 维护**per-origin 持久化 zoom level**（Ctrl+滚轮触发的 layout zoom 改的就是它）。`setZoomFactor(1.0)` 是 transient 设置，**被 per-origin level 覆盖**：用户在 Capture 里 Ctrl+滚轮把 origin zoom 改到 1.1，之后 `setZoomFactor(1.0)` 调成功但实际 dpr 仍 1.1。
+Chromium 给 webContents 维护**per-origin 持久化 zoom level**（Ctrl+滚轮触发的 layout zoom 改的就是它）。`setZoomFactor(1.0)` 是 transient 设置，**被 per-origin level 覆盖**：如果 origin zoom 残留是 1.1，之后 `setZoomFactor(1.0)` 调成功但实际 dpr 仍 1.1。
 
 修法：`main.ts` 的 `applyZoomToWebContents(wc, factor)` helper 先 `wc.setZoomLevel(0)` 清 per-origin 缓存，再 `wc.setZoomFactor(factor)`。**顺序不能反**。所有给 webContents 设 zoom 的地方都走这个 helper。
 
-### 2. 快捷窗口里 Ctrl+滚轮要走 main 端 `webContents.on('zoom-changed')` 拦截，**不能用 renderer wheel hook**
+### 2. Ctrl+滚轮静默忽略：所有窗口都要 `hookZoomChanged` 阻止 Chromium 内置 zoom
 
-DOM `WheelEvent.preventDefault()` 在 renderer 里**阻止不了 Chromium 内置 layout zoom**（layout zoom 是浏览器内部行为，不经 DOM 默认动作路径）。如果在 Capture/AiChat 用 `window.addEventListener('wheel', ...)` + `preventDefault` 想拦 Ctrl+滚轮，结果是：
-- DOM preventDefault 阻止默认 scroll（无效，Ctrl+滚轮本来也不滚）
-- Chromium 内置 layout zoom **仍然触发**（factor 变了一档）
-- renderer hook 转发 IPC → main → 又设一次 zoom
-- **内容缩放两次 / 物理窗口缩放一次** → 视觉错位
+DOM `WheelEvent.preventDefault()` 在 renderer 里**阻止不了 Chromium 内置 layout zoom**（layout zoom 是浏览器内部行为，不经 DOM 默认动作路径）。如果不做任何拦截，用户 Ctrl+滚轮 → Chromium 改 webContents 的 zoom level → main 端不知情 → viewport CSS px 跟 zoom factor 失同步 → sidebar 抽屉断点 / 内容跟窗口边框不对齐等。
 
-正确做法：`main.ts` 的 `hookZoomChanged(win)` 监听 `win.webContents.on('zoom-changed', (e, direction) => { e.preventDefault(); ... })`。**这个 `e.preventDefault()` 是 Electron event，能真正阻 Chromium 内置 zoom**。然后转发 `zoom-step` 事件给主窗口走完整 `stepZoom` 链路。
+修法：`main.ts` 的 `hookZoomChanged(win)` 监听 `win.webContents.on('zoom-changed', (e) => { e.preventDefault(); })`。**这个 `e.preventDefault()` 是 Electron event，能真正阻 Chromium 内置 zoom**。`createMainWindow` / `createCaptureWindow` / `createAiChatWindow` 都调一次。
 
-createCaptureWindow / createAiChatWindow 都调一次 `hookZoomChanged(win)`。
+**历史**：早期 hookZoomChanged 拦截后**转发 `zoom-step` IPC** 给主窗口走完整 `stepZoom` 链路（App.vue 的 onWheel + onZoomStep listener 共用 stepZoom），实现 Ctrl+滚轮调 zoom。但 wheel 入口跟 settings 入口偶发不同步导致 Capture/AiChat 内容跟窗口边框不对齐 → 收敛到 settings 单入口，wheel 静默忽略。
 
 ### 3. AiChat zoom 联动尺寸跟 Capture 一样（但保留 resize）
 
@@ -144,15 +139,17 @@ AiChat：minWidth=minHeight=getAiChatSize(zoomLevel) 只锁最小（用户仍可
 
 `createAiChatWindow` 用 `getAiChatSize(currentZoomLevel)` 算初始尺寸 + 居中位置按当前 zoom factor 算。
 
-### 4. App.vue 在 Capture/AiChat 窗口也会 mount，wheel hook 必须 guard
+### 4. 快捷窗口 hide 期间 setBounds 被 OS 延迟/忽略 → toggle show 前必须重新 align
 
-Quink web 是 SPA，App.vue 是根组件挂 `#app`。**所有 BrowserWindow 都加载同一个 SPA**，App.vue 在主窗口 / Capture / AiChat 各 mount 一份（独立 webContents → 独立 Vue app 实例）。
+**根因**：Capture/AiChat 是持久窗口（hide/show 切换，不 destroy），跟主窗口 zoom 同步走 `sync-zoom` IPC。但当快捷窗口处于 hide 状态时调 `setBounds`，OS 行为不可靠（某些情况延迟到下次 show 时执行，或被静默忽略）。结果是：sync-zoom 时 `setZoomFactor` 立即在 webContents 内部生效，但 `setBounds` 没真的改物理窗口大小 → 下次 show 时窗口物理还是 hide 前的旧尺寸，但内容按新 zoom factor paint → **内容跟窗口边框不对齐**（被裁 / 多余留白）。
 
-主窗口的 App.vue `onMounted` 注册的 Ctrl+滚轮 hook 也会在 Capture/AiChat 的 App.vue 实例里跑。结果是快捷窗口的 Ctrl+滚轮触发**两次** stepZoom（Capture 自己的 App.vue + main 转发到主窗口的 App.vue），双触发跳两档。
+修法：`main.ts` 把 sync-zoom 里对 Capture/AiChat 的 bounds + factor 调用抽成 `alignCaptureToZoom(level)` / `alignAiChatToZoom(level)` 两个独立函数：
+1. `sync-zoom` IPC 里调用（show 状态下生效）
+2. `toggleCaptureWindow` / `toggleAiChatWindow` 在 `show()` 之前**强制再调一次**，用最新 `currentZoomLevel` 重新算 bounds + setZoomFactor → 无论 hide 期间 setBounds 是否生效，下次 show 时永远对齐
 
-修法：App.vue `onMounted` 的 wheel hook + `onZoomStep` listener 都包 `if (!isShortcutWindow)` —— 用 `location.pathname` 判断（`route.name` 在 mount 时机不可靠）。当前判 `['/capture', '/ai-chat', '/float']` 不算主窗口。
+代价：每次 show 多一次 setBounds + setZoomFactor 调用（< 5ms），用户感知不到。
 
-### 5. 主窗口物理尺寸跟 zoom 联动 + 鼠标锚点，防 sidebar 收起 / toolbar 换行 / 留白
+### 5. 主窗口物理尺寸跟 zoom 联动 + 居中，防 sidebar 收起 / toolbar 换行 / 留白
 
 主窗口 `setZoomFactor` 后 viewport CSS px = 物理 px / factor。200% zoom 时 1280 物理 → **640 CSS px < Tailwind md: breakpoint (768)** → 触发响应式抽屉模式（sidebar 自动收起）；编辑器 toolbar 按 CSS px 换行同理。
 
@@ -170,28 +167,13 @@ Quink web 是 SPA，App.vue 是根组件挂 `#app`。**所有 BrowserWindow 都�
 - 启动时 currentBounds = createMainWindow 设的 1280×860 当首次基准
 - 之后用户每次改 zoom 按**当前实际窗口**缩放（用户拖大窗口后改 zoom，按拖大后的尺寸 × ratio）
 - cap 到屏幕 95% 防超屏
-
-**鼠标锚点位置（仿浏览器 Ctrl+滚轮）**：
-- `screen.getCursorScreenPoint()` 拿全局鼠标坐标
-- 鼠标在窗口内时：`x' = cursor.x - (cursor.x - cur.x) × ratio`，`y'` 同理。推导：鼠标相对窗口的物理 px 偏移 dx → 同一 DOM 点缩放后相对新窗口的物理 px 偏移 = dx × ratio（DOM 点 CSS px 不变，物理 px = CSS px × factor）→ 新窗口 x' = cursor.x - dx × ratio 保证鼠标位置不变下面的 DOM 点也不动
-- 鼠标不在窗口内（如快捷窗口 Ctrl+滚轮转发的 zoom-step）→ 回退屏幕居中 `x = (screenW - W) / 2`
-- cap 到屏幕内 `x = clamp(x, 0, screenW - W)`（锚点可能让窗口跑出屏幕，优先窗口在屏幕里，牺牲一点锚点精度）
+- 居中位置 x = (screenW - W) / 2，y = (screenH - H) / 2（从中间向四周扩展，settings 改 zoom 用户预期窗口"原地"变化）
 
 **setMinimumSize**：
 - minW = MIN_CSS_W × factor，minH = MIN_CSS_H × factor
 - cap 到 setBounds 的 W/H 防 OS 冲突（屏幕 95% cap 触发时 W/H 可能 < MIN_CSS × factor，min 不能 > 当前 bounds 否则 Electron 报错）
 
 **trade-off**：zoom 变化时按当前窗口缩放，用户的拖动比例**保留**。但 zoom 100→200 时窗口物理也按 2× 放大（避免"内容大窗口小"），拖大的窗口下 200% 时可能撑满屏被 cap 到 95%。
-
-### 6. zoom 视觉反馈：renderer CSS transform 平滑过渡，不能用 setOpacity 遮蔽
-
-主窗口 `setZoomFactor` 是 instant 但 `setBounds` 走 OS DWM 窗口动画 ~100-200ms，两个 API 不同步导致 viewport CSS px 在 18ms 内**跌一下涨回去**（实测 1191 → 1072 → 1191）触发瀑布流 ResizeObserver 重排 / sidebar 抽屉断点 / TopBar resize 一连串 layout 抖动，肉眼看像"刷新一下"。
-
-修法：renderer 端 `App.vue` 的 `stepZoom` 在 wheel 触发时立即用 CSS `transform: scale(next/current)` 做 80ms 平滑过渡，`transform-origin` 设为鼠标 viewport 坐标（鼠标锚点视觉反馈，跟 main 端 setBounds 鼠标锚点对齐）。transform 是 GPU 合成层 paint scale，会**盖住底下的 layout 抖动**，用户视觉只看到 scale 平滑动画。80ms 后 clear transform（`transition:none` + 强制 reflow 防 clear 自身被动画化反弹），此时 main 端 paint 已对齐目标 scale，视觉一致。
-
-**坑：不能用 `setOpacity(0/1)` 遮蔽中间帧**。早期方案是 main 端 `setOpacity(0)` 包住 `setBounds` + `setZoomFactor`，80ms 后 `setOpacity(1)`。理论上完美遮蔽 layout 抖动，但**蘑菇实测会看到"窗口消失一下又出现"**，80ms 透明对人眼是可感知的。`transform` GPU paint scale 才是真正不可见的盖法。
-
-**快捷窗口 Ctrl+滚轮转发的 zoom-step 没鼠标位置**：renderer 端 `onZoomStep` 用主窗口中心当 transform-origin (`window.innerWidth/2, innerHeight/2`)，main 端 `applyMainWindowZoomSize` 取到的 cursor 也不在主窗口内 → 自动回退居中，两边对齐。
 
 ## chrome-devtools-mcp 调试 Electron
 

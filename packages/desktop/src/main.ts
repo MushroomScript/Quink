@@ -303,6 +303,9 @@ function createMainWindow() {
     }
   });
 
+  // 阻止 Ctrl+滚轮触发 Chromium 内置 zoom (用户改显示比例必须走 Settings, 避免双入口同步偏差)
+  hookZoomChanged(mainWindow);
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     // 引用链接:应用内预览
     try {
@@ -445,6 +448,10 @@ async function toggleCaptureWindow() {
         `document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry')`
       );
     } catch {}
+    // 强制重新对齐 bounds + zoom: hide 期间用户改 zoom (sync-zoom IPC) 时窗口在 hide 状态,
+    // OS 可能延迟/忽略 setBounds → 下次 show 时窗口物理是旧的但 zoom factor 是新的 → 内容跟边框不对齐.
+    // 每次 show 前 align 一次, 用最新 currentZoomLevel 重新算 bounds + setZoomFactor 保证对齐.
+    alignCaptureToZoom(currentZoomLevel);
     captureWindow.show();
     captureWindow.focus();
     captureWindow.webContents.send('window-shown');
@@ -803,16 +810,14 @@ ipcMain.on('note-saved', (_event, noteId?: string) => {
   }
 });
 
-// Capture/AiChat 快捷窗口里 Ctrl+滚轮 → Chromium 触发 webContents 'zoom-changed' 事件 (见 createCaptureWindow /
-// createAiChatWindow 中的 hookZoomChanged). main 端 preventDefault 阻 Chromium 内置 layout zoom (renderer 的 DOM
-// preventDefault 阻不了), 然后转发给主窗口 onZoomStep 走完整 applyZoomLevel + 保存 prefs 链路
+// 所有 BrowserWindow (主窗口 / Capture / AiChat) 里 Ctrl+滚轮 → Chromium 触发 webContents 'zoom-changed'
+// 事件. main 端 preventDefault 阻 Chromium 内置 layout zoom (renderer 的 DOM preventDefault 阻不了, 详见
+// packages/desktop/CLAUDE.md zoom 段). 不再转发到主窗口 → Quink 显示比例只能从 Settings 改, Ctrl+滚轮静默忽略.
+// (历史: 之前转发给主窗口走 stepZoom 链路, 但 wheel zoom 跟 settings zoom 两个入口偶发不同步导致 Capture/AiChat
+// 内容跟窗口边框不对齐, 收敛到单一入口避免)
 function hookZoomChanged(win: BrowserWindow) {
-  win.webContents.on('zoom-changed', (e, direction) => {
+  win.webContents.on('zoom-changed', (e) => {
     e.preventDefault();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      // direction in=放大 (deltaY < 0), out=缩小 (deltaY > 0). 用 ±100 给主窗口 stepZoom 走一档
-      mainWindow.webContents.send('zoom-step', direction === 'in' ? -100 : 100);
-    }
   });
 }
 
@@ -853,10 +858,8 @@ function applyZoomToWebContents(wc: Electron.WebContents, factor: number) {
 }
 
 // 主窗口物理尺寸跟 zoom 联动:
-//   - setBounds 按用户当前窗口 × (newFactor / oldFactor) 缩放, 保留用户拖动的相对尺寸
+//   - setBounds 按用户当前窗口 × (newFactor / oldFactor) 缩放, 保留用户拖动的相对尺寸 + 屏幕居中
 //   - setMinimumSize 按 CSS px 基准 × factor 算 (跟 zoom 走), 不同 zoom 下 viewport CSS px 一致
-//   - 锚点策略: 鼠标在窗口内 → 以鼠标为锚点 (鼠标下的 DOM 点缩放后仍在鼠标下, 仿浏览器 Ctrl+滚轮);
-//     鼠标不在窗口内 (如快捷窗口 Ctrl+滚轮转发) → 回退屏幕居中
 // 启动时 lastMainZoom=100, current=createMainWindow 的 1280×860 当 "标准值" 基准. 之后用户每次改 zoom
 // 按当前实际窗口缩放, 不再用屏幕 60% 等硬基准
 let lastMainZoom = 100;
@@ -881,69 +884,57 @@ function applyMainWindowZoomSize(zoomLevel: number) {
   // cap 屏幕 95% 防超屏
   W = Math.min(W, Math.round(screenW * 0.95));
   H = Math.min(H, Math.round(screenH * 0.95));
-  // 鼠标锚点: 鼠标在窗口内时, 让缩放后鼠标下的 DOM 点仍在鼠标下.
-  // 推导: 鼠标相对旧窗口的物理 px 偏移 dx → 同一 DOM 点相对新窗口的物理 px 偏移 = dx × ratio
-  //   (因为 DOM 点的 CSS px 不变, 物理 px = CSS px × factor, 所以缩放后物理偏移按 ratio 走)
-  //   → 新窗口 x' = cursor.x - dx × ratio, 保证鼠标位置 cursor.x = x' + dx × ratio
-  const cursor = screen.getCursorScreenPoint();
-  const inWindow = cursor.x >= cur.x && cursor.x <= cur.x + cur.width &&
-                   cursor.y >= cur.y && cursor.y <= cur.y + cur.height;
-  let x: number, y: number;
-  if (inWindow) {
-    x = Math.round(cursor.x - (cursor.x - cur.x) * ratio);
-    y = Math.round(cursor.y - (cursor.y - cur.y) * ratio);
-    // cap 到屏幕内 (锚点可能让窗口跑出屏幕, 优先保证窗口在屏幕里, 牺牲一点锚点精度)
-    x = Math.max(0, Math.min(x, screenW - W));
-    y = Math.max(0, Math.min(y, screenH - H));
-  } else {
-    // 鼠标不在窗口内 (快捷窗口 Ctrl+滚轮转发的 zoom-step), 回退居中
-    x = Math.round((screenW - W) / 2);
-    y = Math.round((screenH - H) / 2);
-  }
+  // 居中 (从中间向四周, settings 改 zoom 用户预期窗口"原地"变化, 不应跑偏)
+  const x = Math.round((screenW - W) / 2);
+  const y = Math.round((screenH - H) / 2);
   // setMinimumSize cap 到 W/H 防 OS 冲突 (min 不能 > 当前 bounds, 上面 cap 触发屏幕 95% 时 W/H 可能 < MIN_CSS × factor)
   mainWindow.setMinimumSize(Math.min(minW, W), Math.min(minH, H));
   mainWindow.setBounds({ x, y, width: W, height: H });
   lastMainZoom = zoomLevel;
 }
-// renderer 端的 CSS transform 平滑动画 (App.vue stepZoom) 是 GPU 合成层 paint scale, 会盖住底下的
-// layout 变化 (瀑布流 ResizeObserver 重排 / sidebar 抽屉断点 / TopBar resize) - 用户视觉上只看到 transform
-// scale 平滑过渡, 看不到 layout 抖动. 所以这里裸调两个 set API 即可, 不再用 setOpacity 遮蔽 (透明会被用户感知).
+// Capture / AiChat 跟 zoom 对齐 (bounds + setZoomFactor). 抽出来给两个入口共用:
+//   1. sync-zoom IPC: 用户改 zoom 时同步给所有窗口
+//   2. toggleCaptureWindow / toggleAiChatWindow: 每次 show 前重新对齐, 防 hide 期间 setBounds 被 OS 延迟/
+//      忽略导致下次 show 时窗口物理跟 zoom factor 不一致 (内容跟边框留白 / 被裁的根因)
+function alignCaptureToZoom(level: number) {
+  if (!captureWindow || captureWindow.isDestroyed()) return;
+  const { width: w, height: h } = getCaptureSize(level);
+  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+  // 先放开 min/max 限制再 setBounds,否则锁死的尺寸不让改
+  captureWindow.setMinimumSize(w, h);
+  captureWindow.setMaximumSize(w, h);
+  captureWindow.setBounds({
+    x: Math.round(screenWidth / 2 - w / 2),
+    y: Math.round(screenHeight / 2 - h / 2),
+    width: w,
+    height: h,
+  });
+  applyZoomToWebContents(captureWindow.webContents, level / 100);
+}
+// AiChat 跟 Capture 一样按基准 × factor 重置物理尺寸 + 内容 zoom (覆盖用户拖动的自定义尺寸).
+// 区别: 仍可 resize (不锁 max), 用户改 zoom 后可继续拖大. minWidth/minHeight 也按 factor 缩.
+function alignAiChatToZoom(level: number) {
+  if (!aiChatWindow || aiChatWindow.isDestroyed()) return;
+  const { width: w, height: h, minWidth, minHeight } = getAiChatSize(level);
+  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+  aiChatWindow.setMinimumSize(minWidth, minHeight);
+  aiChatWindow.setBounds({
+    x: Math.round(screenWidth / 2 - w / 2),
+    y: Math.round(screenHeight * 0.15),
+    width: w,
+    height: h,
+  });
+  applyZoomToWebContents(aiChatWindow.webContents, level / 100);
+}
 ipcMain.on('sync-zoom', (_event, level: number) => {
   if (!level || level < 75 || level > 200) return;
   currentZoomLevel = level;
-  const factor = level / 100;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    applyZoomToWebContents(mainWindow.webContents, factor);
+    applyZoomToWebContents(mainWindow.webContents, level / 100);
     applyMainWindowZoomSize(level);
   }
-  if (captureWindow && !captureWindow.isDestroyed()) {
-    const { width: w, height: h } = getCaptureSize(level);
-    const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
-    // 先放开 min/max 限制再 setBounds,否则锁死的尺寸不让改
-    captureWindow.setMinimumSize(w, h);
-    captureWindow.setMaximumSize(w, h);
-    captureWindow.setBounds({
-      x: Math.round(screenWidth / 2 - w / 2),
-      y: Math.round(screenHeight / 2 - h / 2),
-      width: w,
-      height: h,
-    });
-    applyZoomToWebContents(captureWindow.webContents, factor);
-  }
-  // AiChat 跟 Capture 一样按基准 × factor 重置物理尺寸 + 内容 zoom (覆盖用户拖动的自定义尺寸).
-  // 区别: 仍可 resize (不锁 max), 用户改 zoom 后可继续拖大. minWidth/minHeight 也按 factor 缩.
-  if (aiChatWindow && !aiChatWindow.isDestroyed()) {
-    const { width: w, height: h, minWidth, minHeight } = getAiChatSize(level);
-    const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
-    aiChatWindow.setMinimumSize(minWidth, minHeight);
-    aiChatWindow.setBounds({
-      x: Math.round(screenWidth / 2 - w / 2),
-      y: Math.round(screenHeight * 0.15),
-      width: w,
-      height: h,
-    });
-    applyZoomToWebContents(aiChatWindow.webContents, factor);
-  }
+  alignCaptureToZoom(level);
+  alignAiChatToZoom(level);
 });
 
 ipcMain.on('sync-theme', (_event, theme: string) => {
@@ -1156,6 +1147,8 @@ async function toggleAiChatWindow() {
         `document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry')`
       );
     } catch {}
+    // 同 captureWindow: 每次 show 前 align 一次防 hide 期间 sync-zoom 的 setBounds 被 OS 延迟丢失
+    alignAiChatToZoom(currentZoomLevel);
     aiChatWindow.show();
     aiChatWindow.focus();
   }

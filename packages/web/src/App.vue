@@ -205,10 +205,9 @@ function applyUserPreferences(user: any) {
   applyZoomLevel(prefs.zoomLevel || 100);
 }
 
-// 显示比例 8 档 + 应用逻辑. Ctrl+滚轮 hook 和 Settings 保存都复用本 helper.
+// 显示比例应用逻辑. 入口只有 Settings 页 (Ctrl+滚轮已废除, 见 packages/desktop/CLAUDE.md zoom 段).
 // Electron 端: 主进程 setZoomFactor 给 3 个窗口同步; Web/PWA 端: CSS zoom (二选一, 双方同设会双重缩放).
 // localStorage 缓存让 inline script + 创建快捷窗口前 ensureCurrentZoomLevel 拿得到上次值, 避开服务端慢启动 / preferences 不完整 race.
-const ZOOM_STEPS = [75, 80, 90, 100, 110, 125, 150, 200];
 function applyZoomLevel(level: number) {
   localStorage.setItem('quink_zoom_level', String(level));
   if ((window as any).quinkDesktop?.isElectron) {
@@ -225,10 +224,7 @@ let prevImgClickHandler: ((e: MouseEvent) => void) | null = null;
 let prevMissingImgErrHandler: ((e: Event) => void) | null = null;
 let prevCopyHandler: ((e: ClipboardEvent) => void) | null = null;
 let prevCtrlAHandler: ((e: KeyboardEvent) => void) | null = null;
-let prevWheelHandler: ((e: WheelEvent) => void) | null = null;
 let prevWindowOpen: typeof window.open | null = null;
-let lastWheelTime = 0;
-let zoomSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 const { open: openImagePreview } = useImagePreview();
 
@@ -250,90 +246,7 @@ onMounted(async () => {
   if (prevMissingImgErrHandler) document.removeEventListener('error', prevMissingImgErrHandler, true);
   if (prevCopyHandler) document.removeEventListener('copy', prevCopyHandler);
   if (prevCtrlAHandler) document.removeEventListener('keydown', prevCtrlAHandler, true);
-  if (prevWheelHandler) window.removeEventListener('wheel', prevWheelHandler, { capture: true } as any);
   if (prevWindowOpen) window.open = prevWindowOpen;
-
-  // Ctrl+滚轮 hook → 调 Quink "显示比例" (8 档切换), 替代浏览器/Electron 自带 zoom 防叠加.
-  // Chrome 触摸板 pinch zoom 也派 wheel + ctrlKey=true → 同一个 hook 接住, bonus 体验.
-  // Ctrl+/-/0 浏览器级 shortcut 网页无法 hook (preventDefault 失效), 接受叠加, 蘑菇用 wheel 就行.
-  // capture + passive:false 才能 preventDefault 阻止默认 zoom; 100ms 节流防一次滚动多档.
-  // 防抖 500ms 写后端 (UI 立即响应 syncZoom / CSS zoom, 不等 API).
-  //
-  // Electron 端 zoom 体验:
-  //   - renderer 立即用 CSS transform: scale 做 80ms 平滑过渡, transform-origin 跟鼠标位置 (鼠标锚点视觉反馈)
-  //   - main 端 setBounds + setZoomFactor 同步生效, OS DWM 自带窗口 resize 动画 (~100-200ms)
-  //   - transform 是 GPU 合成层 paint scale, 会盖住底下 layout 抖动 (瀑布流 ResizeObserver 重排 /
-  //     sidebar 抽屉断点 / TopBar resize), 用户视觉只看到 transform 平滑动画
-  //   - 80ms 后 clear transform: main 端此时大概率已 setZoomFactor + setBounds 完成, paint 已对齐目标 scale,
-  //     clear 无明显跳变
-  //   - 注: 不能用 setOpacity 遮蔽 (蘑菇实测会看到 "窗口消失一下又出现", 80ms 透明可感知)
-  //
-  // stepZoom 抽出来给两个入口共用: 主窗口本地 wheel (有鼠标位置) + 快捷窗口 IPC 转发的 zoom-step (无鼠标
-  // 位置, 用窗口中心当锚点)
-  const stepZoom = (deltaY: number, mouseX: number, mouseY: number) => {
-    const now = Date.now();
-    if (now - lastWheelTime < 100) return;
-    lastWheelTime = now;
-
-    const current = auth.user?.preferences?.zoomLevel || 100;
-    let idx = ZOOM_STEPS.indexOf(current);
-    if (idx === -1) {
-      // 当前值不在 8 档 (老数据 / 手动改), 找最接近的档位起跳
-      idx = 0;
-      for (let i = 1; i < ZOOM_STEPS.length; i++) {
-        if (Math.abs(ZOOM_STEPS[i] - current) < Math.abs(ZOOM_STEPS[idx] - current)) idx = i;
-      }
-    }
-    // deltaY > 0 滚下 = 缩小; < 0 滚上 = 放大. Math.max/min 卡边界
-    const nextIdx = deltaY > 0 ? Math.max(0, idx - 1) : Math.min(ZOOM_STEPS.length - 1, idx + 1);
-    const next = ZOOM_STEPS[nextIdx];
-    if (next === current) return;
-
-    const isElectron = !!(window as any).quinkDesktop?.isElectron;
-    if (isElectron) {
-      // CSS transform 平滑过渡: scale 是相对值 (next/current), transform-origin 用鼠标位置仿浏览器锚点缩放
-      const ratio = next / current;
-      const html = document.documentElement;
-      html.style.transformOrigin = `${mouseX}px ${mouseY}px`;
-      html.style.transition = 'transform 80ms ease-out';
-      html.style.transform = `scale(${ratio})`;
-      applyZoomLevel(next);
-      // 80ms 后 clear: main 端此时 paint 已对齐目标 scale, 清 transform 视觉一致
-      // transition:none + 强制 reflow 防止 clear 自身被动画化反弹
-      setTimeout(() => {
-        html.style.transition = 'none';
-        html.style.transform = '';
-        html.style.transformOrigin = '';
-        void html.offsetHeight;
-      }, 80);
-    } else {
-      applyZoomLevel(next);
-    }
-
-    if (auth.user?.preferences) auth.user.preferences.zoomLevel = next;
-    if (zoomSaveTimer) clearTimeout(zoomSaveTimer);
-    zoomSaveTimer = setTimeout(() => {
-      auth.updateProfile({ preferences: { ...(auth.user?.preferences || {}), zoomLevel: next } });
-    }, 500);
-  };
-  const onWheel = (e: WheelEvent) => {
-    if (!e.ctrlKey) return;
-    e.preventDefault();
-    stepZoom(e.deltaY, e.clientX, e.clientY);
-  };
-  // 只在主窗口注册 wheel hook 和 onZoomStep listener. App.vue 在 Capture/AiChat 窗口里也会 mount
-  // (同 SPA 根组件), 那俩窗口的 Ctrl+滚轮要走 main 端 webContents 'zoom-changed' 拦截 + 转发到主窗口的路径,
-  // 不能让 Capture 自己的 App.vue 也跑一遍 onWheel/stepZoom (会绕过 main 端 IPC + 直接调 syncZoom 把所有窗口 zoom).
-  // 用 location.pathname 判断 (route.name 在 mount 时机可能未 ready / 不可靠), 主窗口加载 / 或 /notes 等; 快捷窗口固定 /capture /ai-chat /float
-  const isShortcutWindow = ['/capture', '/ai-chat', '/float'].some(p => location.pathname === p);
-  if (!isShortcutWindow) {
-    window.addEventListener('wheel', onWheel, { passive: false, capture: true });
-    prevWheelHandler = onWheel;
-    // 快捷窗口转发的 zoom-step 没鼠标位置 (鼠标在 Capture/AiChat 窗口里), 用主窗口中心当 transform-origin.
-    // main 端 applyMainWindowZoomSize 取到的 cursor 也不在主窗口内 → 自动回退居中, 跟 transform-origin 对齐.
-    desk?.onZoomStep?.((deltaY: number) =>
-      stepZoom(deltaY, window.innerWidth / 2, window.innerHeight / 2));
-  }
 
   // 全局拦截 note-content 内 img 单击 → 弹图片预览(同一笔记的所有图作为一组,可左右切换)
   // 必须 capture + stopPropagation:否则 NoteCard 的 click handler 也会收到,误触发"进入详情"

@@ -32,12 +32,6 @@ contextBridge.exposeInMainWorld('quinkDesktop', {
     ipcRenderer.removeAllListeners('attachment-progress');
     ipcRenderer.on('attachment-progress', (_e, data) => cb(data));
   },
-  // 快捷窗口 Ctrl+滚轮转发的 deltaY (main 转给主窗口). App.vue 注册后跟自己的 onWheel 同样处理 zoom 调档.
-  // removeAllListeners 防 HMR 累积
-  onZoomStep: (cb: (deltaY: number) => void) => {
-    ipcRenderer.removeAllListeners('zoom-step');
-    ipcRenderer.on('zoom-step', (_e, deltaY: number) => cb(deltaY));
-  },
   // 全局附件传输任务 (跨窗口共享 + 跨 session 持久化). 状态唯一来源在 main, 这里都是薄封装.
   attachmentTasks: {
     get: () => ipcRenderer.invoke('attachment-tasks:get'),
