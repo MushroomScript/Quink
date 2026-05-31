@@ -16,22 +16,23 @@
 ### 整体设计
 
 ```
-<main overflow-y-auto>                       ← 滚动容器
+<main overflow-y-auto>                              ← 滚动容器
   <view 根 div>
-    <div class="notes-masonry">              ← flex 横向,N 个子 col
-      <TransitionGroup class="masonry-col">  ← 每列独立 TransitionGroup
-        <NoteCard v-for="note in col" ...>   ← 列内 vertical stack
-      </TransitionGroup>
-      ...                                    ← N 个 col
+    <div class="notes-masonry">                     ← flex 横向,N 个 wrapper
+      <div class="masonry-col-wrapper">             ← 列 wrapper(包 col + sentinel)
+        <TransitionGroup class="masonry-col">       ← 每列独立 TransitionGroup
+          <NoteCard v-for="note in col" ...>        ← 列内 vertical stack
+        </TransitionGroup>
+        <div class="col-sentinel" :ref="..." />     ← 列底 sentinel
+      </div>
+      ...                                           ← N 个 wrapper
     </div>
-    <div ref="sentinel" v-if="notes.length < total">  ← IntersectionObserver 监听
-      滚动加载更多
-    </div>
+    <div v-if="notes.length < total">滚动加载更多</div>   ← 仅文案,无 ref
   </view 根 div>
 </main>
 ```
 
-useMasonry 把 `getItems()` 按"放最矮列"算法分配到 N 个 `T[]`，view v-for `columns` 输出多列 TransitionGroup。useInfiniteScroll 在 sentinel 进入视口前 300px 触发 `loadMore`。两者**完全不直接互相调用**，只通过 store.notes 反应式串起来。
+useMasonry 把 `getItems()` 按"放最矮列"算法分配到 N 个 `T[]`，view v-for `columns` 输出多列 TransitionGroup。useInfiniteScroll 接受 sentinels 数组 ref，每列底部各 1 个 sentinel，**任一进入"视口 + 下方 25%"区域**就触发 `loadMore`。两者**完全不直接互相调用**，只通过 store.notes 反应式串起来。
 
 ### 坑 1：不能用 `column-count` CSS 多列布局
 
@@ -72,13 +73,33 @@ loadMore 期间 `store.loading=true` → 整个 `<template v-else>` unmount → 
 
 范例：`Inspiration.vue` / `Notes.vue`。Todos.vue 本来就没顶部 loading，没坑。
 
-### 坑 4：pickShortest 算法 vs round-robin
+### 坑 4：pickShortest 必须用真实 DOM 高度,不能纯靠 estimateHeight 累计
 
-react-masonry-css 用 `i % N` round-robin，简单但**列高不平衡**（长内容刚好都落某列时差异可达一屏）。
+react-masonry-css 用 `i % N` round-robin,简单但**列高不平衡**(长内容刚好都落某列时差异可达一屏)。
 
-修法：用 `pickShortestCol(累计估算高度)` 选最矮列。`estimateHeight` 按 content 字符数 + tags + summary 估算（不测真实 DOM）。**前 N 张所有列都是 0，行为自然退化成 round-robin → 第一行仍是最新 N 张（"靠上越新"成立）**，之后开始按高度平衡。
+修法:用 `pickShortestCol(列高)` 选最矮列。**列高来源必须用真实 DOM offsetHeight**,不能纯靠 estimateHeight 累计:
 
-估算误差最大场景：含图片 / 音频胶囊 / 长 markdown 渲染（h1/代码块/列表）的卡片。一般日常笔记够用。如果要彻底准，升级到 ResizeObserver + DOM offsetHeight，但复杂度上升 2 倍，先不做。
+| 列 | 真实 offsetHeight | estimateHeight 累计 |
+|---|---|---|
+| col0 | 1791 | 1438 |
+| col1 | 1819 | 1482 |
+| col2 | **2244**(实际最高) | **1426**(被估算成最矮) |
+
+estimateHeight 假设纯文本(`80 + lines*22`, 最多 4 行),不算 markdown 渲染 / 图片 / 音频。含图卡片估算 ~150 真实 542,误差 3 倍以上。结果 col2 真实最高 2244 反被算成最矮 1426 → 后续 loadMore 把新卡片继续往 col2 倒 → 列高越扯越歪(反馈循环)。
+
+实现:`useMasonry(getItems, rootRef?)` 接受 `rootRef: Ref<HTMLElement | null>`(指向 `.notes-masonry`)。`measureRealHeights()` 通过 `rootRef.value.querySelectorAll(':scope > .masonry-col-wrapper > .masonry-col')` 拿真实 offsetHeight。触发时机:
+
+- **rebuild 后 nextTick**(首屏 / 换 view / resize) —— DOM mount 后用真实值刷新 colHeights
+- **删除后 nextTick** —— estimateHeight 减回不精确,真实重测一次
+- **append 前**(loadMore) —— 直接读真实高当 baseline,新加项还没 mount 用 estimateHeight 临时预测
+
+estimateHeight 保留兜底:rebuild 时还没 DOM,只能先估算分配,nextTick 后再修正。
+
+**前 N 张所有列都是 0,行为自然退化成 round-robin → 第一行仍是最新 N 张("靠上越新"成立)**,之后按真实高度平衡。
+
+view 必须传 rootRef:`<div ref="masonryRoot" class="notes-masonry">` + `useMasonry(getItems, masonryRoot)`。Todos 有 pending + done 两组各传各 root。不传 rootRef 退化回纯 estimateHeight(不推荐,会有反馈循环问题)。
+
+selector 兼容老结构 `.notes-masonry > .masonry-col`(Trash 没用 useInfiniteScroll 不带 wrapper),fallback 到 wrapper 内层。
 
 ### 坑 5：scrollTop 调试诀窍
 
@@ -110,6 +131,16 @@ react-masonry-css 用 `i % N` round-robin，简单但**列高不平衡**（长�
 ### 配合 store 的动态 pageSize
 
 每个 view 在 setup 里 watch `columnCount` → 同步 `store.pageSize = n * 10`。3 列 30、4 列 40、5 列 50，刚好首屏 10 行。`store.fetchNotes` 用 `pageSize.value` 替代硬编码 limit。
+
+### 坑 7：sentinel 必须每列各 1 个,不能全列表共用 1 个
+
+老做法把 sentinel 放在 `.notes-masonry` 之后(全列表底部全宽 div),DOM 流上紧贴**最长列**底。列高不齐时(尤其删卡片后),短列已大片空白,但 sentinel 还在最长列底 → 必须等最长列也快触底才触发 `loadMore`,用户感觉"半天不加载"。
+
+修法:每列底部各放 1 个 sentinel(`.col-sentinel`),`IntersectionObserver` 监测**任一**进入"视口 + 下方 25%"区域就 loadMore(`rootMargin: '0px 0px 25% 0px'`)。短列空白接近视口高度 25% 就触发,跟最长列状态无关。
+
+DOM 结构: `.notes-masonry > .masonry-col-wrapper > (TransitionGroup.masonry-col + .col-sentinel)`。wrapper 接管 flex 子项角色(`flex: 1 1 0`),sentinel 跟 TransitionGroup 同层避免塞进 TransitionGroup 触发 enter/leave 钩子。Trash 没用 useInfiniteScroll,直接拿 `.masonry-col` 当 `.notes-masonry` 子项(不带 wrapper),`.masonry-col` 自带 `flex: 1 1 0` 没 wrapper 也能布局。
+
+Todos 有 pending + done 两组瀑布流,sentinels 数组用**固定偏移**避免索引碰撞: pending 段 `sentinels[ci]`(0..N-1),done 段 `sentinels[100 + ci]`(100..100+N-1)。**不能用 `sentinels[columnCount + ci]`**: columnCount resize 变化时,unmount 回调读到的是新 columnCount → 写到错位索引 → 旧 DOM ref 残留在数组里 → observer 永久持有 detached DOM(内存泄漏)。
 
 ### 配合 view 的 push 模式
 

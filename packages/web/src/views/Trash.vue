@@ -121,7 +121,9 @@ useEscToClose(confirmEmpty);
 useEscToClose(confirmDeleteId, '');
 
 // 瀑布流分列 (跟 Notes.vue / Inspiration.vue / Todos.vue 一致, 修早期遗漏的回归)
-const { columns } = useMasonry(() => notes.value);
+// rootRef 让 useMasonry 用真实 DOM 高度而非估算, 修 estimateHeight 误判最矮列的反馈循环
+const masonryRoot = ref<HTMLElement | null>(null);
+const { columns } = useMasonry(() => notes.value, masonryRoot);
 
 async function load() {
   if (!isLoggedIn()) return;
@@ -311,7 +313,7 @@ function onLeave(el: Element, done: () => void) {
         <p class="text-gray-500 text-lg">没有匹配的内容</p>
       </div>
 
-      <div class="notes-masonry">
+      <div ref="masonryRoot" class="notes-masonry">
         <TransitionGroup v-for="(col, ci) in columns" :key="ci" tag="div"
           data-animated-list class="masonry-col" :css="false" @leave="onLeave">
           <div v-for="n in col" :key="n.id" :data-note-type="n.type"

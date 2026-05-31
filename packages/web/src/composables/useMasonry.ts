@@ -1,10 +1,20 @@
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount, nextTick, type Ref } from 'vue';
 
-// 瀑布流: N 个列,新卡片放到"当前累计估算高度最矮"的列,长期保持列高平衡.
-// (跟 react-masonry-css 的 i%N round-robin 不同,后者末尾列高差可达一屏)
+// 瀑布流: N 个列,新卡片放到"当前真实 DOM 最矮列",长期保持列高平衡.
 //
-// 配合 CSS: .notes-masonry { display: flex } + .masonry-col { flex-direction: column }
+// 配合 CSS: .notes-masonry { display: flex } + .masonry-col-wrapper > .masonry-col
 // 跟 useInfiniteScroll + view 的 push 模式一起用,scrollTop 不跳.
+//
+// 列高来源(优先级):
+//   1. 真实 DOM offsetHeight(rootRef 可用时, 通过 querySelectorAll 拿) - 精确
+//   2. estimateHeight 累计(rebuild 时 DOM 还没 mount 的兜底) - 估算误差大(含图片/markdown/音频卡片差 30%+)
+//
+// 触发"读真实高"的时机:
+//   - rebuild 后 nextTick: 用真实值刷新 colHeights, 让下次 append 起点准确
+//   - append(loadMore) 时: 直接读真实高度当 baseline, 配合 estimateHeight 给新加项做预测
+//
+// 老版本(纯 estimateHeight) bug: 含图片/markdown 卡片估算极低 → pickShortest 把"真实最高列"
+// 当成"最矮列" → 新卡片继续往该列倒 → 列高越扯越歪. 真实测量解决这个反馈循环.
 function getColumnCount(): number {
   const w = window.innerWidth;
   if (w >= 1800) return 5;
@@ -14,17 +24,32 @@ function getColumnCount(): number {
   return 1;
 }
 
-// 估算卡片渲染高度(像素).Note 类型字段假设: { content?, tags?, summary? }.
-// 不带类型约束让 useMasonry<T> 保持通用,这里对缺失字段按 0 处理.
+// 估算 NoteCard 渲染高度. line-clamp-4 限制文字 4 行, 但 block 元素(图片/代码块/附件)
+// 不受 line-clamp 限制 → 单独估. 系数基于真实样本(NoteCard 内 .vditor-reset 渲染)反推:
+// - 图片缩略图 ~200px / 张
+// - 代码块 ~60px / 块 (4-5 行可见)
+// - 附件按钮/音频胶囊 ~50px / 个
 function estimateHeight(item: any): number {
-  const charsPerLine = 40; // 标准字号每行约 40 中文字符
-  const contentLen = (item?.content?.length || 0);
-  const lines = Math.min(Math.ceil(contentLen / charsPerLine), 4); // line-clamp-4
-  let h = 80;                              // 卡片框 + padding + 时间/类型行
-  h += lines * 22;                         // 内容文字
-  if (item?.summary) h += 28;              // summary 单独占一行
-  if (item?.tags?.length) h += 28;         // tags 一行
-  // 音频/图片等富媒体没估算进去,差异容忍范围内
+  const content = item?.content || '';
+  const charsPerLine = 40;
+  const lines = Math.min(Math.ceil(content.length / charsPerLine), 4);
+  let h = 80;
+  h += lines * 22;
+  if (item?.summary) h += 28;
+  if (item?.tags?.length) h += 28;
+
+  // 系数偏保守: 估算过激进会让 pickShortest 早期"封死"某列(把大估算卡集中分到一列后, 那列
+  // 估算很高就再也不分配, 真实那列卡片少反而最矮). 宁可估算偏低让 pickShortest 多走 round-robin,
+  // append 时 syncRealHeights 用真实 DOM 修正回来.
+  const imgs = content.match(/!\[[^\]]*\]\([^)]+\.(?:png|jpe?g|gif|webp|heic|svg|bmp)[^)]*\)/gi);
+  if (imgs) h += imgs.length * 100;
+
+  const codeFences = (content.match(/```/g) || []).length;
+  h += Math.floor(codeFences / 2) * 40;
+
+  const attachments = content.match(/(?<!!)\[[^\]]*\]\([^)]+\.(?:mp4|mp3|m4a|wav|ogg|flac|pdf|docx?|xlsx?|pptx?|zip|rar|7z)[^)]*\)/gi);
+  if (attachments) h += attachments.length * 30;
+
   return h;
 }
 
@@ -36,15 +61,36 @@ function pickShortestCol(heights: number[]): number {
   return minIdx;
 }
 
-export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
+export function useMasonry<T extends { id: string }>(
+  getItems: () => T[],
+  rootRef?: Ref<HTMLElement | null>
+) {
   const columnCount = ref(getColumnCount());
   const columns = ref<T[][]>(Array.from({ length: columnCount.value }, () => []));
-  // 每列累计估算高度,用于选最矮列.普通数组(非 ref),仅在 watch 内 mutation,不需要响应式
+  // 每列累计列高估算(rebuild 时填充), append 前会被真实 DOM 高度覆盖
   const colHeights: number[] = new Array(columnCount.value).fill(0);
 
   function resetColHeights(n: number) {
     colHeights.length = 0;
     for (let i = 0; i < n; i++) colHeights.push(0);
+  }
+
+  // 从 rootRef 拿真实列高. rootRef 缺失/列数不匹配返回 null,调用者走估算兜底.
+  // querySelector 用 :scope > .masonry-col-wrapper > .masonry-col,匹配新结构;
+  // 兼容老结构 .notes-masonry > .masonry-col(Trash 等不带 wrapper 的场景).
+  function measureRealHeights(): number[] | null {
+    const root = rootRef?.value;
+    if (!root) return null;
+    let cols = root.querySelectorAll<HTMLElement>(':scope > .masonry-col-wrapper > .masonry-col');
+    if (cols.length === 0) cols = root.querySelectorAll<HTMLElement>(':scope > .masonry-col');
+    if (cols.length !== columnCount.value) return null;
+    return Array.from(cols).map((c) => c.offsetHeight);
+  }
+
+  function syncRealHeights() {
+    const real = measureRealHeights();
+    if (!real) return;
+    for (let i = 0; i < colHeights.length; i++) colHeights[i] = real[i];
   }
 
   function rebuild() {
@@ -57,6 +103,8 @@ export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
       colHeights[idx] += estimateHeight(item);
     });
     columns.value = cols;
+    // rebuild 后下一帧用真实 DOM 高度刷新, 修正 estimateHeight 偏差
+    nextTick(syncRealHeights);
   }
 
   function onResize() {
@@ -77,15 +125,8 @@ export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
   let lastFirstId: string | undefined;
 
   watch(getItems, (newItems, oldItems) => {
-    // === 区分 ref 全量替换(reassign) vs 内部 mutation ===
-    // store.notes 被赋值新数组(fetchNotes 非 append 路径,即筛选/搜索/换 view) → newItems !== oldItems
-    // store.notes 内部 push/splice/unshift(create/delete/loadMore) → newItems === oldItems
-    // 第一次 immediate 触发 oldItems === undefined,按 mutation 路径处理(配合 onMounted 的 rebuild)
     const replaced = oldItems !== undefined && newItems !== oldItems;
     if (replaced) {
-      // 全量替换 = 筛选/搜索/排序导致的数据洗牌,无论 length 变化方向都必须 rebuild,
-      // 让结果从 col[0] 起重新分配。不能走下面的 shrunk + splice 优化路径,
-      // 否则"筛选结果只有 1 张时它留在原本的列里(如第 3 列)而不是第 1 列"。
       rebuild();
       lastLength = newItems.length;
       lastFirstId = newItems[0]?.id;
@@ -96,10 +137,6 @@ export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
     const shrunk = newItems.length < lastLength;
     const firstChanged = firstId !== lastFirstId;
 
-    // 严格删除场景(单删/批量删/恢复): newItems 是 oldItems 的子集,只少不增。
-    // 走增量 splice,避免全量 rebuild 引起的"跨列重排"
-    // ——跨列移动会让 TransitionGroup 在原列触发 leave + 新列 enter,
-    // 误调 onLeave 钩子(如 flyToNavLeave 飞向 sidebar)→ 看着像"后面卡片跟着被删项一起飞"。
     if (shrunk) {
       const newIds = new Set(newItems.map((n) => n.id));
       let hasNewIds = false;
@@ -117,8 +154,7 @@ export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
         }
       }
       if (!hasNewIds) {
-        // 真·删除: 从对应 col 里 splice 掉被删项,colHeights 减相应估算高度。
-        // staying 元素的 DOM 引用不动,TransitionGroup 只对被删项触发 leave。
+        // 真·删除: 走增量 splice
         for (let ci = 0; ci < columns.value.length; ci++) {
           const col = columns.value[ci] as T[];
           for (let i = col.length - 1; i >= 0; i--) {
@@ -128,6 +164,8 @@ export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
             }
           }
         }
+        // 删除后下一帧用真实高度修正,避免 estimateHeight 偏差累积影响后续 pickShortest
+        nextTick(syncRealHeights);
         lastLength = newItems.length;
         lastFirstId = firstId;
         return;
@@ -135,14 +173,16 @@ export function useMasonry<T extends { id: string }>(getItems: () => T[]) {
     }
 
     if (shrunk || firstChanged) {
-      // 数据洗牌(换 view/搜索/排序变化): 全量重建
       rebuild();
     } else if (newItems.length > lastLength) {
-      // loadMore 增量 append: 新卡片各自找最矮列,push 到 columns.value[col] mutation
+      // loadMore append: 先用真实 DOM 高度刷新 colHeights, 避免估算偏差累积导致 pickShortest 选错列
+      syncRealHeights();
       for (let i = lastLength; i < newItems.length; i++) {
         const idx = pickShortestCol(colHeights);
         if (columns.value[idx]) {
           (columns.value[idx] as T[]).push(newItems[i]);
+          // 新加项还没 mount, 用 estimateHeight 当临时预测, 让同批次后续 item pickShortest 不会
+          // 都挤进同一列. 下次 append 前 syncRealHeights 会用真实高度覆盖, 偏差不累积.
           colHeights[idx] += estimateHeight(newItems[i]);
         }
       }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onActivated, ref, watch } from 'vue';
+import { onActivated, onDeactivated, nextTick, ref, watch } from 'vue';
 import { useNotesStore } from '@/stores/notes';
 import NoteInput from '@/components/NoteInput.vue';
 import MobileInput from '@/components/MobileInput.vue';
@@ -13,28 +13,49 @@ defineOptions({ name: 'notes' });
 
 const store = useNotesStore();
 const isMobile = ref(window.innerWidth < 768);
-const sentinel = useInfiniteScroll(() => store.loadMore());
-const { columns, columnCount } = useMasonry(() => store.notes);
+// 详见 Inspiration.vue 同段注释 - 拿专属 ViewState 避免跨 view watch 误触发
+const vs = store.getViewState('notes');
+
+const sentinels = ref<Array<HTMLElement | null>>([]);
+useInfiniteScroll(() => store.loadMore(), sentinels);
+const masonryRoot = ref<HTMLElement | null>(null);
+const { columns, columnCount } = useMasonry(() => vs.notes, masonryRoot);
 watch(columnCount, (n) => { store.pageSize = n * 10; }, { immediate: true });
 
+async function viewRefresh() {
+  await store.fetchNotes(undefined, { keepCount: true });
+}
+
 onActivated(() => {
-  const needRefresh = store.filterType !== 'snippet';
+  store.activeView = 'notes';
+  store.currentRefresh = viewRefresh;
   store.filterType = 'snippet';
-  if (needRefresh) {
+  const wasEmpty = vs.notes.length === 0;
+  if (wasEmpty) {
     store.filterCategory = '';
     store.searchQuery = '';
     store.fetchNotes();
   }
+  nextTick(() => {
+    const main = document.querySelector<HTMLElement>('main');
+    if (main && vs.scrollTop > 0) main.scrollTop = vs.scrollTop;
+  });
 });
 
-// 数据变更前主动 snapshot 所有卡片位置，避免 onLeave 钩子里拿到的是 v-if 切换后的错位坐标
-watch(() => store.notes.length, () => snapshotCards(), { flush: 'sync' });
+onDeactivated(() => {
+  const main = document.querySelector<HTMLElement>('main');
+  if (main) vs.scrollTop = main.scrollTop;
+  if (store.currentRefresh === viewRefresh) store.currentRefresh = null;
+});
+
+watch(() => vs.notes.length, () => snapshotCards(), { flush: 'sync' });
 </script>
 
 <template>
   <div class="px-4 md:px-8 py-4 md:py-6">
+    <!-- v-show 替代 v-if: 详见 Inspiration.vue 同段注释 (退出多选 scrollTop 回顶 bug) -->
     <Transition name="editor-area">
-      <div v-if="!store.isFiltering && !store.selectMode" class="editor-area-wrap mb-4 md:mb-6">
+      <div v-show="!store.isFiltering && !store.selectMode" class="editor-area-wrap mb-4 md:mb-6">
         <div>
           <MobileInput v-if="isMobile" default-type="snippet" />
           <NoteInput v-else default-type="snippet" />
@@ -43,24 +64,28 @@ watch(() => store.notes.length, () => snapshotCards(), { flush: 'sync' });
     </Transition>
 
     <!-- 同 Inspiration.vue: 仅首次加载才整体显示 loading,避免 loadMore 时整列表 unmount → scrollTop 回顶 -->
-    <div v-if="store.loading && store.notes.length === 0" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
+    <div v-if="store.loading && vs.notes.length === 0" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <template v-else>
-      <div v-if="store.notes.length === 0" class="text-center py-16">
+      <div v-if="vs.notes.length === 0" class="text-center py-16">
         <div class="mb-3 flex justify-center text-gray-300">
           <PhNotePencil size="3rem" weight="fill" />
         </div>
         <p class="text-gray-500 text-sm">暂无笔记</p>
       </div>
 
-      <div class="notes-masonry">
-        <TransitionGroup v-for="(col, ci) in columns" :key="ci" tag="div"
-          data-animated-list class="masonry-col" :css="false" @leave="fadeOutLeave">
-          <NoteCard v-for="note in col" :key="note.id" :note="note" />
-        </TransitionGroup>
+      <div ref="masonryRoot" class="notes-masonry">
+        <div v-for="(col, ci) in columns" :key="ci" class="masonry-col-wrapper">
+          <TransitionGroup tag="div" data-animated-list class="masonry-col"
+            :css="false" @leave="fadeOutLeave">
+            <NoteCard v-for="note in col" :key="note.id" :note="note" />
+          </TransitionGroup>
+          <div v-if="vs.notes.length < vs.total"
+            :ref="(el) => (sentinels[ci] = el as HTMLElement | null)" class="col-sentinel" />
+        </div>
       </div>
 
-      <div ref="sentinel" v-if="store.notes.length < store.total" class="text-center py-6 text-xs text-gray-400">
+      <div v-if="vs.notes.length < vs.total" class="text-center py-6 text-xs text-gray-400">
         {{ store.loading ? '加载中...' : '滚动加载更多' }}
       </div>
     </template>

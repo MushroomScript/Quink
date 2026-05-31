@@ -388,7 +388,13 @@ async function refresh() {
   const minDuration = 600;
   const start = Date.now();
   try {
-    await store.fetchNotes();
+    // 优先调当前 view 注册的 refresh (Inspiration/Notes/Todos 在 onActivated 注册).
+    // 没注册时(Trash/Resources/Tags/Stats 等暂未接入, 或 view 刚 deactivated 还没 activate)
+    // fallback 到默认: keepCount 保住已 loadMore 出来的条数, 避免 refresh 把 90 条砍回 30 →
+    // scrollTop 超过新底部 → 用户必须先往上滚才能继续往下 (浏览器 clamp scrollTop 延迟).
+    // fetchNotes 内部保留 lastExtra 让 tag/type/日期 过滤不丢
+    if (store.currentRefresh) await store.currentRefresh();
+    else await store.fetchNotes(undefined, { keepCount: true });
     window.dispatchEvent(new CustomEvent('quink-refresh'));
   } catch (e) {
     console.error('[refresh] failed:', e);
@@ -424,6 +430,9 @@ function handleKeydown(e: KeyboardEvent) {
       showFilters.value = false;
       dateFilterOpen.value = false;
       clearFilters();
+      // 主动 blur 搜索框: 用户在搜索框按 ESC 时焦点仍在 input → searchFocused=true →
+      // isFiltering watchEffect 仍返回 true → 编辑区不显示. blur 后 searchFocused=false 才能恢复
+      searchInput.value?.blur();
       return;
     }
     if (store.selectMode) {

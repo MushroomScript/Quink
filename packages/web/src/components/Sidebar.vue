@@ -51,7 +51,15 @@ async function loadCategories() {
 }
 loadStats();
 loadCategories();
-watch(() => notesStore.notes, () => { loadStats(); }, { deep: true });
+// loadStats 是数据库聚合查询. store.notes 变化时同步刷新, 但 debounce 500ms 避免高频触发:
+// loadMore push 多次 / pollNoteAiResult 字段 mutate / 切 view 时 computed 返回新数组引用 等场景
+// 都会触发 watch, 没 debounce 一次操作就会产生 5+ 个 API 请求.
+let statsTimer: number | undefined;
+function scheduleLoadStats() {
+  if (statsTimer !== undefined) clearTimeout(statsTimer);
+  statsTimer = window.setTimeout(() => loadStats(), 500);
+}
+watch(() => notesStore.notes, scheduleLoadStats, { deep: true });
 watch(() => notesStore.filterCategory, (v) => { activeCategory.value = v; });
 
 async function addCategory() {

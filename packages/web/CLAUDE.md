@@ -32,6 +32,27 @@ schema 定义 4 个值：`note / todo / snippet / link`（看 `packages/server/s
 
 **跨类型快速记录**走 Capture 快捷弹窗，Capture 直接用 RichEditor 保留类型选择器（默认 `showTypeSelector=true`）。如果未来想给主 view 编辑器加回类型 selector，请先想清楚 D1 错配会回来。
 
+## 3 主 view 数据独立（view-local viewState）
+
+`stores/notes.ts` 内部按 ViewKey (`inspiration / notes / todos`) 拆 3 套独立的 `ViewState { notes, total, currentPage, scrollTop, lastExtra }`，全部存在 `_viewState` reactive map 里。`activeView` ref 标记当前激活 view (其他路由如 Trash/Resources 等 activeView=`''`，store action 走 no-op)。
+
+**view 端用 `store.getViewState(myKey)` 拿专属 vs，不要通过 `store.notes` 共享 computed**。理由: store.notes 是 computed 反映 activeView，切 view 时 inner array 引用变化会让所有 KeepAlive 缓存的 view 内的 `useMasonry watch(() => store.notes)` 被误触发 → columns 错位 rebuild → 切回时看到错位数据。走 vs.notes 引用稳定，只有本 view 数据变化时触发。
+
+**外部组件 (Sidebar / NoteDetail / TopBar) 可以继续用 `store.notes`**（反映 activeView 的 notes，符合"当前看到的那批"语义）。
+
+### 加新 view 类型时的必做清单 (以未来加 `/links` 为例)
+
+1. `stores/notes.ts` 加 ViewKey: `'inspiration' | 'notes' | 'todos' | 'links'`
+2. `_viewState` 初始化加 `links: createInitState()`
+3. `typeToView` 映射加 `link: 'links'` (让 `createNote` 跨 view 同步生效)
+4. view 文件 onActivated 设 `store.activeView = 'links'` + `store.currentRefresh = viewRefresh`
+5. view 用 `const vs = store.getViewState('links')`,模板里 `store.notes/total` 改 `vs.notes/total`
+6. onActivated nextTick 恢复 `main.scrollTop = vs.scrollTop`,onDeactivated 记 `vs.scrollTop = main.scrollTop`
+7. `viewRefresh = () => store.fetchNotes(undefined, { keepCount: true })`,onDeactivated 引用相等检查清 currentRefresh (防多 view 切换 race)
+8. 模板 editor-area-wrap 用 **v-show** 不要 v-if (NoteInput 内 Vditor 异步初始化, v-if 重 mount 会让 wrapper 高度为 0 → main scrollHeight 缩水 → scrollTop 被浏览器归零, 退多选/退筛选时编辑区不出现 bug 同根因)
+
+跨 view 同步: `updateNote / deleteNote / pollNoteAiResult` 遍历所有 viewState 同步本地副本 (灵感页删一张笔记,笔记页本地也同步移除)。`createNote` 按 `res.data.type` 决定写到哪个 viewState (不绑 activeView,这样 Capture 跨类型创建后切到目标 view 立刻看到)。
+
 ## 卡片拖放（pointer events，非 HTML5 DnD）
 
 NoteCard 拖到 sidebar / AI 走自定义 `utils/cardDnd.ts`，不用 HTML5 DnD（Chromium DnD 期间拦截 wheel 拿不到滚轮）。dropzone 协议 + 触发 + 视觉 + AI 拖入兜底 + 胶囊 audio anchor 例外详见 **`CARDDND.md`**。改 `cardDnd.ts` / `DragGhost.vue` / `NoteCard.vue` 拖动 / `Sidebar.vue` drop target / `AI.vue` 拖入兜底前先读那里。

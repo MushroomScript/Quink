@@ -404,22 +404,31 @@ onMounted(async () => {
   document.addEventListener('copy', copyHandler);
   prevCopyHandler = copyHandler;
 
-  // 拦截 Ctrl+A: 浏览器默认全选 document(含标题栏 / sidebar / TopBar),
-  // 限定 selection 到 .notes-masonry,只让用户看到列表卡片范围被高亮.
-  // user-select:none 不阻挡 selectAll(Chromium 标准),靠 CSS 解决不了.
-  // 放行规则:
+  // 拦截 Ctrl+A:
+  // - 多选模式(store.selectMode=true): 选中所有卡片(加进 selectedIds), 不选文字
+  // - 非多选模式: 浏览器默认全选 document(含标题栏 / sidebar / TopBar) 体验差,
+  //   限定 selection 到 .notes-masonry, 只让用户看到列表卡片范围被高亮.
+  //   user-select:none 不阻挡 selectAll(Chromium 标准), 靠 CSS 解决不了.
+  // 放行规则(两种模式共用):
   // - INPUT/TEXTAREA: 用户在输入框 → 默认
-  // - Vditor 编辑器有内容: 用户在打字编辑 → 默认(让 Ctrl+A 全选自己写的)
-  // - 其他(含编辑器为空 auto-focus): 拦截到列表
+  // - Vditor 编辑器(contenteditable)内: 用户在打字编辑 → 默认(让 Ctrl+A 全选自己写的)
   const ctrlAHandler = (e: KeyboardEvent) => {
     if (!((e.ctrlKey || e.metaKey) && e.key === 'a' && !e.shiftKey && !e.altKey)) return;
     const ae = document.activeElement as HTMLElement | null;
-    // 光标在搜索框/输入框 内 → 默认(让用户全选输入框内容)
+    // 光标在搜索框/输入框 内 → 默认(让用户全选输入框内容). 不论 selectMode 都放行,
+    // 用户在搜索框输入时按 Ctrl+A 期待的是选中输入框文本而不是切换多选状态.
     if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+    // 多选模式: 选中所有卡片 (优先级最高, 即使光标在隐藏的编辑器内 contenteditable 也覆盖,
+    // 因为 v-show 隐藏 NoteInput 时编辑器还能保持 focus, 若放行就会让 selectMode 下 Ctrl+A 失灵)
+    if (store.selectMode) {
+      e.preventDefault();
+      store.selectAll();
+      return;
+    }
     // 光标在编辑器(contenteditable)内 → 默认.
-    // 代价: 进列表页时编辑器 auto-focus → Ctrl+A 选不到列表,需要先点列表区域取消 focus.
+    // 代价: 进列表页时编辑器 auto-focus → Ctrl+A 选不到列表/卡片,需要先点列表区域取消 focus.
     if (ae?.closest('[contenteditable="true"]')) return;
-    // 其他情况(看列表 / sidebar / topbar / 任何非编辑区域)→ 拦截到 .notes-masonry
+    // 普通模式: 拦截到 .notes-masonry
     const masonry = document.querySelector('.notes-masonry');
     if (!masonry) return; // 非列表页 → 浏览器默认行为
     e.preventDefault();
