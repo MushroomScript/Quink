@@ -156,15 +156,26 @@ Quink web 是 SPA，App.vue 是根组件挂 `#app`。**所有 BrowserWindow 都�
 
 主窗口 `setZoomFactor` 后 viewport CSS px = 物理 px / factor。200% zoom 时 1280 物理 → **640 CSS px < Tailwind md: breakpoint (768)** → 触发响应式抽屉模式（sidebar 自动收起）；编辑器 toolbar 按 CSS px 换行同理。
 
-修法：`main.ts` 的 `applyMainWindowZoomSize(zoomLevel)` 给 mainWindow `setBounds` 按 factor 联动 + 居中位置：
+修法：`main.ts` 的 `applyMainWindowZoomSize(zoomLevel)` 给 mainWindow `setBounds` + `setMinimumSize` 两段独立逻辑：
 
-- **基准按屏幕宽高比算**：baseW = screenW × 0.6，baseH = baseW × (screenH / screenW)。跟屏幕 ratio 一致，避免硬编码 1280×860 让窗口在 16:9 / 16:10 / 21:9 屏感觉比例不协调
-- W = baseW × factor，H = baseH × factor
-- cap 到屏幕 95% 防超屏（小屏 1366×768 用 200% zoom 算超出物理尺寸）
-- **居中位置**：x = (screenW - W) / 2，y = (screenH - H) / 2（从中间向四周扩展，**不是从右下角扩展**保留原 x,y）
-- `setMinimumSize` 同时设为相同 W,H（用户后续拖小到挤压 sidebar 的可能性消除）
+**CSS px 基准**：
+- `MAIN_MIN_CSS_W = 900`：sidebar (md: breakpoint 768) + 编辑器 toolbar 不被挤
+- `minH` = `MAIN_MIN_CSS_W × (screenH / screenW) × MAIN_MIN_H_BONUS`（按屏幕宽高比算 + 1.1 bonus）：16:9 屏 ≈ 557，16:10 屏 ≈ 619。原始按比例算（无 bonus）16:9 屏只有 506，zoom 缩小时 sidebar 分类显示不下，+10% bonus 给分类留几行可见空间
 
-**trade-off**：zoom 变化**覆盖用户拖动的自定义尺寸**。接受这个换 "窗口跟 zoom 等比缩放" + "不出现 zoom 减小后内容缩小但窗口仍大的留白"。
+**setBounds（按用户当前窗口缩放，但保证 ≥ MIN_CSS × factor）**：
+- 记 `lastMainZoom` 模块级变量（初始 100，每次 sync-zoom 后更新）
+- W = `max(currentBounds.width × (newFactor / oldFactor), MAIN_MIN_CSS_W × factor)`
+- H = `max(currentBounds.height × ratio, MAIN_MIN_CSS_H × factor)`
+- 启动时 currentBounds = createMainWindow 设的 1280×860 当首次基准
+- 之后用户每次改 zoom 按**当前实际窗口**缩放（用户拖大窗口后改 zoom，按拖大后的尺寸 × ratio）
+- cap 到屏幕 95% 防超屏
+- 居中位置 x = (screenW - W) / 2，y = (screenH - H) / 2（从中间向四周扩展，不是从右下角）
+
+**setMinimumSize**：
+- minW = MIN_CSS_W × factor，minH = MIN_CSS_H × factor
+- cap 到 setBounds 的 W/H 防 OS 冲突（屏幕 95% cap 触发时 W/H 可能 < MIN_CSS × factor，min 不能 > 当前 bounds 否则 Electron 报错）
+
+**trade-off**：zoom 变化时按当前窗口缩放，用户的拖动比例**保留**。但 zoom 100→200 时窗口物理也按 2× 放大（避免"内容大窗口小"），拖大的窗口下 200% 时可能撑满屏被 cap 到 95%。
 
 ## chrome-devtools-mcp 调试 Electron
 
