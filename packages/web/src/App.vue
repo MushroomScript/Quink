@@ -440,12 +440,17 @@ onMounted(async () => {
     // 光标在编辑器(contenteditable)内 → 默认.
     // 代价: 进列表页时编辑器 auto-focus → Ctrl+A 选不到列表/卡片,需要先点列表区域取消 focus.
     if (ae?.closest('[contenteditable="true"]')) return;
-    // 普通模式: 拦截到 .notes-masonry
+    // 普通模式:
+    // - 列表页 → 选整个 .notes-masonry
+    // - 详情页 → 只选笔记正文 .note-detail-content .vditor-reset (跟右键菜单"全选"一致, 跳过类型/分类/时间/summary/tags)
+    // - 其他页面 → 浏览器默认
     const masonry = document.querySelector('.notes-masonry');
-    if (!masonry) return; // 非列表页 → 浏览器默认行为
+    const detailContent = !masonry ? document.querySelector('.note-detail-content .vditor-reset') : null;
+    const target = masonry || detailContent;
+    if (!target) return;
     e.preventDefault();
     const range = document.createRange();
-    range.selectNodeContents(masonry);
+    range.selectNodeContents(target);
     const sel = window.getSelection();
     sel?.removeAllRanges();
     sel?.addRange(range);

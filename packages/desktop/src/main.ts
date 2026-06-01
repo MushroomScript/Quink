@@ -246,7 +246,7 @@ function createMainWindow() {
   mainWindow.webContents.on('context-menu', (_event, params) => {
     const hasSelection = params.selectionText.length > 0;
 
-    // editable (input/textarea/contenteditable) 全局都显示编辑菜单 — 不限 .vditor/.note-content;
+    // editable (input/textarea/contenteditable) 全局都显示编辑菜单 — 不限 .note-content;
     // AI 搜索框 / TopBar 搜索 / 各 modal input 等都受益
     if (params.isEditable) {
       Menu.buildFromTemplate([
@@ -259,40 +259,47 @@ function createMainWindow() {
       return;
     }
 
-    // 非 editable: 只在编辑区(.vditor)或内容区(.note-content/.prose)内显示复制/全选
+    // 非 editable: 检测命中范围 (异步 IPC 查 DOM)
+    // - .note-content 内 → 列表卡片 / 详情笔记的正文卡 → 弹
+    // - 详情页 main 灰区 (main 子树含 .note-detail-content) → 弹 (详情卡片可能很短, 灰区也算"内容详情里")
+    // - 有 selection (无论命中) → 弹 (用户选完字鼠标移到任何位置都可复制)
     mainWindow!.webContents.executeJavaScript(`
       (function() {
         var el = document.elementFromPoint(${params.x}, ${params.y});
-        return !!(el && (el.closest('.vditor') || el.closest('.note-content') || el.closest('.prose')));
+        if (!el) return false;
+        if (el.closest('.note-content')) return true;
+        var main = el.closest('main');
+        if (main && main.querySelector('.note-detail-content')) return true;
+        return false;
       })()
-    `).then((inContentArea: boolean) => {
-      if (!inContentArea) return;
-      {
-        Menu.buildFromTemplate([
-          { label: '复制', role: 'copy', enabled: hasSelection },
-          { type: 'separator' },
-          {
-            label: '全选',
-            click: () => {
-              // 用 params.x/y 找右键点击的 .note-content (列表里多张卡片时,固定 querySelector
-              // 会永远拿第一个 → 全选错那张卡片). elementFromPoint 拿到当前光标下元素再 closest 上溯
-              mainWindow!.webContents.executeJavaScript(`
-                (function() {
-                  var pt = document.elementFromPoint(${params.x}, ${params.y});
-                  var el = pt && (pt.closest('.note-content') || pt.closest('.vditor-reset'));
-                  if (el) {
-                    var range = document.createRange();
-                    range.selectNodeContents(el);
-                    var sel = window.getSelection();
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                  }
-                })()
-              `).catch(() => {});
-            },
+    `).then((inArea: boolean) => {
+      if (!hasSelection && !inArea) return;
+      Menu.buildFromTemplate([
+        { label: '复制', role: 'copy', enabled: hasSelection },
+        { type: 'separator' },
+        {
+          label: '全选',
+          click: () => {
+            // 全选 = 笔记正文区 (.vditor-reset), 跳过外层类型/分类/时间/summary/tags
+            // 列表多卡片场景: elementFromPoint 找当前卡, 不要 querySelector (永远拿第一个)
+            // 详情页 main 灰区右键: pt 是 MAIN, closest('.note-content') = null → fallback 到 .note-detail-content
+            mainWindow!.webContents.executeJavaScript(`
+              (function() {
+                var pt = document.elementFromPoint(${params.x}, ${params.y});
+                var card = pt && pt.closest('.note-content');
+                if (!card) card = document.querySelector('.note-detail-content');
+                if (!card) return;
+                var target = card.querySelector('.vditor-reset') || card;
+                var range = document.createRange();
+                range.selectNodeContents(target);
+                var sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+              })()
+            `).catch(() => {});
           },
-        ]).popup();
-      }
+        },
+      ]).popup();
     }).catch(() => {});
   });
 
