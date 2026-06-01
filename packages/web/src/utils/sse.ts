@@ -61,6 +61,20 @@ export function startReminderSse() {
     }
   });
 
+  // note-updated: scheduler 触发提醒后 publish, 让前端刷新单条 note 字段
+  // (避免单次提醒发完后 todoRemindSentAt 后端有值前端不知道, 卡片仍显示"未提醒"态)
+  es.addEventListener('note-updated', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { noteId: string };
+      // 动态 import 避免 sse.ts 跟 store 形成静态循环依赖
+      import('@/stores/notes').then(({ useNotesStore }) => {
+        useNotesStore().refreshSingleNote(data.noteId);
+      });
+    } catch (e) {
+      console.error('[sse] note-updated parse failed:', e);
+    }
+  });
+
   es.onerror = (e) => {
     // EventSource readyState: 0=CONNECTING (重连中), 1=OPEN, 2=CLOSED
     // 401 时浏览器把状态置 CLOSED, 此时不会自动重连, 退出

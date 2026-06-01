@@ -3,7 +3,12 @@ import { ref, reactive, watch, nextTick, computed } from 'vue';
 import dayjs from 'dayjs';
 import 'dayjs/locale/zh-cn';
 import { RRule } from 'rrule';
+import { useNow } from '@/composables/useNow';
 dayjs.locale('zh-cn');
+
+// 响应式 now: picker 开 1 小时不动时, computed 用打开瞬间的 Date.now() 算"时间是否已过"会失真.
+// 用全局每 30s tick 的 nowRef 让 saveBlockReason / previewOccurrences 自动重算
+const nowRef = useNow();
 
 const props = defineProps<{
   open: boolean;
@@ -241,7 +246,7 @@ const previewOccurrences = computed<{ items: string[]; error: string | null }>((
   if (!localTime.value) return { items: [], error: null };
   const start = new Date(localTime.value);
   if (isNaN(start.getTime())) return { items: [], error: null };
-  const nowMs = Date.now();
+  const nowMs = nowRef.value; // 响应式 now, picker 开着时每 30s 自动重算
 
   if (!rruleValue.value || !rruleValue.value.trim()) {
     // 单次: 时间在未来才算
@@ -271,7 +276,7 @@ const saveBlockReason = computed(() => {
   if (!localTime.value) return '请填提醒时间';
   const start = new Date(localTime.value);
   if (isNaN(start.getTime())) return '时间格式错误';
-  if (start.getTime() < Date.now()) return '提醒时间已过, 请改成未来';
+  if (start.getTime() < nowRef.value) return '提醒时间已过, 请改成未来';
   if (previewOccurrences.value.error) return 'RRULE 无法解析, 请修正或清空';
   if (previewOccurrences.value.items.length === 0) return '此规则未来无触发 (COUNT 已满或 UNTIL 已过)';
   return '';

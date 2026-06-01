@@ -25,6 +25,7 @@ import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import { highlightTextByPinyin } from '@/utils/pinyin';
 import { startCardDrag, dragState } from '@/utils/cardDnd';
 import ReminderPicker from '@/components/ReminderPicker.vue';
+import { useNow } from '@/composables/useNow';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -251,10 +252,13 @@ const timeAgo = computed(() => dayjs(props.note.createdAt).fromNow());
 const fullTime = computed(() => dayjs(props.note.createdAt).format('YYYY-MM-DD HH:mm'));
 
 // 提醒时间显示: 简短相对时间 (今天 14:30 / 明天 9:00 / 6月10日 / 已过) + 鼠标 hover 看完整
+// 用响应式 nowRef 让 computed 依赖时间流逝重算 — 否则单次提醒 scheduler 不动 todoDue,
+// 时间过去后卡片永远显示"今天 09:30"不会变"已过", 按刷新按钮也没用 (Object.assign 同样 todoDue 不 trigger)
+const nowRef = useNow();
 const reminderText = computed(() => {
   if (!props.note.todoDue) return '';
   const d = dayjs(props.note.todoDue);
-  const now = dayjs();
+  const now = dayjs(nowRef.value);
   if (d.isBefore(now)) return '已过';
   if (d.isSame(now, 'day')) return `今天 ${d.format('HH:mm')}`;
   if (d.isSame(now.add(1, 'day'), 'day')) return `明天 ${d.format('HH:mm')}`;

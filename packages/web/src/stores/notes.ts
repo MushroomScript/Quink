@@ -320,6 +320,22 @@ export const useNotesStore = defineStore('notes', () => {
   // 创建后轮询单条笔记的 AI 结果, 命中 aiProcessed=true 时 Object.assign 进所有 view 的本地引用
   // (mutate 不触发 useMasonry rebuild, NoteCard 通过 props deep watch 自动重渲染 tags/category/summary).
   // 退避序列 2/3/5/8/12s 累积 30s.
+  // SSE 收到 note-updated 时调: GET 单条 → Object.assign 字段保引用同步
+  // 用途: scheduler 触发提醒后后端更新了 todoDue/todoRemindSentAt, 前端不用按刷新也能立即反映
+  async function refreshSingleNote(id: string) {
+    try {
+      const res = await api.getNote(id);
+      const fresh = res.data;
+      for (const k of Object.keys(_viewState) as ViewKey[]) {
+        const vs = _viewState[k];
+        const idx = vs.notes.findIndex((n) => n.id === id);
+        if (idx >= 0) Object.assign(vs.notes[idx], fresh);
+      }
+    } catch (e) {
+      console.error('[refreshSingleNote]', id, e);
+    }
+  }
+
   async function pollNoteAiResult(id: string) {
     const delays = [2000, 3000, 5000, 8000, 12000];
     for (const d of delays) {
@@ -448,6 +464,7 @@ export const useNotesStore = defineStore('notes', () => {
     fetchNotes,
     createNote,
     pollNoteAiResult,
+    refreshSingleNote,
     updateNote,
     deleteNote,
     undoDelete,

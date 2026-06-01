@@ -8,6 +8,7 @@ import rrulePkg from 'rrule';
 import type { RRule as RRuleType } from 'rrule';
 const { RRule } = rrulePkg;
 import { dispatchToAllChannels } from './sender.js';
+import { publish } from './bus.js';
 import type { ReminderPayload } from './types.js';
 
 const SCAN_INTERVAL_MS = 60_000; // 每分钟扫一次
@@ -97,6 +98,9 @@ async function tick() {
         console.log(`[reminder/scheduler] note ${note.id} RRULE 已无下次, 停止`);
       }
     }
+
+    // 推 SSE note-updated, 让前端在线连接立即刷新单条 note (无需手动按刷新按钮)
+    publish(note.userId, 'note-updated', { noteId: note.id });
   }
 }
 
