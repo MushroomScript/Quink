@@ -13,6 +13,9 @@ import uploadRoutes from './routes/upload.js';
 import aiConfigRoutes from './routes/ai-config.js';
 import aiChatRoutes from './routes/ai-chat.js';
 import exportRoutes from './routes/export.js';
+import reminderChannelsRoutes from './routes/reminder-channels.js';
+import sseRoutes from './routes/sse.js';
+import { startReminderScheduler } from './reminder/scheduler.js';
 
 const app = new Hono();
 
@@ -31,6 +34,8 @@ app.route('/api/upload', uploadRoutes);
 app.route('/api/ai/chat', aiChatRoutes);
 app.route('/api/ai', aiConfigRoutes);
 app.route('/api/data', exportRoutes); // GET /api/data = export, POST /api/data = import
+app.route('/api/reminder-channels', reminderChannelsRoutes);
+app.route('/api/sse', sseRoutes);
 
 // Health check（不需要登录）
 app.get('/api/health', (c) => {
@@ -115,3 +120,6 @@ serve({ fetch: app.fetch, port: PORT, hostname: '0.0.0.0' });
 import { cleanAllTrash } from './cleanup.js';
 cleanAllTrash();
 setInterval(cleanAllTrash, 6 * 60 * 60 * 1000);
+
+// 待办提醒 scheduler: 每分钟扫表, 命中 todoDue <= now 的待办 -> 发到所有 enabled channels
+startReminderScheduler();

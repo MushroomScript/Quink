@@ -59,5 +59,13 @@ contextBridge.exposeInMainWorld('quinkDesktop', {
       ipcRenderer.on('attachment-tasks:abort-uploads', (_e, ids) => cb(ids));
     },
   },
+  // 待办提醒: SSE 推到 renderer 后转给 main 弹 OS 原生通知 (任务栏闪 + 通知中心收纳)
+  showNotification: (payload: { title: string; body: string; noteId?: string }) =>
+    ipcRenderer.send('show-notification', payload),
+  // main → renderer: 用户点击通知 → 跳详情页. App.vue 监听
+  onOpenNote: (cb: (noteId: string) => void) => {
+    ipcRenderer.removeAllListeners('open-note');
+    ipcRenderer.on('open-note', (_e, noteId: string) => cb(noteId));
+  },
   isElectron: true,
 });

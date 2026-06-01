@@ -16,6 +16,8 @@
     "pdfjs-dist": "^5.7.284",
     "pinia": "^3.0.0",
     "pinyin-pro": "^3.28.1",
+    "rrule": "^2.8.1",
+    "tslib": "^2.8.1",
     "vditor": "^3.11.2",
     "vue": "^3.5.0",
     "vue-echarts": "^8.0.1",

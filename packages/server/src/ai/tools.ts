@@ -164,7 +164,7 @@ function formatNote(note: any): string {
   if (note.todoStatus) meta.push(`状态:${note.todoStatus === 'done' ? '已完成' : '未完成'}`);
   if (note.category) meta.push(`分类:${note.category}`);
   if (note.tags?.length) meta.push(`标签:${(note.tags as string[]).join(',')}`);
-  if (note.todoDue) meta.push(`截止:${note.todoDue}`);
+  if (note.todoDue) meta.push(`提醒:${note.todoDue}`);
   if (note.pinned) meta.push('置顶');
   meta.push(`创建:${note.createdAt?.slice(0, 10)}`);
   if (note.updatedAt && note.updatedAt !== note.createdAt) meta.push(`更新:${note.updatedAt.slice(0, 10)}`);

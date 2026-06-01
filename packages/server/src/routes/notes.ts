@@ -18,7 +18,8 @@ const createNoteSchema = z.object({
   type: z.enum(['note', 'todo', 'snippet', 'link']).default('note'),
   category: z.string().optional(),
   tags: z.array(z.string()).optional(),
-  todoDue: z.string().optional(),
+  todoDue: z.string().optional(), // ISO datetime, 复用为提醒时间
+  todoRemindRrule: z.string().nullable().optional(), // RFC 5545 RRULE
 });
 
 const updateNoteSchema = z.object({
@@ -29,6 +30,7 @@ const updateNoteSchema = z.object({
   type: z.enum(['note', 'todo', 'snippet', 'link']).optional(),
   todoStatus: z.enum(['pending', 'done']).optional(),
   todoDue: z.string().nullable().optional(),
+  todoRemindRrule: z.string().nullable().optional(),
   pinned: z.boolean().optional(),
 });
 
@@ -187,6 +189,8 @@ app.post('/', async (c) => {
     tags: parsed.data.tags ?? [],
     todoStatus: parsed.data.type === 'todo' ? 'pending' as const : null,
     todoDue: parsed.data.todoDue ?? null,
+    todoRemindRrule: parsed.data.todoRemindRrule ?? null,
+    todoRemindSentAt: null,
     summary: null,
     aiProcessed: false,
     pinned: false,
@@ -231,7 +235,12 @@ app.patch('/:id', async (c) => {
     updates.todoStatus = 'pending';
   }
   if (data.todoStatus !== undefined) updates.todoStatus = data.todoStatus;
-  if (data.todoDue !== undefined) updates.todoDue = data.todoDue;
+  // 改 todoDue 视作"重新设提醒", 必须把 sent_at 重置, 否则 scheduler 看 sent_at 不为 null 会跳过
+  if (data.todoDue !== undefined) {
+    updates.todoDue = data.todoDue;
+    updates.todoRemindSentAt = null;
+  }
+  if (data.todoRemindRrule !== undefined) updates.todoRemindRrule = data.todoRemindRrule;
   if (data.pinned !== undefined) updates.pinned = data.pinned;
 
   await db.update(schema.notes).set(updates).where(eq(schema.notes.id, id));

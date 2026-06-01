@@ -29,6 +29,18 @@ AI 系统专属指引（多配置 / 按功能绑定 / FC v2 / 自动处理 / 自
 - **url 字段裸名约定**：DB `files.url` 字段 + 笔记 `content` 里 markdown link 的 url 都只存裸文件名（如 `xxx.png`），不带 `/api/uploads/` 前缀，前端渲染层拼前缀（详见 `packages/web/CLAUDE.md` 的"文件 url helper"段）。新格式（裸名）和老格式（带前缀）都要兼容——DB 启动时一次性 `REPLACE` 迁移过；后端接收 url 做 disk path resolve 时也要兼容剥前缀（如 `ai-config.ts` transcribe-async：`audioUrl.replace(/^\/api\/uploads\//, '').replace(/^uploads\//, '')`）。
 - **缩略图自动生成**：上传图片时同步生成 `<裸名>.thumb.jpg`（sharp 处理普通图片 / libheif 处理 HEIC），前端 `<img>` 用 thumb URL 显示，onError 降级原图。详见根 **`THUMBNAILS.md`**
 
+## 待办提醒系统
+
+`src/reminder/` 独立模块. 完整链路: scheduler 每分钟扫表 → 命中 `todoDue <= now` 待办 → sender dispatch 到所有 enabled `reminder_channels` → 8 个 adapter (browser / email / bark / wecom_bot / dingtalk_bot / feishu_bot / telegram / webhook) 各自实现 `send(ctx)` 接口.
+
+- **DB schema**: `notes` 复用 `todo_due` 当提醒时间(ISO datetime), 新加 `todo_remind_sent_at` (防重发) + `todo_remind_rrule` (RFC 5545 RRULE 简短形式, **不含 DTSTART**, scheduler 用 `lastFire = todoDue` 当 dtstart 锚点)
+- **RRULE 库**: `rrule` 2.8.1 是 UMD/webpack 打包, Node ESM 走 cjs interop 时**只能 default import + 解构** —— `import rrulePkg from 'rrule'; const { RRule } = rrulePkg;`. 类型用 `import type { RRule as RRuleType } from 'rrule'` 分开. 直接 named import 报 `does not provide an export named 'RRule'`. 详见 `scheduler.ts:4-7` inline 注释
+- **SSE 长连接** (`/api/sse?token=...`): EventSource 不能传 Authorization header → 走 query token (跟 JWT 共用同一 token). browser adapter 通过 `bus.publish(userId, ...)` 把 reminder 事件推给在线 SSE 订阅者 → 前端 `quinkDesktop.showNotification` IPC → Electron `Notification` 弹 OS 通知. **SSE 路由必须 IIFE 模式**: `return new Response(readable)` 之前不能 `await write`, 否则 `@hono/node-server` 不立即返回响应头, 客户端 EventSource 一直 `CONNECTING` 不进 `OPEN`
+- **cleanup 时用 `writer.abort()` 不用 `writer.close()`**: Node 22 WritableStream 在对端已 cancel 时调 `writer.close()` 同步抛 `ERR_INVALID_STATE.TypeError`, 不被 try/catch 拦截让 IIFE 顶层抛错崩 Node 进程. `abort()` 不抛错, 跨状态安全
+- **测试发送** (`POST /api/reminder-channels/:id/test`): 用 `dispatchToSingleChannel` 跑同条 adapter, 失败抛 Error 含具体原因(config 缺字段 / token 无效等), Settings 测试按钮直接展示给用户
+- **加新 channel adapter**: ① `adapters/<name>.ts` 实现 `AdapterFn` (接 ctx, 用 ctx.config + ctx.payload + fetch/sdk) → ② `sender.ts` adapters 表加映射 → ③ `schema.ts` reminderChannels type enum 加新值 → ④ `db/index.ts` 不用动 (type 是 string, enum 仅 Drizzle 类型层级) → ⑤ 前端 `Settings.vue` `channelTypeOptions` + `channelTypeFields` 加配置字段定义
+- **browser 通道唯一性**: 同一 user 只能有一条 `type='browser'` channel. `POST /reminder-channels` 服务端拦截 + 前端 `<select>` UI disable 已有 browser 时的选项. 多条 browser 会让同一 SSE 推送的事件触发 OS 弹通知 N 次
+
 ## 文件重命名
 
 - `PATCH /api/upload/files/:id` 只改 DB `filename`（display name），磁盘真实文件名 + url 不动，避免历史笔记 link 失效。

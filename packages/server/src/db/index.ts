@@ -118,7 +118,20 @@ sqlite.exec(`
     parent_id TEXT,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS reminder_channels (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    config TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+  );
 `);
+// Migrate: notes.todo_remind_sent_at + todo_remind_rrule (提醒功能, 复用 todoDue 作触发时间)
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN todo_remind_sent_at TEXT'); } catch {}
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN todo_remind_rrule TEXT'); } catch {}
 // Migrate: files.folder_id (资源页文件夹: null = 根目录, 非 null = 在指定 folders.id 下)
 try { sqlite.exec('ALTER TABLE files ADD COLUMN folder_id TEXT'); } catch {}
 

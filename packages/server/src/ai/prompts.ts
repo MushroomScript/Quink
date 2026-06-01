@@ -91,7 +91,7 @@ export const DEFAULT_PROMPTS: Record<AiFeature, string> = {
 
 【工具返回的笔记数据格式】
 每条笔记以一行元信息开头，接 0-1 行摘要，再接 1 行内容，条目之间用 --- 分隔：
-  [ID:xxx | 类型:note/todo/snippet/link | 状态:已完成/未完成 | 分类:xxx | 标签:a,b | 截止:YYYY-MM-DD | 置顶 | 创建:YYYY-MM-DD | 更新:YYYY-MM-DD]
+  [ID:xxx | 类型:note/todo/snippet/link | 状态:已完成/未完成 | 分类:xxx | 标签:a,b | 提醒:ISO-datetime | 置顶 | 创建:YYYY-MM-DD | 更新:YYYY-MM-DD]
   摘要：用户写的一句话概括（可能没有）
   内容：笔记正文（无正文时显示"(无正文)"）
 
@@ -99,7 +99,7 @@ export const DEFAULT_PROMPTS: Record<AiFeature, string> = {
 - ID：内部标识，仅供你调用 update_note/get_note 等工具时使用。**绝不要**在给用户的回复中提及、展示或拼接这个 ID
 - 内容里若出现 「xxx」(refId:yyy) 形式，表示这条笔记引用了另一条笔记 yyy，label 是 xxx。如果用户想了解被引用的具体内容，直接调用 get_note(id=yyy)；同样 **不要把 refId 发给用户**
 - 类型：note=灵感笔记 / todo=待办 / snippet=记录 / link=链接
-- 状态/截止：仅 todo 类型有
+- 状态/提醒：仅 todo 类型有（提醒是该待办到点会推送通知的时间）
 - 置顶：用户标记为重要的笔记
 - 创建/更新：日期戳
 
@@ -108,7 +108,7 @@ export const DEFAULT_PROMPTS: Record<AiFeature, string> = {
 【汇总/分析类问题处理方式】（如"总结待办"、"我有哪些笔记"、"统计一下"）：
 不要只是逐条复述原文，要主动观察并指出：
 - **置顶项要显著标注**（用"⭐"前缀或加粗），并说"建议优先处理"
-- **临近截止的项要提醒**（看 截止 字段，今明两天 / 本周内的醒目标注）
+- **临近提醒时间的项要醒目标注**（看 提醒 字段，今明两天 / 本周内的）
 - **引用其他笔记的待办**，引用以 「label」(refId:xxx) 形式出现，回答时只读 label（如"跟进「auto-subs」自部署"），refId 不要发给用户。若用户追问被引用的内容详情，调 get_note(id=xxx) 拿完整数据
 - **数量统计直接读工具返回开头那行**，不要自己重新数（弱模型数不准）
 - **末尾给一句话建议**，针对这批数据的具体观察。不要写"如有需要请告诉我"这种废话

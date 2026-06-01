@@ -80,11 +80,26 @@ export interface Note {
   tags: string[];
   type: 'note' | 'todo' | 'snippet' | 'link';
   todoStatus: 'pending' | 'done' | null;
-  todoDue: string | null;
+  todoDue: string | null; // ISO datetime, 复用为"提醒时间"
+  todoRemindSentAt: string | null; // 上次发送时间 (前端只读, 改 todoDue 时后端自动重置)
+  todoRemindRrule: string | null; // RFC 5545 RRULE, null=单次
   aiProcessed: boolean;
   pinned: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export type ReminderChannelType =
+  | 'browser' | 'email' | 'bark' | 'wecom_bot' | 'dingtalk_bot' | 'feishu_bot' | 'telegram' | 'webhook';
+
+export interface ReminderChannel {
+  id: string;
+  userId: string;
+  type: ReminderChannelType;
+  name: string;
+  config: Record<string, any>;
+  enabled: boolean;
+  createdAt: string;
 }
 
 export interface PaginatedResponse<T> {
@@ -504,4 +519,27 @@ export const api = {
   getStats() {
     return request<{ data: { totalNotes: number; totalTodos: number; pendingTodos: number } }>('/stats');
   },
+
+  // Reminder Channels
+  getReminderChannels() {
+    return request<{ data: ReminderChannel[] }>('/reminder-channels');
+  },
+  createReminderChannel(data: { type: ReminderChannelType; name: string; config: Record<string, any>; enabled?: boolean }) {
+    return request<{ data: ReminderChannel }>('/reminder-channels', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateReminderChannel(id: string, data: Partial<Pick<ReminderChannel, 'name' | 'config' | 'enabled'>>) {
+    return request<{ data: ReminderChannel }>(`/reminder-channels/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  deleteReminderChannel(id: string) {
+    return request<{ message: string }>(`/reminder-channels/${id}`, { method: 'DELETE' });
+  },
+  // 立即发测试消息, 失败抛 Error 含原因 (config 拼写错 / token 无效等)
+  testReminderChannel(id: string) {
+    return request<{ message: string }>(`/reminder-channels/${id}/test`, { method: 'POST' });
+  },
 };
+
+// SSE token helper - utils/sse.ts 用; 跟 request() 内部 getToken 共用同一个 localStorage key
+export function getAuthToken(): string | null {
+  return localStorage.getItem('quink_token');
+}

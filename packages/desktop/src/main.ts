@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   Tray,
   Menu,
+  Notification,
   screen,
   ipcMain,
   shell,
@@ -726,6 +727,32 @@ ipcMain.on('attachment-tasks:mark-failed', (_e, payload: { id: string; error: st
 );
 ipcMain.on('attachment-tasks:remove', (_e, id: string) => attachmentTasksStore.removeById(id));
 ipcMain.on('attachment-tasks:clear-completed', () => attachmentTasksStore.clearCompleted());
+
+// 提醒通道: renderer 收到 SSE reminder 事件后转发到这里, 用 Electron 原生 Notification (任务栏图标会闪 + Win11 通知中心收纳)
+// 点击通知 → 激活主窗口 + IPC 转发让 renderer 跳详情页. noteId 透传给 renderer.
+ipcMain.on('show-notification', (_e, payload: { title: string; body: string; noteId?: string }) => {
+  if (!Notification.isSupported()) {
+    console.warn('[notification] OS 不支持系统通知');
+    return;
+  }
+  const n = new Notification({
+    title: payload.title || 'Quink 提醒',
+    body: payload.body || '',
+    silent: false,
+  });
+  n.on('click', () => {
+    // 激活主窗口 + 让 renderer 跳到对应笔记
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+      if (payload.noteId) {
+        mainWindow.webContents.send('open-note', payload.noteId);
+      }
+    }
+  });
+  n.show();
+});
 
 // close: abort 所有 inflight (download main 端自己 abort; upload broadcast 让发起 renderer abort 本地 controller) + 清空
 ipcMain.on('attachment-tasks:close', () => {

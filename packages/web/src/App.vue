@@ -6,6 +6,7 @@ import { useNotesStore } from '@/stores/notes';
 import { api, type Note } from '@/api';
 import Vditor from 'vditor';
 import { initAudioBubbleHandler } from '@/utils/audio';
+import { startReminderSse, stopReminderSse } from '@/utils/sse';
 import Sidebar from '@/components/Sidebar.vue';
 import TopBar from '@/components/TopBar.vue';
 import NoteEditModal from '@/components/NoteEditModal.vue';
@@ -244,6 +245,13 @@ onMounted(async () => {
   appReady.value = true;
   if (!user) return;
   applyUserPreferences(user);
+
+  // 启动提醒 SSE: 长连接接收 server 推送, 收到 reminder 事件 → Electron 原生通知 / 浏览器 Notification
+  startReminderSse();
+  // Electron 点击系统通知 → 主窗口跳笔记详情
+  (window as any).quinkDesktop?.onOpenNote?.((noteId: string) => {
+    if (noteId && noteId !== 'test') router.push(`/note/${noteId}`);
+  });
 
   // 清理 HMR 残留
   if (prevRefClickHandler) document.removeEventListener('click', prevRefClickHandler, true);

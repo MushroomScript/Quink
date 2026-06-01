@@ -20,9 +20,11 @@ import {
   PhArrowCounterClockwise,
   PhLightbulb,
   PhCheckSquare,
+  PhBell,
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import ReminderPicker from '@/components/ReminderPicker.vue';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -170,6 +172,26 @@ async function toggleTodo() {
   showMenu.value = false;
 }
 
+// 待办提醒: 点菜单"设置/编辑提醒" → 弹 ReminderPicker, 保存走 store.updateNote (与 NoteCard 同模式)
+const reminderPickerOpen = ref(false);
+function openReminderPicker() {
+  showMenu.value = false;
+  reminderPickerOpen.value = true;
+}
+async function saveReminder(payload: { remindAt: string | null; rrule: string | null }) {
+  if (!note.value) return;
+  try {
+    await store.updateNote(note.value.id, {
+      todoDue: payload.remindAt,
+      todoRemindRrule: payload.rrule,
+    } as any);
+    toast.show(payload.remindAt ? '已设置提醒' : '已清除提醒', 'success');
+  } catch (e) {
+    console.error('[NoteDetail] saveReminder failed:', e);
+    toast.show('保存失败', 'error');
+  }
+}
+
 const confirmDelete = ref(false);
 function askDelete() {
   showMenu.value = false;
@@ -276,6 +298,11 @@ onUnmounted(() => {
               <PhCheck v-else size="0.875rem" weight="fill" />
               <span>{{ note.todoStatus === 'done' ? '标记未完成' : '标记已完成' }}</span>
             </button>
+            <button v-if="note.type === 'todo'" @click.stop="openReminderPicker"
+              class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+              <PhBell size="0.875rem" weight="fill" />
+              <span>{{ note.todoDue ? '编辑提醒' : '设置提醒' }}</span>
+            </button>
             <div class="border-t border-gray-100 my-0.5"></div>
             <!-- 移至类型: 当前 type 不显示, 避免"移至自身"无效项 -->
             <button v-if="note.type !== 'note'" @click.stop="moveTo('note')"
@@ -303,6 +330,14 @@ onUnmounted(() => {
         </Transition>
         <div v-if="showMenu" class="fixed inset-0 z-[9998]" @click="showMenu = false" />
       </Teleport>
+
+      <!-- 提醒设置弹窗 -->
+      <ReminderPicker
+        v-model:open="reminderPickerOpen"
+        :remind-at="note?.todoDue ?? null"
+        :rrule="note?.todoRemindRrule ?? null"
+        @save="saveReminder"
+      />
 
       <!-- 删除确认弹窗 (跟 TopBar 批量删除同模式) -->
       <Teleport to="body">

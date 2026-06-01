@@ -17,11 +17,14 @@ import {
   PhPencilSimple,
   PhArrowCounterClockwise,
   PhTrash,
+  PhBell,
+  PhBellRinging,
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import { highlightTextByPinyin } from '@/utils/pinyin';
 import { startCardDrag, dragState } from '@/utils/cardDnd';
+import ReminderPicker from '@/components/ReminderPicker.vue';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -247,6 +250,41 @@ watchEffect(async (onCleanup) => {
 const timeAgo = computed(() => dayjs(props.note.createdAt).fromNow());
 const fullTime = computed(() => dayjs(props.note.createdAt).format('YYYY-MM-DD HH:mm'));
 
+// 提醒时间显示: 简短相对时间 (今天 14:30 / 明天 9:00 / 6月10日 / 已过) + 鼠标 hover 看完整
+const reminderText = computed(() => {
+  if (!props.note.todoDue) return '';
+  const d = dayjs(props.note.todoDue);
+  const now = dayjs();
+  if (d.isBefore(now)) return '已过';
+  if (d.isSame(now, 'day')) return `今天 ${d.format('HH:mm')}`;
+  if (d.isSame(now.add(1, 'day'), 'day')) return `明天 ${d.format('HH:mm')}`;
+  if (d.diff(now, 'day') < 7) return d.format('ddd HH:mm');
+  return d.format('M月D日 HH:mm');
+});
+const reminderFullText = computed(() => {
+  if (!props.note.todoDue) return '';
+  const t = dayjs(props.note.todoDue).format('YYYY-MM-DD HH:mm');
+  return props.note.todoRemindRrule ? `${t}（重复: ${props.note.todoRemindRrule}）` : t;
+});
+
+const reminderPickerOpen = ref(false);
+function openReminderPicker() {
+  showMenu.value = false;
+  reminderPickerOpen.value = true;
+}
+async function saveReminder(payload: { remindAt: string | null; rrule: string | null }) {
+  try {
+    await store.updateNote(props.note.id, {
+      todoDue: payload.remindAt,
+      todoRemindRrule: payload.rrule,
+    } as any);
+    toast.show(payload.remindAt ? '已设置提醒' : '已清除提醒', 'success');
+  } catch (e) {
+    console.error('[NoteCard] saveReminder failed:', e);
+    toast.show('保存失败', 'error');
+  }
+}
+
 const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '笔记', link: '链接' };
 const typeColor: Record<string, string> = {
   note: 'bg-primary-light text-primary',
@@ -281,7 +319,19 @@ const typeColor: Record<string, string> = {
           {{ typeLabels[note.type] }}
         </span>
         <span v-if="note.category" class="text-xs text-gray-400">{{ note.category }}</span>
-        <span class="ml-auto text-[11px] text-gray-400" :title="fullTime">{{ timeAgo }}</span>
+        <!-- 提醒铃铛: 仅 todo 且已设 todoDue 时显示, 点击改提醒. 暗色用 amber, 已过用 gray -->
+        <span v-if="note.type === 'todo' && note.todoDue"
+          class="ml-auto flex items-center gap-1 text-[11px] cursor-pointer hover:opacity-70"
+          :class="reminderText === '已过' ? 'text-gray-400' : 'text-amber-600'"
+          :title="reminderFullText"
+          @click.stop="openReminderPicker">
+          <PhBellRinging v-if="note.todoRemindRrule" size="0.875rem" weight="fill" />
+          <PhBell v-else size="0.875rem" weight="fill" />
+          <span class="tabular-nums">{{ reminderText }}</span>
+        </span>
+        <span class="text-[11px] text-gray-400"
+          :class="{ 'ml-auto': !(note.type === 'todo' && note.todoDue) }"
+          :title="fullTime">{{ timeAgo }}</span>
         <!-- 三点菜单 -->
         <button ref="menuBtn" @click.stop="toggleMenu"
           class="p-0.5 rounded-md text-gray-300 hover:text-gray-500 hover:bg-gray-100 transition-colors">
@@ -325,6 +375,11 @@ const typeColor: Record<string, string> = {
             <PhCheck v-else size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>{{ note.todoStatus === 'done' ? '标记未完成' : '标记已完成' }}</span>
           </button>
+          <button v-if="note.type === 'todo'" @click.stop="openReminderPicker"
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+            <PhBell size="0.875rem" weight="fill" style="margin-top: 2px" />
+            <span>{{ note.todoDue ? '编辑提醒' : '设置提醒' }}</span>
+          </button>
           <button @click.stop="enterSelectMode()"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhCheckSquare size="0.875rem" weight="fill" style="margin-top: 2px" />
@@ -340,6 +395,14 @@ const typeColor: Record<string, string> = {
       </Transition>
       <div v-if="showMenu" class="fixed inset-0 z-[9998]" @click="showMenu = false" />
     </Teleport>
+
+    <!-- 提醒设置弹窗 -->
+    <ReminderPicker
+      v-model:open="reminderPickerOpen"
+      :remind-at="note.todoDue"
+      :rrule="note.todoRemindRrule"
+      @save="saveReminder"
+    />
 
     <!-- 删除确认弹窗 -->
     <Teleport to="body">

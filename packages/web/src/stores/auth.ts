@@ -86,6 +86,8 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null;
     setToken(null);
     syncTokenToDesktop(null);
+    // 退出后断开提醒 SSE, 避免持续用旧 token 重连 / 收到上个账户的提醒
+    import('@/utils/sse').then(m => m.stopReminderSse()).catch(() => {});
   }
 
   return { user, loading, loggedIn, nickname, avatar, register, login, fetchMe, updateProfile, logout };

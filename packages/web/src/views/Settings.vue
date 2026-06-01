@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue';
+import { ref, reactive, onMounted, watch, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
@@ -92,6 +92,168 @@ const shortcuts = ref({
 });
 const editingShortcut = ref<string | null>(null);
 const recordingKeys = ref('');
+
+// ── Reminder Channels ──
+import type { ReminderChannel, ReminderChannelType } from '@/api';
+const reminderChannels = ref<ReminderChannel[]>([]);
+const editingChannel = ref<{ id?: string; type: ReminderChannelType; name: string; config: Record<string, any>; enabled: boolean } | null>(null);
+const channelError = ref('');
+const testingChannelId = ref<string | null>(null);
+const browserPermission = ref<NotificationPermission>(typeof Notification !== 'undefined' ? Notification.permission : 'denied');
+
+const channelTypeOptions: Array<{ id: ReminderChannelType; label: string; description: string }> = [
+  { id: 'browser', label: '浏览器 / Electron', description: '应用打开时弹系统通知' },
+  { id: 'email', label: '邮件 (SMTP)', description: '通过 SMTP 发邮件' },
+  { id: 'bark', label: 'Bark (iOS)', description: 'iOS 个人推送, 仅 App Store 提供, 无安卓版' },
+  { id: 'wecom_bot', label: '企业微信机器人', description: '群机器人 webhook' },
+  { id: 'dingtalk_bot', label: '钉钉机器人', description: '群机器人 webhook (可选加签)' },
+  { id: 'feishu_bot', label: '飞书机器人', description: '群机器人 webhook (可选加签)' },
+  { id: 'telegram', label: 'Telegram', description: 'Bot API sendMessage' },
+  { id: 'webhook', label: '通用 Webhook', description: '自定义 URL POST JSON' },
+];
+
+// 每种 channel type 的配置字段定义 — 模板按这个表动态渲染表单
+const channelTypeFields: Record<ReminderChannelType, Array<{ key: string; label: string; placeholder?: string; type?: 'text' | 'password' | 'number' | 'textarea'; optional?: boolean }>> = {
+  browser: [],
+  email: [
+    { key: 'host', label: 'SMTP 服务器', placeholder: 'smtp.qq.com' },
+    { key: 'port', label: '端口', placeholder: '465', type: 'number' },
+    { key: 'user', label: '用户名 (邮箱)' },
+    { key: 'pass', label: '密码 / 授权码', type: 'password' },
+    { key: 'from', label: '发件地址', placeholder: '"Quink 提醒" <xxx@qq.com>' },
+    { key: 'to', label: '收件地址', placeholder: 'you@example.com' },
+  ],
+  bark: [
+    { key: 'url', label: 'Bark 推送 URL', placeholder: 'https://api.day.app/<your-key>' },
+  ],
+  wecom_bot: [
+    { key: 'webhook', label: 'Webhook URL', placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...' },
+  ],
+  dingtalk_bot: [
+    { key: 'webhook', label: 'Webhook URL', placeholder: 'https://oapi.dingtalk.com/robot/send?access_token=...' },
+    { key: 'secret', label: '加签 secret (可选)', optional: true, type: 'password' },
+  ],
+  feishu_bot: [
+    { key: 'webhook', label: 'Webhook URL', placeholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/...' },
+    { key: 'secret', label: '加签 secret (可选)', optional: true, type: 'password' },
+  ],
+  telegram: [
+    { key: 'bot_token', label: 'Bot Token', placeholder: '123456:ABC-DEF1234...', type: 'password' },
+    { key: 'chat_id', label: 'Chat ID', placeholder: '123456789 或 -100xxxxxx' },
+  ],
+  webhook: [
+    { key: 'url', label: 'URL', placeholder: 'https://your.host/endpoint' },
+    { key: 'method', label: 'Method (默认 POST)', optional: true, placeholder: 'POST' },
+    { key: 'headers', label: 'Headers JSON (可选)', type: 'textarea', optional: true, placeholder: '{"Authorization": "Bearer xxx"}' },
+  ],
+};
+
+async function loadReminderChannels() {
+  try {
+    const r = await api.getReminderChannels();
+    reminderChannels.value = r.data;
+  } catch (e) {
+    console.error('[Settings] loadReminderChannels failed:', e);
+  }
+}
+
+// browser 通道全用户唯一: 后端拦截了, 这里 UI 同步 disable. 编辑现有 browser channel 时不算 (id 自己排除)
+const hasBrowserChannel = computed(() => reminderChannels.value.some(c => c.type === 'browser'));
+
+function startEditChannel(ch?: ReminderChannel) {
+  channelError.value = '';
+  if (ch) {
+    editingChannel.value = {
+      id: ch.id,
+      type: ch.type,
+      name: ch.name,
+      config: { ...(ch.config || {}) },
+      enabled: ch.enabled,
+    };
+  } else {
+    // 没有 browser 通道时默认到 browser; 已有就跳到第一个非 browser 类型, 避免新建时弹出 disabled 选项
+    editingChannel.value = {
+      type: hasBrowserChannel.value ? 'email' : 'browser',
+      name: '我的提醒',
+      config: {},
+      enabled: true,
+    };
+  }
+}
+
+async function saveChannel() {
+  if (!editingChannel.value) return;
+  const e = editingChannel.value;
+  if (!e.name.trim()) { channelError.value = '请填写名称'; return; }
+
+  // headers 是 textarea, 用户写的是 JSON 字符串 — 保存时解析回对象, 失败给提示
+  const payloadConfig: Record<string, any> = { ...e.config };
+  if (e.type === 'webhook' && typeof payloadConfig.headers === 'string') {
+    const raw = (payloadConfig.headers as string).trim();
+    if (raw) {
+      try { payloadConfig.headers = JSON.parse(raw); }
+      catch { channelError.value = 'Headers JSON 格式错误'; return; }
+    } else {
+      delete payloadConfig.headers;
+    }
+  }
+
+  try {
+    if (e.id) {
+      await api.updateReminderChannel(e.id, { name: e.name, config: payloadConfig, enabled: e.enabled });
+    } else {
+      await api.createReminderChannel({ type: e.type, name: e.name, config: payloadConfig, enabled: e.enabled });
+    }
+    editingChannel.value = null;
+    await loadReminderChannels();
+    showMsg('已保存');
+  } catch (err: any) {
+    channelError.value = err?.message || '保存失败';
+  }
+}
+
+async function deleteChannel(id: string) {
+  if (!confirm('删除这个提醒通道?')) return;
+  try {
+    await api.deleteReminderChannel(id);
+    await loadReminderChannels();
+    showMsg('已删除');
+  } catch (e: any) {
+    toast.show(e?.message || '删除失败', 'error');
+  }
+}
+
+async function testChannel(id: string) {
+  testingChannelId.value = id;
+  try {
+    await api.testReminderChannel(id);
+    toast.show('测试消息已发送', 'success');
+  } catch (e: any) {
+    toast.show(e?.message || '发送失败', 'error');
+  } finally {
+    testingChannelId.value = null;
+  }
+}
+
+async function toggleChannelEnabled(ch: ReminderChannel) {
+  try {
+    await api.updateReminderChannel(ch.id, { enabled: !ch.enabled });
+    await loadReminderChannels();
+  } catch (e: any) {
+    toast.show(e?.message || '更新失败', 'error');
+  }
+}
+
+async function requestBrowserPermission() {
+  if (typeof Notification === 'undefined') {
+    toast.show('当前环境不支持系统通知', 'error');
+    return;
+  }
+  const p = await Notification.requestPermission();
+  browserPermission.value = p;
+  if (p === 'granted') toast.show('已授权', 'success');
+  else toast.show('已拒绝/未授权', 'default');
+}
 
 // ── AI Configs ──
 import type { AiConfigItem, AiPromptItem } from '@/api';
@@ -251,6 +413,7 @@ const tabs = [
   { id: 'preferences', label: '偏好设置' },
   { id: 'shortcuts', label: '快捷键' },
   { id: 'ai', label: 'AI 模型' },
+  { id: 'reminders', label: '提醒' },
   { id: 'export', label: '导出' },
   { id: 'about', label: '关于' },
 ];
@@ -283,6 +446,7 @@ onMounted(async () => {
     localAutoSummaryMinLen.value = prefs.autoSummaryMinLen;
   }
   loadAiData();
+  loadReminderChannels();
   // 延到下一个 tick 再开启 watch,避免初始化赋值触发自动保存
   setTimeout(() => { prefsLoaded = true; }, 0);
 });
@@ -789,11 +953,11 @@ function goBack() {
               <div class="text-sm font-medium text-gray-700 truncate">{{ cfg.name }}</div>
               <div class="text-xs text-gray-400">{{ cfg.provider }} · {{ cfg.model }}</div>
             </div>
-            <button @click="testConfig(cfg.id)" class="text-xs text-gray-400 hover:text-gray-600 px-2">
+            <button @click="testConfig(cfg.id)" class="px-2.5 py-1 text-xs rounded-md bg-primary-light text-primary-dark hover:bg-primary/20">
               {{ testingId === cfg.id ? (testResult || '测试中') : '测试' }}
             </button>
-            <button @click="startEditConfig(cfg)" class="text-xs text-gray-400 hover:text-gray-600">编辑</button>
-            <button @click="deleteConfig(cfg.id)" class="text-xs text-gray-400 hover:text-red-500">删除</button>
+            <button @click="startEditConfig(cfg)" class="px-2.5 py-1 text-xs rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">编辑</button>
+            <button @click="deleteConfig(cfg.id)" class="px-2.5 py-1 text-xs rounded-md bg-red-50 text-red-500 hover:bg-red-100">删除</button>
           </div>
         </TransitionGroup>
 
@@ -929,6 +1093,96 @@ function goBack() {
             <option :value="524288">512K</option>
             <option :value="1048576">1M</option>
           </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ 提醒通道 ═══ -->
+    <div v-if="activeTab === 'reminders'" class="space-y-6">
+      <div class="bg-white rounded-xl border border-gray-200 p-6">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="text-sm font-medium text-gray-800">提醒通道</h3>
+            <p class="text-xs text-gray-400 mt-1">待办设了"提醒时间"到点会通过这里的所有启用通道推送一份</p>
+          </div>
+          <button @click="startEditChannel()" class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors" style="background: rgb(var(--c-accent) / 0.1); color: rgb(var(--c-accent))">
+            + 添加通道
+          </button>
+        </div>
+
+        <div v-if="reminderChannels.length === 0" class="text-center py-8 text-gray-400 text-sm">
+          还没有提醒通道，点击上方按钮添加
+        </div>
+
+        <TransitionGroup tag="div" data-animated-list class="space-y-2" :css="false" @leave="collapseLeave">
+          <div v-for="ch in reminderChannels" :key="ch.id"
+            class="flex items-center gap-3 p-3 rounded-lg border border-gray-100 hover:border-gray-200 transition-all duration-300">
+            <div class="w-2 h-2 rounded-full shrink-0" :class="ch.enabled ? 'bg-green-500' : 'bg-gray-300'"></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium text-gray-700 truncate">{{ ch.name }}</div>
+              <div class="text-xs text-gray-400">{{ channelTypeOptions.find(o => o.id === ch.type)?.label || ch.type }}</div>
+            </div>
+            <ToggleSwitch :model-value="ch.enabled" @update:model-value="toggleChannelEnabled(ch)" size="sm" />
+            <button @click="testChannel(ch.id)" :disabled="testingChannelId === ch.id"
+              class="px-2.5 py-1 text-xs rounded-md bg-primary-light text-primary-dark hover:bg-primary/20 disabled:opacity-50">
+              {{ testingChannelId === ch.id ? '发送中' : '测试' }}
+            </button>
+            <button @click="startEditChannel(ch)" class="px-2.5 py-1 text-xs rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">编辑</button>
+            <button @click="deleteChannel(ch.id)" class="px-2.5 py-1 text-xs rounded-md bg-red-50 text-red-500 hover:bg-red-100">删除</button>
+          </div>
+        </TransitionGroup>
+
+        <!-- Edit/Create form -->
+        <div v-if="editingChannel" class="mt-4 p-4 rounded-lg border border-gray-200 bg-gray-50 space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">名称</label>
+              <input v-model="editingChannel.name" class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary" placeholder="如：我的提醒" />
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">类型</label>
+              <select v-model="editingChannel.type" :disabled="!!editingChannel.id"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none disabled:opacity-50">
+                <option v-for="t in channelTypeOptions" :key="t.id" :value="t.id"
+                  :disabled="t.id === 'browser' && hasBrowserChannel && editingChannel.type !== 'browser'">
+                  {{ t.label }}{{ t.id === 'browser' && hasBrowserChannel && editingChannel.type !== 'browser' ? ' (已添加)' : '' }}
+                </option>
+              </select>
+            </div>
+          </div>
+          <p class="text-xs text-gray-400 -mt-1">{{ channelTypeOptions.find(o => o.id === editingChannel?.type)?.description }}</p>
+
+          <!-- browser 特殊: 没有配置字段, 只显示授权状态 -->
+          <div v-if="editingChannel.type === 'browser'" class="rounded-lg bg-white border border-gray-200 px-3 py-2 text-xs flex items-center justify-between">
+            <span class="text-gray-600">浏览器通知权限：
+              <span :class="browserPermission === 'granted' ? 'text-green-600' : browserPermission === 'denied' ? 'text-red-500' : 'text-gray-400'">
+                {{ browserPermission === 'granted' ? '已授权' : browserPermission === 'denied' ? '已拒绝' : '未授权' }}
+              </span>
+            </span>
+            <button v-if="browserPermission !== 'granted'" @click="requestBrowserPermission"
+              class="text-primary hover:underline">立即授权</button>
+          </div>
+
+          <!-- 其他类型: 按 channelTypeFields 表动态渲染 -->
+          <div v-for="f in channelTypeFields[editingChannel.type]" :key="f.key">
+            <label class="block text-xs text-gray-500 mb-1">{{ f.label }}</label>
+            <textarea v-if="f.type === 'textarea'" v-model="editingChannel.config[f.key]" rows="3"
+              :placeholder="f.placeholder" spellcheck="false"
+              class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:border-primary font-mono resize-none" />
+            <input v-else v-model="editingChannel.config[f.key]" :type="f.type || 'text'"
+              :placeholder="f.placeholder" spellcheck="false"
+              class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary font-mono" />
+          </div>
+
+          <div v-if="channelError" class="text-red-500 text-xs bg-red-50 rounded-lg px-3 py-2">{{ channelError }}</div>
+          <div class="flex gap-2">
+            <button @click="saveChannel" class="px-4 py-1.5 text-white text-xs font-medium rounded-lg" style="background: rgb(var(--c-accent))">
+              保存
+            </button>
+            <button @click="editingChannel = null; channelError = ''" class="px-4 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">
+              取消
+            </button>
+          </div>
         </div>
       </div>
     </div>

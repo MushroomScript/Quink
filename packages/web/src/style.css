@@ -568,3 +568,150 @@ mark.find-hl-active {
   border-radius: 3px;
   box-shadow: 0 0 0 2px #fbbf24;
 }
+
+/* ─────── 提醒选择弹窗 (ReminderPicker.vue) ───────
+ * 集中放这里是因为 ReminderPicker 用了 Teleport 到 body,
+ * Vue 的 <style scoped> + :global([data-theme="dark"]) + Teleport 三件套
+ * 会被编译器吞掉 dark 规则 (实测 ".preset-btn[data-v-xxx]" 编译出来后
+ * :global() 块整段消失). 所以 light + dark 全部写这里, 集中维护. */
+
+/* 预设按钮 (不重复 / 每天 / 工作日 / 每周 / 每月 / 每年) */
+.reminder-picker .preset-btn {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid rgb(229 231 235);
+  color: rgb(75 85 99);
+  background: white;
+  transition: all 0.15s;
+}
+.reminder-picker .preset-btn:hover {
+  background: rgb(249 250 251);
+}
+.reminder-picker .preset-active {
+  border-color: rgb(var(--c-accent));
+  color: rgb(var(--c-accent));
+  background: rgb(var(--c-accent-light) / 0.4);
+}
+
+/* 中文 RRULE GUI: 频率下拉 / 间隔输入 / 周几 / 月日 / 结束日期 */
+.reminder-picker .rrule-input {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid rgb(229 231 235);
+  border-radius: 6px;
+  background: white;
+  color: rgb(55 65 81);
+  outline: none;
+}
+.reminder-picker .rrule-input:focus {
+  border-color: rgb(var(--c-accent));
+}
+.reminder-picker .rrule-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.reminder-picker .weekday-btn {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+  border-radius: 50%;
+  border: 1px solid rgb(229 231 235);
+  color: rgb(75 85 99);
+  background: white;
+  transition: all 0.15s;
+}
+.reminder-picker .weekday-btn:hover {
+  background: rgb(249 250 251);
+}
+.reminder-picker .weekday-active {
+  border-color: rgb(var(--c-accent));
+  color: white;
+  background: rgb(var(--c-accent));
+}
+.reminder-picker .rrule-radio {
+  accent-color: rgb(var(--c-accent));
+}
+
+/* ── dark 适配 ── */
+[data-theme="dark"] .reminder-picker {
+  background: #1f2937;
+  color: #e5e7eb;
+}
+[data-theme="dark"] .reminder-picker input,
+[data-theme="dark"] .reminder-picker textarea,
+[data-theme="dark"] .reminder-picker select,
+[data-theme="dark"] .reminder-picker .rrule-input {
+  background: #111827;
+  border-color: #374151;
+  color: #e5e7eb;
+}
+[data-theme="dark"] .reminder-picker .preset-btn,
+[data-theme="dark"] .reminder-picker .weekday-btn {
+  background: #111827;
+  border-color: #374151;
+  color: #9ca3af;
+}
+[data-theme="dark"] .reminder-picker .preset-btn:hover,
+[data-theme="dark"] .reminder-picker .weekday-btn:hover {
+  background: #1f2937;
+}
+[data-theme="dark"] .reminder-picker .preset-active {
+  background: rgb(var(--c-accent) / 0.2);
+  /* 注意 dark 下 --c-accent-light 是深色 (40 45 65), 不能当 text 颜色用. 改用 --c-accent 亮主色 */
+  color: rgb(var(--c-accent));
+  border-color: rgb(var(--c-accent));
+}
+[data-theme="dark"] .reminder-picker .weekday-active {
+  background: rgb(var(--c-accent));
+  border-color: rgb(var(--c-accent));
+  color: white;
+}
+[data-theme="dark"] .reminder-picker p,
+[data-theme="dark"] .reminder-picker label {
+  color: #cbd5e1;
+}
+/* 预览列表 (bg-gray-50 在 dark 下要换深底). border-color 由上面集中规则统一 #4b5563 处理, 这里只管 bg/color */
+[data-theme="dark"] .reminder-picker .rrule-preview {
+  background: #0f172a;
+  color: #cbd5e1;
+}
+/* 取消按钮 (border-color 走集中规则, 这里只管 text + hover) */
+[data-theme="dark"] .reminder-picker button.border-gray-200 {
+  color: #d1d5db;
+}
+[data-theme="dark"] .reminder-picker button.border-gray-200:hover {
+  background: #374151;
+}
+/* 清除提醒按钮 */
+[data-theme="dark"] .reminder-picker button.bg-red-50 {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+[data-theme="dark"] .reminder-picker button.bg-red-50:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+/* 高级 toggle 文字 (用类名匹配, 不依赖 DOM 层级) */
+[data-theme="dark"] .reminder-picker button.text-gray-500 {
+  color: #94a3b8;
+}
+/* RRULE 帮助折叠块 */
+[data-theme="dark"] .reminder-picker details > div {
+  background: #0f172a;
+  color: #cbd5e1;
+}
+[data-theme="dark"] .reminder-picker details summary {
+  color: #94a3b8;
+}
+[data-theme="dark"] .reminder-picker details span.bg-white {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+[data-theme="dark"] .reminder-picker details p,
+[data-theme="dark"] .reminder-picker details ul,
+[data-theme="dark"] .reminder-picker details li {
+  color: #cbd5e1;
+}
+[data-theme="dark"] .reminder-picker details .text-gray-400 {
+  color: #6b7280;
+}
