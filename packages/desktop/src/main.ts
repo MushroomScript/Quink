@@ -387,6 +387,7 @@ function createCaptureWindow() {
     y: Math.round(screenHeight / 2 - height / 2),
     frame: false,
     resizable: true,
+    maximizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
@@ -410,16 +411,6 @@ function createCaptureWindow() {
   captureWindow.webContents.once('did-finish-load', () => {
     if (!captureWindow || captureWindow.isDestroyed()) return;
     applyZoomToWebContents(captureWindow.webContents, currentZoomLevel / 100);
-  });
-
-  // 延迟绑定 blur，避免刚 show 就被 hide
-  let blurEnabled = false;
-  captureWindow.on('show', () => {
-    blurEnabled = false;
-    setTimeout(() => { blurEnabled = true; }, 300);
-  });
-  captureWindow.on('blur', () => {
-    if (blurEnabled) hideCaptureWindow();
   });
 
   captureWindow.on('closed', () => {
@@ -1136,15 +1127,6 @@ function createAiChatWindow() {
   aiChatWindow.webContents.once('did-finish-load', () => {
     if (!aiChatWindow || aiChatWindow.isDestroyed()) return;
     applyZoomToWebContents(aiChatWindow.webContents, currentZoomLevel / 100);
-  });
-
-  let blurEnabled = false;
-  aiChatWindow.on('show', () => {
-    blurEnabled = false;
-    setTimeout(() => { blurEnabled = true; }, 300);
-  });
-  aiChatWindow.on('blur', () => {
-    if (blurEnabled) hideAiChatWindow();
   });
 
   aiChatWindow.on('closed', () => { aiChatWindow = null; });

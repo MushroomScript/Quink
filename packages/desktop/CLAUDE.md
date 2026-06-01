@@ -62,6 +62,30 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 
 **如果真的需要让 popup 溢出 Capture 窗口**：唯一方法是新建一个无边框 + 透明 + alwaysOnTop 的 BrowserWindow 当 popup 用，每次 hover 时创建 / setPosition / show / hide。工作量大（~100 行 IPC + 窗口管理），不建议为单个 tooltip 这么做。
 
+### webkit-app-region drag 区按 paint 顺序拦点击，z-index 不解决
+
+无边框窗口（`frame: false`）里 `-webkit-app-region: drag` 标记的区域 OS 级别拦截所有鼠标事件 → 区域内的子元素 click 全部无效，除非该子元素显式 `no-drag`。
+
+**陷阱**：region 解析按 **paint 顺序** 走（later painted on top），**z-index 不影响**。想在 vditor toolbar（drag 区）上方浮一个按钮（如 Capture 右上角关闭叉），按钮必须在 DOM 顺序上**晚于** toolbar 元素；否则即使按钮 `position: absolute; z-index: 50; -webkit-app-region: no-drag`，paint 时 toolbar 仍在上方 → OS 把按钮位置当 drag 区 → click 派不进 DOM，按钮"显示但点不动"。
+
+修法：按钮 DOM 放在 RichEditor / vditor 容器**之后**而不是之前：
+
+```html
+<div class="capture-editor-host relative">
+  <RichEditor />  <!-- toolbar 先 paint -->
+  <button class="capture-close-btn">  <!-- 后 paint, 才能在 toolbar 上方接 click -->
+    <PhXCircle />
+  </button>
+</div>
+```
+
+按钮还要 inline `-webkit-app-region: no-drag` 让 OS 知道这块不是拖动区。
+
+按钮**严格在 toolbar 高度居中**也有约束：外框 height 不能大于 toolbar height，否则永远没法对齐（叉号在 toolbar 内 30px 时外框 36px 会突出 + 偏下）。结论：外框 = toolbar 高度（capture-drag 内 `2.1875rem` = 35px），top: 0，svg flex 居中 → 自动 = toolbar 中心。范例：`Capture.vue` 的 `.capture-close-btn`。
+
+### Capture / AiChat 失焦不自动 hide
+两个快捷窗口都**只通过用户主动行为关闭**（Esc / 右上角叉 / 全局快捷键 toggle / 保存笔记后），不监听 `blur` 自动 hide。原因：拖文件到 Capture 上传时 OS file dialog 短暂抢焦点 → blur 触发 → 窗口被 hide 中断流程。如果以后真要"点别处自动收起"，要把 file dialog / Vditor emoji panel / 我们自己的 popup 这些 blur 来源全部白名单，目前没这复杂度需求。
+
 ## preload 双轨：`preload-main.ts` 跟 `preload.ts`
 
 - **主窗口**（`createMainWindow`）用 `preload-main.ts` → 暴露 `quinkDesktop`，包含全部 IPC 接口（30+ method：syncToken / syncZoom / attachmentTasks / pickDirectory / openAttachment 等）

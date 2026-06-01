@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { useNotesStore } from '@/stores/notes';
 import { useAuthStore } from '@/stores/auth';
 import RichEditor from '@/components/RichEditor.vue';
+import { PhXCircle } from '@phosphor-icons/vue';
 
 // setup 顶层同步设主题（在 Vue 第一次 render 前），让窗口 show 时就是正确主题色，
 // 避免暗色主题用户首次打开看到白色闪烁
@@ -37,11 +38,13 @@ async function onSubmit(data: { html: string; type: string; tags: string[] }) {
   } finally { submitting.value = false; }
 }
 
+function closeWindow() {
+  try { (window as any).quink?.hideWindow(); } catch {}
+}
+
 // Esc 关闭
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    try { (window as any).quink?.hideWindow(); } catch {}
-  }
+  if (e.key === 'Escape') closeWindow();
 }
 
 // Vditor 加载完成时通知主进程，让它延迟到此刻才 show 窗口
@@ -80,16 +83,21 @@ onUnmounted(() => {
 <template>
   <div class="h-full flex flex-col bg-transparent tooltip-below capture-drag">
     <!-- Not logged in -->
-    <div v-if="notLoggedIn" class="flex-1 flex items-center justify-center bg-white rounded-xl shadow-2xl">
+    <div v-if="notLoggedIn" class="relative flex-1 flex items-center justify-center bg-white rounded-xl shadow-2xl">
       <div class="text-center">
         <p class="text-gray-500 text-sm">请先在主窗口登录</p>
-        <p class="text-gray-400 text-xs mt-1">Esc 关闭</p>
       </div>
+      <button @click="closeWindow" class="capture-close-btn" style="-webkit-app-region: no-drag" title="关闭">
+        <PhXCircle size="1.125rem" weight="fill" />
+      </button>
     </div>
 
     <!-- Editor -->
-    <div v-else class="capture-editor-host flex-1 overflow-hidden bg-white rounded-xl shadow-2xl">
-      <RichEditor ref="editorRef" @submit="onSubmit" @ready="onEditorReady" :show-ai="false" :show-fullscreen-btn="false" :max-height="80" :min-height="60" hint-text="Esc 关闭 | Ctrl+Enter 保存" placeholder="快速记录你的想法..." />
+    <div v-else class="capture-editor-host relative flex-1 overflow-hidden bg-white rounded-xl shadow-2xl">
+      <RichEditor ref="editorRef" @submit="onSubmit" @ready="onEditorReady" :show-ai="false" :show-fullscreen-btn="false" :max-height="80" :min-height="60" placeholder="快速记录你的想法..." />
+      <button @click="closeWindow" class="capture-close-btn" style="-webkit-app-region: no-drag" title="关闭">
+        <PhXCircle size="1.125rem" weight="fill" />
+      </button>
     </div>
 
     <!-- Toast -->
@@ -104,6 +112,30 @@ onUnmounted(() => {
 </template>
 
 <style>
+/* 右上角关闭按钮: 跟 vditor toolbar 内表情按钮同尺寸 (1.75rem 外框 + 0.875rem svg).
+   必须放在 RichEditor 之后 (DOM 顺序): 否则 vditor toolbar 后绘制盖上, OS 把按钮位置当 drag 区 → click 派不进 DOM. */
+.capture-close-btn {
+  position: absolute;
+  top: 0;
+  right: 0.25rem;
+  z-index: 50;
+  width: 2.1875rem;
+  height: 2.1875rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  transition: color 0.15s;
+}
+.capture-close-btn:hover {
+  color: #ef4444;
+}
+[data-theme="dark"] .capture-close-btn {
+  color: rgba(255,255,255,0.4);
+}
+[data-theme="dark"] .capture-close-btn:hover {
+  color: #f87171;
+}
 .capture-drag .vditor-toolbar {
   -webkit-app-region: drag;
 }

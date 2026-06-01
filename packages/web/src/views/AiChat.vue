@@ -3,7 +3,7 @@ import { ref, nextTick, onMounted, onUnmounted } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { api, isLoggedIn } from '@/api';
 import Vditor from 'vditor';
-import { PhSparkle, PhStop, PhPaperPlaneTilt } from '@phosphor-icons/vue';
+import { PhSparkle, PhStop, PhPaperPlaneTilt, PhXCircle } from '@phosphor-icons/vue';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 
 // setup 顶层同步设主题（在 Vue 第一次 render 前），让窗口 show 时就是正确主题色
@@ -121,10 +121,12 @@ function newChat() {
   streamingContent.value = '';
 }
 
+function closeWindow() {
+  try { (window as any).quink?.hideWindow(); } catch {}
+}
+
 function onGlobalKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    try { (window as any).quink?.hideWindow(); } catch {}
-  }
+  if (e.key === 'Escape') closeWindow();
 }
 
 // Ctrl+滚轮 zoom 由 main 端 webContents.on('zoom-changed') 拦截 (preventDefault 阻 Chromium 内置 layout zoom),
@@ -144,6 +146,21 @@ onUnmounted(() => {
 });
 </script>
 
+<style scoped>
+.aichat-close-btn {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sb-dim);
+  transition: color 0.15s;
+}
+.aichat-close-btn:hover {
+  color: #f87171;
+}
+</style>
+
 <template>
   <div class="h-full flex flex-col select-none">
     <!-- Title bar -->
@@ -154,7 +171,9 @@ onUnmounted(() => {
       </span>
       <div class="flex items-center gap-2" style="-webkit-app-region: no-drag">
         <button @click="newChat" class="text-[10px] px-2 py-0.5 rounded hover:bg-white/10" style="color: var(--sb-dim)">新对话</button>
-        <span class="text-[10px]" style="color: var(--sb-dim)">Esc 关闭</span>
+        <button @click="closeWindow" class="aichat-close-btn" title="关闭">
+          <PhXCircle size="1rem" weight="fill" />
+        </button>
       </div>
     </div>
 

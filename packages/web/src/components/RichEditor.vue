@@ -4,6 +4,13 @@ import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import { api } from '@/api';
 import { resolveFileUrl, resolveMarkdownFileUrls, stripMarkdownFileUrls } from '@/utils/fileUrl';
+import {
+  addUploadTask,
+  updateProgressById,
+  markSuccessById,
+  markFailedById,
+  markCancelledById,
+} from '@/composables/useAttachmentTasks';
 import RenameModal from './RenameModal.vue';
 import {
   PhLightbulb,
@@ -136,6 +143,82 @@ const editorRef = ref<HTMLDivElement>();
 let vditor: Vditor | null = null;
 const dirty = ref(false);
 
+const isDragOver = ref(false);
+let dragCounter = 0;
+
+function isExternalFileDrag(e: DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types || []).includes('Files');
+}
+
+function onEditorDragEnter(e: DragEvent) {
+  if (!isExternalFileDrag(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  dragCounter++;
+  isDragOver.value = true;
+}
+
+function onEditorDragOver(e: DragEvent) {
+  if (!isExternalFileDrag(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+}
+
+function onEditorDragLeave(e: DragEvent) {
+  if (!isExternalFileDrag(e)) return;
+  e.stopPropagation();
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    isDragOver.value = false;
+  }
+}
+
+async function onEditorDrop(e: DragEvent) {
+  if (!isExternalFileDrag(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  dragCounter = 0;
+  isDragOver.value = false;
+  const files = Array.from(e.dataTransfer?.files || []);
+  if (!files.length) return;
+  await uploadAndInsert(files);
+}
+
+async function uploadAndInsert(files: File[]) {
+  vditor?.focus();
+  type UploadResult = { ok: boolean; name: string; type: string; url?: string };
+  const results = await Promise.all(files.map(async (file): Promise<UploadResult> => {
+    const ctrl = new AbortController();
+    const taskId = await addUploadTask(file.name, file.size, ctrl);
+    try {
+      const res = await api.uploadFile(file, 'file', {
+        signal: ctrl.signal,
+        onProgress: (recv, total) => updateProgressById(taskId, recv, total),
+      });
+      markSuccessById(taskId);
+      return { ok: true, name: file.name, type: file.type, url: res.data?.url };
+    } catch (err: any) {
+      if (err?.name === 'AbortError') markCancelledById(taskId);
+      else markFailedById(taskId, err?.message || '上传失败');
+      return { ok: false, name: file.name, type: file.type };
+    }
+  }));
+  vditor?.focus();
+  setTimeout(() => {
+    for (const r of results) {
+      if (!r.ok || !r.url) continue;
+      const url = resolveFileUrl(r.url);
+      const md = r.type?.startsWith('image/')
+        ? `![${r.name}](${url})\n`
+        : `[📎 ${r.name}](${url})\n`;
+      vditor?.insertValue(md);
+    }
+  }, 80);
+}
+
 // 自定义 vditor toolbar tooltip: 默认 vditor tooltip 是按钮的 ::before/::after 伪元素
 // 被 App.vue main 的 overflow-y-auto 裁切(尤其飞向上方时)。改用 Teleport 到 body 的
 // 自定义 tooltip,固定定位 + z-index 最顶,脱离任何 overflow 控制,永远朝上显示完整
@@ -240,6 +323,11 @@ onMounted(() => {
       // (mouseover bubble 上来,closest 找 .vditor-tooltipped 按钮)
       editorRef.value?.addEventListener('mouseover', onToolbarMouseOver);
       editorRef.value?.addEventListener('mouseout', onToolbarMouseOut);
+      // capture 阶段拦截 Vditor 内置 drop, 走我们自己的上传 + dock + insertValue
+      editorRef.value?.addEventListener('dragenter', onEditorDragEnter, true);
+      editorRef.value?.addEventListener('dragover', onEditorDragOver, true);
+      editorRef.value?.addEventListener('dragleave', onEditorDragLeave, true);
+      editorRef.value?.addEventListener('drop', onEditorDrop, true);
     },
     input: () => {
       dirty.value = true;
@@ -250,6 +338,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   editorRef.value?.removeEventListener('mouseover', onToolbarMouseOver);
   editorRef.value?.removeEventListener('mouseout', onToolbarMouseOut);
+  editorRef.value?.removeEventListener('dragenter', onEditorDragEnter, true);
+  editorRef.value?.removeEventListener('dragover', onEditorDragOver, true);
+  editorRef.value?.removeEventListener('dragleave', onEditorDragLeave, true);
+  editorRef.value?.removeEventListener('drop', onEditorDrop, true);
   vditor?.destroy();
   vditor = null;
 });
@@ -637,6 +729,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
          (历史版本写 +36 想多占工具栏空间,但 Vditor 加载后会覆盖回 props.minHeight,
          导致加载前比加载后高 36px,而且每次 Vue update 会把 Vditor 设的覆盖掉变高。) -->
     <div ref="editorRef" class="vditor-wrapper"
+      :data-drag-over="isDragOver ? '' : undefined"
       :style="isFullscreen ? { flex: '1 1 auto', minHeight: 0 } : { '--editor-max': maxHeight + 'px', minHeight: minHeight + 'px' }"></div>
 
     <!-- AI buttons + bottom bar (录音时 absolute overlay 浮层覆盖此行,不占额外高度) -->
@@ -827,6 +920,36 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
   width: 100% !important;
   display: flex !important;
   flex-direction: column !important;
+}
+/* 用 [data-drag-over] 而不是 .is-drag-over: vditor init 时会给 wrapper 加 .vditor class,
+   Vue :class 在 reactive 切换时会重写 element.className 全集, 覆盖丢失 .vditor class →
+   toolbar 失去 vditor CSS 变小 7px, pre 上移 +7px 撑高补位, 且 class 永久丢失不回退.
+   data-* attribute 只 toggle 单个属性, 不动 className. */
+.vditor-wrapper[data-drag-over] > .vditor-content {
+  position: relative;
+}
+.vditor-wrapper[data-drag-over] > .vditor-content::after {
+  content: '拖入文件以上传';
+  position: absolute;
+  inset: 0;
+  border: 3px dashed rgb(var(--c-accent));
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgb(var(--c-accent) / 0.7);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  z-index: 10;
+}
+[data-theme="dark"] .vditor-wrapper[data-drag-over] > .vditor-content::after {
+  background: rgba(0, 0, 0, 0.55);
+}
+.vditor-wrapper[data-drag-over] .vditor-reset::before {
+  visibility: hidden !important;
 }
 /* 非全屏:限制内容区 max-height + overflow */
 .vditor-wrapper > .vditor-content {
