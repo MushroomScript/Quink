@@ -1408,7 +1408,7 @@ onUnmounted(() => {
         <div class="absolute inset-0 bg-black/30" @click="moveTargetOpen = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 max-h-[70vh] flex flex-col">
           <p class="text-sm text-gray-700 mb-3">移动 {{ selectedIds.size }} 个文件到...</p>
-          <div class="flex-1 overflow-y-auto -mx-2 border border-gray-100 rounded-lg p-1 max-h-80">
+          <div class="flex-1 min-h-0 overflow-y-auto -mx-2 border border-gray-100 rounded-lg p-1 max-h-80">
             <button @click="moveSelectedTo(null)" :disabled="currentFolderId === null"
               class="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 inline-flex items-center gap-2 text-xs text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed">
               <PhHouse size="0.875rem" weight="fill" />

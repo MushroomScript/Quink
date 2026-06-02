@@ -550,7 +550,7 @@ watch(() => auth.user, (user) => {
 
       <div class="flex-1 flex flex-col overflow-hidden">
         <TopBar />
-        <main ref="mainEl" class="flex-1 overflow-y-auto" style="scrollbar-gutter: stable">
+        <main ref="mainEl" class="flex-1 relative overflow-y-auto" style="scrollbar-gutter: stable">
           <!-- batch action bar Teleport target: TopBar 的 batch bar 用 Teleport 渲染到这里,
                让 batch bar 物理位置在 main 内 (跟卡片在同一 overflow 容器), 半透明 bg-gray-50/80
                透过去能看到下方卡片轮廓 (跟回收站 sticky toolbar 同款视觉).
@@ -592,7 +592,7 @@ watch(() => auth.user, (user) => {
               </button>
             </div>
           </div>
-          <div class="flex-1 overflow-y-auto px-6 py-4">
+          <div class="flex-1 min-h-0 overflow-y-auto px-6 py-4">
             <div v-if="refPreviewNote.summary" class="text-sm text-gray-500 italic mb-3">{{ refPreviewNote.summary }}</div>
             <div class="note-content">
               <div class="vditor-reset" v-html="refPreviewHtml" />

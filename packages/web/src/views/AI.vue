@@ -654,7 +654,13 @@ async function retryLastMessage() {
 </script>
 
 <template>
-  <div class="flex h-full overflow-hidden">
+  <!-- absolute inset-0: 占满 main 的 viewport (main relative), 不依赖 portal 高度.
+       原因: App.vue main 内的 #batch-bar-portal 是 content-based 高度 (sticky batch bar 范围必须 = 内容全高),
+       AI.vue 之前用 h-full 拿不到 portal 高度 (portal 自身 content-based 跟 children 循环依赖) → 退化为 content height,
+       AI.vue 内双栏 flex-col 撑大 main → main 整体滚动 → 双栏不再独立滚动.
+       absolute 脱离 portal 文档流, AI 页面下 portal height = 0 不影响 (本就不需要 main 滚动), 切换到瀑布流页面恢复正常.
+       sticky batch bar 在 AI 页面不出现, 这里不需要考虑 portal sticky range. -->
+  <div class="absolute inset-0 flex overflow-hidden">
     <!-- 左侧：对话列表（桌面端） -->
     <div class="w-56 shrink-0 border-r border-gray-100 flex flex-col bg-gray-50/50 hidden md:flex">
       <div class="p-3 space-y-2">
@@ -668,7 +674,7 @@ async function retryLastMessage() {
           </button>
         </div>
       </div>
-      <div class="flex-1 overflow-y-auto px-2 pb-2">
+      <div class="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
         <TransitionGroup name="conv-list" tag="div" class="space-y-0.5">
           <div v-for="conv in filteredConversations" :key="conv.id"
             @click="selectConversation(conv.id)"
@@ -707,7 +713,7 @@ async function retryLastMessage() {
             </button>
           </div>
         </div>
-        <div class="flex-1 overflow-y-auto px-2 pb-2">
+        <div class="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
           <TransitionGroup name="conv-list" tag="div" class="space-y-0.5">
             <div v-for="conv in filteredConversations" :key="conv.id"
               @click="selectConversation(conv.id)"
@@ -747,7 +753,7 @@ async function retryLastMessage() {
           <PhXCircle size="0.875rem" weight="fill" />
         </button>
       </div>
-      <div ref="messagesEl" data-drop-target="ai-page" class="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-4">
+      <div ref="messagesEl" data-drop-target="ai-page" class="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 py-6 space-y-4">
         <!-- 空状态 -->
         <div v-if="!currentConvId || messages.length === 0" class="text-center py-16">
           <div class="mb-3 flex justify-center text-gray-300">
@@ -870,7 +876,8 @@ async function retryLastMessage() {
       </div>
 
       <!-- 输入框 (data-drop-target 让拖到输入框松开也走 'ai-page' 分支 = 塞到当前对话输入框) -->
-      <div class="px-4 md:px-6 py-3 border-t border-gray-100" data-drop-target="ai-page">
+      <!-- shrink-0: flex 父容器空间不足时也不被挤压, 跟 messagesEl 的 min-h-0 配对防"展开引用列表把输入框顶出 viewport" -->
+      <div class="px-4 md:px-6 py-3 border-t border-gray-100 shrink-0" data-drop-target="ai-page">
         <div class="flex gap-2 items-end">
           <div class="flex-1 min-w-0 bg-white border border-gray-200 rounded-xl overflow-hidden focus-within:border-primary transition-colors pt-1.5">
             <textarea ref="queryEl" v-model="query" @keydown="handleKeydown" @input="autoGrowTextarea" placeholder="问点什么..." rows="1"

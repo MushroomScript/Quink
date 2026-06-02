@@ -20,6 +20,11 @@ const messagesEl = ref<HTMLDivElement>();
 const inputEl = ref<HTMLInputElement>();
 const convId = ref('');
 
+// AiChat 窗口专属持久会话: 每次唤出都恢复上次对话, 点"新对话"才换新.
+// 用 localStorage 而非 sessionStorage: sessionStorage 跟窗口生命周期绑, sync-theme 触发 destroy 重建后丢.
+// key 跟主窗口 AI.vue 的 `quink_ai_conv` (sessionStorage) 隔离, 两边对话不互串.
+const AICHAT_CONV_KEY = 'quink_aichat_conv_id';
+
 function parseThinking(text: string): { thinking: string; answer: string } {
   const m = text.match(/<think>([\s\S]*?)(<\/think>|$)/);
   if (!m) return { thinking: '', answer: text };
@@ -35,6 +40,34 @@ async function ensureConversation() {
   if (!convId.value) {
     const res = await api.createConversation();
     convId.value = res.data.id;
+    try { localStorage.setItem(AICHAT_CONV_KEY, convId.value); } catch {}
+  }
+}
+
+// 把后端返回的一条 message 渲染成 AiChat 内 messages 格式 (assistant 走 md2html, user 不渲染)
+async function renderHistoryMessage(m: { id: string; role: string; content: string }) {
+  const role = m.role === 'assistant' ? 'assistant' as const : 'user' as const;
+  if (role === 'user') return { id: m.id, role, content: m.content };
+  let html: string | undefined;
+  const renderText = stripOuterCodeFence(parseThinking(m.content).answer || m.content);
+  try { html = await Vditor.md2html(resolveMarkdownFileUrls(renderText), { cdn: '/vditor' } as any); } catch {}
+  return { id: m.id, role, content: m.content, html };
+}
+
+async function loadPersistedConversation() {
+  let savedId = '';
+  try { savedId = localStorage.getItem(AICHAT_CONV_KEY) || ''; } catch {}
+  if (!savedId) return;
+  try {
+    const res = await api.getMessages(savedId);
+    // 服务端校验通过 (user 拥有该 conv) 才走到这里, 即使 messages 为空也保留 convId 让后续发消息延续这条会话
+    convId.value = savedId;
+    const rendered = await Promise.all(res.data.map(renderHistoryMessage));
+    messages.value = rendered;
+    scrollToBottom();
+  } catch {
+    // conv 被服务端删 / 不存在 / 网络异常: 静默清 localStorage 走新会话流程, 不打扰用户
+    try { localStorage.removeItem(AICHAT_CONV_KEY); } catch {}
   }
 }
 
@@ -119,6 +152,7 @@ function newChat() {
   convId.value = '';
   messages.value = [];
   streamingContent.value = '';
+  try { localStorage.removeItem(AICHAT_CONV_KEY); } catch {}
 }
 
 function closeWindow() {
@@ -138,6 +172,18 @@ onMounted(async () => {
   document.documentElement.setAttribute('data-theme', theme);
   document.addEventListener('keydown', onGlobalKeydown);
   setTimeout(() => inputEl.value?.focus(), 500);
+  // 登录态下恢复上次的 AiChat 专属会话 (跟 fetchMe 顺序: fetchMe 拿到 token 后才能调 getMessages)
+  if (user) loadPersistedConversation();
+  // 每次窗口显示时同步主题 + 重新 focus 输入框. 持久窗口 hide→show 时 onMounted 不重跑,
+  // 必须靠 window-shown IPC 触发 DOM .focus() 让 Chromium 重新激活 hwnd 把 OS 焦点从原窗口切过来
+  // (跟 Capture.vue 同套机制, 详见 packages/desktop/CLAUDE.md "Capture / AiChat 失焦不自动 hide" 邻段)
+  try {
+    (window as any).quink?.onWindowShown?.(() => {
+      const t = localStorage.getItem('quink_theme') || 'blueberry';
+      document.documentElement.setAttribute('data-theme', t);
+      setTimeout(() => inputEl.value?.focus(), 50);
+    });
+  } catch {}
   // zoom 同步: 主窗口改显示比例时主进程直接 setZoomFactor 应用到 AiChat 窗口, renderer 不再需要监听 + 自行操作 fontSize
 });
 
@@ -170,7 +216,7 @@ onUnmounted(() => {
         <span>AI 对话</span>
       </span>
       <div class="flex items-center gap-2" style="-webkit-app-region: no-drag">
-        <button @click="newChat" class="text-[10px] px-2 py-0.5 rounded hover:bg-white/10" style="color: var(--sb-dim)">新对话</button>
+        <button @click="newChat" class="text-xs font-medium px-2.5 py-1 rounded hover:opacity-80 transition-opacity" style="background: var(--sb-active-bg); color: var(--sb-active-text)">新对话</button>
         <button @click="closeWindow" class="aichat-close-btn" title="关闭">
           <PhXCircle size="1rem" weight="fill" />
         </button>
@@ -182,7 +228,7 @@ onUnmounted(() => {
     </div>
 
     <template v-else>
-      <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-white">
+      <div ref="messagesEl" class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3 bg-white">
         <div v-if="messages.length === 0 && !streamingContent" class="text-center py-8">
           <div class="mb-2 flex justify-center text-gray-300">
             <PhSparkle size="2rem" weight="fill" />

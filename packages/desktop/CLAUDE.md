@@ -86,6 +86,17 @@ Electron `BrowserWindow` 是一个独立 OS 窗口，宽高就是它的物理边
 ### Capture / AiChat 失焦不自动 hide
 两个快捷窗口都**只通过用户主动行为关闭**（Esc / 右上角叉 / 全局快捷键 toggle / 保存笔记后），不监听 `blur` 自动 hide。原因：拖文件到 Capture 上传时 OS file dialog 短暂抢焦点 → blur 触发 → 窗口被 hide 中断流程。如果以后真要"点别处自动收起"，要把 file dialog / Vditor emoji panel / 我们自己的 popup 这些 blur 来源全部白名单，目前没这复杂度需求。
 
+### 持久窗口 hide → show 必须 send `window-shown` IPC + renderer DOM `.focus()` 才能把 OS 焦点带过来
+Windows 上单纯 `BrowserWindow.show() + .focus()` 对 hide → show 切换的窗口**经常被 SetForegroundWindow 静默失败** (Win32 foreground lock 机制限制非前台应用 focus 别的窗口), 表现是窗口出现但任务栏闪烁、键盘焦点还在原窗口、用户输入不到快捷窗口里。**必须紧跟一个 webContents 内 DOM 元素 `.focus()` 调用** —— Chromium 内部对 DOM focus 的实现会触发 OS hwnd 激活, 间接救活 SetForegroundWindow.
+
+**实现两步**:
+1. 主进程 `toggleXxxWindow` 的"已存在分支" `show() + focus()` 之后调 `webContents.send('window-shown')`
+2. renderer 监听 `quink.onWindowShown(() => inputEl.focus())` (50ms setTimeout 给 Vue 异步 render 留缓冲), 在 `onMounted` 内一次性挂. 持久窗口 hide → show 时 onMounted 不重跑, 必须靠这条 IPC 才能每次唤出都 refocus 输入框
+
+**为啥首次创建路径不需要这套**: 首次创建走 `ready-to-show` / `content-ready` 异步等待路径, 期间 onMounted 跑了 `setTimeout(() => inputEl.focus(), 500)` 一次性 focus, 窗口刚出现 OS hwnd 激活自然成功 (跟 Win32 foreground lock 状态有关, 新窗口 createWindow 不受限). 只有 hide → show 才必须走 IPC + DOM focus.
+
+范例: `main.ts` 的 `toggleCaptureWindow` / `toggleAiChatWindow` 已存在分支 + `Capture.vue` / `AiChat.vue` 的 `onWindowShown` listener.
+
 ## preload 双轨：`preload-main.ts` 跟 `preload.ts`
 
 - **主窗口**（`createMainWindow`）用 `preload-main.ts` → 暴露 `quinkDesktop`，包含全部 IPC 接口（30+ method：syncToken / syncZoom / attachmentTasks / pickDirectory / openAttachment 等）

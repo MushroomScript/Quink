@@ -1190,6 +1190,10 @@ async function toggleAiChatWindow() {
     aiChatWindow.once('show', () => alignAiChatToZoom(currentZoomLevel));
     aiChatWindow.show();
     aiChatWindow.focus();
+    // 跟 captureWindow 一致: 通知 renderer 重新 DOM focus 输入框. Windows 上单纯 BrowserWindow.focus()
+    // 对 hidden→show 窗口经常被 SetForegroundWindow 限制 (foreground lock) 静默失败, 必须紧跟 webContents
+    // 内 DOM 元素 .focus() 让 Chromium 重新激活 hwnd, 焦点才会从原窗口真切到这里
+    aiChatWindow.webContents.send('window-shown');
   }
 }
 
