@@ -111,4 +111,10 @@ Quink web 端渲染相关坑：DOM 操作 / CSS 布局 / Vue 模板 / HMR / mark
 
 - **Windows bat 文件编码**：永远用 PowerShell `[System.IO.File]::WriteAllBytes` 写 **GBK + CRLF** 的 bat 文件，**不要**用 Write 工具（UTF-8 + LF），cmd 默认 cp936 会把 UTF-8 中文字节当命令分隔符乱读。`chcp 65001` 救不了，因为 cmd 逐行读，那一行本身就被拆了。
 
+- **Win11 Electron native `<select>` 的 dropdown popup 是 OS 控件（Win32），CSS 几乎管不到**：表现为 dark 主题下点开 `<select>` 看到的 option 列表是白底黑字，跟整体配色不协调。`color-scheme: dark` 设在 select 上 / `option { background-color }` / `option { color }` 这些常用招式在 Windows 平台 Chromium **都被忽略**（macOS / 多数 Linux 也类似，dropdown 用 OS 原生组件）。Chromium 134 也没改这点。**修法**：dark 主题下需要 dropdown 也暗色的话，**用自定义下拉代替 native `<select>`**——`<button>` 触发 + `<div>` 弹层 + `position: absolute` 锚定 + 鼠标事件选项，完全 CSS 控制。范例：`DatePicker.vue` 的时分选择（hh / mm 弹层，竖向单列，向上展开）。Settings 的下拉如果蘑菇觉得 dropdown 白色不爽也按同思路改造。
+
+- **嵌套 popup state：parent 关闭时不复位 child state，再开 parent 看到旧 child 残留**：父弹层（如 DatePicker popup）里嵌一个子弹层（如时分下拉），子弹层 open state 独立 ref。关父弹层只 set parent open=false，子 state 没动 → 下次开父弹层 → 子弹层立即出现在打开状态。**修法**：父弹层组件内 `watch(open, v => { if (!v) { childOpenA.value = false; childOpenB.value = false } })`，一个 watcher 覆盖所有"关父弹层"路径（backdrop click / Esc / 选了值自动关 / clear / 等），不用每条路径单独清。范例：`DatePicker.vue` 关 picker 时复位 `hourOpen` / `minuteOpen`。
+
+- **浏览器 UA shadow DOM 完全不可穿透**：`<input type="date">` 展开的日历面板内部、`<input type="file">` 的"选择文件"按钮、`<input type="color">` 的颜色选择器、`::-webkit-scrollbar` 滚动条本体、`<select>` 的 dropdown popup ——全是浏览器原生组件（UA shadow DOM 或 OS 控件），CSS 选择器穿不进去也覆盖不了。`color-scheme` 部分场景有效（caret-color / scrollbar 颜色 in modern Chrome）但 dropdown popup / 日历面板 / 文件选择器内部都没用。要 dark 主题完美适配只能换成自定义组件。Quink 日期输入已全部换 `DatePicker.vue`，搜索框等其他原生 input 仍依赖 UA 行为。
+
 - **`prompts.ts` 模板字符串里别嵌反引号写示例**：在 `` `...` `` 模板字符串内再写 `` ` `` 会让 tsx 解析器把模板字符串提前闭合 → server 起不来 → 没有红色编辑器警告，只有运行时崩溃。**用 「」 或 '...' 包代码/字段示例**。范例：`prompts.ts` chat prompt 里 `「label」(refId:xxx)` 写法（不要再变成 `` `「label」(refId:xxx)` ``）。

@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import 'dayjs/locale/zh-cn';
 import { RRule } from 'rrule';
 import { useNow } from '@/composables/useNow';
+import DatePicker from '@/components/DatePicker.vue';
 dayjs.locale('zh-cn');
 
 // 响应式 now: picker 开 1 小时不动时, computed 用打开瞬间的 Date.now() 算"时间是否已过"会失真.
@@ -27,7 +28,6 @@ const emit = defineEmits<{
 const localTime = ref('');
 const rruleValue = ref<string | null>(null);
 const advancedOpen = ref(false);
-const inputEl = ref<HTMLInputElement | null>(null);
 
 const PRESETS = [
   { label: '不重复', value: null },
@@ -200,7 +200,6 @@ watch(() => props.open, (v) => {
   rruleValue.value = props.rrule || null;
   advancedOpen.value = !!(props.rrule && !PRESETS.some(p => p.value === props.rrule));
   withGuiSyncDisabled(() => parseRruleToGui(props.rrule));
-  nextTick(() => inputEl.value?.focus());
 });
 
 // 切到高级模式时也同步一次 GUI (防止用户先点预设 'FREQ=YEARLY' 再展开高级, GUI 还是 DAILY 跟当前 rrule 不一致)
@@ -306,13 +305,7 @@ const canSave = computed(() => !saveBlockReason.value);
               <p class="text-sm text-gray-700 mb-3 font-medium">设置提醒</p>
 
               <label class="block text-xs text-gray-500 mb-1">提醒时间</label>
-              <input
-                ref="inputEl"
-                v-model="localTime"
-                type="datetime-local"
-                class="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:border-primary tabular-nums"
-                spellcheck="false"
-              />
+              <DatePicker v-model="localTime" type="datetime" placeholder="选择提醒时间" />
 
               <label class="block text-xs text-gray-500 mt-4 mb-2">重复规则</label>
               <div class="grid grid-cols-3 gap-2">
@@ -405,9 +398,9 @@ const canSave = computed(() => !saveBlockReason.value);
                   <label class="flex items-center gap-2 text-xs cursor-pointer h-7">
                     <input type="radio" v-model="gui.endMode" value="until" class="rrule-radio" />
                     <span>直到</span>
-                    <input v-model="gui.endUntil" type="date"
-                      class="rrule-input tabular-nums"
-                      :disabled="gui.endMode !== 'until'" />
+                    <DatePicker v-model="gui.endUntil"
+                      :disabled="gui.endMode !== 'until'"
+                      placeholder="截止日" />
                   </label>
                 </div>
               </div>

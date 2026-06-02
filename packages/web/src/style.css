@@ -132,6 +132,9 @@
 
 /* ── Dark theme ── */
 [data-theme="dark"] body, [data-theme="dark"] { color-scheme: dark; }
+/* color-scheme 不传到 <select> 内部 dropdown popup 渲染，必须给 select 自己设
+   否则 dark 主题下点开 select 看到白色 option 列表 */
+[data-theme="dark"] select, [data-theme="dark"] option { color-scheme: dark; }
 [data-theme="dark"] body { background: var(--c-body); color: #e2e8f0; }
 /* Backgrounds */
 [data-theme="dark"] .bg-white { background: #1e1e2a !important; }

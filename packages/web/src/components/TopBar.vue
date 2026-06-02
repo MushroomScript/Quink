@@ -7,6 +7,7 @@ import { markRaw } from 'vue';
 import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen, PhCalendarBlank, PhCheck, PhCaretRight } from '@phosphor-icons/vue';
 import { pinyinMatch } from '@/utils/pinyin';
 import { useToast } from '@/composables/useToast';
+import DatePicker from '@/components/DatePicker.vue';
 
 const toggleMobileSidebar = inject<() => void>('toggleMobileSidebar');
 
@@ -571,9 +572,21 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           </div>
           <span class="text-gray-200">|</span>
           <span class="text-xs text-gray-400 shrink-0">时间</span>
-          <input v-model="filterDateFrom" @change="applyFilters" type="date" class="px-2 py-1 border border-gray-200 rounded-lg text-xs outline-none bg-white" />
+          <div class="w-36">
+            <DatePicker
+              :model-value="filterDateFrom"
+              placeholder="开始"
+              @update:model-value="v => { filterDateFrom = v; applyFilters() }"
+            />
+          </div>
           <span class="text-xs text-gray-400">-</span>
-          <input v-model="filterDateTo" @change="applyFilters" type="date" class="px-2 py-1 border border-gray-200 rounded-lg text-xs outline-none bg-white" />
+          <div class="w-36">
+            <DatePicker
+              :model-value="filterDateTo"
+              placeholder="结束"
+              @update:model-value="v => { filterDateTo = v; applyFilters() }"
+            />
+          </div>
           <button @click="clearFilters"
             class="text-xs font-medium px-3 py-1 rounded-lg transition-colors ml-auto shrink-0"
             :class="hasFilters ? 'text-white bg-red-400 hover:bg-red-500' : 'text-gray-400 bg-gray-100 hover:bg-gray-200'">
@@ -656,11 +669,11 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <div class="space-y-2">
           <div>
             <label class="block text-[11px] text-gray-500 mb-0.5">开始日期</label>
-            <input v-model="store.fileDateFrom" type="date" class="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:border-primary bg-white" />
+            <DatePicker v-model="store.fileDateFrom" placeholder="开始日期" />
           </div>
           <div>
             <label class="block text-[11px] text-gray-500 mb-0.5">结束日期</label>
-            <input v-model="store.fileDateTo" type="date" class="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:border-primary bg-white" />
+            <DatePicker v-model="store.fileDateTo" placeholder="结束日期" />
           </div>
         </div>
         <!-- 即时搜索已生效,"确定"语义就是关弹窗(用户心理舒服);清除按钮挪到资源页 chip 行 -->
