@@ -5,6 +5,7 @@ import router from './router';
 import './style.css';
 import './styles/cursors-base.css';
 import './styles/loadThemeCursors';
+import './composables/useCustomCaret';
 
 const app = createApp(App);
 app.use(createPinia());
