@@ -172,7 +172,26 @@
 /* Note content */
 [data-theme="dark"] .note-content { color: #cbd5e1; }
 [data-theme="dark"] .note-content a { color: rgb(var(--c-accent)); }
-[data-theme="dark"] .note-content code { background: rgba(255,255,255,0.1); color: #f0abfc; }
+/* Inline code (dark): vditor.css `.vditor-reset code:not(.hljs):not(.highlight-chroma)` specificity 0,3,1 比我们高, 同 :not + !important 才能覆盖背景 */
+[data-theme="dark"] .note-content code:not(.hljs):not(.highlight-chroma) { background: rgba(255,255,255,0.1) !important; color: #f0abfc !important; }
+/* Pre 内 code 单独 reset: 不被上面紫色覆盖, 让 hljs syntax highlight token 颜色接管 (selector list 第二项加 :not 抬 specificity 比 inline code 规则高 1 element) */
+[data-theme="dark"] .note-content pre code,
+[data-theme="dark"] .note-content pre code:not(.hljs):not(.highlight-chroma) { background: transparent !important; color: #e2e8f0 !important; }
+/* Tables (dark, 显示态): override vditor.css 默认 tr 白底 / 偶数行纯白 + style.css th 浅白 + 浅灰边框, 否则白底 + dark 灰字看不见 */
+[data-theme="dark"] .note-content table tr { background-color: transparent !important; }
+[data-theme="dark"] .note-content table tbody tr:nth-child(2n) { background-color: rgba(255,255,255,0.03) !important; }
+[data-theme="dark"] .note-content table th { background: rgba(255,255,255,0.08) !important; }
+[data-theme="dark"] .note-content table th,
+[data-theme="dark"] .note-content table td { border-color: rgba(255,255,255,0.1) !important; }
+/* Hr (dark): vditor 默认 #eaecef + border-top #cbd5e1 在 dark 太亮 */
+[data-theme="dark"] .note-content hr { background-color: rgba(255,255,255,0.1) !important; border-top: 0 !important; height: 1px !important; }
+/* Kbd (dark): 浏览器默认白底深字 (GitHub 风格), dark 下不协调 */
+[data-theme="dark"] .note-content kbd { background: rgba(255,255,255,0.08) !important; color: #e2e8f0 !important; border-color: rgba(255,255,255,0.15) !important; }
+/* Mark 普通高亮 (dark): 浏览器默认黄底黑字, dark 下不协调; :not(.find-hl):not(.find-hl-active) 避免冲掉搜索高亮 (后面 .find-hl / .find-hl-active 段已有 dark 专属规则) */
+[data-theme="dark"] .note-content mark:not(.find-hl):not(.find-hl-active) { background: rgba(217,119,6,0.3) !important; color: #fcd34d !important; }
+/* H1 / H2 下划线 (dark): vditor 默认 border-bottom #eaecef 在 dark 偏亮 */
+[data-theme="dark"] .note-content h1,
+[data-theme="dark"] .note-content h2 { border-bottom-color: rgba(255,255,255,0.1) !important; }
 /* Vditor dark */
 [data-theme="dark"] .vditor { --panel-background-color: #1e1e2a; --textarea-background-color: #1e1e2a; }
 [data-theme="dark"] .vditor-reset { color: #e2e8f0 !important; }
