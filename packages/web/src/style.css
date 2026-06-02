@@ -154,10 +154,10 @@
 [data-theme="dark"] .text-gray-600,
 [data-theme="dark"] .text-gray-500 { color: #94a3b8 !important; }
 [data-theme="dark"] .text-gray-400 { color: #64748b !important; }
-/* Shadows */
+/* Shadows: 保留 --tw-ring-shadow 让 ring-* 类 (置顶 / selectMode 选中) 在 dark 下仍可见, 否则 !important 会把 Tailwind 合并到 box-shadow 里的 ring 段一起冲掉 */
 [data-theme="dark"] .shadow-sm,
-[data-theme="dark"] .shadow-2xl { box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important; }
-[data-theme="dark"] .hover\:shadow-md:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important; }
+[data-theme="dark"] .shadow-2xl { box-shadow: var(--tw-ring-shadow, 0 0 #0000), 0 2px 8px rgba(0,0,0,0.4) !important; }
+[data-theme="dark"] .hover\:shadow-md:hover { box-shadow: var(--tw-ring-shadow, 0 0 #0000), 0 4px 12px rgba(0,0,0,0.5) !important; }
 /* Inputs */
 [data-theme="dark"] input,
 [data-theme="dark"] textarea,
