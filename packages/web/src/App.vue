@@ -313,6 +313,11 @@ onMounted(async () => {
   // 同时拦截 /api/uploads/* 附件链接 → 桌面端调系统默认应用打开,web 端走浏览器下载。
   // 否则浏览器跟随 a.href 跳走,Electron 内嵌 chromium 对 text/markdown 等 mime 显示空白页。
   const handler = async (e: MouseEvent) => {
+    // programmatic click (link.click() / dispatchEvent) e.isTrusted=false, 跳过本 handler.
+    // 防 web fallback 死循环: web 端附件下载靠创建临时 <a download> + link.click() 触发原生下载,
+    // 那次冒泡会再次进本 handler → 又匹配 /api/uploads/ 分支 → 又 preventDefault + 又创建临时 a → 死循环,
+    // 用户感觉"点文件没反应"(浏览器后台反复发 HEAD 但原生下载被反复 preventDefault).
+    if (!e.isTrusted) return;
     if ((e.target as HTMLElement).closest?.('.voice-bubble')) return;
     const el = (e.target as HTMLElement).closest?.('a, .note-ref-link') as HTMLElement | null;
     if (!el) return;

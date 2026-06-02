@@ -104,6 +104,8 @@ Quink web 端渲染相关坑：DOM 操作 / CSS 布局 / Vue 模板 / HMR / mark
 
 ## 其他
 
+- **`document.addEventListener('click', handler, true)` 全局 capture handler 必须开头 `if (!e.isTrusted) return;`**: programmatic click (`element.click()` / `dispatchEvent`) 触发的事件也会冒泡到 document 被同一 handler 拦截 —— 如果 handler 内逻辑创建新元素再 `.click()` 就会死循环. 典型场景: web 端附件下载用临时 `<a download>` + `link.click()` 触发原生下载, 临时 a 的 click 冒泡进 handler → 又匹配 `/api/uploads/` 分支 → 又 preventDefault + 又创建临时 a + 又 click → 死循环, 用户感觉"点文件没反应"(浏览器后台反复发 HEAD 但原生下载被反复 preventDefault). `e.isTrusted` 是浏览器原生标志: 用户键鼠操作 true, 代码触发 false. handler 顶部统一跳过 isTrusted=false 比给临时元素加 dataset 标记更不易遗忘. 范例: `App.vue` 全局 click handler 顶部.
+
 - **Windows bat 文件编码**：永远用 PowerShell `[System.IO.File]::WriteAllBytes` 写 **GBK + CRLF** 的 bat 文件，**不要**用 Write 工具（UTF-8 + LF），cmd 默认 cp936 会把 UTF-8 中文字节当命令分隔符乱读。`chcp 65001` 救不了，因为 cmd 逐行读，那一行本身就被拆了。
 
 - **`prompts.ts` 模板字符串里别嵌反引号写示例**：在 `` `...` `` 模板字符串内再写 `` ` `` 会让 tsx 解析器把模板字符串提前闭合 → server 起不来 → 没有红色编辑器警告，只有运行时崩溃。**用 「」 或 '...' 包代码/字段示例**。范例：`prompts.ts` chat prompt 里 `「label」(refId:xxx)` 写法（不要再变成 `` `「label」(refId:xxx)` ``）。
