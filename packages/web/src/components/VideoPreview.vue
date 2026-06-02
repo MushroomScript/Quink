@@ -16,7 +16,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
   <Teleport to="body">
     <Transition name="fade">
       <div v-if="current"
-        class="fixed inset-0 z-[300] flex items-center justify-center bg-black/85 cursor-pointer"
+        class="fixed inset-0 z-[var(--z-modal-media)] flex items-center justify-center bg-black/85 cursor-pointer"
         @click="close">
         <!-- 视频本身不响应外层点击关闭, @click.stop 防止点 video controls 时穿透关 modal.
              禁 controlslist 全部三点菜单内项 + disablepictureinpicture, 让 Chromium overflow menu 无内容自动隐藏

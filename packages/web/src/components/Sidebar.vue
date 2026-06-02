@@ -300,7 +300,7 @@ onUnmounted(() => {
       <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
         enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-75 ease-in"
         leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
-        <div v-if="showUserMenu" class="absolute left-3 right-3 top-full mt-1 bg-sidebar-light rounded-xl shadow-xl z-50 py-1" style="border: 1px solid var(--sb-border)">
+        <div v-if="showUserMenu" class="absolute left-3 right-3 top-full mt-1 bg-sidebar-light rounded-xl shadow-xl z-[var(--z-sidebar)] py-1" style="border: 1px solid var(--sb-border)">
           <!-- 传输列表: 常驻入口, 永远可点. 无任务时点开 dock 显示空状态 -->
           <button @click="openTransferDock"
             class="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition-colors"
@@ -412,11 +412,11 @@ onUnmounted(() => {
   </aside>
 
   <Teleport to="body">
-    <div v-if="showUserMenu" class="fixed inset-0 z-40" @click="closeUserMenu" />
+    <div v-if="showUserMenu" class="fixed inset-0 z-[var(--z-sidebar-backdrop)]" @click="closeUserMenu" />
 
     <!-- 添加分类弹窗 -->
     <Transition name="modal">
-      <div v-if="showAddCategory" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="showAddCategory" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="showAddCategory = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72">
           <p class="text-sm font-medium text-gray-700 mb-3">新增分类</p>
@@ -435,7 +435,7 @@ onUnmounted(() => {
 
     <!-- 拖到回收站确认弹窗 (跟其他删除路径一致, 危险操作必须确认) -->
     <Transition name="modal">
-      <div v-if="confirmTrash" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmTrash" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="cancelTrash" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">删除内容</p>
@@ -450,7 +450,7 @@ onUnmounted(() => {
 
     <!-- 删除分类确认弹窗 -->
     <Transition name="modal">
-      <div v-if="showDeleteConfirm" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="showDeleteConfirm" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="showDeleteConfirm = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">确认删除分类</p>

@@ -189,7 +189,7 @@ onUnmounted(() => {
     <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
       leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
       <div v-if="menu.visible"
-        class="media-context-menu fixed z-[400] bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[150px] origin-top-left"
+        class="media-context-menu fixed z-[var(--z-context-menu)] bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[150px] origin-top-left"
         :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
         <!-- 图片菜单:预览 + 下载 -->
         <template v-if="menu.kind === 'image'">

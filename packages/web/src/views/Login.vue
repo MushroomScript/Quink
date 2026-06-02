@@ -42,7 +42,7 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
     <!-- Background glow -->
     <div class="absolute top-1/4 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none" style="background: rgb(var(--c-accent) / 0.15)"></div>
 
-    <div class="w-full max-w-sm relative z-10">
+    <div class="w-full max-w-sm relative z-[var(--z-sticky)]">
       <div class="text-center mb-8 select-none">
         <img :src="`/quink-${currentTheme}-192.png`" alt="Quink" class="w-20 h-20 mx-auto mb-4" draggable="false" />
         <h1 class="text-4xl font-bold tracking-tight" style="color: rgb(var(--c-accent))">Quink</h1>

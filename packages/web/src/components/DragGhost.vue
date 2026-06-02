@@ -7,7 +7,7 @@ import { dragState } from '@/utils/cardDnd';
 <template>
   <Teleport to="body">
     <div v-if="dragState.active"
-      class="pointer-events-none fixed z-[9999]"
+      class="pointer-events-none fixed z-[var(--z-overlay)]"
       :style="{ left: (dragState.ghostX + 12) + 'px', top: (dragState.ghostY + 12) + 'px' }">
       <div class="bg-white border border-gray-300 rounded-lg shadow-lg px-3 py-1.5 text-xs text-gray-700 max-w-[220px] truncate opacity-90">
         {{ dragState.ghostText }}

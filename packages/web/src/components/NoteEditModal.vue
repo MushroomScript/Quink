@@ -98,7 +98,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', onKeydown, true)
          fixed inset-0 被困在小窗口尺寸里(transform 祖先成为 containing block),
          看着像"小窗一闪过"。非全屏走 modal(有 scale,正常体验)。 -->
     <Transition :name="initialFullscreen ? 'modal-fade' : 'modal'" @after-leave="onAfterLeave">
-    <div v-if="showInner" class="fixed inset-0 z-[100] flex items-center justify-center">
+    <div v-if="showInner" class="fixed inset-0 z-[var(--z-modal-edit)] flex items-center justify-center">
       <!-- Backdrop: 毛玻璃 -->
       <div class="absolute inset-0 bg-black/40 backdrop-blur-md" @click="tryClose" />
 
@@ -129,7 +129,6 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', onKeydown, true)
             :focus-end="true"
             :max-height="450"
             submit-label="保存"
-            :z-index="110"
             @submit="onSubmit"
           />
         </div>
@@ -138,7 +137,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', onKeydown, true)
       <!-- 未保存确认弹窗 -->
       <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="opacity-0 scale-95"
         leave-active-class="transition duration-100 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
-        <div v-if="showConfirm" class="absolute inset-0 z-10 flex items-center justify-center">
+        <div v-if="showConfirm" class="absolute inset-0 z-[var(--z-sticky)] flex items-center justify-center">
           <div class="absolute inset-0 bg-black/20" @click="showConfirm = false" />
           <div class="relative bg-white rounded-xl shadow-xl p-6 w-80 text-center">
             <p class="text-sm text-gray-700 mb-1">内容尚未保存</p>

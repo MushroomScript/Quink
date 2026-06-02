@@ -305,7 +305,7 @@ onUnmounted(() => {
       <!-- 顶部卡片：灵感/笔记/待办/资源/标签/回收站/活跃天数;hover scale + shadow,relative+z-10 让浮起来盖到邻居上;点击跳对应 view(活跃天数 path=null 不跳) -->
       <div class="grid grid-cols-7 gap-3 mb-6">
         <div v-for="card in topCards" :key="card.label"
-          class="bg-white rounded-xl border border-gray-200 p-3 flex flex-col items-center text-center relative transition-all duration-200 hover:scale-105 hover:shadow-md hover:z-10"
+          class="bg-white rounded-xl border border-gray-200 p-3 flex flex-col items-center text-center relative transition-all duration-200 hover:scale-105 hover:shadow-md hover:z-[var(--z-sticky)]"
           :class="card.path ? 'cursor-pointer' : 'cursor-default'"
           @click="card.path && router.push(card.path)">
           <div class="w-8 h-8 rounded-lg flex items-center justify-center mb-2" :class="card.color">
@@ -389,7 +389,7 @@ onUnmounted(() => {
     <!-- 热力图 cell tooltip: Teleport 到 body 跨过祖先容器;每种类型一行,数字右对齐(tabular-nums 等宽避免抖) -->
     <Teleport to="body">
       <div v-if="tooltip.visible"
-        class="fixed z-[9999] pointer-events-none bg-gray-800 text-white text-xs px-3 py-2 rounded-lg shadow-lg whitespace-nowrap min-w-[7rem]"
+        class="fixed z-[var(--z-overlay)] pointer-events-none bg-gray-800 text-white text-xs px-3 py-2 rounded-lg shadow-lg whitespace-nowrap min-w-[7rem]"
         :style="{ top: tooltip.top, left: tooltip.left, transform: 'translate(-50%, -100%)' }">
         <div class="font-medium tabular-nums">{{ tooltip.date }}</div>
         <template v-if="tooltip.parts.length">

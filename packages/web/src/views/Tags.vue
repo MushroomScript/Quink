@@ -118,7 +118,7 @@ watch(() => visibleTags.value.length, () => snapshotCards(), { flush: 'sync' });
     <!-- 重命名弹窗 -->
     <Teleport to="body">
       <Transition name="modal">
-        <div v-if="editingTag" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div v-if="editingTag" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
           <div class="absolute inset-0 bg-black/30" @click="editingTag = ''" />
           <div class="relative bg-white rounded-xl shadow-xl p-6 w-80 space-y-4">
             <h3 class="text-sm font-medium text-gray-800">重命名标签</h3>
@@ -136,7 +136,7 @@ watch(() => visibleTags.value.length, () => snapshotCards(), { flush: 'sync' });
     <!-- 删除确认弹窗 -->
     <Teleport to="body">
       <Transition name="modal">
-        <div v-if="confirmDeleteTag" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div v-if="confirmDeleteTag" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
           <div class="absolute inset-0 bg-black/30" @click="confirmDeleteTag = ''" />
           <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
             <p class="text-sm text-gray-700 mb-1">删除标签 #{{ confirmDeleteTag }}</p>

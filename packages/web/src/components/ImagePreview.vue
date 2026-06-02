@@ -73,7 +73,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown));
     <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="opacity-0"
       leave-active-class="transition duration-100 ease-in" leave-to-class="opacity-0">
       <div v-if="isOpen && currentImage"
-        class="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 cursor-zoom-out"
+        class="fixed inset-0 z-[var(--z-modal-media)] flex items-center justify-center bg-black/80 cursor-zoom-out"
         @click="close" @wheel="handleWheel">
         <img :src="currentImage.url" :alt="currentImage.filename" draggable="false"
           @mousedown="handleImageMouseDown" @click.stop="handleImageClick"

@@ -317,7 +317,7 @@ const typeColor: Record<string, string> = {
           </svg>
         </div>
         <!-- type chip 在非 selectMode 时充当拖动 handle (整卡片不 draggable, 让正文可选文字); selectMode 时不需要它单独拖, 整卡片接管 -->
-        <span class="text-[11px] px-2 py-0.5 rounded-full font-medium select-none touch-none"
+        <span class="text-[11px] px-2 pt-px pb-[3px] rounded-full font-medium select-none touch-none"
           :class="[typeColor[note.type], !store.selectMode ? 'cursor-grab active:cursor-grabbing' : '']"
           @pointerdown.stop="!store.selectMode ? onPointerDown($event) : undefined">
           {{ typeLabels[note.type] }}
@@ -360,7 +360,7 @@ const typeColor: Record<string, string> = {
     <Teleport to="body">
       <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
         leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
-        <div v-if="showMenu" class="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[9999] min-w-[110px] [&_svg]:mt-px"
+        <div v-if="showMenu" class="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[var(--z-overlay)] min-w-[110px] [&_svg]:mt-px"
           :style="menuPos">
           <button @click.stop="store.togglePin(note.id); showMenu = false"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
@@ -397,7 +397,7 @@ const typeColor: Record<string, string> = {
           </button>
         </div>
       </Transition>
-      <div v-if="showMenu" class="fixed inset-0 z-[9998]" @click="showMenu = false" />
+      <div v-if="showMenu" class="fixed inset-0 z-[var(--z-overlay-backdrop)]" @click="showMenu = false" />
     </Teleport>
 
     <!-- 提醒设置弹窗 -->
@@ -411,7 +411,7 @@ const typeColor: Record<string, string> = {
     <!-- 删除确认弹窗 -->
     <Teleport to="body">
       <Transition name="modal">
-        <div v-if="confirmDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
+        <div v-if="confirmDelete" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
           <div class="absolute inset-0 bg-black/30" @click="confirmDelete = false" />
           <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
             <p class="text-sm text-gray-700 mb-1">删除内容</p>

@@ -91,7 +91,7 @@ function ensureElements() {
       `width:${CARET_WIDTH}px`,
       'background:rgb(var(--c-accent))',
       'pointer-events:none',
-      'z-index:2147483646', // 比常用 modal 高，但低于 toast
+      'z-index:var(--z-caret)', // 比所有 OS 控件 + 编辑器内置 caret 都高,详见根 Z-INDEX-SCALE.md
       'border-radius:1.5px',
       'display:none',
       'animation:quink-caret-blink 1.1s steps(2, start) infinite',

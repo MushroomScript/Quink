@@ -910,7 +910,7 @@ onUnmounted(() => {
     @drop="onExtDrop">
     <!-- Sticky toolbar — 在 wrapper 之外, 不被 blur. data-resources-toolbar 给遮罩计算 top 用 (遮罩贴它的下边线) -->
     <div data-resources-toolbar
-      class="sticky top-0 z-10 -mx-4 md:-mx-8 px-4 md:px-6 pt-[8px] pb-[10px] mb-4 flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/80"
+      class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-6 pt-[8px] pb-[10px] mb-4 flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/80"
       style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <template v-if="selectMode">
         <p class="text-xs text-primary-dark font-medium">已选 {{ selectedIds.size }} 项</p>
@@ -1090,7 +1090,7 @@ onUnmounted(() => {
             ]"
             @click="onCardClick($event, f)" @pointerdown="onFilePointerDown($event, f)">
             <div class="h-32 bg-gray-50 flex items-center justify-center overflow-hidden relative">
-              <div v-if="selectMode" class="absolute top-2 left-2 z-10 w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
+              <div v-if="selectMode" class="absolute top-2 left-2 z-[var(--z-sticky)] w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
                 :class="selectedIds.has(f.id) ? 'bg-primary border-primary' : 'border-gray-400 bg-white/80'">
                 <svg v-if="selectedIds.has(f.id)" class="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none">
                   <path d="M5 12l5 5L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
@@ -1264,7 +1264,7 @@ onUnmounted(() => {
          上 = toolbar bottom, 右 = main 右边, 下 = main 底边 (随时跟着 main resize 自动更新) -->
     <Transition name="ext-drop">
       <div v-if="isDraggingFiles"
-        class="fixed z-30 pointer-events-none border-[3px] border-dashed border-primary rounded-xl bg-white/70 flex items-center justify-center"
+        class="fixed z-[var(--z-drop-hint)] pointer-events-none border-[3px] border-dashed border-primary rounded-xl bg-white/70 flex items-center justify-center"
         :style="overlayStyle">
         <p class="text-primary text-5xl font-bold select-none opacity-70">
           上传文件到当前目录下
@@ -1277,7 +1277,7 @@ onUnmounted(() => {
   <!-- 文件重命名弹窗 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="renameTarget" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="renameTarget" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="renameTarget = null" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-80">
           <p class="text-sm text-gray-700 mb-1">重命名文件</p>
@@ -1299,7 +1299,7 @@ onUnmounted(() => {
   <!-- 文件删除确认 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmDeleteId" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmDeleteId" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmDeleteId = ''" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">删除文件</p>
@@ -1316,7 +1316,7 @@ onUnmounted(() => {
   <!-- 批量删除确认 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmBatchDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmBatchDelete" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmBatchDelete = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">批量删除</p>
@@ -1333,7 +1333,7 @@ onUnmounted(() => {
   <!-- 新建文件夹弹窗 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="createFolderOpen" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="createFolderOpen" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="createFolderOpen = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-80">
           <p class="text-sm text-gray-700 mb-3">新建文件夹</p>
@@ -1354,7 +1354,7 @@ onUnmounted(() => {
   <!-- 文件夹重命名 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="renameFolderTarget" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="renameFolderTarget" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="renameFolderTarget = null" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-80">
           <p class="text-sm text-gray-700 mb-3">重命名文件夹</p>
@@ -1375,7 +1375,7 @@ onUnmounted(() => {
   <!-- 文件夹删除确认 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmDeleteFolderId" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmDeleteFolderId" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmDeleteFolderId = ''" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-80">
           <p class="text-sm text-gray-700 mb-1 text-center">删除文件夹</p>
@@ -1396,7 +1396,7 @@ onUnmounted(() => {
   </Teleport>
 
   <!-- 拖动 ghost (fixed 跟鼠标移动, 显示拖动的文件名 / 数量) -->
-  <div v-if="dragState.active" class="fixed pointer-events-none z-[9999] bg-white px-3 py-2 rounded-lg shadow-lg border border-primary text-xs text-gray-700 font-medium"
+  <div v-if="dragState.active" class="fixed pointer-events-none z-[var(--z-overlay)] bg-white px-3 py-2 rounded-lg shadow-lg border border-primary text-xs text-gray-700 font-medium"
     :style="{ left: dragState.ghostX + 12 + 'px', top: dragState.ghostY + 12 + 'px' }">
     {{ dragState.text }}
   </div>
@@ -1404,7 +1404,7 @@ onUnmounted(() => {
   <!-- 移动到... 弹窗 (展开整个文件夹树) -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="moveTargetOpen" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="moveTargetOpen" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="moveTargetOpen = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 max-h-[70vh] flex flex-col">
           <p class="text-sm text-gray-700 mb-3">移动 {{ selectedIds.size }} 个文件到...</p>
@@ -1434,7 +1434,7 @@ onUnmounted(() => {
   <!-- 大文件单击确认: 防止误点 100MB+ 文件白下载 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmOpenFile" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmOpenFile" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmOpenFile = null" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 text-center">
           <p class="text-sm text-gray-700 mb-4 break-all">

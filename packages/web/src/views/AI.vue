@@ -701,7 +701,7 @@ async function retryLastMessage() {
     </div>
 
     <!-- 手机端对话列表抽屉 -->
-    <div v-if="showMobileConvs" class="fixed inset-0 z-50 md:hidden">
+    <div v-if="showMobileConvs" class="fixed inset-0 z-[var(--z-sidebar)] md:hidden">
       <div class="absolute inset-0 bg-black/40" @click="showMobileConvs = false" />
       <div class="absolute left-0 top-0 bottom-0 w-64 bg-white shadow-2xl flex flex-col" @click.stop>
         <div class="p-3 space-y-2">
@@ -901,7 +901,7 @@ async function retryLastMessage() {
   <!-- 删除确认弹窗 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmDeleteId" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmDeleteId" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmDeleteId = ''" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">删除对话</p>

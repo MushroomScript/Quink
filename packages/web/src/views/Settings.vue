@@ -7,6 +7,7 @@ import { api } from '@/api';
 import { collapseLeave, snapshotCards } from '@/utils/cardLeave';
 import { useTheme } from '@/composables/useTheme';
 import ToggleSwitch from '@/components/ToggleSwitch.vue';
+import CustomSelect from '@/components/CustomSelect.vue';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 
 const router = useRouter();
@@ -652,7 +653,7 @@ function goBack() {
 <template>
   <div class="px-4 md:px-8 pb-8 select-none" @keydown="handleShortcutKeydown">
     <!-- Tabs (sticky 锁顶, 跟资源页 toolbar 同款: -mx 抵消 root padding 占全宽, bg 半透明, 顶部 box-shadow 分隔) -->
-    <div class="sticky top-0 z-10 -mx-4 md:-mx-8 px-4 md:px-8 pt-[8px] mb-6 flex flex-wrap gap-1 border-b border-gray-200 bg-gray-50"
+    <div class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-8 pt-[8px] mb-6 flex flex-wrap gap-1 border-b border-gray-200 bg-gray-50"
       style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <button
         v-for="tab in tabs"
@@ -770,16 +771,16 @@ function goBack() {
         </div>
         <div>
           <label class="block text-xs font-medium text-gray-500 mb-1">显示比例</label>
-          <select v-model.number="prefs.zoomLevel" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none">
-            <option value="75">75%</option>
-            <option value="80">80%</option>
-            <option value="90">90%</option>
-            <option value="100">100%（默认）</option>
-            <option value="110">110%</option>
-            <option value="125">125%</option>
-            <option value="150">150%</option>
-            <option value="200">200%</option>
-          </select>
+          <CustomSelect v-model="prefs.zoomLevel" size="md" class="w-full" :options="[
+            { value: 75, label: '75%' },
+            { value: 80, label: '80%' },
+            { value: 90, label: '90%' },
+            { value: 100, label: '100%（默认）' },
+            { value: 110, label: '110%' },
+            { value: 125, label: '125%' },
+            { value: 150, label: '150%' },
+            { value: 200, label: '200%' },
+          ]" />
         </div>
         <!-- 待办未完成数字提示 -->
         <div class="flex items-center justify-between pt-2 border-t border-gray-100">
@@ -796,15 +797,15 @@ function goBack() {
               <div class="text-sm text-gray-700 font-medium">回收站保留时间</div>
               <div class="text-xs text-gray-400 mt-0.5">超过此时长的已删除内容会自动永久删除</div>
             </div>
-            <select v-model.number="prefs.trashRetentionDays" class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none bg-white">
-              <option :value="7">7 天</option>
-              <option :value="14">14 天</option>
-              <option :value="30">30 天</option>
-              <option :value="60">60 天</option>
-              <option :value="90">90 天</option>
-              <option :value="180">180 天</option>
-              <option :value="0">永久保留</option>
-            </select>
+            <CustomSelect v-model="prefs.trashRetentionDays" size="compact" :options="[
+              { value: 7, label: '7 天' },
+              { value: 14, label: '14 天' },
+              { value: 30, label: '30 天' },
+              { value: 60, label: '60 天' },
+              { value: 90, label: '90 天' },
+              { value: 180, label: '180 天' },
+              { value: 0, label: '永久保留' },
+            ]" />
           </div>
         </div>
         <!-- 下载目录 (本地配置, localStorage 存, 不跨设备同步因为 path 跟 OS 相关).
@@ -970,12 +971,12 @@ function goBack() {
             </div>
             <div>
               <label class="block text-xs text-gray-500 mb-1">服务商</label>
-              <select v-model="editingConfig.provider" @change="() => {
-                const p = aiProviderOptions.find(x => x.id === editingConfig!.provider);
-                if (p) { editingConfig!.baseUrl = p.defaultUrl; editingConfig!.model = p.defaultModel; }
-              }" class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none">
-                <option v-for="p in aiProviderOptions" :key="p.id" :value="p.id">{{ p.label }}</option>
-              </select>
+              <CustomSelect v-model="editingConfig.provider" size="compact" class="w-full"
+                :options="aiProviderOptions.map(p => ({ value: p.id, label: p.label }))"
+                @change="() => {
+                  const p = aiProviderOptions.find(x => x.id === editingConfig!.provider);
+                  if (p) { editingConfig!.baseUrl = p.defaultUrl; editingConfig!.model = p.defaultModel; }
+                }" />
             </div>
           </div>
           <div>
@@ -1014,10 +1015,11 @@ function goBack() {
         <div class="space-y-3">
           <div v-for="f in aiFeatures" :key="f.key" class="flex items-center justify-between">
             <span class="text-sm text-gray-600">{{ f.label }}</span>
-            <select v-model="aiBindings[f.key]" @change="onBindingChange" class="w-48 px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none">
-              <option v-if="aiConfigs.length === 0" value="" disabled>请先创建 AI 配置</option>
-              <option v-for="cfg in aiConfigs" :key="cfg.id" :value="cfg.id">{{ cfg.name }}</option>
-            </select>
+            <CustomSelect v-model="aiBindings[f.key]" size="compact" class="w-48"
+              :disabled="aiConfigs.length === 0"
+              :placeholder="aiConfigs.length === 0 ? '请先创建 AI 配置' : '请选择'"
+              :options="aiConfigs.map(cfg => ({ value: cfg.id, label: cfg.name }))"
+              @change="onBindingChange" />
           </div>
         </div>
       </div>
@@ -1082,17 +1084,17 @@ function goBack() {
         <!-- Token 上限 -->
         <div class="flex items-center justify-between">
           <div class="text-xs text-gray-600">上下文 Token 上限</div>
-          <select v-model.number="prefs.aiChatMaxTokens" class="px-2 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/30">
-            <option :value="4096">4K</option>
-            <option :value="8192">8K</option>
-            <option :value="16384">16K</option>
-            <option :value="32768">32K</option>
-            <option :value="65536">64K</option>
-            <option :value="131072">128K</option>
-            <option :value="262144">256K</option>
-            <option :value="524288">512K</option>
-            <option :value="1048576">1M</option>
-          </select>
+          <CustomSelect v-model="prefs.aiChatMaxTokens" size="sm" :options="[
+            { value: 4096, label: '4K' },
+            { value: 8192, label: '8K' },
+            { value: 16384, label: '16K' },
+            { value: 32768, label: '32K' },
+            { value: 65536, label: '64K' },
+            { value: 131072, label: '128K' },
+            { value: 262144, label: '256K' },
+            { value: 524288, label: '512K' },
+            { value: 1048576, label: '1M' },
+          ]" />
         </div>
       </div>
     </div>
@@ -1141,13 +1143,13 @@ function goBack() {
             </div>
             <div>
               <label class="block text-xs text-gray-500 mb-1">类型</label>
-              <select v-model="editingChannel.type" :disabled="!!editingChannel.id"
-                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none disabled:opacity-50">
-                <option v-for="t in channelTypeOptions" :key="t.id" :value="t.id"
-                  :disabled="t.id === 'browser' && hasBrowserChannel && editingChannel.type !== 'browser'">
-                  {{ t.label }}{{ t.id === 'browser' && hasBrowserChannel && editingChannel.type !== 'browser' ? ' (已添加)' : '' }}
-                </option>
-              </select>
+              <CustomSelect v-model="editingChannel.type" size="compact" class="w-full"
+                :disabled="!!editingChannel.id"
+                :options="channelTypeOptions.map(t => ({
+                  value: t.id,
+                  label: t.label + (t.id === 'browser' && hasBrowserChannel && editingChannel!.type !== 'browser' ? ' (已添加)' : ''),
+                  disabled: t.id === 'browser' && hasBrowserChannel && editingChannel!.type !== 'browser',
+                }))" />
             </div>
           </div>
           <p class="text-xs text-gray-400 -mt-1">{{ channelTypeOptions.find(o => o.id === editingChannel?.type)?.description }}</p>

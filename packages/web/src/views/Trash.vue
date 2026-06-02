@@ -265,7 +265,7 @@ function onLeave(el: Element, done: () => void) {
          根 div 顶部 padding 必须去掉 (改 pb-6 只留底部) 否则 sticky 不立即钉住. 资源页加同款多选时复用这套 class. -->
     <!-- v-if 用 allNotes.length: 搜索没结果时也保留工具栏, 让用户能继续退出搜索 / 多选 / 恢复所有 -->
     <div v-if="allNotes.length > 0"
-      class="sticky top-0 z-10 -mx-4 md:-mx-8 px-4 md:px-6 pt-[8px] pb-[10px] mb-4 flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/80"
+      class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-6 pt-[8px] pb-[10px] mb-4 flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/80"
       style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <p v-if="!selectMode" class="text-xs text-gray-400">{{ notes.length }} 条已删除的内容</p>
       <p v-else class="text-xs text-primary-dark font-medium">已选 {{ selectedIds.size }} 条</p>
@@ -330,7 +330,7 @@ function onLeave(el: Element, done: () => void) {
                     <path d="M5 12l5 5L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
                   </svg>
                 </div>
-                <span class="text-[11px] px-2 py-0.5 rounded-full font-medium select-none" :class="typeColor[n.type]">
+                <span class="text-[11px] px-2 pt-px pb-[3px] rounded-full font-medium select-none" :class="typeColor[n.type]">
                   {{ typeLabels[n.type] }}
                 </span>
                 <span v-if="n.category" class="text-xs text-gray-400" v-html="highlightText(n.category)" />
@@ -370,7 +370,7 @@ function onLeave(el: Element, done: () => void) {
   <!-- 永久删除确认弹窗 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmDeleteId" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmDeleteId" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmDeleteId = ''" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">永久删除</p>
@@ -387,7 +387,7 @@ function onLeave(el: Element, done: () => void) {
   <!-- 清空回收站确认弹窗 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmEmpty" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmEmpty" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmEmpty = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">清空回收站</p>
@@ -404,7 +404,7 @@ function onLeave(el: Element, done: () => void) {
   <!-- 恢复确认弹窗 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmRestoreId" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmRestoreId" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmRestoreId = ''" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">恢复内容</p>
@@ -421,7 +421,7 @@ function onLeave(el: Element, done: () => void) {
   <!-- 恢复所有确认弹窗 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmRestoreAll" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmRestoreAll" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmRestoreAll = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">恢复所有</p>
@@ -438,7 +438,7 @@ function onLeave(el: Element, done: () => void) {
   <!-- 批量恢复确认弹窗 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmBatchRestore" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmBatchRestore" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmBatchRestore = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">批量恢复</p>
@@ -455,7 +455,7 @@ function onLeave(el: Element, done: () => void) {
   <!-- 批量永久删除确认弹窗 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmBatchDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmBatchDelete" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmBatchDelete = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">批量永久删除</p>

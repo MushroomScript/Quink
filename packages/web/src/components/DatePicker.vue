@@ -363,11 +363,11 @@ onBeforeUnmount(() => {
 .qdp-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 299;
+  z-index: var(--z-datepicker-backdrop);
 }
 .qdp-popup {
   position: fixed;
-  z-index: 300;
+  z-index: var(--z-modal-media);
   background: white;
   border-radius: 12px;
   border: 1px solid rgb(0 0 0 / 0.06);

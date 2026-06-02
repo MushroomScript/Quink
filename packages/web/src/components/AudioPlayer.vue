@@ -139,7 +139,7 @@ function syncFromAudio() {
     <div v-if="showVolumePopover"
       @mouseenter="onVolumeMouseEnter"
       @mouseleave="onVolumeMouseLeave"
-      class="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-md p-2 w-10"
+      class="fixed z-[var(--z-overlay)] bg-white border border-gray-200 rounded-lg shadow-md p-2 w-10"
       :style="volumePopoverPos">
       <!-- 竖向 slider: rotate(-90deg) 把水平 range 转成竖直; track 用 linear-gradient 自定义填充主色 + 未填充浅灰 (-webkit-appearance:none 关掉 chromium 默认黑色 track) -->
       <div class="relative w-6 h-24 flex items-center justify-center">

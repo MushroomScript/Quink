@@ -49,6 +49,6 @@ async function submit() {
 
   <Transition enter-active-class="transition duration-200" enter-from-class="opacity-0 translate-y-2"
     leave-active-class="transition duration-150" leave-to-class="opacity-0 translate-y-2">
-    <div v-if="showToast" class="fixed bottom-20 left-1/2 -translate-x-1/2 bg-green-600 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-50">已保存</div>
+    <div v-if="showToast" class="fixed bottom-20 left-1/2 -translate-x-1/2 bg-green-600 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-[var(--z-sidebar)]">已保存</div>
   </Transition>
 </template>

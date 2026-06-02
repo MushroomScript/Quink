@@ -541,7 +541,7 @@ watch(() => auth.user, (user) => {
         </div>
 
       <!-- Mobile sidebar drawer -->
-      <div v-if="showMobileSidebar" class="fixed inset-0 z-50 md:hidden">
+      <div v-if="showMobileSidebar" class="fixed inset-0 z-[var(--z-sidebar)] md:hidden">
         <div class="absolute inset-0 bg-black/40" @click="showMobileSidebar = false" />
         <div class="absolute left-0 -top-[200px] -bottom-[200px] w-60 shadow-2xl overflow-y-auto bg-sidebar pt-[200px] pb-[200px]" @click.stop>
           <Sidebar />
@@ -570,10 +570,10 @@ watch(() => auth.user, (user) => {
 
     <NoteEditModal v-if="editingNote" :note="editingNote" :initial-fullscreen="editFullscreen" @close="closeEditModal" />
 
-    <!-- 引用预览 Modal(z-150 覆盖编辑 modal z-100) -->
+    <!-- 引用预览 Modal(z-modal-preview 覆盖编辑 modal z-modal-edit) -->
     <Teleport to="body">
       <Transition name="modal">
-      <div v-if="refPreviewNote && !refPreviewHidden" class="fixed inset-0 z-[150] flex items-center justify-center">
+      <div v-if="refPreviewNote && !refPreviewHidden" class="fixed inset-0 z-[var(--z-modal-preview)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30 backdrop-blur-sm" @click="goBackRefPreview" />
         <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 max-h-[70vh] flex flex-col overflow-hidden ring-1 ring-black/5">
           <div class="flex items-center justify-between px-5 py-3 bg-gray-50/80 shrink-0">

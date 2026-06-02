@@ -37,7 +37,6 @@ const props = withDefaults(defineProps<{
   placeholder?: string;
   showTypeSelector?: boolean;
   submitLabel?: string;
-  zIndex?: number;
   minHeight?: number;
   maxHeight?: number;
   showAi?: boolean;
@@ -53,7 +52,6 @@ const props = withDefaults(defineProps<{
   showTypeSelector: true,
   submitLabel: '保存',
   showAi: true,
-  zIndex: 50,
   minHeight: 120,
   maxHeight: 320,
   showFullscreenBtn: true,
@@ -112,7 +110,7 @@ function getPopupPos(el: HTMLElement | undefined, width: number) {
     position: 'fixed' as const,
     bottom: `${window.innerHeight - r.top + 4}px`,
     left: `${Math.max(r.right - width, 8)}px`,
-    zIndex: 9999,
+    zIndex: 9999, // var(--z-overlay), JS inline 取不到 CSS var, 跟 scale 保持同档, 见根 Z-INDEX-SCALE.md
     maxHeight: `${maxH}px`,
     display: 'flex',
     flexDirection: 'column' as const,
@@ -720,7 +718,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
     :data-fullscreen="isFullscreen || undefined"
     :style="{ viewTransitionName: vtName }"
     :class="isFullscreen
-      ? 'fixed inset-0 z-[200] bg-white flex flex-col'
+      ? 'fixed inset-0 z-[var(--z-modal)] bg-white flex flex-col'
       : 'flex flex-col'">
     <!-- Vditor editor -->
     <!-- minHeight 占位精确等于 Vditor 加载完会设置的值 (Vditor 源码会执行
@@ -871,7 +869,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 
   <!-- Popups: Teleport 到 body,不受 modal overflow-hidden 裁剪 -->
   <Teleport to="body">
-    <div v-if="showTagInput || showRefSearch" class="fixed inset-0" style="z-index: 9998" @click="closePopups" />
+    <div v-if="showTagInput || showRefSearch" class="fixed inset-0" style="z-index: var(--z-overlay-backdrop)" @click="closePopups" />
     <!-- Tag popup -->
     <div v-if="showTagInput" class="bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex items-center gap-2 whitespace-nowrap"
       :style="getPopupPos(tagBtnEl, 220)">
@@ -904,7 +902,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
   <!-- 自定义 vditor toolbar tooltip: Teleport 到 body,脱离 main overflow 裁切 -->
   <Teleport to="body">
     <div v-if="customTooltip.visible"
-         class="fixed z-[10000] px-2 py-1 bg-gray-800 text-white text-[11px] rounded shadow-lg pointer-events-none whitespace-nowrap"
+         class="fixed z-[var(--z-tooltip)] px-2 py-1 bg-gray-800 text-white text-[11px] rounded shadow-lg pointer-events-none whitespace-nowrap"
          :style="{ top: customTooltip.top + 'px', left: customTooltip.left + 'px', transform: 'translateX(-50%)' }">
       {{ customTooltip.text }}
     </div>

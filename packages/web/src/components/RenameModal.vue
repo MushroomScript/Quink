@@ -69,7 +69,7 @@ function onCancel() {
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="open" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="open" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="onCancel" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-80">
           <p class="text-sm text-gray-700 mb-3">{{ title || '重命名' }}</p>

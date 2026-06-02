@@ -22,6 +22,7 @@
 | 根 `ICONS.md` | 图标系统约定 | 手动（改图标时来读） |
 | 根 `RENDERING-PITFALLS.md` | 渲染相关坑（DOM/CSS/Vue/HMR/markdown/Vditor/动画/鼠标事件） | 手动（改 UI / markdown / 编辑器 / 列表动画时来读） |
 | 根 `THUMBNAILS.md` | 静态图片缩略图体系（sharp 后端生成 / thumb URL helper / 显示约定） | 手动（改头像 / 资源缩略图 / upload.ts sharp / 加新图片显示场景时来读） |
+| 根 `Z-INDEX-SCALE.md` | z-index 体系（CSS 变量 scale 总表 / 用法 / 现存 quirks） | 手动（加新弹层 / popup / modal / overlay 时来读） |
 | `packages/server/CLAUDE.md` | 后端专属（认证 / 数据库 / 文件上传后端逻辑 / 重命名同步） | 在该 package 工作时自动 |
 | `packages/server/src/ai/CLAUDE.md` | AI 系统（多配置 / FC v2 / 自动处理 / `{categories}` 占位 / 弱模型适配 / chat prompt / label 透传） | 在该子目录工作时自动 |
 | `packages/web/CLAUDE.md` | 前端专属（主题系统 / 移动端 / Vditor 静态文件 / 笔记类型→view 映射 / 文件 url helper） | 在该 package 工作时自动 |
@@ -141,6 +142,7 @@ pnpm run dev:desktop
 - **图标系统** —— `@phosphor-icons/vue`、PhXCircle vs PhX、weight/size 规则、v-html 内嵌、视觉中心偏移 nudge。详见 **`ICONS.md`**。改图标相关代码前先读那里
 - **渲染坑** —— DOM / CSS / Vue 模板 / HMR / markdown 渲染 / Vditor 编辑器 / TransitionGroup 动画 / 拖动鼠标事件。详见 **`RENDERING-PITFALLS.md`**。改 UI / markdown / 编辑器 / 列表动画前先去那里查
 - **静态图片缩略图** —— sharp / libheif 后端生成 `.thumb.jpg` / 前端 `<img>` thumb URL + onError 降级 / 别用 background-image。详见 **`THUMBNAILS.md`**。改头像 / 资源缩略图 / upload.ts sharp 行为 / 加新图片显示场景前先读那里
+- **z-index 体系** —— 全项目走 CSS 变量(`--z-sticky` / `--z-modal` / `--z-overlay` 等),代码里只写变量名不写数字。详见 **`Z-INDEX-SCALE.md`**。加新弹层 / popup / modal / overlay / dropdown 前先读那里
 - **AI 系统（后端）** —— 多配置 / 按功能绑定 / FC v2 / `{categories}` 占位 / 弱模型适配 / chat prompt 三大块 / 引用 label 透传。详见 `packages/server/src/ai/CLAUDE.md`（在该子目录工作时自动加载）
 - **卡片拖放（DnD）** —— pointer events 不用 HTML5 DnD / dropzone 协议表 / AI 拖入兜底 / audio anchor 例外。详见 **`packages/web/CARDDND.md`**。改 NoteCard 拖动 / Sidebar drop target / cardDnd / AI 拖入相关前先读那里
 - **鼠标光标（Bibata 7 主题）** —— SVG 模板 + `$F$`/`$S$` 占位色脚本生成 / 7 主题 × 15 cursor / `loadThemeCursors` 按 `data-theme` 动态 `<link>` / 项目内写 cursor 必须用 `var(--cur-X), X` 否则 specificity 输 / Vditor / OS 窗口 / UA shadow DOM 改不了。详见 **`packages/web/CURSORS.md`**。改主题色 / 加新 cursor / 项目内写 `cursor: pointer` 前先读那里

@@ -118,7 +118,7 @@ onUnmounted(() => {
   position: absolute;
   top: 0;
   right: 0.25rem;
-  z-index: 50;
+  z-index: var(--z-sidebar);
   width: 2.1875rem;
   height: 2.1875rem;
   display: inline-flex;

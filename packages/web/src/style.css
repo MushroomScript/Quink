@@ -100,6 +100,28 @@
 :root { --heatmap-low: rgb(var(--c-accent-light)); --heatmap-high: color-mix(in srgb, rgb(var(--c-accent-dark)) 75%, #000); }
 [data-theme="dark"] { --heatmap-low: rgba(var(--c-accent) / 0.18); --heatmap-high: rgb(var(--c-accent)); }
 
+/* ══ z-index scale ══
+   全项目 z-index 走变量,新增层级先来这里登记。详见根 Z-INDEX-SCALE.md。
+   数值是历史现状,保留不动,只命名 → 不改任何叠加顺序。 */
+:root {
+  --z-sticky:              10;    /* sticky 工具栏 / 卡片 hover 浮起 / NoteEditModal 内 confirm 子覆盖 */
+  --z-drop-hint:           30;    /* Resources 拖入大边框 */
+  --z-sidebar-backdrop:    40;    /* Sidebar 用户菜单的点空 backdrop */
+  --z-sidebar:             50;    /* Sidebar 菜单 / 移动端抽屉 / Capture 容器 / RichEditor 工具栏 */
+  --z-modal-edit:         100;    /* NoteEditModal 主模态 */
+  --z-modal-edit-inner:   110;    /* 编辑 modal 内 RichEditor / AttachmentDownloadDock */
+  --z-modal-preview:      150;    /* App 引用预览 modal(在编辑 modal 之上) */
+  --z-modal:              200;    /* 通用 modal: confirm / Tags / RenameModal / ReminderPicker / RichEditor 全屏 */
+  --z-datepicker-backdrop: 299;   /* DatePicker 内 backdrop, 跟 popup 紧耦合, 比它低 1 */
+  --z-modal-media:        300;    /* DatePicker popup / ImagePreview / VideoPreview */
+  --z-context-menu:       400;    /* MediaContextMenu 右键菜单 */
+  --z-popup:             1000;    /* CustomSelect popup(高于 modal,低于 toast) */
+  --z-overlay-backdrop:  9998;    /* 临时 overlay 的点空 backdrop(NoteCard/TopBar 下拉等) */
+  --z-overlay:           9999;    /* 临时悬浮: dropdown / toast / DragGhost / tooltip */
+  --z-tooltip:          10000;    /* RichEditor 自定义 tooltip(比一般 overlay 略高) */
+  --z-caret:        2147483646;   /* 自定义粗 caret 覆盖层(必须比所有 OS 控件高) */
+}
+
 /* Stats 顶卡图标方块暗主题适配: Tailwind bg-XXX-50 是浅色,暗主题下会"漂浮"在暗卡片上。
    用同色相 alpha 0.2 替换,保留每张卡的色彩差异化同时跟暗背景协调。父选择器 .grid-cols-7 限定 scope 不污染全局 */
 [data-theme="dark"] .grid-cols-7 .bg-blue-50    { background-color: rgba(59, 130, 246, 0.2); }
@@ -132,9 +154,6 @@
 
 /* ── Dark theme ── */
 [data-theme="dark"] body, [data-theme="dark"] { color-scheme: dark; }
-/* color-scheme 不传到 <select> 内部 dropdown popup 渲染，必须给 select 自己设
-   否则 dark 主题下点开 select 看到白色 option 列表 */
-[data-theme="dark"] select, [data-theme="dark"] option { color-scheme: dark; }
 [data-theme="dark"] body { background: var(--c-body); color: #e2e8f0; }
 /* Backgrounds */
 [data-theme="dark"] .bg-white { background: #1e1e2a !important; }
@@ -146,6 +165,13 @@
 [data-theme="dark"] .bg-gray-50\/50 { background: rgba(255,255,255,0.05) !important; }
 /* Settings 主题色选择器: dark 主题下选中态需要更亮的背景,否则选中按钮跟周围非选中按钮的 5% 白雾几乎一样,加上 dark 图标的 squircle 也是深色 → 整个按钮溶进页面背景看不清 */
 [data-theme="dark"] .theme-pick-selected { background: rgba(255,255,255,0.22) !important; }
+/* Type chip (todo/snippet/link): bg-X-100 + text-X-600 在 dark 下太亮, 半透明 + 中亮文字色重做 */
+[data-theme="dark"] .bg-amber-100   { background-color: rgba(245,158,11,0.18) !important; }
+[data-theme="dark"] .bg-emerald-100 { background-color: rgba(16,185,129,0.18) !important; }
+[data-theme="dark"] .bg-sky-100     { background-color: rgba(56,189,248,0.18) !important; }
+[data-theme="dark"] .text-amber-600   { color: #fbbf24 !important; }
+[data-theme="dark"] .text-emerald-600 { color: #34d399 !important; }
+[data-theme="dark"] .text-sky-600     { color: #38bdf8 !important; }
 /* Borders */
 [data-theme="dark"] .border-gray-200,
 [data-theme="dark"] .border-gray-100,
@@ -180,12 +206,18 @@
 /* Pre 内 code 单独 reset: 不被上面紫色覆盖, 让 hljs syntax highlight token 颜色接管 (selector list 第二项加 :not 抬 specificity 比 inline code 规则高 1 element) */
 [data-theme="dark"] .note-content pre code,
 [data-theme="dark"] .note-content pre code:not(.hljs):not(.highlight-chroma) { background: transparent !important; color: #e2e8f0 !important; }
-/* Tables (dark, 显示态): override vditor.css 默认 tr 白底 / 偶数行纯白 + style.css th 浅白 + 浅灰边框, 否则白底 + dark 灰字看不见 */
-[data-theme="dark"] .note-content table tr { background-color: transparent !important; }
-[data-theme="dark"] .note-content table tbody tr:nth-child(2n) { background-color: rgba(255,255,255,0.03) !important; }
-[data-theme="dark"] .note-content table th { background: rgba(255,255,255,0.08) !important; }
+/* Tables (dark): 同时覆盖显示态卡片 (.note-content) 和编辑器内 (.vditor-ir .vditor-reset).
+   override vditor.css 默认 tr 白底 / 偶数行纯白 + style.css th 浅白 + 浅灰边框, 否则白底 + dark 灰字看不见 */
+[data-theme="dark"] .note-content table tr,
+[data-theme="dark"] .vditor-reset table tr { background-color: transparent !important; }
+[data-theme="dark"] .note-content table tbody tr:nth-child(2n),
+[data-theme="dark"] .vditor-reset table tbody tr:nth-child(2n) { background-color: rgba(255,255,255,0.03) !important; }
 [data-theme="dark"] .note-content table th,
-[data-theme="dark"] .note-content table td { border-color: rgba(255,255,255,0.1) !important; }
+[data-theme="dark"] .vditor-reset table th { background: rgba(255,255,255,0.08) !important; }
+[data-theme="dark"] .note-content table th,
+[data-theme="dark"] .note-content table td,
+[data-theme="dark"] .vditor-reset table th,
+[data-theme="dark"] .vditor-reset table td { border-color: rgba(255,255,255,0.1) !important; }
 /* Hr (dark): vditor 默认 #eaecef + border-top #cbd5e1 在 dark 太亮 */
 [data-theme="dark"] .note-content hr { background-color: rgba(255,255,255,0.1) !important; border-top: 0 !important; height: 1px !important; }
 /* Kbd (dark): 浏览器默认白底深字 (GitHub 风格), dark 下不协调 */

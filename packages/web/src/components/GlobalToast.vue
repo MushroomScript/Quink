@@ -85,7 +85,7 @@ function onHoverLeave(id: number, hasAction: boolean) {
   -->
   <TransitionGroup
     tag="div"
-    class="fixed left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 items-center pointer-events-none"
+    class="fixed left-1/2 -translate-x-1/2 z-[var(--z-overlay)] flex flex-col gap-2 items-center pointer-events-none"
     :style="{ top: topOffset }"
     enter-active-class="transition-[opacity,transform] duration-300 ease-out"
     enter-from-class="!opacity-0 -translate-y-8"

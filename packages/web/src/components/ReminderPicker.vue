@@ -5,6 +5,7 @@ import 'dayjs/locale/zh-cn';
 import { RRule } from 'rrule';
 import { useNow } from '@/composables/useNow';
 import DatePicker from '@/components/DatePicker.vue';
+import CustomSelect from '@/components/CustomSelect.vue';
 dayjs.locale('zh-cn');
 
 // 响应式 now: picker 开 1 小时不动时, computed 用打开瞬间的 Date.now() 算"时间是否已过"会失真.
@@ -286,7 +287,7 @@ const canSave = computed(() => !saveBlockReason.value);
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="open" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="open" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="onCancel" />
         <!-- 整体: flex-col (顶部内容区 + 底部 footer button bar)
              固定高 h-[480px]: 不管 details 折叠 / GUI 切频率 / 预览列表多少, 外形稳定
@@ -350,12 +351,12 @@ const canSave = computed(() => !saveBlockReason.value);
             <div class="rrule-gui p-3 rounded-lg border border-gray-200 space-y-2.5">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-xs text-gray-500 shrink-0">频率</span>
-                <select v-model="gui.freq" class="rrule-input">
-                  <option value="DAILY">每天</option>
-                  <option value="WEEKLY">每周</option>
-                  <option value="MONTHLY">每月</option>
-                  <option value="YEARLY">每年</option>
-                </select>
+                <CustomSelect v-model="gui.freq" size="sm" :options="[
+                  { value: 'DAILY', label: '每天' },
+                  { value: 'WEEKLY', label: '每周' },
+                  { value: 'MONTHLY', label: '每月' },
+                  { value: 'YEARLY', label: '每年' },
+                ]" />
                 <span class="text-xs text-gray-500 shrink-0">每</span>
                 <input v-model.number="gui.interval" type="number" min="1" max="999"
                   class="rrule-input w-14 text-center tabular-nums" />

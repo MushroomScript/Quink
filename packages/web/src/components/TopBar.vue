@@ -622,7 +622,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
        pt-[8px] pb-[10px] 抵消中文字符 baseline 在 line-box 内自然偏下的视觉偏差. -->
   <Teleport to="#batch-bar-portal" defer>
     <div v-if="store.selectMode"
-      class="sticky top-0 z-10 px-4 md:px-6 pt-[8px] pb-[10px] flex items-center gap-3 border-t border-gray-100 bg-gray-50/80"
+      class="sticky top-0 z-[var(--z-sticky)] px-4 md:px-6 pt-[8px] pb-[10px] flex items-center gap-3 border-t border-gray-100 bg-gray-50/80"
       style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <span class="text-xs text-gray-500">已选 {{ store.selectedIds.size }} 项</span>
       <button @click="store.selectAll()" class="text-xs text-primary hover:underline">全选</button>
@@ -663,7 +663,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
     <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 -translate-y-1"
       leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0">
       <div v-if="dateFilterOpen"
-        class="fixed z-[9999] bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-56"
+        class="fixed z-[var(--z-overlay)] bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-56"
         :style="dateFilterPos">
         <div class="text-[11px] text-gray-400 mb-2">按时间筛选</div>
         <div class="space-y-2">
@@ -684,13 +684,13 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         </button>
       </div>
     </Transition>
-    <div v-if="dateFilterOpen" class="fixed inset-0 z-[9998]" @click="dateFilterOpen = false" />
+    <div v-if="dateFilterOpen" class="fixed inset-0 z-[var(--z-overlay-backdrop)]" @click="dateFilterOpen = false" />
   </Teleport>
 
   <!-- 标签建议下拉（Teleport 到 body，避开主区编辑器层级） -->
   <Teleport to="body">
     <div v-if="showTagSuggestions && tagSuggestions.length"
-      class="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[9999]"
+      class="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[var(--z-overlay)]"
       :style="tagSuggestPos">
       <button v-for="t in tagSuggestions" :key="t" @mousedown.prevent="addTag(t)"
         class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 flex items-center gap-1.5">
@@ -702,7 +702,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
 
   <!-- 移动分类下拉 -->
   <Teleport to="body">
-    <div v-if="showBatchMove" class="fixed z-[9999]" :style="batchMovePos">
+    <div v-if="showBatchMove" class="fixed z-[var(--z-overlay)]" :style="batchMovePos">
       <div class="bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-40 max-h-48 overflow-y-auto">
         <button v-for="cat in categories" :key="cat.id"
           @click="store.batchMove(cat.name); showBatchMove = false"
@@ -713,12 +713,12 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <div v-if="categories.length === 0" class="px-3 py-2 text-xs text-gray-400">无分类</div>
       </div>
     </div>
-    <div v-if="showBatchMove" class="fixed inset-0 z-[9998]" @click="showBatchMove = false" />
+    <div v-if="showBatchMove" class="fixed inset-0 z-[var(--z-overlay-backdrop)]" @click="showBatchMove = false" />
   </Teleport>
 
   <!-- 批量"移至类型"下拉 (灵感/笔记/待办 三选) -->
   <Teleport to="body">
-    <div v-if="showBatchType" class="fixed z-[9999]" :style="batchTypePos">
+    <div v-if="showBatchType" class="fixed z-[var(--z-overlay)]" :style="batchTypePos">
       <div class="bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-32">
         <button @click="pickBatchType('note')"
           class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 inline-flex items-center gap-1.5">
@@ -737,12 +737,12 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         </button>
       </div>
     </div>
-    <div v-if="showBatchType" class="fixed inset-0 z-[9998]" @click="showBatchType = false" />
+    <div v-if="showBatchType" class="fixed inset-0 z-[var(--z-overlay-backdrop)]" @click="showBatchType = false" />
   </Teleport>
 
   <!-- 批量"加标签"弹窗 (输入框 + 建议 + 已选 chip + 确认) -->
   <Teleport to="body">
-    <div v-if="showBatchTags" class="fixed z-[9999] bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-60" :style="batchTagsPos">
+    <div v-if="showBatchTags" class="fixed z-[var(--z-overlay)] bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-60" :style="batchTagsPos">
       <div class="text-[11px] text-gray-400 mb-2">为选中笔记加标签</div>
       <!-- 已选 chip 列表 -->
       <div v-if="batchTagsSelected.length" class="flex flex-wrap gap-1 mb-2">
@@ -769,13 +769,13 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <span>添加 {{ batchTagsSelected.length || '' }} 个标签到 {{ store.selectedIds.size }} 项</span>
       </button>
     </div>
-    <div v-if="showBatchTags" class="fixed inset-0 z-[9998]" @click="showBatchTags = false" />
+    <div v-if="showBatchTags" class="fixed inset-0 z-[var(--z-overlay-backdrop)]" @click="showBatchTags = false" />
   </Teleport>
 
   <!-- 批量删除确认弹窗 -->
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="confirmBatchDelete" class="fixed inset-0 z-[200] flex items-center justify-center">
+      <div v-if="confirmBatchDelete" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmBatchDelete = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
           <p class="text-sm text-gray-700 mb-1">删除内容</p>

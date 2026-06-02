@@ -84,7 +84,7 @@ async function onReopenTask(t: AttachmentTask): Promise<void> {
   <Transition name="dock-fade">
     <div
       v-if="dockVisible"
-      class="fixed left-1/2 -translate-x-1/2 z-[110] w-[380px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden"
+      class="fixed left-1/2 -translate-x-1/2 z-[var(--z-modal-edit-inner)] w-[380px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden"
       style="bottom: 24px"
     >
       <!-- 顶部 bar: 任务统计 + 清空已完成 + 关闭 -->
