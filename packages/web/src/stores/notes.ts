@@ -14,10 +14,15 @@ interface ViewState {
   scrollTop: number;
   // 记上次 fetchNotes 的 extra (tag/tags/types/dateFrom/dateTo), loadMore 时复用避免丢过滤
   lastExtra?: { tag?: string; tags?: string; types?: string; dateFrom?: string; dateTo?: string };
+  // 跨 view 操作的脏标记: updateNote 改 type 把笔记搬到另一个 view 时, 不直接 reassign
+  // 后台 view 的 notes (KeepAlive 缓存的 view DOM 已 detach → useMasonry rebuild 拿不到
+  // 真实卡片高度 → 全走 estimateHeight 偏低 → pickShortest 错把所有卡塞同列). 改打 dirty,
+  // 目标 view 下次 onActivated 时走 keepCount fetch 同步.
+  dirty?: boolean;
 }
 
 function createInitState(): ViewState {
-  return { notes: [], total: 0, currentPage: 1, scrollTop: 0, lastExtra: undefined };
+  return { notes: [], total: 0, currentPage: 1, scrollTop: 0, lastExtra: undefined, dirty: false };
 }
 
 export const useNotesStore = defineStore('notes', () => {
@@ -105,14 +110,20 @@ export const useNotesStore = defineStore('notes', () => {
     if (!opts.append && !opts.keepCount) {
       vs.currentPage = 1;
       vs.lastExtra = extra;
+      vs.dirty = false;
     } else if (opts.keepCount) {
       // refresh 保留 lastExtra,避免丢过滤条件(refresh() 通常不传 extra)
       extra = vs.lastExtra;
+      vs.dirty = false;
     }
     loading.value = true;
     try {
+      // keepCount limit 加 buffer (+20): server 可能有"别处新增"的 id (跨 view 改 type / 多设备 /
+      // Capture), 不加 buffer 时 limit=本地条数, server 按 updated_at DESC 把新条目排前, 原本第
+      // (length-N+1)..length 位的旧条目就被截掉, freshMap 没它们 → 误删. buffer 20 覆盖一次操作几条
+      // 的常见量, 极端批量新增 (一次同步 30+) 不管, 走下次 onActivated reset.
       const limit = opts.keepCount
-        ? Math.max(pageSize.value, vs.notes.length)
+        ? Math.max(pageSize.value, vs.notes.length + 20)
         : pageSize.value;
       const params: Record<string, string> = {
         page: opts.keepCount ? '1' : String(vs.currentPage),
@@ -136,21 +147,28 @@ export const useNotesStore = defineStore('notes', () => {
         // 重建所有 DOM 节点导致容器短暂塌缩,滚动位置回到顶部
         vs.notes.push(...newOnes);
       } else if (opts.keepCount) {
-        // Mutate 模式: 按 id 更新现有字段 + 移除消失的, 不替换数组引用. useMasonry 走 mutate
-        // 路径 (newItems === oldItems, 走 splice 优化) → columns 不重建 → 卡片零跨列移动.
-        // reassign 版 (上面 else 分支) 即使 rebuild 用真实高度也会让最矮列选择跟原来不同 →
-        // 部分卡跨列搬, 实测 diff=89; mutate 版可达 diff=0.
-        // 代价: 别处新增的 id 不出现在本地 (接受 — 别人在其他设备/Capture 弹窗新建的笔记
-        // 等下次 onActivated reset 时才看到; refresh 语义是"刷新现有", 不是"看新增")
+        // 两条路径:
+        //   无新增 → mutate (更新现有字段 + 删消失的), useMasonry 走 splice 优化, 卡片零移动 diff=0.
+        //   有新增 → reassign 走 server 顺序(pinned DESC, updated_at DESC), useMasonry rebuild.
+        //     代价: 部分卡可能跨列移动(rebuild pickShortest 重新选最矮列, 即使用真实高度也可能
+        //     跟原列不同, 实测 diff=89). trade-off: 比"新条目排在末尾脱离时间顺序"对用户更对.
+        //     onActivated 触发时 DOM 已 attach, measureCardHeights 拿到真实高度 → 不会出现
+        //     "全走 estimateHeight 把所有卡塞同列"的错乱.
         const freshMap = new Map(res.data.map(n => [n.id, n]));
-        // 1. 删除消失的 id (从尾往前 splice 防 index 漂移)
-        for (let i = vs.notes.length - 1; i >= 0; i--) {
-          if (!freshMap.has(vs.notes[i].id)) vs.notes.splice(i, 1);
-        }
-        // 2. 更新现有 id 的字段 (Object.assign 保引用, NoteCard props deep watch 拿到新值)
-        for (const note of vs.notes) {
-          const fresh = freshMap.get(note.id);
-          if (fresh) Object.assign(note, fresh);
+        const localIds = new Set(vs.notes.map(n => n.id));
+        const hasNewIds = res.data.some(n => !localIds.has(n.id));
+        if (hasNewIds) {
+          vs.notes = res.data;
+        } else {
+          // 删消失的 id (从尾往前 splice 防 index 漂移)
+          for (let i = vs.notes.length - 1; i >= 0; i--) {
+            if (!freshMap.has(vs.notes[i].id)) vs.notes.splice(i, 1);
+          }
+          // 更新现有 id 字段 (Object.assign 保引用, NoteCard props deep watch 拿到新值)
+          for (const note of vs.notes) {
+            const fresh = freshMap.get(note.id);
+            if (fresh) Object.assign(note, fresh);
+          }
         }
       } else {
         vs.notes = res.data;
@@ -212,11 +230,14 @@ export const useNotesStore = defineStore('notes', () => {
     // 用 notes.value[idx] = newObj 替换数组元素,columns 里的旧引用还指向旧对象,
     // NoteCard.props.note 不会感知到内容变化(典型症状: 三点菜单"编辑"保存后列表不刷新)。
     // Object.assign 保持引用同时更新字段,columns / NoteDetail / 任何持有该 ref 的地方都收到响应式更新。
+    const targetViewKey = typeToView[res.data.type];
+    let foundInTargetView = false;
     for (const k of Object.keys(_viewState) as ViewKey[]) {
       const vs = _viewState[k];
       const idx = vs.notes.findIndex((n) => n.id === id);
       if (idx >= 0) {
         Object.assign(vs.notes[idx], res.data);
+        if (k === targetViewKey) foundInTargetView = true;
         // type / category 改后跟当前 view 过滤不一致 → 从本地列表移除, 让卡片直接消失
         // (只对当前 activeView 做过滤判断, 其他 view 保留 — 切回后会自己 re-evaluate)
         if (k === activeView.value) {
@@ -228,6 +249,14 @@ export const useNotesStore = defineStore('notes', () => {
           }
         }
       }
+    }
+    // type 改后跨 view (笔记 → 待办 / 灵感 → 笔记 etc): 标目标 view dirty, 不在这里插入.
+    // 之前试过 reassign 后台 view notes "插入到置顶之后第一位", 但 KeepAlive 后台 view 的 DOM
+    // 已 detach → useMasonry rebuild 走 measureCardHeights 拿不到任何卡 → 全部 estimateHeight
+    // 偏低 → pickShortest 把所有卡都塞到同一列 (实测 12 张 pending 分布 1/11/0). 改打 dirty,
+    // 目标 view onActivated 走 fetchNotes keepCount 同步 (那时 DOM 可达, rebuild 正常).
+    if (targetViewKey && !foundInTargetView) {
+      _viewState[targetViewKey].dirty = true;
     }
     return res.data;
   }

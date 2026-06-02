@@ -35,6 +35,9 @@ onActivated(() => {
     store.filterCategory = '';
     store.searchQuery = '';
     store.fetchNotes();
+  } else if (vs.dirty) {
+    // 跨 view 操作脏标记: DOM 可达后走 keepCount fetch 同步新增 / 删除, 详见 Todos.vue 同段注释
+    viewRefresh();
   }
   nextTick(() => {
     const main = document.querySelector<HTMLElement>('main');

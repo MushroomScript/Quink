@@ -64,6 +64,9 @@ onActivated(() => {
   if (wasEmpty) {
     store.searchQuery = '';
     store.fetchNotes();
+  } else if (vs.dirty) {
+    // 跨 view 操作脏标记: DOM 可达后走 keepCount fetch 同步新增 / 删除, 详见 Todos.vue 同段注释
+    viewRefresh();
   }
   // nextTick 恢复 scrollTop (DOM 重显示后再设置, 否则 main 还没拿到本 view DOM)
   nextTick(() => {

@@ -62,6 +62,11 @@ onActivated(async () => {
   if (wasEmpty) {
     store.searchQuery = '';
     await store.fetchNotes();
+  } else if (vs.dirty) {
+    // 跨 view 操作让这个 view 数据不全 (updateNote 改 type 把笔记搬过来时只标 dirty 不直接插).
+    // 现在切回来 DOM 可达, 走 keepCount fetch 同步: 删消失的 + 拉新增的 push 末尾, useMasonry
+    // 走 mutate 路径不 rebuild, 已有卡片零移动.
+    await viewRefresh();
   }
   await nextTick();
   animateEnter.value = true;

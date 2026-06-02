@@ -50,8 +50,13 @@ schema 定义 4 个值：`note / todo / snippet / link`（看 `packages/server/s
 6. onActivated nextTick 恢复 `main.scrollTop = vs.scrollTop`,onDeactivated 记 `vs.scrollTop = main.scrollTop`
 7. `viewRefresh = () => store.fetchNotes(undefined, { keepCount: true })`,onDeactivated 引用相等检查清 currentRefresh (防多 view 切换 race)
 8. 模板 editor-area-wrap 用 **v-show** 不要 v-if (NoteInput 内 Vditor 异步初始化, v-if 重 mount 会让 wrapper 高度为 0 → main scrollHeight 缩水 → scrollTop 被浏览器归零, 退多选/退筛选时编辑区不出现 bug 同根因)
+9. onActivated 加 `else if (vs.dirty) { viewRefresh() }` 分支 (跨 view 改 type 进来的新条目走这里同步, 详见下面"跨 view 同步")
 
 跨 view 同步: `updateNote / deleteNote / pollNoteAiResult` 遍历所有 viewState 同步本地副本 (灵感页删一张笔记,笔记页本地也同步移除)。`createNote` 按 `res.data.type` 决定写到哪个 viewState (不绑 activeView,这样 Capture 跨类型创建后切到目标 view 立刻看到)。
+
+**跨 view 改 type 走 dirty 标记 (而不是直接 reassign 后台 view)**: `updateNote` 改一条笔记的 type 让它从源 view 搬到目标 view 时, 源 view 走 Object.assign + splice 移除, 目标 view **只标 `vs.dirty = true` 不直接插入**。原因: 目标 view 通常在 KeepAlive 后台, DOM 已 detach → useMasonry rebuild 走 `measureCardHeights` 时 `rootRef.value.querySelectorAll('[data-note-id]')` 拿不到任何卡 (detached element 的 querySelectorAll 返回空) → 全部走 `estimateHeight` 偏低 → `pickShortestCol` 把所有卡塞到同一列 (实测 12 张 pending 分布变 1/11/0)。目标 view 下次 `onActivated` 时 `else if (vs.dirty)` 分支触发 `viewRefresh()` → fetchNotes keepCount 拉权威数据, 此时 DOM 已 attach 真实高度可用, rebuild 正常。`fetchNotes` reset / keepCount 都清 `vs.dirty = false` 标记。
+
+`fetchNotes` keepCount 模式两条路径: **无新增 id** → mutate (`Object.assign` 更新字段 + `splice` 删消失的), useMasonry 走 splice 优化卡片零移动 (顶部刷新按钮最常见路径); **有新增 id** → reassign `vs.notes = res.data` 按 server 顺序 (pinned DESC, createdAt DESC) 重排, useMasonry 走 rebuild 用真实高度 pickShortest, 代价是部分卡跨列移动 (实测 diff=89), trade-off: 比"新条目 push 到末尾脱离时间顺序"对用户更对。keepCount limit 加 `+20` buffer 避免 server 新增条目挤掉本地条目导致误删。
 
 ## 卡片拖放（pointer events，非 HTML5 DnD）
 
