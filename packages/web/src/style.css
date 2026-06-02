@@ -220,7 +220,7 @@
 ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
 
 /* ── Editor Toolbar ── */
-.tbtn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 13px; color: #64748b; cursor: pointer; transition: all 0.1s; border: none; background: none; transform: translateY(1px); }
+.tbtn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 13px; color: #64748b; cursor: var(--cur-pointer), pointer; transition: all 0.1s; border: none; background: none; transform: translateY(1px); }
 .tbtn:hover { background: #f1f5f9; color: #1e293b; }
 [data-theme="dark"] .tbtn { color: #94a3b8; }
 [data-theme="dark"] .tbtn:hover { background: rgba(255,255,255,0.08); color: #e2e8f0; }
@@ -228,7 +228,7 @@
 .sep { width: 1px; height: 16px; background: #e2e8f0; margin: 0 4px; flex-shrink: 0; }
 .popup-input { padding: 4px 8px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 12px; outline: none; }
 .popup-input:focus { border-color: #60a5fa; }
-.popup-btn { padding: 4px 10px; background: rgb(var(--c-accent)); color: white; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; }
+.popup-btn { padding: 4px 10px; background: rgb(var(--c-accent)); color: white; font-size: 12px; border: none; border-radius: 6px; cursor: var(--cur-pointer), pointer; }
 
 /* ── Note Content (Markdown rendered) ── */
 .note-content { font-size: 14px; line-height: 1.6; overflow-wrap: break-word; word-break: break-word; }
@@ -263,7 +263,7 @@
 /* 任务列表(.vditor-task)单独覆盖回 none,跟 vditor.css 第 1083 行的 !important 保持一致 */
 .vditor-reset ul.vditor-task { list-style: none; }
 /* task checkbox 可点击 toggle: hover 时边框加深 + 放大告诉用户可点(列表卡片 + 详情页通用,不挑 .vditor-task 因为 lute md2html 不一定加该类) */
-.note-content input[type="checkbox"] { cursor: pointer; }
+.note-content input[type="checkbox"] { cursor: var(--cur-pointer), pointer; }
 .note-content input[type="checkbox"]:hover { border-color: rgb(var(--c-accent-dark)); transform: scale(1.1); transition: all 0.15s ease; }
 
 /* Prevent text selection on UI elements */
@@ -419,7 +419,7 @@ body.resources-dragging * {
   text-decoration: none !important;
   background: rgb(var(--c-accent-light));
   color: rgb(var(--c-accent-dark)) !important;
-  cursor: pointer;
+  cursor: var(--cur-pointer), pointer;
   transition: opacity 0.15s;
 }
 .note-ref-link:hover {
@@ -450,7 +450,7 @@ body.resources-dragging * {
   background: rgb(var(--c-accent)) !important;
   color: white !important;
   text-decoration: none !important;
-  cursor: pointer;
+  cursor: var(--cur-pointer), pointer;
   user-select: none;
   min-width: 80px;
   max-width: 240px;
@@ -534,7 +534,7 @@ body.resources-dragging * {
   border: 2px solid rgb(var(--c-accent));
   border-radius: 50%;
   background: transparent;
-  cursor: pointer;
+  cursor: var(--cur-pointer), pointer;
   vertical-align: middle;
   position: relative;
   margin-right: 4px;
@@ -628,7 +628,7 @@ mark.find-hl-active {
 }
 .reminder-picker .rrule-input:disabled {
   opacity: 0.5;
-  cursor: not-allowed;
+  cursor: var(--cur-not-allowed), not-allowed;
 }
 .reminder-picker .weekday-btn {
   width: 28px;

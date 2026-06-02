@@ -206,7 +206,7 @@ function onKeydown(e: KeyboardEvent) {
   font-weight: 500;
   letter-spacing: 0;
   white-space: nowrap;
-  cursor: pointer;
+  cursor: var(--cur-pointer), pointer;
   transition: background 0.12s ease, color 0.12s ease;
   -webkit-app-region: no-drag;
 }
@@ -217,7 +217,7 @@ function onKeydown(e: KeyboardEvent) {
 .float-btn:active {
   background: rgba(0, 0, 0, 0.1);
 }
-.float-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.float-btn:disabled { opacity: 0.4; cursor: var(--cur-not-allowed), not-allowed; }
 .float-btn svg { flex-shrink: 0; }
 
 .float-divider {

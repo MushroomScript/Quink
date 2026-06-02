@@ -409,7 +409,7 @@ onUnmounted(() => {
 .heatmap-cell {
   position: relative;
   transition: transform 0.15s ease, filter 0.15s ease;
-  cursor: pointer;
+  cursor: var(--cur-pointer), pointer;
 }
 .heatmap-cell:hover {
   transform: scale(1.25);
@@ -418,7 +418,7 @@ onUnmounted(() => {
 }
 /* 空 cell(无记录): 视觉保留放大反馈,但 cursor 为常态 + onCellClick 守住不响应点击 */
 .heatmap-cell-empty {
-  cursor: default;
+  cursor: var(--cur-default), default;
 }
 
 /* 自定义 legend item: hover 时放大 + 浅背景,跟饼图扇形双向联动 */

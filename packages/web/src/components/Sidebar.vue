@@ -227,7 +227,8 @@ function onCategoryResizeStart(e: PointerEvent) {
   e.preventDefault();
   resizeStartY = e.clientY;
   resizeStartH = categoryHeight.value;
-  document.body.style.cursor = 'row-resize';
+  // 用 var() 配 Bibata 主题色 cursor，fallback 系统 row-resize
+  document.body.style.cursor = 'var(--cur-row-resize), row-resize';
   document.body.style.userSelect = 'none';
   window.addEventListener('pointermove', onCategoryResizeMove);
   window.addEventListener('pointerup', onCategoryResizeEnd, { once: true });
@@ -484,7 +485,7 @@ onUnmounted(() => {
 .category-resize-handle {
   height: 6px;
   position: relative;
-  cursor: row-resize;
+  cursor: var(--cur-row-resize), row-resize;
   touch-action: none;
 }
 .category-resize-handle::before {

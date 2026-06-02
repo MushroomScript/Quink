@@ -172,7 +172,7 @@ function syncFromAudio() {
   height: 4px;
   border-radius: 9999px;
   outline: none;
-  cursor: pointer;
+  cursor: var(--cur-pointer), pointer;
 }
 .audio-volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -182,7 +182,7 @@ function syncFromAudio() {
   border-radius: 50%;
   border: 2px solid white;
   box-shadow: 0 1px 2px rgba(0,0,0,0.15);
-  cursor: pointer;
+  cursor: var(--cur-pointer), pointer;
 }
 .audio-volume-slider::-moz-range-thumb {
   background: rgb(var(--c-accent));
@@ -191,7 +191,7 @@ function syncFromAudio() {
   border-radius: 50%;
   border: 2px solid white;
   box-shadow: 0 1px 2px rgba(0,0,0,0.15);
-  cursor: pointer;
+  cursor: var(--cur-pointer), pointer;
 }
 .audio-volume-slider::-moz-range-track {
   background: transparent;

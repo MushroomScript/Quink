@@ -1,0 +1,115 @@
+/* ════════════════════════════════════════════════════════════════
+ * Quink 全局 cursor 通用规则（auto-generated）
+ * Source: packages/web/scripts/gen-cursors.mjs
+ * 主题专属 --cur-* 变量在 public/cursors/cursors-{theme}.css，
+ * 由 main.ts 的 loadThemeCursors 按 <html data-theme> 动态 <link>。
+ * 不要手改，改规则后重跑脚本。
+ * ════════════════════════════════════════════════════════════════ */
+
+/* ─── 默认 cursor ─── */
+html, body {
+  cursor: var(--cur-default), default;
+}
+
+/* ─── 链接 / 按钮 / 可点击控件 ─── */
+a,
+button:not([disabled]),
+[role="button"]:not([aria-disabled="true"]),
+input[type="button"]:not([disabled]),
+input[type="submit"]:not([disabled]),
+input[type="reset"]:not([disabled]),
+select:not([disabled]),
+label[for],
+summary {
+  cursor: var(--cur-pointer), pointer;
+}
+
+/* ─── 文本输入：cursor 用 I 形、caret（闪烁光标）跟主题色 ─── */
+input[type="text"]:not([disabled]),
+input[type="email"]:not([disabled]),
+input[type="password"]:not([disabled]),
+input[type="search"]:not([disabled]),
+input[type="url"]:not([disabled]),
+input[type="tel"]:not([disabled]),
+input[type="number"]:not([disabled]),
+input:not([type]):not([disabled]),
+textarea:not([disabled]),
+[contenteditable="true"] {
+  cursor: var(--cur-text), text;
+  caret-color: rgb(var(--c-accent));
+}
+
+/* ─── 勾选框 / 单选 / 滑动条：原生交互控件，pointer 语义 ─── */
+input[type="checkbox"]:not([disabled]),
+input[type="radio"]:not([disabled]),
+input[type="range"]:not([disabled]) {
+  cursor: var(--cur-pointer), pointer;
+}
+
+/* ─── 日期/时间/文件/颜色 input：浏览器原生 picker 触发器，pointer 语义 ─── */
+/* 弹出的原生日历/时间面板 CSS 管不到（浏览器内部 UA shadow DOM paint） */
+input[type="date"]:not([disabled]),
+input[type="datetime-local"]:not([disabled]),
+input[type="time"]:not([disabled]),
+input[type="month"]:not([disabled]),
+input[type="week"]:not([disabled]),
+input[type="color"]:not([disabled]),
+input[type="file"]:not([disabled]) {
+  cursor: var(--cur-pointer), pointer;
+}
+/* input 内部的日历/时钟图标按钮（Chromium）—— 这个是 UA pseudo-element，可以接管 cursor */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator,
+input[type="week"]::-webkit-calendar-picker-indicator,
+input[type="color"]::-webkit-color-swatch-wrapper,
+input[type="file"]::-webkit-file-upload-button {
+  cursor: var(--cur-pointer), pointer;
+}
+
+/* ─── 禁用 ─── */
+button[disabled],
+input[disabled],
+textarea[disabled],
+select[disabled],
+[aria-disabled="true"] {
+  cursor: var(--cur-not-allowed), not-allowed;
+}
+
+/* ─── HTML5 DnD 拖拽（Quink 卡片用 pointer events 不走这里） ─── */
+[draggable="true"] {
+  cursor: var(--cur-grab), grab;
+}
+[draggable="true"]:active {
+  cursor: var(--cur-grabbing), grabbing;
+}
+
+/* ─── Tailwind cursor-* utility 类覆盖 ─── */
+/* 项目里大量用 <div class="cursor-pointer"> 这种 div + Tailwind 类。
+ * Tailwind 的 .cursor-pointer 写在 div 上时不匹配上面"元素语义"通用规则，
+ * 这里按相同 specificity 覆盖，靠 cursors-base.css 在 style.css 之后 import 赢。 */
+.cursor-default     { cursor: var(--cur-default), default; }
+.cursor-pointer     { cursor: var(--cur-pointer), pointer; }
+.cursor-text        { cursor: var(--cur-text), text; }
+.cursor-grab        { cursor: var(--cur-grab), grab; }
+.cursor-grabbing    { cursor: var(--cur-grabbing), grabbing; }
+.cursor-not-allowed { cursor: var(--cur-not-allowed), not-allowed; }
+.cursor-move        { cursor: var(--cur-move), move; }
+.cursor-crosshair   { cursor: var(--cur-crosshair), crosshair; }
+.cursor-help        { cursor: var(--cur-help), help; }
+.cursor-wait        { cursor: var(--cur-wait), wait; }
+.cursor-progress    { cursor: var(--cur-progress), progress; }
+.cursor-zoom-in     { cursor: var(--cur-zoom-in), zoom-in; }
+.cursor-zoom-out    { cursor: var(--cur-zoom-out), zoom-out; }
+.cursor-copy        { cursor: var(--cur-copy), copy; }
+.cursor-row-resize  { cursor: var(--cur-row-resize), row-resize; }
+.cursor-ns-resize   { cursor: var(--cur-row-resize), ns-resize; }  /* 同一个 SVG，ns/row 视觉一致 */
+
+/* ─── Tailwind 状态变体覆盖（active: / disabled: 等） ─── */
+/* Tailwind variant 类编译成 .variant\:cursor-X:state，specificity 比 .cursor-X 高一级，
+ * 不单独覆盖会被原生关键字 cursor 接管。这里只列项目实际用到的 2 种变体。 */
+.active\:cursor-grabbing:active { cursor: var(--cur-grabbing), grabbing; }
+.disabled\:cursor-not-allowed:disabled,
+.disabled\:cursor-not-allowed[disabled],
+.disabled\:cursor-not-allowed[aria-disabled="true"] { cursor: var(--cur-not-allowed), not-allowed; }

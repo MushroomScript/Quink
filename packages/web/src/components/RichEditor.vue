@@ -987,7 +987,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+  cursor: var(--cur-pointer), pointer;
   transform: translateY(3px);
 }
 .vditor-wrapper .vditor-toolbar__item button svg,
