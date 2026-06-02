@@ -1134,7 +1134,7 @@ onUnmounted(() => {
                 class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-gray-50 hover:text-primary">
                 <PhFolderOpen size="0.875rem" weight="bold" />
               </button>
-              <a :href="resolveFileUrl(f.url)" target="_blank" download @click.stop title="下载"
+              <a :href="resolveFileUrl(f.url)" download @click.stop title="下载"
                 class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-gray-50 hover:text-primary"
                 :class="hasSearchQuery ? 'border-l border-gray-50' : ''">
                 <PhDownloadSimple size="0.875rem" weight="bold" />
@@ -1236,7 +1236,7 @@ onUnmounted(() => {
                   class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
                   <PhFolderOpen size="0.875rem" weight="bold" />
                 </button>
-                <a :href="resolveFileUrl(f.url)" target="_blank" download @click.stop title="下载"
+                <a :href="resolveFileUrl(f.url)" download @click.stop title="下载"
                   class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
                   <PhDownloadSimple size="0.875rem" weight="bold" />
                 </a>

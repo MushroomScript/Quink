@@ -31,7 +31,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
           title="关闭 (Esc)">
           <PhX size="1.125rem" weight="bold" />
         </button>
-        <a :href="current.url" target="_blank" :download="current.filename" @click.stop
+        <a :href="current.url" :download="current.filename" @click.stop
           class="absolute top-4 right-16 w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
           title="下载">
           <PhDownloadSimple size="1.125rem" weight="fill" />

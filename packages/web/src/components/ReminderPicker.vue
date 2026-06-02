@@ -439,7 +439,7 @@ const canSave = computed(() => !saveBlockReason.value);
                   <li>共 10 次: <span class="bg-white px-1 rounded">FREQ=DAILY;COUNT=10</span></li>
                 </ul>
                 <p>可视化生成器:
-                  <a href="https://jkbrzt.github.io/rrule/" target="_blank" rel="noopener" class="text-primary hover:underline">jkbrzt.github.io/rrule</a>
+                  <a href="https://jkbrzt.github.io/rrule/" class="text-primary hover:underline">jkbrzt.github.io/rrule</a>
                   (写好后复制粘贴到上面框里)
                 </p>
                 <p class="text-gray-400">DTSTART 不用写, 后端会用上面"提醒时间"补</p>

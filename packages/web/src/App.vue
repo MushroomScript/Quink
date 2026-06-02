@@ -325,6 +325,15 @@ onMounted(async () => {
     }
     // 附件链接: 图片/音频已有专门处理(imgHandler / voice-bubble),这里只接其他文件类型
     const href = el.getAttribute('href') || '';
+    // Web 端外链 (http/https 且不含 /api/uploads/) 强制新标签: 否则浏览器跟随 a.href 导航 → 整个 SPA 跳走丢上下文 / KeepAlive 状态.
+    // 桌面端不动: Electron main 已用 setWindowOpenHandler + will-navigate 把外链交给系统浏览器 (packages/desktop/src/main.ts).
+    // 排除 /api/uploads/: 罕见情况下 markdown 可能写绝对附件 URL (http://host/api/uploads/x.txt), 让下面附件分支接管走 dock/下载, 不要开新标签.
+    if (!desk && /^https?:\/\//i.test(href) && !href.includes('/api/uploads/')) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      window.open(href, '_blank', 'noopener,noreferrer');
+      return;
+    }
     if (href.includes('/api/uploads/') && !/\.(png|jpg|jpeg|gif|webp|svg|webm|mp3|wav|ogg|m4a)$/i.test(href)) {
       e.preventDefault();
       e.stopImmediatePropagation();
