@@ -172,6 +172,23 @@
 [data-theme="dark"] .text-amber-600   { color: #fbbf24 !important; }
 [data-theme="dark"] .text-emerald-600 { color: #34d399 !important; }
 [data-theme="dark"] .text-sky-600     { color: #38bdf8 !important; }
+/* 危险次要按钮 (bg-red-50/100 + text-red-500/600 + hover:bg-red-100/200): Tailwind 内置 red-50 #fef2f2 /
+   red-100 #fee2e2 / red-200 #fecaca 在 dark 背景上太亮突兀, 走半透明红重做 (跟 type chip 同思路).
+   覆盖入口: Trash 清空/永久删除/批量永久删除, 卡片右键删除, Settings AI配置/推送渠道删除, TopBar 批量删除,
+   Resources 删除/清空, ReminderPicker 清除提醒, 以及配套的 inline 错误提示气泡 (text-red-500 + bg-red-50). */
+[data-theme="dark"] .bg-red-50  { background-color: rgba(239,68,68,0.15) !important; }
+[data-theme="dark"] .bg-red-100 { background-color: rgba(239,68,68,0.2)  !important; }
+[data-theme="dark"] .hover\:bg-red-50:hover  { background-color: rgba(239,68,68,0.15) !important; }
+[data-theme="dark"] .hover\:bg-red-100:hover { background-color: rgba(239,68,68,0.28) !important; }
+[data-theme="dark"] .hover\:bg-red-200:hover { background-color: rgba(239,68,68,0.35) !important; }
+[data-theme="dark"] .text-red-500,
+[data-theme="dark"] .text-red-600 { color: #fca5a5 !important; }
+/* 中性次要按钮 bg-gray-200 / bg-gray-300 + hover (Trash 多选 / Resources 全选/退出 / Toggle off 态 / status dot 默认):
+   8% 白雾跟现有 hover:bg-gray-100 同色阶, Toggle off / status dot 一起带过来也合适 (关闭态本就该暗) */
+[data-theme="dark"] .bg-gray-200,
+[data-theme="dark"] .bg-gray-300 { background-color: rgba(255,255,255,0.08) !important; }
+[data-theme="dark"] .hover\:bg-gray-200:hover,
+[data-theme="dark"] .hover\:bg-gray-300:hover { background-color: rgba(255,255,255,0.14) !important; }
 /* Borders */
 [data-theme="dark"] .border-gray-200,
 [data-theme="dark"] .border-gray-100,
@@ -737,14 +754,7 @@ mark.find-hl-active {
 [data-theme="dark"] .reminder-picker button.border-gray-200:hover {
   background: #374151;
 }
-/* 清除提醒按钮 */
-[data-theme="dark"] .reminder-picker button.bg-red-50 {
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
-}
-[data-theme="dark"] .reminder-picker button.bg-red-50:hover {
-  background: rgba(239, 68, 68, 0.25);
-}
+/* 清除提醒按钮走全局 .bg-red-50 / .text-red-500 dark 规则, 这里不再单独定义 */
 /* 高级 toggle 文字 (用类名匹配, 不依赖 DOM 层级) */
 [data-theme="dark"] .reminder-picker button.text-gray-500 {
   color: #94a3b8;
