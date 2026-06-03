@@ -1,6 +1,6 @@
 ---
 name: ship
-description: 收尾流程 —— 看 working tree → 划 TODO 完成项 → 必要时更新 CLAUDE.md / RENDERING-PITFALLS.md → 写 commit message → stage + commit。蘑菇说 "commit" / "/ship" / "更新 todo 然后 commit" 等都触发此 skill。
+description: 收尾流程 —— 看 working tree → 必要时更新 CLAUDE.md / RENDERING-PITFALLS.md → 写 commit message → stage + commit。蘑菇说 "commit" / "/ship" 等都触发此 skill。
 ---
 
 # Ship —— Quink 项目收尾流程
@@ -17,13 +17,7 @@ description: 收尾流程 —— 看 working tree → 划 TODO 完成项 → 必
 
 如果工作树没改动 → 告诉蘑菇并退出，不创建空 commit。
 
-## 2. 分析本次改动归属
-
-扫描每个改动文件，对照 `TODO.MD` 里的项目编号（A1-A6 / B1-B7 / C1 / D1-D2 / E1-E3 / F1-F6 / G1-G2 / H1），判断本次 commit 完成了哪些项。
-
-**判断依据**：看代码改动对应的功能点，而不是文件路径。比如改 `Settings.vue` 可能对应 E1（标签开关）或 E2（排序）。
-
-## 3. 判断是否要更新文档
+## 2. 判断是否要更新文档
 
 按 Quink 的 `CLAUDE.md` 维护规则（根 CLAUDE.md "CLAUDE.md 维护规则"段）：
 
@@ -40,18 +34,7 @@ description: 收尾流程 —— 看 working tree → 划 TODO 完成项 → 必
 
 如果要更新，先用 `Edit` / `Write` 改文档，再继续。
 
-## 4. 划掉 TODO.MD 完成项
-
-`TODO.MD` 里把刚完成的项目用 `~~...~~` 包起来。规则：
-
-- 只划本次确实完成的项
-- 如果整组（如"第 4 组：标签页一篮子（E1+E2+E3）"）都完成，整组也划
-- 不新增项
-- 不动其他未完成项
-
-`TODO.MD` 本身**不进 commit**（蘑菇本地跟踪用，不污染 git history）。
-
-## 5. 写 commit message
+## 3. 写 commit message
 
 参考 Quink 历史 commit 风格（`git log --oneline -5` 可看实例）：
 
@@ -63,10 +46,9 @@ description: 收尾流程 —— 看 working tree → 划 TODO 完成项 → 必
 
 例子参考最近几个 commit（`db53ca2` `9efe9aa` `beb9993`）。
 
-## 6. Stage + commit
+## 4. Stage + commit
 
-- `git add` **显式列出文件**（不用 `git add -A` / `.` 避免误传敏感 / 临时文件）
-- **不要 add TODO.MD**
+- `git add` **显式列出文件**（不用 `git add -A` / `.` 避免误传敏感 / 临时文件、运行时 lock 等）
 - 用 HEREDOC 传 commit message：
 
 ```bash
@@ -82,7 +64,7 @@ EOF
 )"
 ```
 
-commit 完简短报告：commit hash + 几个文件改了多少行 + TODO 里划掉了哪些项。
+commit 完简短报告：commit hash + 几个文件改了多少行。
 
 ## 约束
 
