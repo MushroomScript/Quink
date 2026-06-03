@@ -39,6 +39,7 @@ const TEXT_INPUT_TYPES = new Set(['text', 'email', 'password', 'search', 'url', 
 const CARET_WIDTH = 2;
 const CARET_HEIGHT_RATIO = 1.0; // 1em
 const CARET_LEFT_OFFSET = -1; // 左偏 1px
+const CARET_BOTTOM_EXTEND = 0.5; // caret 底部往下延伸 0.5px (caret 高度 += 0.5, 顶部不变, 底部下移 0.5, 蘑菇视觉偏好)
 
 let mirror: HTMLDivElement | null = null;
 let caret: HTMLDivElement | null = null;
@@ -236,9 +237,10 @@ function updateCaretContentEditable(el: HTMLElement) {
   const node = range.startContainer;
   const fontHolder = (node.nodeType === Node.TEXT_NODE ? node.parentElement : node as Element) as HTMLElement | null;
   const fontSize = fontHolder ? parseFloat(getComputedStyle(fontHolder).fontSize) : 16;
-  const caretHeight = fontSize * CARET_HEIGHT_RATIO;
-  // Vditor 几何居中 + 1px 下移
-  const verticalPadding = Math.max(0, (rHeight - caretHeight) / 2) + 1;
+  const baseHeight = fontSize * CARET_HEIGHT_RATIO;
+  const caretHeight = baseHeight + CARET_BOTTOM_EXTEND; // 底部往下延 0.5
+  // Vditor 几何居中(用 baseHeight, 让 caret 顶部位置跟原 baseHeight 时一致) + 1px 下移
+  const verticalPadding = Math.max(0, (rHeight - baseHeight) / 2) + 1;
 
   caret!.style.display = 'block';
   caret!.style.width = CARET_WIDTH + 'px';
@@ -285,10 +287,14 @@ function updateCaret() {
   const zoom = getCssZoom();
   const markerRect = marker.getBoundingClientRect();
   const markerLeft = markerRect.left / zoom;
-  const markerTop = markerRect.top / zoom;
+  // 垂直位置用 mirror 自身的 rect.top (= input 内容区 top = line box top, 跟字体无关).
+  // 不能用 markerRect.top: 那是 ZWSP marker inline-rect.top, 受字体 ascent 影响,
+  // 同 lineHeight 下 SimHei vs YaHei 差 3px → 跨字体场景 caret 垂直偏移.
+  const mirrorTop = mirror.getBoundingClientRect().top / zoom;
   const cs = getComputedStyle(el);
   const fontSize = parseFloat(cs.fontSize);
-  const caretHeight = fontSize * CARET_HEIGHT_RATIO;
+  const baseHeight = fontSize * CARET_HEIGHT_RATIO;
+  const caretHeight = baseHeight + CARET_BOTTOM_EXTEND; // 底部往下延 0.5
 
   // input scroll 偏移 (scrollLeft/Top 本身是 CSS px = layout 单位)
   const scrollLeft = el.scrollLeft;
@@ -297,12 +303,12 @@ function updateCaret() {
   // markerLeft 已是 layout 坐标，mirror 定位在 input 内容区，所以减 scrollLeft 即得 input 内 caret 真实位置
   // 加 CARET_LEFT_OFFSET 让 caret 整体左偏 1px (重心落左字尾, 不挡右字开头)
   let caretLeft = markerLeft - scrollLeft + CARET_LEFT_OFFSET;
-  // 垂直：marker 顶部是当前行的 text top（line box top）
   let lineHeight = parseFloat(cs.lineHeight);
   if (isNaN(lineHeight)) lineHeight = fontSize * 1.2;
-  // 几何居中: caret 上下留白对称分布在 line box 内 (蘑菇要求去掉之前的 +0.5 偏移)
-  const verticalPadding = Math.max(0, (lineHeight - caretHeight) / 2);
-  let caretTop = markerTop - scrollTop + verticalPadding;
+  // 几何居中(用 baseHeight, 让 caret 顶部位置跟原 baseHeight 时一致) + 1 蘑菇视觉偏好
+  // (跟 contenteditable 路径的 verticalPadding 偏移保持一致, 两个场景 caret 对齐感受相同)
+  const verticalPadding = Math.max(0, (lineHeight - baseHeight) / 2) + 1;
+  let caretTop = mirrorTop - scrollTop + verticalPadding;
 
   // 边界裁切：caret 必须在 input 内容区内（不越出 padding 边界）
   const inputRect = el.getBoundingClientRect();
