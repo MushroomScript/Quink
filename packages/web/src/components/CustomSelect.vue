@@ -27,6 +27,7 @@
  *   - 键盘：Enter/Space/Arrow 打开，Arrow 移动 active，Enter 选中，Esc 关闭
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { getCssZoom } from '@/utils/zoom';
 
 // 组件 template 是多根（button + Teleport），Vue 默认不会把外层传入的 class/style
 // 透传到任一节点，需要显式 v-bind="$attrs" 落到 trigger button 上。
@@ -93,18 +94,55 @@ function closePopup() {
 function positionPopup() {
   if (!triggerEl.value) return;
   const rect = triggerEl.value.getBoundingClientRect();
+  // Web 端 CSS zoom 下 rect 是 zoom 后视觉坐标, popup 也被 zoom 一次 → 直接赋值会偏 (zoom-1)*100%.
+  // 除以 zoom 让 popup 渲染到正确位置。Electron 端 zoom = 1 行为不变。详见 utils/zoom.ts
+  const zoom = getCssZoom();
+  const rTop = rect.top / zoom;
+  const rBottom = rect.bottom / zoom;
+  const rLeft = rect.left / zoom;
+  const rWidth = rect.width / zoom;
   // popup 高度估算：item 行高约 30px + 内 padding 8px，取 maxHeight 上限
   const estHeight = Math.min(props.maxHeight, props.options.length * 30 + 8);
-  const spaceBelow = window.innerHeight - rect.bottom;
+  // window.innerHeight/Width 不被 html zoom 影响, 同样除以 zoom 换算成 layout 空间
+  const layoutVH = window.innerHeight / zoom;
+  const layoutVW = window.innerWidth / zoom;
+  const spaceBelow = layoutVH - rBottom;
   const top = spaceBelow >= estHeight + 8
-    ? rect.bottom + 4
-    : Math.max(8, rect.top - estHeight - 4);
+    ? rBottom + 4
+    : Math.max(8, rTop - estHeight - 4);
+  // 宽度策略: minWidth = trigger (popup 至少跟 trigger 一样宽, 视觉对齐),
+  // 不写 width 让 popup 自然撑开到最宽 .qsel-item 的内容宽度 (item 自带 white-space: nowrap),
+  // maxWidth viewport - 16 兜底防止超长选项跑出屏幕。
+  // 避免老逻辑 width: trigger 时短 trigger 截断长选项 (蘑菇报: "短的时候展开看不见长的那一行")
   popupStyle.value = {
     top: `${top}px`,
-    left: `${rect.left}px`,
-    width: `${rect.width}px`,
+    left: `${rLeft}px`,
+    minWidth: `${rWidth}px`,
+    maxWidth: `${layoutVW - 16}px`,
     maxHeight: `${props.maxHeight}px`,
   };
+  // 二次校正: nextTick 拿到 popup 实际 (撑开后) 宽度 + 高度
+  // - 上方场景: estHeight 是粗估, 撑开后真实 popupH 可能更大 → 重算 top 防止 popup 跟 trigger 重叠
+  // - 横向: 如果撑开后右边超 viewport, 把 left 往左拉
+  nextTick(() => {
+    if (!popupEl.value) return;
+    const popupRect = popupEl.value.getBoundingClientRect();
+    const popupH = popupRect.height / zoom;
+    const popupRight = popupRect.right / zoom;
+    const patch: Record<string, string> = {};
+    // 上方场景判定: 第一次算的 top 比 trigger top 小, 说明走了上方分支
+    const firstTop = parseFloat(popupStyle.value.top);
+    if (firstTop < rTop) {
+      patch.top = `${Math.max(8, rTop - popupH - 4)}px`;
+    }
+    const rightOverflow = popupRight - (layoutVW - 8);
+    if (rightOverflow > 0) {
+      patch.left = `${Math.max(8, rLeft - rightOverflow)}px`;
+    }
+    if (Object.keys(patch).length) {
+      popupStyle.value = { ...popupStyle.value, ...patch };
+    }
+  });
 }
 
 function scrollActiveIntoView() {
@@ -131,9 +169,14 @@ function onDocPointerDown(e: MouseEvent) {
   closePopup();
 }
 
-// 滚动 / resize 时直接关掉 popup，不重定位（用户重新打开会拿到新位置）
-function onWindowChange() {
-  if (open.value) closePopup();
+// 滚动 / resize 时重新定位 popup, 不关掉。
+// 之前老版本是直接 closePopup, 蘑菇报两个问题: (a) popup 自身滚动 (因 capture scroll) → 立刻关
+// (b) zoom 切换瞬间 layout 重排可能触发 scroll/resize → popup 关后再开异常。
+// 新策略: popup 自身或其子元素的滚动不动 (避免选项滚动时关掉自己), 外部 scroll/resize 重新定位 popup。
+function onWindowChange(e?: Event) {
+  if (!open.value) return;
+  if (e && popupEl.value && popupEl.value.contains(e.target as Node)) return;
+  positionPopup();
 }
 
 function onKeydown(e: KeyboardEvent) {

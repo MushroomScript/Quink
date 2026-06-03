@@ -19,6 +19,8 @@
  * 启动：main.ts import 即触发模块级 side effect。
  */
 
+import { getCssZoom } from '../utils/zoom';
+
 type TextField = HTMLInputElement | HTMLTextAreaElement;
 type Editable = TextField | HTMLElement;  // HTMLElement = contenteditable
 
@@ -137,7 +139,13 @@ function syncMirrorStyle(el: TextField) {
   }
 
   // 用 input 内容区尺寸（不含 padding/border）作为 mirror 的内容盒
+  // 全部走 layout 坐标 (rect / zoom): mirror 是 fixed 子元素被 zoom 乘 1 次, 用 layout 值给 style
+  // 渲染后 mirror 视觉位置正好跟 input 内容区起点对齐。padL/T/borL/T 本身是 CSS px (layout) 不变。
+  const zoom = getCssZoom();
   const rect = el.getBoundingClientRect();
+  const inputTop = rect.top / zoom;
+  const inputLeft = rect.left / zoom;
+  const inputW = rect.width / zoom;
   const padL = parseFloat(cs.paddingLeft);
   const padT = parseFloat(cs.paddingTop);
   const padR = parseFloat(cs.paddingRight);
@@ -146,10 +154,10 @@ function syncMirrorStyle(el: TextField) {
   const borT = parseFloat(cs.borderTopWidth);
 
   // mirror 定位到 input 内容区左上角；mirror 自己没 padding/border，所以 markerRect 直接是 caret 位置
-  m.top = (rect.top + borT + padT) + 'px';
-  m.left = (rect.left + borL + padL) + 'px';
+  m.top = (inputTop + borT + padT) + 'px';
+  m.left = (inputLeft + borL + padL) + 'px';
   // 宽度 = input 内容宽（用于 textarea wrap）；textarea 高度让内容自动撑
-  const contentWidth = rect.width - borL - padL - parseFloat(cs.borderRightWidth) - padR;
+  const contentWidth = inputW - borL - padL - parseFloat(cs.borderRightWidth) - padR;
   m.width = contentWidth + 'px';
   // 高度自动撑（用于 textarea 多行）
   m.height = 'auto';
@@ -183,30 +191,42 @@ function updateCaretContentEditable(el: HTMLElement) {
     return;
   }
 
-  let rect = range.getBoundingClientRect();
+  // 全部走 layout 坐标 (visual rect / zoom). transform 给 fixed caret 时直接用 layout 值,
+  // fixed 子元素渲染时被祖先 zoom 乘回 → 视觉对齐。Electron 端 zoom=1 行为不变。详见 utils/zoom.ts
+  const zoom = getCssZoom();
+  const vRect = range.getBoundingClientRect();
+  let rLeft = vRect.left / zoom;
+  let rTop = vRect.top / zoom;
+  let rHeight = vRect.height / zoom;
   // 空 rect 兜底 1: getClientRects 拿第一段
-  if (rect.width === 0 && rect.height === 0 && rect.left === 0 && rect.top === 0) {
+  if (vRect.width === 0 && vRect.height === 0 && vRect.left === 0 && vRect.top === 0) {
     const rects = range.getClientRects();
-    if (rects.length > 0) rect = rects[0];
+    if (rects.length > 0) {
+      const r = rects[0];
+      rLeft = r.left / zoom;
+      rTop = r.top / zoom;
+      rHeight = r.height / zoom;
+    }
   }
   // 空 rect 兜底 2: 用 focusNode 父元素 padding box 左上角 + lineHeight (空 Vditor 段落场景)
-  if (rect.height === 0) {
-    const node = range.startContainer;
-    const parent = (node.nodeType === Node.TEXT_NODE ? node.parentElement : node as Element) as HTMLElement | null;
+  if (rHeight === 0) {
+    const fbNode = range.startContainer;
+    const parent = (fbNode.nodeType === Node.TEXT_NODE ? fbNode.parentElement : fbNode as Element) as HTMLElement | null;
     if (parent) {
       const pr = parent.getBoundingClientRect();
       const pcs = getComputedStyle(parent);
+      // pr.left/top 是 visual / zoom 转 layout; padL/T 是 CSS px 直接 layout, 不要混用
       const padL = parseFloat(pcs.paddingLeft);
       const padT = parseFloat(pcs.paddingTop);
       const fs = parseFloat(pcs.fontSize);
-      // 用 lineHeight 当 rect.height, 让后续 verticalPadding 算法把 caret 居中到 line box
-      // (兜底之前用 fontSize 让 verticalPadding=0, caret 贴 line top, 视觉"靠上几像素")
       let lh = parseFloat(pcs.lineHeight);
       if (isNaN(lh)) lh = fs * 1.2;
-      rect = { left: pr.left + padL, top: pr.top + padT, width: 0, height: lh, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+      rLeft = pr.left / zoom + padL;
+      rTop = pr.top / zoom + padT;
+      rHeight = lh;  // lineHeight 本身就是 layout px, 不要再 / zoom
     }
   }
-  if (rect.height === 0) {
+  if (rHeight === 0) {
     caret!.style.display = 'none';
     return;
   }
@@ -216,12 +236,12 @@ function updateCaretContentEditable(el: HTMLElement) {
   const fontHolder = (node.nodeType === Node.TEXT_NODE ? node.parentElement : node as Element) as HTMLElement | null;
   const fontSize = fontHolder ? parseFloat(getComputedStyle(fontHolder).fontSize) : 16;
   const caretHeight = fontSize * CARET_HEIGHT_RATIO;
-  // Vditor 几何居中 + 1px 下移 (蘑菇说"vditor 不用动了"那时候的位置, 不再跟 input 联动)
-  const verticalPadding = Math.max(0, (rect.height - caretHeight) / 2) + 1;
+  // Vditor 几何居中 + 1px 下移
+  const verticalPadding = Math.max(0, (rHeight - caretHeight) / 2) + 1;
 
   caret!.style.display = 'block';
   caret!.style.width = CARET_WIDTH + 'px';
-  caret!.style.transform = `translate(${rect.left}px, ${rect.top + verticalPadding}px)`;
+  caret!.style.transform = `translate(${rLeft}px, ${rTop + verticalPadding}px)`;
   caret!.style.height = caretHeight + 'px';
 }
 
@@ -259,28 +279,35 @@ function updateCaret() {
   marker.textContent = '​'; // ZWSP，零宽空格只为拿到位置
   mirror.appendChild(marker);
 
+  // 全部走 layout 坐标 (rect / zoom). transform 给 fixed caret 时直接用 layout 值,
+  // fixed 子元素渲染时被祖先 zoom 乘回 → 视觉对齐。Electron 端 zoom=1 行为不变。详见 utils/zoom.ts
+  const zoom = getCssZoom();
   const markerRect = marker.getBoundingClientRect();
+  const markerLeft = markerRect.left / zoom;
+  const markerTop = markerRect.top / zoom;
   const cs = getComputedStyle(el);
   const fontSize = parseFloat(cs.fontSize);
   const caretHeight = fontSize * CARET_HEIGHT_RATIO;
 
-  // input scroll 偏移
+  // input scroll 偏移 (scrollLeft/Top 本身是 CSS px = layout 单位)
   const scrollLeft = el.scrollLeft;
   const scrollTop = el.scrollTop;
 
-  // markerRect.left 已经是 viewport 坐标，mirror 定位在 input 内容区，所以减 scrollLeft 即得 input 内 caret 真实位置
-  let caretLeft = markerRect.left - scrollLeft;
+  // markerLeft 已是 layout 坐标，mirror 定位在 input 内容区，所以减 scrollLeft 即得 input 内 caret 真实位置
+  let caretLeft = markerLeft - scrollLeft;
   // 垂直：marker 顶部是当前行的 text top（line box top）
-  // caret 顶部应该跟字符 baseline 附近对齐 → 我们用 line top + (lineHeight - fontSize) / 2
-  // 但更简单的近似：直接用 marker top 减 scrollTop，caret 高度 = fontSize * ratio
   let lineHeight = parseFloat(cs.lineHeight);
   if (isNaN(lineHeight)) lineHeight = fontSize * 1.2;
   // 几何居中 + 0.5px 下移微调跟字符视觉居中 (蘑菇调出来的偏好)
   const verticalPadding = Math.max(0, (lineHeight - caretHeight) / 2) + 0.5;
-  let caretTop = markerRect.top - scrollTop + verticalPadding;
+  let caretTop = markerTop - scrollTop + verticalPadding;
 
   // 边界裁切：caret 必须在 input 内容区内（不越出 padding 边界）
   const inputRect = el.getBoundingClientRect();
+  const inputLeft = inputRect.left / zoom;
+  const inputRight = inputRect.right / zoom;
+  const inputTop = inputRect.top / zoom;
+  const inputBottom = inputRect.bottom / zoom;
   const padL = parseFloat(cs.paddingLeft);
   const padR = parseFloat(cs.paddingRight);
   const padT = parseFloat(cs.paddingTop);
@@ -288,10 +315,10 @@ function updateCaret() {
   const borL = parseFloat(cs.borderLeftWidth);
   const borT = parseFloat(cs.borderTopWidth);
 
-  const minLeft = inputRect.left + borL + padL;
-  const maxLeft = inputRect.right - padR - CARET_WIDTH;
-  const minTop = inputRect.top + borT + padT;
-  const maxBottom = inputRect.bottom - padB;
+  const minLeft = inputLeft + borL + padL;
+  const maxLeft = inputRight - padR - CARET_WIDTH;
+  const minTop = inputTop + borT + padT;
+  const maxBottom = inputBottom - padB;
 
   // 在内容区外（被 scroll 出去 / 越界）→ 隐藏
   if (caretLeft < minLeft - 1 || caretLeft > maxLeft + 1 ||
