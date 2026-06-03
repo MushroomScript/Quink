@@ -35,9 +35,10 @@ const HMR_KEY = '__quinkCaretController';
 
 const TEXT_INPUT_TYPES = new Set(['text', 'email', 'password', 'search', 'url', 'tel', 'number', '']);
 
-// Caret 尺寸（蘑菇要的：宽 3px + 高 1em）
-const CARET_WIDTH = 3;
+// Caret 尺寸（蘑菇调出来的: 宽 2px + 高 1em + 整体左偏 1px 让 caret 重心落左字尾巴, 减少挡右字）
+const CARET_WIDTH = 2;
 const CARET_HEIGHT_RATIO = 1.0; // 1em
+const CARET_LEFT_OFFSET = -1; // 左偏 1px
 
 let mirror: HTMLDivElement | null = null;
 let caret: HTMLDivElement | null = null;
@@ -241,7 +242,7 @@ function updateCaretContentEditable(el: HTMLElement) {
 
   caret!.style.display = 'block';
   caret!.style.width = CARET_WIDTH + 'px';
-  caret!.style.transform = `translate(${rLeft}px, ${rTop + verticalPadding}px)`;
+  caret!.style.transform = `translate(${rLeft + CARET_LEFT_OFFSET}px, ${rTop + verticalPadding}px)`;
   caret!.style.height = caretHeight + 'px';
 }
 
@@ -294,12 +295,13 @@ function updateCaret() {
   const scrollTop = el.scrollTop;
 
   // markerLeft 已是 layout 坐标，mirror 定位在 input 内容区，所以减 scrollLeft 即得 input 内 caret 真实位置
-  let caretLeft = markerLeft - scrollLeft;
+  // 加 CARET_LEFT_OFFSET 让 caret 整体左偏 1px (重心落左字尾, 不挡右字开头)
+  let caretLeft = markerLeft - scrollLeft + CARET_LEFT_OFFSET;
   // 垂直：marker 顶部是当前行的 text top（line box top）
   let lineHeight = parseFloat(cs.lineHeight);
   if (isNaN(lineHeight)) lineHeight = fontSize * 1.2;
-  // 几何居中 + 0.5px 下移微调跟字符视觉居中 (蘑菇调出来的偏好)
-  const verticalPadding = Math.max(0, (lineHeight - caretHeight) / 2) + 0.5;
+  // 几何居中: caret 上下留白对称分布在 line box 内 (蘑菇要求去掉之前的 +0.5 偏移)
+  const verticalPadding = Math.max(0, (lineHeight - caretHeight) / 2);
   let caretTop = markerTop - scrollTop + verticalPadding;
 
   // 边界裁切：caret 必须在 input 内容区内（不越出 padding 边界）
