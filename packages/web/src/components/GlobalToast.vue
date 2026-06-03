@@ -97,7 +97,7 @@ function onHoverLeave(id: number, hasAction: boolean) {
   >
     <div v-for="t in toasts" :key="t.id"
       class="px-4 py-1.5 rounded-full text-sm font-medium text-white select-none shadow-lg flex items-center gap-3 transform-gpu"
-      :style="{ opacity: 0.75 }"
+      :style="{ opacity: 0.92 }"
       :class="[
         t.action ? 'pointer-events-auto' : 'pointer-events-none',
         t.kind === 'error' ? 'bg-red-500' : 'bg-primary',
@@ -105,10 +105,13 @@ function onHoverLeave(id: number, hasAction: boolean) {
       @mouseenter="onHoverEnter(t.id, !!t.action)"
       @mouseleave="onHoverLeave(t.id, !!t.action)"
     >
-      <span class="whitespace-nowrap">{{ t.message }}</span>
+      <!-- relative -top-px: 补偿 YaHei 字体 metrics 不对称导致字符墨迹中心比 inline-box geometric center 偏下 1px
+           (上方 leading 4px > 下方 leading 2px → 字符视觉居中需要往上 1px). 用 relative top 而非 toast padding 调整,
+           让按钮按 flex items-center 自然在 box 几何中心, 不受字符补偿影响. -->
+      <span class="whitespace-nowrap relative -top-px">{{ t.message }}</span>
       <button v-if="t.action"
         @click="onAction(t.id, t.action.onClick)"
-        class="text-xs font-semibold px-2 py-0.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors cursor-pointer"
+        class="toast-undo-btn text-sm underline underline-offset-2 cursor-pointer whitespace-nowrap transition-colors relative -top-px"
       >
         {{ t.action.label }}
       </button>

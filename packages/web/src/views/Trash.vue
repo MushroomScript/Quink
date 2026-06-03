@@ -330,7 +330,7 @@ function onLeave(el: Element, done: () => void) {
                     <path d="M5 12l5 5L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
                   </svg>
                 </div>
-                <span class="text-[11px] px-2 pt-px pb-[3px] rounded-full font-medium select-none" :class="typeColor[n.type]">
+                <span class="text-[11px] px-2 py-0.5 rounded-full font-medium select-none" :class="typeColor[n.type]">
                   {{ typeLabels[n.type] }}
                 </span>
                 <span v-if="n.category" class="text-xs text-gray-400" v-html="highlightText(n.category)" />

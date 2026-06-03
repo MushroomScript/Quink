@@ -317,7 +317,7 @@ const typeColor: Record<string, string> = {
           </svg>
         </div>
         <!-- type chip 在非 selectMode 时充当拖动 handle (整卡片不 draggable, 让正文可选文字); selectMode 时不需要它单独拖, 整卡片接管 -->
-        <span class="text-[11px] px-2 pt-px pb-[3px] rounded-full font-medium select-none touch-none"
+        <span class="text-[11px] px-2 py-0.5 rounded-full font-medium select-none touch-none"
           :class="[typeColor[note.type], !store.selectMode ? 'cursor-grab active:cursor-grabbing' : '']"
           @pointerdown.stop="!store.selectMode ? onPointerDown($event) : undefined">
           {{ typeLabels[note.type] }}

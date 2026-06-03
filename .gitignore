@@ -16,6 +16,9 @@ packages/web/public/vditor/
 # Electron build output
 packages/desktop/dist/
 
+# TypeScript incremental build cache (vue-tsc -b / tsc --incremental 生成)
+*.tsbuildinfo
+
 # Rust build output
 packages/native/target/
 packages/native/*.node
