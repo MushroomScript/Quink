@@ -204,6 +204,12 @@ function applyUserPreferences(user: any) {
     localStorage.setItem('quink_theme', prefs.theme);
   }
   applyZoomLevel(prefs.zoomLevel || 100);
+  // 同步排序偏好到 notesStore (放 App.vue 全局加载点而非只放 Settings: Settings 是路由进去才 mount,
+  // 用户启动 app 直接进 Inspiration 时 store.sortBy 必须已是用户偏好, 否则首次 fetchNotes 用默认 'created'
+  // 跟用户设定的 'updated' 不一致). 缺失字段不覆盖 (保留 store 默认 'created').
+  if (prefs.notesSortBy === 'created' || prefs.notesSortBy === 'updated') {
+    store.sortBy = prefs.notesSortBy;
+  }
 }
 
 // 显示比例应用逻辑. 入口只有 Settings 页 (Ctrl+滚轮已废除, 见 packages/desktop/CLAUDE.md zoom 段).

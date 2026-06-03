@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, shallowRef, computed, reactive } from 'vue';
+import { ref, shallowRef, computed, reactive, watch } from 'vue';
 import { api, type Note } from '@/api';
 
 // 3 个主 view 各自独立的状态. 切 view 不重拉 → scrollTop / 已 loadMore 的条数都保留.
@@ -57,6 +57,19 @@ export const useNotesStore = defineStore('notes', () => {
   // 各 view 用它隐藏顶部 NoteInput 编辑区,避免筛选状态下还让用户新写笔记
   const isFiltering = ref(false);
   const sortBy = ref<'created' | 'updated'>('created');
+  // 排序变化 → server ORDER BY 跟着变, 但 fetchNotes 的 keepCount mutate 路径会保旧 vs.notes 顺序
+  // (mutate 只更新字段不重排). 修法: 清所有 view 的 notes/total/page, 各 view 下次 onActivated 走
+  // wasEmpty 分支 fetchNotes() reset 拉新顺序. 不立即触发 fetch: 改 sortBy 时用户通常在 Settings 页,
+  // 3 主 view 在 KeepAlive 后台 DOM detach 状态, detach 下 useMasonry measureCardHeights 拿不到真实
+  // 高度 → pickShortest 错塞同列. 等切回时 DOM attach 走 wasEmpty 拉数据 + rebuild 才正常.
+  watch(sortBy, () => {
+    for (const v of Object.values(_viewState)) {
+      v.notes = [];
+      v.total = 0;
+      v.currentPage = 1;
+      v.dirty = false;
+    }
+  });
   // 资源页筛选: 跟 TopBar 筛选面板共享(类型 + 日期),不属于笔记 fetchNotes 参数,Resources view 自己 watch
   const fileCategory = ref<'all' | 'image' | 'audio' | 'document'>('all');
   const fileDateFrom = ref('');
@@ -71,27 +84,6 @@ export const useNotesStore = defineStore('notes', () => {
   function getViewState(key: ViewKey): ViewState {
     return _viewState[key];
   }
-
-  // Sorted notes (当前 view 的, 用于 groupedByDate)
-  const sortedNotes = computed(() => {
-    return [...notes.value].sort((a, b) => {
-      const dateA = sortBy.value === 'updated' ? a.updatedAt : a.createdAt;
-      const dateB = sortBy.value === 'updated' ? b.updatedAt : b.createdAt;
-      return dateB.localeCompare(dateA);
-    });
-  });
-
-  // Group notes by date
-  const groupedByDate = computed(() => {
-    const groups: Record<string, Note[]> = {};
-    for (const note of sortedNotes.value) {
-      const dateField = sortBy.value === 'updated' ? note.updatedAt : note.createdAt;
-      const date = dateField.slice(0, 10);
-      if (!groups[date]) groups[date] = [];
-      groups[date].push(note);
-    }
-    return groups;
-  });
 
   async function fetchNotes(
     extra?: { tag?: string; tags?: string; types?: string; dateFrom?: string; dateTo?: string },
@@ -137,6 +129,9 @@ export const useNotesStore = defineStore('notes', () => {
       if (extra?.types) params.types = extra.types;
       if (extra?.dateFrom) params.dateFrom = extra.dateFrom;
       if (extra?.dateTo) params.dateTo = extra.dateTo;
+      // 排序字段 (created 默认, updated = 按最后编辑时间). Settings 偏好驱动, 改后 watch(sortBy) 清缓存
+      // 让各 view onActivated 走 wasEmpty 分支重新 fetch (server 真正按时间字段 ORDER BY 排好返回)
+      if (sortBy.value === 'updated') params.sort = 'updated';
 
       const res = await api.getNotes(params);
       if (opts.append) {
@@ -246,7 +241,20 @@ export const useNotesStore = defineStore('notes', () => {
           if (typeMismatch || categoryMismatch) {
             vs.notes.splice(idx, 1);
             vs.total = Math.max(0, vs.total - 1);
+            continue;
           }
+        }
+        // 按编辑时间排序时, 编辑后笔记需飞到"置顶之后第一位"匹配 server ORDER BY (updated_at DESC).
+        // 仅当前 activeView (DOM attach) 做 splice 重排: useMasonry watch 检测 firstChanged 触发
+        // rebuild 用真实高度 pickShortest. 其他 view (KeepAlive 后台 DOM detach) 不重排, 避免
+        // measureCardHeights 拿不到高度全塞同列 bug; 用户切回后台 view 时如果想看新顺序, 切 sort
+        // 偏好会清缓存, 或者下次手动触发 reset.
+        if (sortBy.value === 'updated' && !res.data.pinned && k === activeView.value && idx > 0) {
+          const note = vs.notes[idx];
+          vs.notes.splice(idx, 1);
+          const insertIdx = vs.notes.findIndex((n) => !n.pinned);
+          if (insertIdx === -1) vs.notes.push(note);
+          else vs.notes.splice(insertIdx, 0, note);
         }
       }
     }
@@ -488,8 +496,6 @@ export const useNotesStore = defineStore('notes', () => {
     fileDateTo,
     currentRefresh,
     sortBy,
-    sortedNotes,
-    groupedByDate,
     fetchNotes,
     createNote,
     pollNoteAiResult,

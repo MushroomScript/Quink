@@ -37,8 +37,10 @@ const updateNoteSchema = z.object({
 // GET /api/notes
 app.get('/', async (c) => {
   const userId = c.get('userId');
-  const { search, category, type, tag, tags, types, dateFrom, dateTo, page = '1', limit = '50' } = c.req.query();
+  const { search, category, type, tag, tags, types, dateFrom, dateTo, sort, page = '1', limit = '50' } = c.req.query();
   const offset = (parseInt(page) - 1) * parseInt(limit);
+  // 排序字段: created (默认, 兼容老行为) / updated. 未知值兜底 createdAt 不报错.
+  const sortColumn = sort === 'updated' ? schema.notes.updatedAt : schema.notes.createdAt;
 
   const conditions: any[] = [
     eq(schema.notes.userId, userId),
@@ -86,7 +88,7 @@ app.get('/', async (c) => {
 
   const results = await db.select().from(schema.notes)
     .where(and(...conditions))
-    .orderBy(desc(schema.notes.pinned), desc(schema.notes.createdAt))
+    .orderBy(desc(schema.notes.pinned), desc(sortColumn))
     .limit(parseInt(limit))
     .offset(offset);
 

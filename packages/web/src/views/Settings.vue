@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, watch, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import { useNotesStore } from '@/stores/notes';
 import { useToast } from '@/composables/useToast';
 import { api } from '@/api';
 import { collapseLeave, snapshotCards } from '@/utils/cardLeave';
@@ -12,6 +13,7 @@ import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils
 
 const router = useRouter();
 const auth = useAuthStore();
+const notesStore = useNotesStore();
 const toast = useToast();
 const currentTheme = useTheme();
 
@@ -59,6 +61,9 @@ const prefs = reactive({
   autoTranscribeVoice: false,
   showTodoBadge: true,
   trashRetentionDays: 30,
+  // 笔记列表排序字段: created (默认, 按创建时间) / updated (按最后编辑时间).
+  // 改后 store watch(sortBy) 清各 view 缓存, 切回 view 时 onActivated 走 reset 拉新顺序
+  notesSortBy: 'created' as 'created' | 'updated',
   aiChatMaxTokens: 8192,
   aiPersona: 'concise',
   aiPersonaCustom: '',
@@ -446,6 +451,10 @@ onMounted(async () => {
     localAiPersonaCustom.value = prefs.aiPersonaCustom;
     localAutoSummaryMinLen.value = prefs.autoSummaryMinLen;
   }
+  // 同步排序偏好到 notesStore (放 if(auth.user) 块外: 未登录场景 prefs 走默认值也要确保 store 一致,
+  // 否则 store.sortBy 可能残留前一次 session 的值. 用户偏好跟 store 默认值不同时触发 store watch
+  // 清缓存 → 主 view 在 KeepAlive 后台 vs.notes 清空, 切回时 onActivated wasEmpty 走 reset 拉新顺序)
+  notesStore.sortBy = prefs.notesSortBy;
   loadAiData();
   loadReminderChannels();
   // 延到下一个 tick 再开启 watch,避免初始化赋值触发自动保存
@@ -570,6 +579,14 @@ watch(prefs, () => {
   savePrefsTimer = setTimeout(() => savePreferences(true).then(() => toast.show('已保存')), 300);
 });
 
+// 排序偏好同步到 notesStore: 用户在偏好里改 select 时立即推到 store, 触发 store watch 清各 view 缓存,
+// 切回主 view 时 onActivated wasEmpty 走 reset 拉新顺序. onMounted 加载时也会同步一次 (那里不走此 watch
+// 因为有 prefsLoaded 闸门, 但 onMounted 里手动同步了一次)
+watch(() => prefs.notesSortBy, (v) => {
+  if (!prefsLoaded) return;
+  notesStore.sortBy = v;
+});
+
 async function saveShortcuts() {
   saving.value = true;
   try {
@@ -652,9 +669,11 @@ function goBack() {
 
 <template>
   <div class="px-4 md:px-8 pb-8 select-none" @keydown="handleShortcutKeydown">
-    <!-- Tabs (sticky 锁顶, 跟资源页 toolbar 同款: -mx 抵消 root padding 占全宽, bg 半透明, 顶部 box-shadow 分隔) -->
-    <div class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-8 pt-[8px] mb-6 flex flex-wrap gap-1 border-b border-gray-200 bg-gray-50"
-      style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
+    <!-- Tabs (sticky 锁顶, -mx 抵消 root padding 占全宽, 顶部 box-shadow 分隔.
+         背景走 --c-body 不透明 (跟页面同色融为一体): 之前用 bg-gray-50 在 dark 主题下被 style.css 覆盖成 5% 白半透明,
+         sticky 锁顶时下面卡片透过来视觉脏 → 改用主题变量保证 7 套主题都不透明) -->
+    <div class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-8 pt-[8px] mb-6 flex flex-wrap gap-1 border-b border-gray-200"
+      style="background-color: var(--c-body); box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <button
         v-for="tab in tabs"
         :key="tab.id"
@@ -781,6 +800,19 @@ function goBack() {
             { value: 150, label: '150%' },
             { value: 200, label: '200%' },
           ]" />
+        </div>
+        <!-- 列表排序: 灵感/笔记/待办 3 主 view 按此字段排序 (置顶永远在最前, 组内按所选时间排) -->
+        <div class="pt-2 border-t border-gray-100">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm text-gray-700 font-medium">列表排序</div>
+              <div class="text-xs text-gray-400 mt-0.5">灵感/笔记/待办列表的排序依据 (置顶始终在前)</div>
+            </div>
+            <CustomSelect v-model="prefs.notesSortBy" size="compact" :options="[
+              { value: 'created', label: '创建时间' },
+              { value: 'updated', label: '最后编辑时间' },
+            ]" />
+          </div>
         </div>
         <!-- 待办未完成数字提示 -->
         <div class="flex items-center justify-between pt-2 border-t border-gray-100">
