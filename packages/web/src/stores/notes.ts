@@ -220,36 +220,44 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function updateNote(id: string, data: Partial<Note>) {
     const res = await api.updateNote(id, data);
-    // 改字段不只影响当前 view, 也要同步到所有 view 的本地 notes (例如笔记标签变化, 灵感 view 里的副本也要刷新)
-    // mutate 字段而非替换引用: useMasonry 的 columns 里存的是 notes 元素引用,
-    // 用 notes.value[idx] = newObj 替换数组元素,columns 里的旧引用还指向旧对象,
-    // NoteCard.props.note 不会感知到内容变化(典型症状: 三点菜单"编辑"保存后列表不刷新)。
-    // Object.assign 保持引用同时更新字段,columns / NoteDetail / 任何持有该 ref 的地方都收到响应式更新。
+    // 改字段同步到所有 view 的本地 notes 副本. 4 种情境对称处理 (源 / 目标 × 当前 / 后台):
+    //   源 view 当前 = 普通改 (Object.assign + 可能 splice 过滤 / sortBy 重排)
+    //   源 view 后台 + 跨 view 搬走 (k !== targetViewKey) = 不动 vs.notes 只标 dirty
+    //       原因: Object.assign 改字段会让 view 内 filter-based computed (如 Todos 的
+    //       pendingTodos = vs.notes.filter(type==='todo')) 重算返回新数组 → useMasonry watch
+    //       newItems !== oldItems → rebuild → KeepAlive 后台 DOM detached → measureCardHeights
+    //       拿空 → 全 estimateHeight 偏低 → pickShortest 塞同一列 (跟昨天目标 view detached
+    //       reassign 是镜像 bug, 在 hover navigate 把源 view 切到后台时触发).
+    //   源 view 后台 + 仍归属此 view (改非 type 字段) = Object.assign 更新, 接受 latent rebuild 风险
+    //       (filter computed 重算虽然 ids 不变但返回新引用仍触发 rebuild, 实际 Inspiration/Notes 直传
+    //       vs.notes 不走 filter computed 不受影响, Todos 这条 latent 路径靠下次 onActivated 兜底)
+    //   目标 view 当前 (hover navigate 跳过来后落地) = 直接插入"置顶之后第一位" (仿 createNote)
+    //       让用户立刻看到新条目, DOM attached useMasonry rebuild 用真实高度正常.
+    //   目标 view 后台 (传统拖法 / 编辑器改 type) = 标 dirty, 下次 onActivated 走 viewRefresh.
     const targetViewKey = typeToView[res.data.type];
     let foundInTargetView = false;
     for (const k of Object.keys(_viewState) as ViewKey[]) {
       const vs = _viewState[k];
       const idx = vs.notes.findIndex((n) => n.id === id);
-      if (idx >= 0) {
-        Object.assign(vs.notes[idx], res.data);
-        if (k === targetViewKey) foundInTargetView = true;
-        // type / category 改后跟当前 view 过滤不一致 → 从本地列表移除, 让卡片直接消失
-        // (只对当前 activeView 做过滤判断, 其他 view 保留 — 切回后会自己 re-evaluate)
-        if (k === activeView.value) {
-          const typeMismatch = !!filterType.value && res.data.type !== filterType.value;
-          const categoryMismatch = !!filterCategory.value && res.data.category !== filterCategory.value;
-          if (typeMismatch || categoryMismatch) {
-            vs.notes.splice(idx, 1);
-            vs.total = Math.max(0, vs.total - 1);
-            continue;
-          }
+      if (idx < 0) continue;
+      // 源 view 后台 + 跨 view 搬走: 防 detached rebuild 塞同列 bug, 不动数据 + 标 dirty 让下次激活时 viewRefresh 同步
+      if (k !== activeView.value && k !== targetViewKey) {
+        vs.dirty = true;
+        continue;
+      }
+      Object.assign(vs.notes[idx], res.data);
+      if (k === targetViewKey) foundInTargetView = true;
+      if (k === activeView.value) {
+        // type / category 改后跟当前 view 过滤不一致 → 移除, 卡片消失
+        const typeMismatch = !!filterType.value && res.data.type !== filterType.value;
+        const categoryMismatch = !!filterCategory.value && res.data.category !== filterCategory.value;
+        if (typeMismatch || categoryMismatch) {
+          vs.notes.splice(idx, 1);
+          vs.total = Math.max(0, vs.total - 1);
+          continue;
         }
-        // 按编辑时间排序时, 编辑后笔记需飞到"置顶之后第一位"匹配 server ORDER BY (updated_at DESC).
-        // 仅当前 activeView (DOM attach) 做 splice 重排: useMasonry watch 检测 firstChanged 触发
-        // rebuild 用真实高度 pickShortest. 其他 view (KeepAlive 后台 DOM detach) 不重排, 避免
-        // measureCardHeights 拿不到高度全塞同列 bug; 用户切回后台 view 时如果想看新顺序, 切 sort
-        // 偏好会清缓存, 或者下次手动触发 reset.
-        if (sortBy.value === 'updated' && !res.data.pinned && k === activeView.value && idx > 0) {
+        // 按编辑时间排序时编辑后笔记飞到"置顶之后第一位" 匹配 server ORDER BY (updated_at DESC)
+        if (sortBy.value === 'updated' && !res.data.pinned && idx > 0) {
           const note = vs.notes[idx];
           vs.notes.splice(idx, 1);
           const insertIdx = vs.notes.findIndex((n) => !n.pinned);
@@ -258,30 +266,45 @@ export const useNotesStore = defineStore('notes', () => {
         }
       }
     }
-    // type 改后跨 view (笔记 → 待办 / 灵感 → 笔记 etc): 标目标 view dirty, 不在这里插入.
-    // 之前试过 reassign 后台 view notes "插入到置顶之后第一位", 但 KeepAlive 后台 view 的 DOM
-    // 已 detach → useMasonry rebuild 走 measureCardHeights 拿不到任何卡 → 全部 estimateHeight
-    // 偏低 → pickShortest 把所有卡都塞到同一列 (实测 12 张 pending 分布 1/11/0). 改打 dirty,
-    // 目标 view onActivated 走 fetchNotes keepCount 同步 (那时 DOM 可达, rebuild 正常).
+    // 目标 view 不持有这条 (跨 view 改 type 落地)
     if (targetViewKey && !foundInTargetView) {
-      _viewState[targetViewKey].dirty = true;
+      const targetVs = _viewState[targetViewKey];
+      if (targetViewKey === activeView.value) {
+        // hover navigate 跳来后用户在目标 view 落地: 直接插入"置顶之后第一位", reassign 让 useMasonry
+        // rebuild (前台 DOM attached, measureCardHeights 拿真实高度 → 正常分列). 跟 createNote 同路径.
+        const insertIdx = targetVs.notes.findIndex((n) => !n.pinned);
+        const next = [...targetVs.notes];
+        if (insertIdx === -1) next.push(res.data);
+        else next.splice(insertIdx, 0, res.data);
+        targetVs.notes = next;
+        targetVs.total = (targetVs.total || 0) + 1;
+      } else {
+        // 传统拖法 / 编辑器改 type: 目标 view 后台, 标 dirty, 下次 onActivated 走 viewRefresh.
+        targetVs.dirty = true;
+      }
     }
     return res.data;
   }
 
   async function deleteNote(id: string) {
     await api.deleteNote(id);
-    // 跨 view 同步删除: 所有 view 的本地 notes 移除该 id
-    // 用 splice 而不是 filter 重新赋值: filter 创建新数组等于 reassign,会跟筛选/搜索的
-    // notes = res.data 在 useMasonry 视角下混淆 —— 都是"length 减少 + 子集",
-    // 误走 splice 优化让筛选结果留在原列。改 mutate 后,useMasonry 用 reassign 检测
-    // 能精确区分两种场景: reassign=筛选(rebuild), mutate=删除(走原 splice 优化)
+    // 跨 view 同步删除:
+    //   前台 view: splice 移除 id (DOM attached, useMasonry 走 shrunk 增量删除 line 158-189 安全).
+    //     注意必须 splice mutate 不能 filter reassign — filter 创建新数组等于 reassign, useMasonry
+    //     会跟筛选/搜索的 `notes = res.data` 混淆 (都是"length 减少 + 子集") → 误走 splice 优化让
+    //     筛选结果留在原列。mutate 后 reassign=筛选(rebuild) / mutate=删除(splice 优化) 能精确区分。
+    //   后台 view: 标 dirty 不动数据 (跟 updateNote / syncFreshToViewStates 同根因 — 避开 Todos
+    //     filter computed 重算触发 useMasonry rebuild 在 detached DOM 上塞同列). 下次 onActivated
+    //     viewRefresh 走 fetchNotes keepCount 自动 splice 删除已不存在的 id, 那时 DOM 可达安全.
     for (const k of Object.keys(_viewState) as ViewKey[]) {
       const vs = _viewState[k];
       const idx = vs.notes.findIndex((n) => n.id === id);
-      if (idx >= 0) {
+      if (idx < 0) continue;
+      if (k === activeView.value) {
         vs.notes.splice(idx, 1);
         vs.total = Math.max(0, vs.total - 1);
+      } else {
+        vs.dirty = true;
       }
     }
   }
@@ -354,25 +377,38 @@ export const useNotesStore = defineStore('notes', () => {
     await setTodoStatus([id], note.todoStatus === 'done' ? 'pending' : 'done');
   }
 
-  // 创建后轮询单条笔记的 AI 结果, 命中 aiProcessed=true 时 Object.assign 进所有 view 的本地引用
-  // (mutate 不触发 useMasonry rebuild, NoteCard 通过 props deep watch 自动重渲染 tags/category/summary).
-  // 退避序列 2/3/5/8/12s 累积 30s.
-  // SSE 收到 note-updated 时调: GET 单条 → Object.assign 字段保引用同步
-  // 用途: scheduler 触发提醒后后端更新了 todoDue/todoRemindSentAt, 前端不用按刷新也能立即反映
+  // 把 GET /api/notes/:id 拿到的最新数据同步到所有 view 的本地副本.
+  // 前台 view (activeView): Object.assign 保引用更新, NoteCard props deep watch 重渲染.
+  // 后台 view: 不动 vs.notes 只标 dirty, 下次 onActivated 走 viewRefresh 同步.
+  //   原因: deep mutation 让 view 内 filter-based computed (Todos.vue 的 pendingTodos =
+  //   vs.notes.filter(type==='todo')) 重算返回新数组 → useMasonry watch newItems !== oldItems
+  //   → rebuild → KeepAlive 后台 DOM detached → measureCardHeights 拿空 → estimateHeight
+  //   偏低 → pickShortest 塞同一列. 跟 updateNote 4-case 对称化同根因, 详见 packages/web/CLAUDE.md.
+  function syncFreshToViewStates(id: string, fresh: Note) {
+    for (const k of Object.keys(_viewState) as ViewKey[]) {
+      const vs = _viewState[k];
+      const idx = vs.notes.findIndex((n) => n.id === id);
+      if (idx < 0) continue;
+      if (k === activeView.value) {
+        Object.assign(vs.notes[idx], fresh);
+      } else {
+        vs.dirty = true;
+      }
+    }
+  }
+
+  // SSE 收到 note-updated 时调 (scheduler 触发提醒后端更新 todoDue/todoRemindSentAt, 前端立刻反映).
   async function refreshSingleNote(id: string) {
     try {
       const res = await api.getNote(id);
-      const fresh = res.data;
-      for (const k of Object.keys(_viewState) as ViewKey[]) {
-        const vs = _viewState[k];
-        const idx = vs.notes.findIndex((n) => n.id === id);
-        if (idx >= 0) Object.assign(vs.notes[idx], fresh);
-      }
+      syncFreshToViewStates(id, res.data);
     } catch (e) {
       console.error('[refreshSingleNote]', id, e);
     }
   }
 
+  // 创建后轮询单条笔记的 AI 结果, 命中 aiProcessed=true 时同步进所有 view.
+  // 退避序列 2/3/5/8/12s 累积 30s.
   async function pollNoteAiResult(id: string) {
     const delays = [2000, 3000, 5000, 8000, 12000];
     for (const d of delays) {
@@ -381,11 +417,7 @@ export const useNotesStore = defineStore('notes', () => {
         const res = await api.getNote(id);
         const fresh = res.data;
         if (fresh.aiProcessed) {
-          for (const k of Object.keys(_viewState) as ViewKey[]) {
-            const vs = _viewState[k];
-            const idx = vs.notes.findIndex((n) => n.id === id);
-            if (idx >= 0) Object.assign(vs.notes[idx], fresh);
-          }
+          syncFreshToViewStates(id, fresh);
           return;
         }
       } catch (e) {

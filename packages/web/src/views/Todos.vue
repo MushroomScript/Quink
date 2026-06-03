@@ -37,9 +37,9 @@ const otherNotes = computed(() =>
 const pendingMasonryRoot = ref<HTMLElement | null>(null);
 const doneMasonryRoot = ref<HTMLElement | null>(null);
 const otherMasonryRoot = ref<HTMLElement | null>(null);
-const { columns: pendingColumns, columnCount } = useMasonry(() => pendingTodos.value, pendingMasonryRoot);
-const { columns: doneColumns } = useMasonry(() => doneTodos.value, doneMasonryRoot);
-const { columns: otherColumns } = useMasonry(() => otherNotes.value, otherMasonryRoot);
+const { columns: pendingColumns, columnCount, flushDeferredRebuild: flushPending } = useMasonry(() => pendingTodos.value, pendingMasonryRoot);
+const { columns: doneColumns, flushDeferredRebuild: flushDone } = useMasonry(() => doneTodos.value, doneMasonryRoot);
+const { columns: otherColumns, flushDeferredRebuild: flushOther } = useMasonry(() => otherNotes.value, otherMasonryRoot);
 watch(columnCount, (n) => { store.pageSize = n * 10; }, { immediate: true });
 
 // 屏蔽掉初次加载（fetchNotes 完成后）触发的全员 enter，只让用户操作触发的 enter 走动画
@@ -68,6 +68,10 @@ onActivated(async () => {
     // 走 mutate 路径不 rebuild, 已有卡片零移动.
     await viewRefresh();
   }
+  // 后台期间累积的 useMasonry rebuild 请求 (filter computed 触发, 详见 useMasonry.ts) 3 组各补一次.
+  flushPending();
+  flushDone();
+  flushOther();
   await nextTick();
   animateEnter.value = true;
   const main = document.querySelector<HTMLElement>('main');

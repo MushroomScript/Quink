@@ -69,6 +69,13 @@ export function useMasonry<T extends { id: string }>(
   const columns = ref<T[][]>(Array.from({ length: columnCount.value }, () => []));
   // 每列累计列高估算(rebuild 时填充), append 前会被真实 DOM 高度覆盖
   const colHeights: number[] = new Array(columnCount.value).fill(0);
+  // KeepAlive 后台 view 的 DOM 被 detach. 此时 rebuild() 走 measureCardHeights() querySelectorAll
+  // 拿空 → 所有卡 estimateHeight 兜底 → pickShortestCol 全塞同一列 (蘑菇踩过的"塞同列" bug 根因).
+  // 触发场景: filter-based computed (如 Todos pendingTodos = vs.notes.filter(...)) 在后台 view 的
+  // vs.notes deep mutation 时重算返回新数组 → watch newItems !== oldItems → rebuild → detached.
+  // 修法: rebuild 检测 root.isConnected, detached 时标 deferred + return; onActivated 时 view 主动调
+  // flushDeferredRebuild() 触发补 rebuild, 此时 DOM 已 attach, measureCardHeights 拿真实高度正常分列.
+  let deferredRebuild = false;
 
   function resetColHeights(n: number) {
     colHeights.length = 0;
@@ -108,6 +115,14 @@ export function useMasonry<T extends { id: string }>(
   }
 
   function rebuild() {
+    // detached DOM 检测: KeepAlive 后台 view 的 root 被 detach. 此时 rebuild 会让 measureCardHeights
+    // 全部拿不到 → estimateHeight 偏低 → pickShortest 塞同一列. 改打 deferred, 等下次 onActivated
+    // 时 view 调 flushDeferredRebuild() 补做 (那时 root 已 connected, 真实高度可用).
+    const root = rootRef?.value;
+    if (root && !root.isConnected) {
+      deferredRebuild = true;
+      return;
+    }
     const n = columnCount.value;
     const cols: T[][] = Array.from({ length: n }, () => []);
     resetColHeights(n);
@@ -121,8 +136,18 @@ export function useMasonry<T extends { id: string }>(
       colHeights[idx] += realMap.get(id) ?? estimateHeight(item);
     });
     columns.value = cols;
+    deferredRebuild = false;
     // 即使 rebuild 用了真实高度, append 新卡的 estimate 偏差仍可能积累, nextTick 再 sync 一次
     nextTick(syncRealHeights);
+  }
+
+  // detached 期间累积的 rebuild 请求 (e.g. 后台 view 接收 store 函数的 mutation 触发 filter computed
+  // 重算 → watch trigger → rebuild → 被 detached 守卫拦下标 deferred). view 在 onActivated 调一次
+  // 同步 detached 期间的累积变化, 此时 root 已 connected, rebuild 用真实高度正常分列.
+  function flushDeferredRebuild() {
+    if (deferredRebuild) {
+      rebuild();
+    }
   }
 
   function onResize() {
@@ -209,5 +234,5 @@ export function useMasonry<T extends { id: string }>(
     lastFirstId = firstId;
   }, { deep: true, immediate: true });
 
-  return { columns, columnCount };
+  return { columns, columnCount, flushDeferredRebuild };
 }

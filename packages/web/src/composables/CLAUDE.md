@@ -151,6 +151,28 @@ Todos 有 pending + done 两组瀑布流,sentinels 数组用**固定偏移**避�
 
 `store.fetchNotes` 内 append 时用 `notes.value.push(...newOnes)` 而非 `notes.value = [...notes.value, ...newOnes]` 替换。Pinia setup store 的 ref 数组用 mutation 是响应式的，但**不会让 TransitionGroup 当作"整体替换"**。范例：`stores/notes.ts` 的 fetchNotes 内 append 分支。
 
+### 坑 8: KeepAlive 后台 view rebuild 塞同列 (detached-aware 修法)
+
+**症状**: 后台 view (KeepAlive deactivated, DOM detached) 期间 `getItems()` 返回数据变化 (e.g. Todos 的 `pendingTodos = vs.notes.filter(type==='todo')` filter computed 在 vs.notes deep mutation 时重算返回新数组) → useMasonry watch `newItems !== oldItems` → 触发 `rebuild()` → `measureCardHeights()` 走 `rootRef.value.querySelectorAll('[data-note-id]')` → **detached element 的 querySelectorAll 返回空** → realMap 为空 → 所有卡 fallback `estimateHeight` 偏低 → `pickShortestCol` 把所有卡塞到同一列 (实测 12 张 pending 分布 1/11/0). 用户切回该 view 时看到错乱布局.
+
+**触发场景**:
+- 拖卡片到 sidebar 时悬停 400ms 自动 navigate 跳目标 view → 源 view 切到后台 + 松手时 store.updateNote 改 type → 源 view 的 vs.notes Object.assign → filter computed 重算 → 后台 rebuild
+- AI 回填 (pollNoteAiResult / refreshSingleNote) 改字段时, 非当前 view 的 Todos vs.notes Object.assign → filter computed 重算 → 后台 rebuild
+- 任何让 vs.notes deep mutate 的 store 函数, 当 view 在后台时
+
+**修法 (useMasonry 底层 detached-aware)**:
+- `rebuild()` 开头检测 `rootRef?.value && !rootRef.value.isConnected` → 标 `deferredRebuild = true` + return, 不动 `columns.value` (保留上次 attached 状态的分配)
+- 暴露 `flushDeferredRebuild()`, view 在 `onActivated` 时调用 → root 已重新 connected → 补做一次 rebuild → `measureCardHeights` 拿真实高度正常分列
+
+**为啥这是最根本的修法 (跟 store 层防御的对比)**:
+- store 函数对所有 viewState 改字段时, 改成"前台 mutate / 后台标 dirty" 是**上层防御** (避开后台 mutate 引发 rebuild)
+- useMasonry detached-aware 是**底层防御** (即使后台被 mutate 触发 rebuild 也兜底不塞同列)
+- 两层一起组成双保险: store 层减少不必要的后台 mutate, useMasonry 层保证任何情况下都不在 detached DOM 上算坏分列
+
+**view 端调用约定**: 所有用 useMasonry 的 view (Inspiration / Notes / Todos) 在 `onActivated` 末尾调 `flushDeferredRebuild()`. Todos 因为有 3 组瀑布流, destructure 时各起别名 (`flushPending` / `flushDone` / `flushOther`) 3 次都调. 新加用 useMasonry 的 view 必须遵守.
+
+**为啥 Trash.vue 不调**: Trash 不是 KeepAlive 的 3 主 view 一员, 进 Trash 是路由切换 (unmount + remount), DOM 总是 attached 状态. 没有"后台 mutate"路径.
+
 ## 其他 composables 简记
 
 ### useTheme

@@ -43,25 +43,40 @@ interface PendingStart {
 
 let pendingStart: PendingStart | null = null;
 let activePointerId: number | null = null;
-// AI hover 停留检测: 拖到 sidebar "AI" 项停留 N ms → 派 quink-ai-expand 让 Sidebar navigate /ai (拖动状态保持, 用户继续拖到 conv).
-// 用 setTimeout 启动独立 timer (不依赖鼠标移动); hover 离开 AI 时 clearTimeout 重置, 重新 hover 时重新计时
-let aiHoverTimer: number | null = null;
-let expandedAi = false;
-const AI_HOVER_EXPAND_MS = 400;
+// Hover 停留自动 navigate: 拖到 sidebar 主导航 (灵感/笔记/待办/AI) 任一项停留 N ms → 派 quink-ai-expand
+// (event 名历史遗留: 原本只给 AI 用, 现复用做通用 sidebar drag-hover navigate; detail.path 区分目标路径)
+// → Sidebar 收到后 router.push(path), 拖动状态保持不释放, 用户能继续拖目标视图里的更细 drop target
+// (或直接松手 → handleDrop 仍照常改 type / 加进 AI), 同时视图已切走 → 改完立刻看到结果.
+// 同一个 target 一次拖动里只触发一次 navigate (navigatedTarget 记录); hover 离开时 clearTimeout 重置.
+let hoverNavTimer: number | null = null;
+let navigatedTarget: string | null = null;
+const HOVER_NAV_MS = 400;
 
-function clearAiHoverTimer() {
-  if (aiHoverTimer !== null) { clearTimeout(aiHoverTimer); aiHoverTimer = null; }
+// dropzone target → sidebar nav 路径. 返回 null = 该 target 不参与 hover-navigate (cat: / action:trash 等).
+// 跟 cardLeave.ts 的 TYPE_TO_NAV_PATH 同源映射 (type→view 全局只此两处, 加 view 时记得两边都改).
+function hoverTargetToNavPath(target: string): string | null {
+  if (target === 'action:ai') return '/ai';
+  if (target === 'type:note') return '/';
+  if (target === 'type:snippet') return '/notes';
+  if (target === 'type:todo') return '/todos';
+  return null;
 }
-function startAiHoverTimer() {
-  clearAiHoverTimer();
-  aiHoverTimer = window.setTimeout(() => {
-    aiHoverTimer = null;
-    // timer 到时再次确认 hover 还在 AI 项 (防中途离开未及时 clear)
-    if (dragState.active && dragState.hoverTarget === 'action:ai' && !expandedAi) {
-      expandedAi = true;
-      window.dispatchEvent(new CustomEvent('quink-ai-expand'));
+
+function clearHoverNavTimer() {
+  if (hoverNavTimer !== null) { clearTimeout(hoverNavTimer); hoverNavTimer = null; }
+}
+function startHoverNavTimer(target: string) {
+  clearHoverNavTimer();
+  hoverNavTimer = window.setTimeout(() => {
+    hoverNavTimer = null;
+    // timer 到时再次确认 hover 还在原 target (防中途离开未及时 clear) + 未 navigate 过
+    if (dragState.active && dragState.hoverTarget === target && navigatedTarget !== target) {
+      const path = hoverTargetToNavPath(target);
+      if (!path) return;
+      navigatedTarget = target;
+      window.dispatchEvent(new CustomEvent('quink-ai-expand', { detail: { path } }));
     }
-  }, AI_HOVER_EXPAND_MS);
+  }, HOVER_NAV_MS);
 }
 
 // NoteCard pointerdown 调用. payload 内 ids 单/多 由 selectMode 判断
@@ -117,10 +132,11 @@ function onMove(e: PointerEvent) {
   }
   if (nextTarget !== prevTarget) {
     dragState.hoverTarget = nextTarget;
-    if (nextTarget === 'action:ai' && !expandedAi) {
-      startAiHoverTimer();  // 进入 AI 项, 启动停留计时
+    // 进入参与 hover-navigate 的主导航 target (灵感/笔记/待办/AI) 且本次未跳转过 → 启动停留计时
+    if (nextTarget && nextTarget !== navigatedTarget && hoverTargetToNavPath(nextTarget)) {
+      startHoverNavTimer(nextTarget);
     } else {
-      clearAiHoverTimer();  // 离开 AI 项, 取消计时
+      clearHoverNavTimer();
     }
   }
 }
@@ -160,9 +176,9 @@ async function handleDrop(target: string, ids: string[]) {
     // 软删除走确认弹窗: 派事件让 Sidebar 处理 (跟之前 HTML5 模式一致)
     window.dispatchEvent(new CustomEvent('quink-drop-trash', { detail: ids }));
   } else if (target === 'action:ai') {
-    // 拖到 sidebar AI 松手 (没停留 1s 自动展开 / 或停留过但在 AI 项松手) → 跳 /ai + 新对话 + 引用塞输入框
+    // 拖到 sidebar AI 松手 (没停留够 400ms 自动 navigate / 或停留过但在 AI 项松手) → 跳 /ai + 新对话 + 引用塞输入框
     sessionStorage.setItem('quink_ai_pending_drop', JSON.stringify({ kind: 'new', ids }));
-    window.dispatchEvent(new CustomEvent('quink-ai-expand'));  // Sidebar navigate /ai
+    window.dispatchEvent(new CustomEvent('quink-ai-expand', { detail: { path: '/ai' } }));  // Sidebar navigate /ai
     window.dispatchEvent(new CustomEvent('quink-ai-drop', { detail: { kind: 'new', ids } }));
   } else if (target.startsWith('conv:')) {
     const convId = target.slice(5);
@@ -183,6 +199,6 @@ function reset() {
   dragState.hoverTarget = null;
   dragState.ghostText = '';
   pendingStart = null;
-  clearAiHoverTimer();
-  expandedAi = false;
+  clearHoverNavTimer();
+  navigatedTarget = null;
 }

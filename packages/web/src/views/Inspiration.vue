@@ -25,7 +25,7 @@ const vs = store.getViewState('inspiration');
 const sentinels = ref<Array<HTMLElement | null>>([]);
 useInfiniteScroll(() => store.loadMore(), sentinels);
 const masonryRoot = ref<HTMLElement | null>(null);
-const { columns, columnCount } = useMasonry(() => vs.notes, masonryRoot);
+const { columns, columnCount, flushDeferredRebuild } = useMasonry(() => vs.notes, masonryRoot);
 // 每页拉的条数 = 列数 × 10(3 列 30, 4 列 40, 5 列 50),刚好一屏 10 行
 watch(columnCount, (n) => { store.pageSize = n * 10; }, { immediate: true });
 
@@ -68,6 +68,9 @@ onActivated(() => {
     // 跨 view 操作脏标记: DOM 可达后走 keepCount fetch 同步新增 / 删除, 详见 Todos.vue 同段注释
     viewRefresh();
   }
+  // 后台期间累积的 useMasonry rebuild 请求 (filter computed 触发或 vs.notes deep mutation 触发)
+  // 在 detached 时被 deferred, 这里 root 已 connected 补做一次, 用真实高度正常分列.
+  flushDeferredRebuild();
   // nextTick 恢复 scrollTop (DOM 重显示后再设置, 否则 main 还没拿到本 view DOM)
   nextTick(() => {
     const main = document.querySelector<HTMLElement>('main');

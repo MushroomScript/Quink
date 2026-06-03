@@ -52,9 +52,34 @@ schema 定义 4 个值：`note / todo / snippet / link`（看 `packages/server/s
 8. 模板 editor-area-wrap 用 **v-show** 不要 v-if (NoteInput 内 Vditor 异步初始化, v-if 重 mount 会让 wrapper 高度为 0 → main scrollHeight 缩水 → scrollTop 被浏览器归零, 退多选/退筛选时编辑区不出现 bug 同根因)
 9. onActivated 加 `else if (vs.dirty) { viewRefresh() }` 分支 (跨 view 改 type 进来的新条目走这里同步, 详见下面"跨 view 同步")
 
-跨 view 同步: `updateNote / deleteNote / pollNoteAiResult` 遍历所有 viewState 同步本地副本 (灵感页删一张笔记,笔记页本地也同步移除)。`createNote` 按 `res.data.type` 决定写到哪个 viewState (不绑 activeView,这样 Capture 跨类型创建后切到目标 view 立刻看到)。
+跨 view 同步: `updateNote / deleteNote / pollNoteAiResult / refreshSingleNote` 遍历所有 viewState 同步本地副本 (灵感页删一张笔记,笔记页本地也同步移除)。`createNote` 按 `res.data.type` 决定写到哪个 viewState (不绑 activeView,这样 Capture 跨类型创建后切到目标 view 立刻看到)。
 
-**跨 view 改 type 走 dirty 标记 (而不是直接 reassign 后台 view)**: `updateNote` 改一条笔记的 type 让它从源 view 搬到目标 view 时, 源 view 走 Object.assign + splice 移除, 目标 view **只标 `vs.dirty = true` 不直接插入**。原因: 目标 view 通常在 KeepAlive 后台, DOM 已 detach → useMasonry rebuild 走 `measureCardHeights` 时 `rootRef.value.querySelectorAll('[data-note-id]')` 拿不到任何卡 (detached element 的 querySelectorAll 返回空) → 全部走 `estimateHeight` 偏低 → `pickShortestCol` 把所有卡塞到同一列 (实测 12 张 pending 分布变 1/11/0)。目标 view 下次 `onActivated` 时 `else if (vs.dirty)` 分支触发 `viewRefresh()` → fetchNotes keepCount 拉权威数据, 此时 DOM 已 attach 真实高度可用, rebuild 正常。`fetchNotes` reset / keepCount 都清 `vs.dirty = false` 标记。
+**后台 view 任何 vs.notes mutation 都必须避开 (deleteNote / pollNoteAiResult / refreshSingleNote 全走对称化)**: 这些遍历 viewState 同步的函数全部按 "k === activeView" 分支处理:
+
+| 函数 | 前台 view | 后台 view |
+|---|---|---|
+| `updateNote` | Object.assign + 可能 splice / sortBy 重排 | 跨 view 搬走 → 标 dirty; 否则 Object.assign |
+| `deleteNote` | splice 移除 + total-- | 标 dirty (不 splice) |
+| `pollNoteAiResult` / `refreshSingleNote` (共用 `syncFreshToViewStates`) | Object.assign 更新字段 | 标 dirty |
+
+**根因相同**: 后台 view 的 vs.notes 任何 mutation (Object.assign 改字段 / splice 删元素) 都让 view 内 filter-based computed (Todos 的 `pendingTodos = vs.notes.filter(type==='todo')`) 重算返回新数组 → useMasonry watch `newItems !== oldItems` → rebuild → KeepAlive 后台 DOM detached → `measureCardHeights` 通过 `rootRef.querySelectorAll('[data-note-id]')` 拿空 → 全 estimateHeight 偏低 → `pickShortestCol` 塞同一列 (实测 12 张 pending 分布变 1/11/0)。**前台 view 安全**因 DOM attached，rebuild 用真实高度 pickShortest 正常分列。**Inspiration / Notes 直接传 `() => vs.notes`** (同数组引用) 不走 filter computed → 后台 deep mutation 时 `newItems === oldItems` 不 rebuild → 这俩 view 后台理论上 mutate 也安全，但为了一致性 + 防御未来 view 也加 filter computed, 所有"跨 view 同步"函数统一走 dirty 策略。
+
+**新增'遍历所有 viewState 改字段'的函数必须走对称化**: 优先复用 `syncFreshToViewStates(id, fresh)`，或自己实现"前台 mutate / 后台 dirty"分支。**不要再写裸的 `for k in viewState; mutate`**。
+
+**底层兜底: useMasonry detached-aware**: 即使 store 函数偶尔后台 mutate vs.notes 漏防御 (e.g. 新加遍历 viewState 的函数忘了对称化), useMasonry `rebuild()` 自身检测 `root.isConnected`, detached 时标 deferred return 不动 columns; view 端 `onActivated` 调 `flushDeferredRebuild()` 补做 rebuild (此时 DOM 已 attach 真实高度可用). 双层防御保证 detached DOM 上不会算出"塞同列"的坏分配. 详见 `packages/web/src/composables/CLAUDE.md` 坑 8.
+
+**跨 view 改 type 4 case 对称化 (源 / 目标 × 当前 / 后台)**: `updateNote` 按 `activeView` 跟 `targetViewKey` 关系走不同路径:
+
+| 角色 | 是当前 view | 是后台 view |
+|---|---|---|
+| **源 view** (持有原副本) | Object.assign + 可能 splice 过滤 / sortBy 重排 | **不动数据 + 标 dirty** (跨 view 搬走时) / Object.assign (字段改但仍归属此 view 时) |
+| **目标 view** (按新 type 归属) | **reassign 直接插入"置顶之后第一位"** (仿 createNote) | 标 dirty |
+
+**为啥后台 view 不能 Object.assign**: deep mutation 让 view 内 filter-based computed (如 `Todos.vue` 的 `pendingTodos = vs.notes.filter(type==='todo')`) 重算返回新数组 → useMasonry watch `newItems !== oldItems` → rebuild → KeepAlive 后台 DOM detached → `measureCardHeights` 通过 `rootRef.querySelectorAll('[data-note-id]')` 拿空 (detached element 的 querySelectorAll 返回空) → 全 estimateHeight 偏低 → `pickShortestCol` 塞同一列 (实测 12 张 pending 分布变 1/11/0). Inspiration / Notes 直接传 `() => vs.notes` (同数组引用) 不走 computed → 后台 deep mutation 时 `newItems === oldItems` 不 rebuild 安全, 只 Todos filter computed 在 hover navigate 把源 view 切到后台时触发。
+
+**为啥目标 view 当前 view 时直接插入**: hover navigate (拖卡片到 sidebar 灵感/笔记/待办停留 400ms) 让目标 view 切到前台再落地, DOM attached 时 reassign 走 useMasonry rebuild 用真实高度 pickShortest 正常分列, 用户立刻看到新条目。跟旧版"目标 view 一律标 dirty"区别: 旧版假设目标 view 永远后台 (传统拖法 / 编辑器改 type), hover navigate 破坏假设。
+
+**dirty 标记下次消费**: 后台 view 下次 `onActivated` 时 `else if (vs.dirty) { viewRefresh() }` → fetchNotes keepCount 拉权威数据, 此时 DOM 已 attach 真实高度可用, rebuild 正常。`fetchNotes` reset / keepCount 都清 `vs.dirty = false` 标记。
 
 `fetchNotes` keepCount 模式两条路径: **无新增 id** → mutate (`Object.assign` 更新字段 + `splice` 删消失的), useMasonry 走 splice 优化卡片零移动 (顶部刷新按钮最常见路径); **有新增 id** → reassign `vs.notes = res.data` 按 server 顺序 (pinned DESC, createdAt DESC) 重排, useMasonry 走 rebuild 用真实高度 pickShortest, 代价是部分卡跨列移动 (实测 diff=89), trade-off: 比"新条目 push 到末尾脱离时间顺序"对用户更对。keepCount limit 加 `+20` buffer 避免 server 新增条目挤掉本地条目导致误删。
 

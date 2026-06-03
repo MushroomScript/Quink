@@ -191,9 +191,11 @@ function onDropTrashEvent(e: CustomEvent) {
   trashIds.value = ids;
   confirmTrash.value = true;
 }
-// 拖动停留 sidebar AI 项 1s → cardDnd 派 quink-ai-expand → 这里 navigate /ai 但拖动状态不释放, 用户能继续拖 conv 列表
-function onAiExpand() {
-  if (route.path !== '/ai') router.push('/ai');
+// 拖动停留 sidebar 主导航项 (灵感/笔记/待办/AI) 400ms → cardDnd 派 quink-ai-expand (event 名历史遗留, 见 cardDnd.ts)
+// → 这里 navigate 到 detail.path 但拖动状态不释放, 用户能继续拖目标视图 (e.g. AI 的 conv 列表) 或松手 commit type 变更
+function onAiExpand(e: Event) {
+  const path = (e as CustomEvent).detail?.path ?? '/ai';  // detail 缺省兜底 /ai 兼容旧调用
+  if (route.path !== path) router.push(path);
 }
 
 // 分类区高度拖拽. 蘑菇规则:

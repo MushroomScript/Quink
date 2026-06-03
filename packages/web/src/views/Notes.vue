@@ -19,7 +19,7 @@ const vs = store.getViewState('notes');
 const sentinels = ref<Array<HTMLElement | null>>([]);
 useInfiniteScroll(() => store.loadMore(), sentinels);
 const masonryRoot = ref<HTMLElement | null>(null);
-const { columns, columnCount } = useMasonry(() => vs.notes, masonryRoot);
+const { columns, columnCount, flushDeferredRebuild } = useMasonry(() => vs.notes, masonryRoot);
 watch(columnCount, (n) => { store.pageSize = n * 10; }, { immediate: true });
 
 async function viewRefresh() {
@@ -39,6 +39,8 @@ onActivated(() => {
     // 跨 view 操作脏标记: DOM 可达后走 keepCount fetch 同步新增 / 删除, 详见 Todos.vue 同段注释
     viewRefresh();
   }
+  // 后台期间累积的 useMasonry rebuild 请求 (detached 时被 deferred 拦下) 这里 root 已 connected 补做.
+  flushDeferredRebuild();
   nextTick(() => {
     const main = document.querySelector<HTMLElement>('main');
     if (main && vs.scrollTop > 0) main.scrollTop = vs.scrollTop;
