@@ -7,9 +7,11 @@ import { useToast } from '@/composables/useToast';
 import { api } from '@/api';
 import { collapseLeave, snapshotCards } from '@/utils/cardLeave';
 import { useTheme } from '@/composables/useTheme';
+import { useEscToClose } from '@/composables/useEscToClose';
 import ToggleSwitch from '@/components/ToggleSwitch.vue';
 import CustomSelect from '@/components/CustomSelect.vue';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
+import dayjs from 'dayjs';
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -539,6 +541,39 @@ async function saveProfile() {
 
 let prefsLoaded = false;
 
+// 改"回收站保留时间"时, 若新天数会让现有 trash 笔记立刻被永久清掉, 先弹窗确认再写回 prefs (写回触发下面 prefs watch → PATCH /me → 后端 cleanTrashForUser).
+// 之所以拦在这里而不是放后端: 后端 PATCH /me 在保存的同步路径里直接 DELETE, 用户没机会反悔.
+// CustomSelect 在模板里改成 :modelValue + @update:modelValue → tryChangeRetention, 缩短保留期才检测.
+const pendingRetentionConfirm = ref<{ count: number; newVal: number; oldVal: number } | null>(null);
+useEscToClose(pendingRetentionConfirm, null);
+
+async function tryChangeRetention(newVal: number | string) {
+  const next = Number(newVal);
+  const oldVal = prefs.trashRetentionDays;
+  if (next === oldVal) return;
+  if (pendingRetentionConfirm.value) return; // 上一次弹窗未关, 防 race
+  // 仅在缩短保留期 (含"永久 0 → 有限天数") 时才需要检测; 扩大或保持永久 0 不会触发删除
+  const shrinking = next !== 0 && (oldVal === 0 || next < oldVal);
+  if (!shrinking) { prefs.trashRetentionDays = next; return; }
+  let count = 0;
+  try {
+    const res = await api.getTrash();
+    const cutoff = dayjs().subtract(next, 'day');
+    count = (res.data || []).filter((n: any) => n.deletedAt && dayjs(n.deletedAt).isBefore(cutoff)).length;
+  } catch { /* 拉失败兜底直接保存, 后端清理是 idempotent 不会出错 */ }
+  if (count === 0) { prefs.trashRetentionDays = next; return; }
+  pendingRetentionConfirm.value = { count, newVal: next, oldVal };
+}
+function confirmRetentionChange() {
+  if (!pendingRetentionConfirm.value) return;
+  prefs.trashRetentionDays = pendingRetentionConfirm.value.newVal;
+  pendingRetentionConfirm.value = null;
+}
+function cancelRetentionChange() {
+  pendingRetentionConfirm.value = null;
+  // 不动 prefs.trashRetentionDays, CustomSelect 因为绑 :modelValue=prefs.trashRetentionDays 自动回原值显示
+}
+
 // 拼一份完整 preferences：保留 userPrefs 中未托管的字段（aiBindings、shortcuts 等），prefs 顶层覆盖之
 // 同时清理老 fontSize 字段 (zoom 改造后 prefs.zoomLevel 是真值, 防止 buildPrefs 把老 fontSize 又带回 DB)
 function buildPrefs() {
@@ -829,7 +864,7 @@ function goBack() {
               <div class="text-sm text-gray-700 font-medium">回收站保留时间</div>
               <div class="text-xs text-gray-400 mt-0.5">超过此时长的已删除内容会自动永久删除</div>
             </div>
-            <CustomSelect v-model="prefs.trashRetentionDays" size="compact" :options="[
+            <CustomSelect :modelValue="prefs.trashRetentionDays" @update:modelValue="tryChangeRetention" size="compact" :options="[
               { value: 7, label: '7 天' },
               { value: 14, label: '14 天' },
               { value: 30, label: '30 天' },
@@ -1270,5 +1305,22 @@ function goBack() {
         <p class="text-center text-[10px] text-gray-300 mt-6">Made with ❤️ by Mushroom</p>
       </div>
     </div>
+
+    <!-- 改回收站保留时间触发"立即永久删除 N 条"时的确认弹窗 (CLAUDE.md: 危险操作必须弹窗确认) -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="pendingRetentionConfirm" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+          <div class="absolute inset-0 bg-black/30" @click="cancelRetentionChange" />
+          <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 text-center">
+            <p class="text-sm text-gray-700 mb-1">缩短回收站保留时间</p>
+            <p class="text-xs text-gray-400 mb-4">将立即永久删除 {{ pendingRetentionConfirm.count }} 条已删除内容，不可恢复</p>
+            <div class="flex gap-2 justify-center">
+              <button @click="cancelRetentionChange" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+              <button @click="confirmRetentionChange" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">确定</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>

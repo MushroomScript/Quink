@@ -24,7 +24,9 @@ import { getCssZoom } from '../utils/zoom';
 type TextField = HTMLInputElement | HTMLTextAreaElement;
 type Editable = TextField | HTMLElement;  // HTMLElement = contenteditable
 
-function isContentEditable(el: Element | null): el is HTMLElement {
+// 返回 boolean 而不是 type guard `el is HTMLElement`: Editable = TextField | HTMLElement 被 TS 简化为 HTMLElement (TextField 都 extends HTMLElement),
+// 此 guard 的 true 分支 narrow 没意义, 但 false 分支会反向 narrow 把 el 从 HTMLElement 排除掉变成 never → 后续 instanceof / selectionStart 全 TS 报错.
+function isContentEditable(el: Element | null): boolean {
   return !!(el instanceof HTMLElement && el.isContentEditable
     && !(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement));
 }
