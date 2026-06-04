@@ -746,8 +746,8 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 
     <!-- AI buttons + bottom bar (录音时 absolute overlay 浮层覆盖此行,不占额外高度) -->
     <div class="relative">
-    <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-t border-gray-100 select-none">
-      <div class="flex items-center gap-2">
+    <div class="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border-t border-gray-100 select-none">
+      <div class="flex items-center gap-2 flex-wrap min-w-0">
         <!-- Type selector -->
         <div v-if="showTypeSelector" class="flex gap-0.5">
           <button v-for="t in noteTypes" :key="t.value" @click="noteType = t.value"
@@ -808,7 +808,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
       </div>
 
       <!-- Submit + fullscreen + visibility chip (PR #2 群组共享) -->
-      <div class="flex items-center gap-1.5">
+      <div class="flex items-center gap-1.5 shrink-0">
         <span v-if="hintText" class="text-[11px] text-gray-400 mr-1">{{ hintText }}</span>
         <VisibilityChip v-if="showVisibilityChip" v-model="visibilityModel" compact />
         <button v-if="showFullscreenBtn" @click="toggleFullscreen"

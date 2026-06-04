@@ -10,8 +10,10 @@ import { api } from '@/api';
 import dayjs from 'dayjs';
 import {
   PhUsersThree, PhCopy, PhArrowsClockwise, PhX, PhCheck, PhSignOut, PhTrash,
-  PhCaretRight, PhPencilSimple, PhCamera,
+  PhCaretRight, PhPencilSimple, PhCamera, PhNote,
 } from '@phosphor-icons/vue';
+import NoteCard from './NoteCard.vue';
+import type { Note } from '@/api';
 
 const props = defineProps<{ groupId: string }>();
 
@@ -38,6 +40,8 @@ async function load() {
     if (store.currentDetail?.myRole === 'owner' || store.currentDetail?.myRole === 'admin') {
       await store.loadJoinRequests(groupId.value);
     }
+    // PR #2 阶段 5a: 拉群内笔记 (跟群详情并发)
+    loadGroupNotes(true);
   } catch (e: any) {
     errorMsg.value = e?.message || '加载失败';
   } finally {
@@ -45,10 +49,57 @@ async function load() {
   }
 }
 
+// PR #2 群内笔记 feed: 单列垂直 stack NoteCard, 分页 "加载更多". 默认 sharedAt DESC
+const groupNotes = ref<Note[]>([]);
+const groupNotesTotal = ref(0);
+const groupNotesPage = ref(1);
+const groupNotesLoading = ref(false);
+const GROUP_NOTES_LIMIT = 30;
+
+async function loadGroupNotes(reset = false) {
+  if (!groupId.value || groupNotesLoading.value) return;
+  groupNotesLoading.value = true;
+  try {
+    if (reset) {
+      groupNotesPage.value = 1;
+      groupNotes.value = [];
+    }
+    const res = await api.getGroupNotes(groupId.value, { page: groupNotesPage.value, limit: GROUP_NOTES_LIMIT });
+    if (reset) {
+      groupNotes.value = res.data;
+    } else {
+      // 去重 (server 分页边界可能有重叠)
+      const existing = new Set(groupNotes.value.map(n => n.id));
+      for (const n of res.data) if (!existing.has(n.id)) groupNotes.value.push(n);
+    }
+    groupNotesTotal.value = res.pagination.total;
+  } catch {} finally {
+    groupNotesLoading.value = false;
+  }
+}
+
+function loadMoreGroupNotes() {
+  groupNotesPage.value++;
+  loadGroupNotes(false);
+}
+
 // groupId 切 (左侧群列表点击切换) → 重新拉
 watch(groupId, load);
-onMounted(load);
-onUnmounted(() => { store.currentDetail = null; store.currentJoinRequests = []; });
+onMounted(() => {
+  load();
+  window.addEventListener('quink-group-notes-changed', onGroupNotesChanged);
+});
+onUnmounted(() => {
+  store.currentDetail = null;
+  store.currentJoinRequests = [];
+  window.removeEventListener('quink-group-notes-changed', onGroupNotesChanged);
+});
+
+// PR #2 阶段 5c: 收到 sse group-notes-changed (别人加/改/删了共享笔记) → 当前打开的就是这个群时 reload
+function onGroupNotesChanged(e: Event) {
+  const detail = (e as CustomEvent).detail;
+  if (detail?.groupId === groupId.value) loadGroupNotes(true);
+}
 
 // ── 邀请链接管理 ──
 
@@ -418,6 +469,30 @@ async function toggleAutoJoin() {
               {{ m.role === 'owner' ? '创建者' : m.role === 'admin' ? '管理员' : '成员' }}
             </span>
           </div>
+        </div>
+      </section>
+
+      <!-- 群内笔记 feed (PR #2 群组共享). 单列垂直 stack NoteCard, sharedAt DESC, 分页加载更多 -->
+      <section>
+        <div class="flex items-center gap-2 mb-3">
+          <h3 class="text-sm font-medium">群内笔记</h3>
+          <span class="text-xs text-gray-400 tabular-nums">{{ groupNotesTotal }}</span>
+        </div>
+        <div v-if="groupNotes.length === 0 && !groupNotesLoading" class="text-center py-12">
+          <div class="mb-3 flex justify-center text-gray-300">
+            <PhNote size="2.5rem" weight="fill" />
+          </div>
+          <p class="text-gray-500 text-sm">还没有共享笔记</p>
+          <p class="text-gray-400 text-xs mt-1">在编辑器底栏选择本群可见性, 笔记会出现在这里</p>
+        </div>
+        <div v-else class="space-y-3">
+          <NoteCard v-for="n in groupNotes" :key="n.id" :note="n" />
+        </div>
+        <div v-if="groupNotes.length < groupNotesTotal" class="text-center mt-4">
+          <button @click="loadMoreGroupNotes" :disabled="groupNotesLoading"
+            class="px-4 py-1.5 text-xs rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50">
+            {{ groupNotesLoading ? '加载中...' : `加载更多 (${groupNotes.length}/${groupNotesTotal})` }}
+          </button>
         </div>
       </section>
     </div>

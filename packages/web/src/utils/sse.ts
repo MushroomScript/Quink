@@ -176,6 +176,15 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] group-member-joined parse failed:', e); }
   });
 
+  // PR #2 阶段 5c: group-notes-changed - 共享笔记 POST/PATCH/DELETE 时给目标群成员推, 触发群 feed 自动刷新
+  // 派 window 事件让 GroupDetail.vue 监听 (sse.ts 拿不到 component instance / router)
+  es.addEventListener('group-notes-changed', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
+      window.dispatchEvent(new CustomEvent('quink-group-notes-changed', { detail: { groupId: data.groupId } }));
+    } catch (e) { console.error('[sse] group-notes-changed parse failed:', e); }
+  });
+
   // group-changed: 任何群组写操作后 broadcast 给所有 active 成员 (排除操作者).
   // 触发场景: 成员变化 / 角色变更 / 群信息修改. 不弹 toast (避免噪音), 静默刷新当前打开的群 + 群列表
   es.addEventListener('group-changed', (ev) => {

@@ -6,8 +6,11 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { useNotesStore } from '@/stores/notes';
+import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import type { Note } from '@/api';
+import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
+import { PhUsersThree } from '@phosphor-icons/vue';
 import {
   PhCheck,
   PhCheckSquare,
@@ -32,6 +35,12 @@ dayjs.locale('zh-cn');
 
 const props = defineProps<{ note: Note }>();
 const store = useNotesStore();
+const auth = useAuthStore();
+
+// PR #2 群组共享: 判断作者身份 + 共享状态. NoteCard 右上角根据这些显示作者头像 / 已分享标识
+const isMyNote = computed(() => !props.note.userId || props.note.userId === auth.user?.id);
+const isShared = computed(() => props.note.visibility === 'shared');
+const sharedCount = computed(() => props.note.sharedGroupIds?.length ?? 0);
 const router = useRouter();
 const toast = useToast();
 const openEditModal = inject<(note: Note) => void>('openEditModal');
@@ -343,6 +352,24 @@ const typeColor: Record<string, string> = {
           :class="[typeColor[note.type], !store.selectMode ? 'cursor-grab active:cursor-grabbing' : '']"
           @pointerdown.stop="!store.selectMode ? onPointerDown($event) : undefined">
           {{ typeLabels[note.type] }}
+        </span>
+        <!-- PR #2: 我自己发的共享笔记加 "已选择 N 个群" chip 提醒已分享; 别人发的显示作者头像 + nickname -->
+        <span v-if="isMyNote && isShared && sharedCount > 0"
+          class="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark select-none whitespace-nowrap"
+          :title="`已选择 ${sharedCount} 个群`">
+          <PhUsersThree size="0.625rem" weight="fill" />
+          <span>已选择 {{ sharedCount }} 个群</span>
+        </span>
+        <span v-else-if="!isMyNote && (note as any).authorNickname"
+          class="inline-flex items-center gap-1 text-[10px] text-gray-500 select-none"
+          :title="`@${(note as any).authorNickname}`">
+          <img v-if="(note as any).authorAvatar" :src="resolveFileThumbUrl((note as any).authorAvatar)"
+            @error="thumbErrorFallback($event, resolveFileUrl((note as any).authorAvatar))"
+            class="w-4 h-4 rounded-full object-cover" alt="" />
+          <div v-else class="w-4 h-4 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[8px] font-bold">
+            {{ ((note as any).authorNickname || '?').charAt(0).toUpperCase() }}
+          </div>
+          <span class="truncate max-w-[60px]">{{ (note as any).authorNickname }}</span>
         </span>
         <span v-if="note.category" class="text-xs text-gray-400">{{ note.category }}</span>
         <!-- 提醒铃铛: 仅 todo 且已设 todoDue 时显示, 点击改提醒. 暗色用 amber, 已过用 gray -->

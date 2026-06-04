@@ -7,6 +7,7 @@ import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
 import { autoTag, autoClassify, autoSummary } from '../ai/client.js';
 import { toPinyinSearchable } from '../utils/pinyin.js';
+import { publish } from '../reminder/bus.js';
 
 const app = new Hono();
 
@@ -39,6 +40,27 @@ const updateNoteSchema = z.object({
   visibility: z.enum(['private', 'shared']).optional(),
   sharedGroupIds: z.array(z.string()).optional(),
 });
+
+// PR #2 阶段 5c: 广播 'group-notes-changed' 给目标群所有 active 成员 (除操作者).
+// POST/PATCH 共享笔记 / 永久删除 共享笔记时调用, 前端在群详情页时自动 reload group feed
+async function broadcastNoteShared(groupIds: string[], exceptUserId: string) {
+  if (groupIds.length === 0) return;
+  const members = await db.select({ userId: schema.groupMembers.userId, groupId: schema.groupMembers.groupId })
+    .from(schema.groupMembers)
+    .where(and(
+      inArray(schema.groupMembers.groupId, groupIds),
+      eq(schema.groupMembers.status, 'active'),
+    )).all();
+  // dedup userId+groupId, 一个用户在多个目标群里也只一条事件
+  const seen = new Set<string>();
+  for (const m of members) {
+    if (m.userId === exceptUserId) continue;
+    const key = m.userId + '|' + m.groupId;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    publish(m.userId, 'group-notes-changed', { groupId: m.groupId });
+  }
+}
 
 // 校验所有 groupIds 都是 userId 的 active member 的群. 任一不符返回 error string, 全过返回 null
 async function validateSharedGroups(userId: string, groupIds: string[]): Promise<string | null> {
@@ -145,8 +167,45 @@ app.get('/', async (c) => {
     .where(and(...conditions))
     .get();
 
+  // PR #2 阶段 4: 拼 sharedGroupIds (我的 shared 笔记 NoteCard 显示 "N 群" chip 用) +
+  // scope!=mine 时拼 author info (NoteCard 显示作者头像区分"我的"vs"群里别人发的")
+  let data: any[] = results;
+  if (results.length > 0) {
+    const noteIds = results.map(n => n.id);
+    // 批量查 note_shares 聚合成 Map<noteId, groupIds[]>
+    const sharesRows = await db.select({ noteId: schema.noteShares.noteId, groupId: schema.noteShares.groupId })
+      .from(schema.noteShares)
+      .where(inArray(schema.noteShares.noteId, noteIds))
+      .all();
+    const sharesMap = new Map<string, string[]>();
+    for (const s of sharesRows) {
+      const arr = sharesMap.get(s.noteId) || [];
+      arr.push(s.groupId);
+      sharesMap.set(s.noteId, arr);
+    }
+    // scope!=mine 时多查 author info (mine scope 作者就是自己, 前端 auth.user 已知)
+    let authorMap: Map<string, { nickname: string; avatar: string | null }> | null = null;
+    if (scope !== 'mine') {
+      const authorIds = [...new Set(results.map(n => n.userId))];
+      const authors = await db.select({ id: schema.users.id, nickname: schema.users.nickname, avatar: schema.users.avatar })
+        .from(schema.users)
+        .where(inArray(schema.users.id, authorIds))
+        .all();
+      authorMap = new Map(authors.map(u => [u.id, { nickname: u.nickname, avatar: u.avatar }]));
+    }
+    data = results.map(n => {
+      const enriched: any = { ...n, sharedGroupIds: sharesMap.get(n.id) || [] };
+      if (authorMap) {
+        const a = authorMap.get(n.userId);
+        enriched.authorNickname = a?.nickname ?? null;
+        enriched.authorAvatar = a?.avatar ?? null;
+      }
+      return enriched;
+    });
+  }
+
   return c.json({
-    data: results,
+    data,
     pagination: {
       page: parseInt(page),
       limit: parseInt(limit),
@@ -164,7 +223,21 @@ app.get('/trash', async (c) => {
     .where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`))
     .orderBy(desc(schema.notes.deletedAt))
     .all();
-  return c.json({ data: results });
+  // PR #2: 拼 sharedGroupIds 让 Trash 删除确认窗显示 "已分享到 N 群组"
+  if (results.length === 0) return c.json({ data: results });
+  const noteIds = results.map(n => n.id);
+  const sharesRows = await db.select({ noteId: schema.noteShares.noteId, groupId: schema.noteShares.groupId })
+    .from(schema.noteShares)
+    .where(inArray(schema.noteShares.noteId, noteIds))
+    .all();
+  const sharesMap = new Map<string, string[]>();
+  for (const s of sharesRows) {
+    const arr = sharesMap.get(s.noteId) || [];
+    arr.push(s.groupId);
+    sharesMap.set(s.noteId, arr);
+  }
+  const data = results.map(n => ({ ...n, sharedGroupIds: sharesMap.get(n.id) || [] }));
+  return c.json({ data });
 });
 
 // POST /api/notes/trash/:id/restore
@@ -182,14 +255,27 @@ app.post('/trash/:id/restore', async (c) => {
 app.delete('/trash/:id', async (c) => {
   const userId = c.get('userId');
   const { id } = c.req.param();
-  await db.delete(schema.notes).where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId)));
+  // PR #2: 永久删除事务清 note_shares (防 FK constraint 阻 delete notes)
+  db.transaction((tx) => {
+    tx.delete(schema.noteShares).where(eq(schema.noteShares.noteId, id)).run();
+    tx.delete(schema.notes).where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId))).run();
+  });
   return c.json({ message: '已永久删除' });
 });
 
 // DELETE /api/notes/trash — 清空
 app.delete('/trash', async (c) => {
   const userId = c.get('userId');
-  await db.delete(schema.notes).where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`));
+  // PR #2: 先拿要删的 noteIds 清 note_shares, 再删 notes (单 DELETE 包 subquery 也能但事务更清晰)
+  const trashed = await db.select({ id: schema.notes.id }).from(schema.notes)
+    .where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`))
+    .all();
+  if (trashed.length === 0) return c.json({ message: '已清空' });
+  const ids = trashed.map(t => t.id);
+  db.transaction((tx) => {
+    tx.delete(schema.noteShares).where(inArray(schema.noteShares.noteId, ids)).run();
+    tx.delete(schema.notes).where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`)).run();
+  });
   return c.json({ message: '已清空' });
 });
 
@@ -291,6 +377,8 @@ app.post('/', async (c) => {
 
   // 异步 AI 处理（不阻塞响应）
   processNoteWithAi(userId, note.id, note.content, note.tags as string[]).catch(() => {});
+  // PR #2 阶段 5c: 通知目标群成员有新笔记 (前端 sse handler 收到后在群详情页 reload feed)
+  broadcastNoteShared(sharedGroupIds, userId).catch(e => console.error('[notes] broadcast failed:', e));
 
   return c.json({ data: { ...note, sharedGroupIds } }, 201);
 });
@@ -351,6 +439,14 @@ app.patch('/:id', async (c) => {
     if (data.visibility !== undefined) updates.visibility = data.visibility;
   }
 
+  // PR #2 阶段 5c: 拿 PATCH 前的旧 sharedGroupIds 做差异广播 (旧群通知"被取消", 新群通知"新增")
+  let oldGroupIds: string[] = [];
+  if (willUpdateShares) {
+    const oldShares = await db.select({ groupId: schema.noteShares.groupId })
+      .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
+    oldGroupIds = oldShares.map(s => s.groupId);
+  }
+
   // 事务: notes update + note_shares 整批替换 一起跑, 防写一半留脏数据
   const now = updates.updatedAt as string;
   db.transaction((tx) => {
@@ -364,6 +460,18 @@ app.patch('/:id', async (c) => {
       }
     }
   });
+
+  // PR #2 阶段 5c: 广播给 旧 ∪ 新 groupIds 的成员 (旧群刷掉这条笔记, 新群加上这条笔记 / 内容改了也要同步)
+  if (willUpdateShares) {
+    const allGroupIds = [...new Set([...oldGroupIds, ...(newSharedGroupIds || [])])];
+    broadcastNoteShared(allGroupIds, userId).catch(e => console.error('[notes] broadcast failed:', e));
+  } else if (existing.visibility === 'shared') {
+    // 只改了内容/tag 没改群列表, 但已经是 shared → 通知所有群成员刷新看新内容
+    const shares = await db.select({ groupId: schema.noteShares.groupId })
+      .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
+    broadcastNoteShared(shares.map(s => s.groupId), userId).catch(e => console.error('[notes] broadcast failed:', e));
+  }
+
   const updated = await db.select().from(schema.notes).where(eq(schema.notes.id, id)).get();
   // 返回 sharedGroupIds 让前端拿到当前最新分享列表
   const shares = await db.select({ groupId: schema.noteShares.groupId })
@@ -384,6 +492,13 @@ app.delete('/:id', async (c) => {
   await db.update(schema.notes)
     .set({ deletedAt: dayjs().toISOString() })
     .where(eq(schema.notes.id, id));
+
+  // PR #2 阶段 5c: 软删共享笔记 → 通知群成员 (note_shares 保留但 deletedAt 过滤让 feed 看不到)
+  if (existing.visibility === 'shared') {
+    const shares = await db.select({ groupId: schema.noteShares.groupId })
+      .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
+    broadcastNoteShared(shares.map(s => s.groupId), userId).catch(e => console.error('[notes] broadcast failed:', e));
+  }
   return c.json({ message: '已移入回收站' });
 });
 

@@ -16,11 +16,11 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: { visibility: 'private' |
 
 const groupsStore = useGroupsStore();
 
-// chip 文案: private="私密" / shared="已发到 N 群"
+// chip 文案: private="私密" / shared="已选择 N 个群"
 const chipLabel = computed(() => {
   if (props.modelValue.visibility === 'private') return '私密';
   const n = props.modelValue.sharedGroupIds.length;
-  return n === 0 ? '已分享' : `已发到 ${n} 群`;
+  return n === 0 ? '已分享' : `已选择 ${n} 个群`;
 });
 
 const isShared = computed(() => props.modelValue.visibility === 'shared');
@@ -111,12 +111,12 @@ onUnmounted(() => {
 <template>
   <!-- Chip: private 灰色锁 / shared 蓝色多人 icon. 点击 toggle popover -->
   <button ref="chipEl" type="button" @click.stop="toggleOpen"
-    class="inline-flex items-center gap-1 rounded-full text-xs font-medium transition-colors"
+    class="inline-flex items-center gap-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap shrink-0"
     :class="[
       compact ? 'px-2 py-0.5' : 'px-2.5 py-1',
       isShared ? 'bg-primary-light text-primary-dark hover:bg-primary/15' : 'bg-gray-100 text-gray-500 hover:bg-gray-200',
     ]"
-    :title="isShared ? `已发到 ${modelValue.sharedGroupIds.length} 个群组, 点击调整` : '仅你可见, 点击分享到群组'">
+    :title="isShared ? `已选择 ${modelValue.sharedGroupIds.length} 个群, 点击调整` : '仅你可见, 点击分享到群组'">
     <PhLock v-if="!isShared" :size="compact ? '0.625rem' : '0.75rem'" weight="fill" />
     <PhUsersThree v-else :size="compact ? '0.625rem' : '0.75rem'" weight="fill" />
     <span>{{ chipLabel }}</span>
@@ -129,7 +129,7 @@ onUnmounted(() => {
       enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-75 ease-in"
       leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
       <div v-if="open" ref="popoverEl"
-        class="fixed z-[var(--z-popover)] w-64 bg-white rounded-xl shadow-xl py-2 origin-bottom"
+        class="fixed z-[var(--z-overlay)] w-64 bg-white rounded-xl shadow-xl py-2 origin-bottom"
         style="border: 1px solid var(--sb-border)"
         :style="popoverStyle">
         <!-- 私密选项: 单独一行, 单击切到 private -->

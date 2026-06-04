@@ -12,6 +12,7 @@ import { useMasonry } from '@/composables/useMasonry';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useAuthStore } from '@/stores/auth';
 import { useNotesStore } from '@/stores/notes';
+import { useGroupsStore } from '@/stores/groups';
 import { pinyinMatch, highlightTextByPinyin } from '@/utils/pinyin';
 
 dayjs.extend(relativeTime);
@@ -119,6 +120,20 @@ const confirmDeleteId = ref('');
 const rendered = ref<Record<string, string>>({});
 useEscToClose(confirmEmpty);
 useEscToClose(confirmDeleteId, '');
+
+// PR #2: 永久删除确认窗显示 "已分享到 N 群". 笔记保留 note_shares (蘑菇决策, 软删时不清),
+// 永久删除会同步清掉 note_shares 让历史也消失
+const groupsStore = useGroupsStore();
+const confirmDeleteShares = computed<string[]>(() => {
+  if (!confirmDeleteId.value) return [];
+  const n = allNotes.value.find(x => x.id === confirmDeleteId.value);
+  return (n as any)?.sharedGroupIds ?? [];
+});
+const confirmDeleteGroupNames = computed<string[]>(() => {
+  return confirmDeleteShares.value
+    .map(id => groupsStore.groups.find(g => g.id === id)?.name)
+    .filter((s): s is string => !!s);
+});
 
 // 瀑布流分列 (跟 Notes.vue / Inspiration.vue / Todos.vue 一致, 修早期遗漏的回归)
 // rootRef 让 useMasonry 用真实 DOM 高度而非估算, 修 estimateHeight 误判最矮列的反馈循环
@@ -372,9 +387,20 @@ function onLeave(el: Element, done: () => void) {
     <Transition name="modal">
       <div v-if="confirmDeleteId" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
         <div class="absolute inset-0 bg-black/30" @click="confirmDeleteId = ''" />
-        <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
+        <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 text-center">
           <p class="text-sm text-gray-700 mb-1">永久删除</p>
-          <p class="text-xs text-gray-400 mb-4">此操作不可恢复</p>
+          <p class="text-xs text-gray-400 mb-2">此操作不可恢复</p>
+          <!-- PR #2: 提醒共享笔记删除后群里历史也消失 -->
+          <p v-if="confirmDeleteShares.length > 0" class="text-xs text-red-500 mb-4">
+            已分享到
+            <template v-if="confirmDeleteGroupNames.length > 0">
+              <span v-for="(name, i) in confirmDeleteGroupNames" :key="name">
+                <span class="font-medium">「{{ name }}」</span><span v-if="i < confirmDeleteGroupNames.length - 1">、</span>
+              </span>
+            </template>
+            <template v-else>{{ confirmDeleteShares.length }} 个群组</template>
+            , 删除后群内也消失
+          </p>
           <div class="flex gap-2 justify-center">
             <button @click="confirmDeleteId = ''" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
             <button @click="doPermanentDelete" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">永久删除</button>

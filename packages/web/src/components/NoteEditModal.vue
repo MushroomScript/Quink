@@ -106,7 +106,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', onKeydown, true)
       <div class="absolute inset-0 bg-black/40 backdrop-blur-md" @click="tryClose" />
 
       <!-- Modal -->
-      <div ref="modalCardRef" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col overflow-hidden ring-1 ring-black/5">
+      <div ref="modalCardRef" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[80vh] flex flex-col overflow-hidden ring-1 ring-black/5">
         <!-- Header -->
         <div class="flex items-center justify-between px-5 py-3 bg-gray-50/80">
           <span class="text-xs font-medium text-gray-500">编辑笔记</span>
