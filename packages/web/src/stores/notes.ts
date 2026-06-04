@@ -19,10 +19,13 @@ interface ViewState {
   // 真实卡片高度 → 全走 estimateHeight 偏低 → pickShortest 错把所有卡塞同列). 改打 dirty,
   // 目标 view 下次 onActivated 时走 keepCount fetch 同步.
   dirty?: boolean;
+  // PR #2 群组共享: 笔记 scope (mine 只看我 / shared 群里别人共享给我). 群 feed 不走这里,
+  // GroupDetail 内 local ref 自管. TopBar 加 scope 切换 chip 让用户主动求"看共享"
+  scope?: 'mine' | 'shared';
 }
 
 function createInitState(): ViewState {
-  return { notes: [], total: 0, currentPage: 1, scrollTop: 0, lastExtra: undefined, dirty: false };
+  return { notes: [], total: 0, currentPage: 1, scrollTop: 0, lastExtra: undefined, dirty: false, scope: 'mine' };
 }
 
 export const useNotesStore = defineStore('notes', () => {
@@ -132,6 +135,8 @@ export const useNotesStore = defineStore('notes', () => {
       // 排序字段 (created 默认, updated = 按最后编辑时间). Settings 偏好驱动, 改后 watch(sortBy) 清缓存
       // 让各 view onActivated 走 wasEmpty 分支重新 fetch (server 真正按时间字段 ORDER BY 排好返回)
       if (sortBy.value === 'updated') params.sort = 'updated';
+      // PR #2 scope: mine (默认) / shared (群里别人共享给我). TopBar scope chip 切换时改 vs.scope
+      if (vs.scope && vs.scope !== 'mine') params.scope = vs.scope;
 
       const res = await api.getNotes(params);
       if (opts.append) {
@@ -196,8 +201,9 @@ export const useNotesStore = defineStore('notes', () => {
     todo: 'todos',
   };
 
-  async function createNote(content: string, type: string = 'note', tags?: string[]) {
-    const res = await api.createNote({ content, type, tags });
+  // PR #2 createNote 加 visibility + sharedGroupIds 透传给 server
+  async function createNote(content: string, type: string = 'note', tags?: string[], visibility: 'private' | 'shared' = 'private', sharedGroupIds: string[] = []) {
+    const res = await api.createNote({ content, type, tags, visibility, sharedGroupIds });
     // 按新笔记 type 决定加到哪个 viewState, 不绑当前 activeView. 这样跨 view 创建 (如在灵感页
     // 用 Capture 创建 type=todo) 切到对应 view 立刻看到, 不用等 fetchNotes.
     const targetViewKey = typeToView[res.data.type];

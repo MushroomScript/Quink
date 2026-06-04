@@ -74,6 +74,8 @@ export interface User {
 
 export interface Note {
   id: string;
+  // 作者 userId (PR #2 群组共享: shared 笔记群成员能看到别人发的, 需区分作者跟自己)
+  userId?: string;
   content: string;
   summary: string | null;
   category: string | null;
@@ -87,7 +89,17 @@ export interface Note {
   pinned: boolean;
   createdAt: string;
   updatedAt: string;
+  // PR #2 群组共享: 'private' (默认 仅作者) / 'shared' (分享到 sharedGroupIds 列出的群)
+  visibility?: 'private' | 'shared';
+  sharedGroupIds?: string[];
+  // 群组 feed (GET /api/groups/:id/notes) 才返回, 给 NoteCard 显示发布人头像 + 排序
+  sharedAt?: string;
+  authorNickname?: string;
+  authorAvatar?: string | null;
 }
+
+// PR #2 scope: 笔记列表过滤. mine (只看我自己) / shared (群里别人共享给我的) / group:<id> (某群可见)
+export type NotesScope = 'mine' | 'shared' | `group:${string}`;
 
 export type ReminderChannelType =
   | 'browser' | 'email' | 'bark' | 'wecom_bot' | 'dingtalk_bot' | 'feishu_bot' | 'telegram' | 'webhook';
@@ -253,7 +265,7 @@ export const api = {
     return request<{ data: Note }>(`/notes/${id}`);
   },
 
-  createNote(data: { content: string; type?: string; category?: string; tags?: string[] }) {
+  createNote(data: { content: string; type?: string; category?: string; tags?: string[]; visibility?: 'private' | 'shared'; sharedGroupIds?: string[] }) {
     return request<{ data: Note }>('/notes', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -601,6 +613,11 @@ export const api = {
   },
   getGroup(id: string) {
     return request<{ data: GroupDetail }>(`/groups/${id}`);
+  },
+  // PR #2 群组共享: 拉群内共享的笔记 (sharedAt DESC 排序), 含 authorNickname/Avatar 给 NoteCard 用
+  getGroupNotes(groupId: string, params?: { page?: number; limit?: number }) {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString() : '';
+    return request<PaginatedResponse<Note>>(`/groups/${groupId}/notes${qs}`);
   },
   updateGroup(id: string, data: { name?: string; avatar?: string | null; autoJoin?: boolean }) {
     return request<{ data: Group }>(`/groups/${id}`, { method: 'PATCH', body: JSON.stringify(data) });

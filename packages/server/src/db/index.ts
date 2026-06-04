@@ -160,6 +160,18 @@ sqlite.exec(`
     handled_by TEXT REFERENCES users(id)
   );
 
+  -- PR #2 群组共享: 笔记 → 群组多对多, sharedAt 给群 feed 排序
+  CREATE TABLE IF NOT EXISTS note_shares (
+    note_id TEXT NOT NULL REFERENCES notes(id),
+    group_id TEXT NOT NULL REFERENCES groups(id),
+    shared_at TEXT NOT NULL,
+    PRIMARY KEY (note_id, group_id)
+  );
+  -- 群 feed 查询: SELECT * FROM note_shares WHERE group_id=? ORDER BY shared_at DESC
+  CREATE INDEX IF NOT EXISTS idx_note_shares_group_shared ON note_shares(group_id, shared_at DESC);
+  -- 删笔记 / 取消分享: DELETE FROM note_shares WHERE note_id=?
+  CREATE INDEX IF NOT EXISTS idx_note_shares_note ON note_shares(note_id);
+
   CREATE TABLE IF NOT EXISTS reminder_pending (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
@@ -213,6 +225,8 @@ try { sqlite.exec(`UPDATE users SET preferences = json_set(json_remove(preferenc
 ) WHERE json_extract(preferences, '$.fontSize') IS NOT NULL AND json_extract(preferences, '$.zoomLevel') IS NULL`); } catch {}
 // Migrate: notes.content_pinyin (拼音搜索支持: 全拼 + 首字母拼接串,搜索时 LIKE %query% 命中)
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN content_pinyin TEXT'); } catch {}
+// Migrate: notes.visibility (PR #2 群组共享: private | shared, 默认 private 让现有笔记无侵入)
+try { sqlite.exec("ALTER TABLE notes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'"); } catch {}
 // 一次性回填 + 升级重算: PINYIN_SCHEMA_VERSION 每次 toPinyinSearchable 算法升级时 +1,
 // 启动检测 config 表里存的版本号,低于当前版本就把所有 content_pinyin 清空让下面回填重算。
 // v1: 全拼 + 单读音首字母. v2: 多音字首字母穷举. v3: 多音字只取前 2 读音. v4: 加罕用读音黑名单.

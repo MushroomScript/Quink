@@ -12,6 +12,7 @@ import {
   markCancelledById,
 } from '@/composables/useAttachmentTasks';
 import RenameModal from './RenameModal.vue';
+import VisibilityChip from './VisibilityChip.vue';
 import {
   PhLightbulb,
   PhNotePencil,
@@ -42,6 +43,10 @@ const props = withDefaults(defineProps<{
   showAi?: boolean;
   showFullscreenBtn?: boolean;
   hintText?: string;
+  // PR #2 群组共享: chip 控制可见性 (private / shared 到 N 群)
+  initialVisibility?: 'private' | 'shared';
+  initialSharedGroupIds?: string[];
+  showVisibilityChip?: boolean;
 }>(), {
   initialContent: '',
   initialType: 'note',
@@ -56,6 +61,9 @@ const props = withDefaults(defineProps<{
   maxHeight: 320,
   showFullscreenBtn: true,
   hintText: '',
+  initialVisibility: 'private',
+  initialSharedGroupIds: () => [],
+  showVisibilityChip: true,
 });
 
 const isFullscreen = ref(props.initialFullscreen);
@@ -81,9 +89,15 @@ function toggleFullscreen() {
 }
 
 const emit = defineEmits<{
-  (e: 'submit', data: { html: string; type: string; tags: string[] }): void;
+  (e: 'submit', data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[] }): void;
   (e: 'ready'): void;
 }>();
+
+// PR #2 群组共享: 内部双向 v-model 的可见性状态. NoteInput 等用方传 initial*, 不再外部 sync (chip popover 实时更新)
+const visibilityModel = ref<{ visibility: 'private' | 'shared'; sharedGroupIds: string[] }>({
+  visibility: props.initialVisibility,
+  sharedGroupIds: [...props.initialSharedGroupIds],
+});
 
 const noteTypes = [
   { value: 'note', label: '灵感', icon: markRaw(PhLightbulb), iconStyle: '' },
@@ -370,7 +384,7 @@ function handleSubmit() {
   const md = stripMarkdownFileUrls(vditor.getValue().trim());
   if (!md) return;
 
-  emit('submit', { html: md, type: noteType.value, tags: [...tags.value] });
+  emit('submit', { html: md, type: noteType.value, tags: [...tags.value], visibility: visibilityModel.value.visibility, sharedGroupIds: [...visibilityModel.value.sharedGroupIds] });
   dirty.value = false;
   // 保存后退出全屏: NoteInput 场景让用户看回到列表; NoteEditModal 场景下 modal 自身也在
   // 关闭(同一 tick 内 store.updateNote 后 showInner=false),这里只是顺手清掉状态。
@@ -793,9 +807,10 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         </span>
       </div>
 
-      <!-- Submit + fullscreen -->
+      <!-- Submit + fullscreen + visibility chip (PR #2 群组共享) -->
       <div class="flex items-center gap-1.5">
         <span v-if="hintText" class="text-[11px] text-gray-400 mr-1">{{ hintText }}</span>
+        <VisibilityChip v-if="showVisibilityChip" v-model="visibilityModel" compact />
         <button v-if="showFullscreenBtn" @click="toggleFullscreen"
           class="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
           :title="isFullscreen ? '退出全屏 (Esc)' : '全屏编辑'">

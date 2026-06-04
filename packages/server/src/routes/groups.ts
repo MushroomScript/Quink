@@ -237,6 +237,62 @@ app.get('/:id', async (c) => {
   });
 });
 
+// 群内可见笔记列表 (PR #2 群组共享). 必须 active member 才能拉. 排序 sharedAt DESC (最近被分享冲顶)
+// 跟 GET /api/notes?scope=group:<id> 等价, 但路径更 RESTful + 自然返回作者头像/昵称给 NoteCard 用
+app.get('/:id/notes', async (c) => {
+  const userId = c.get('userId');
+  const groupId = c.req.param('id');
+  const me = await getActiveMember(groupId, userId);
+  if (!me) return c.json({ error: '群组不存在或你不是成员' }, 404);
+  const { page = '1', limit = '50' } = c.req.query();
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  // 子查询: notes JOIN note_shares JOIN users (作者头像/昵称 给 NoteCard 用)
+  // ORDER BY shared_at DESC (蘑菇决策: 最近被分享冲顶, 老笔记重新分享会再次置顶)
+  const rows = db.all(sql`
+    SELECT n.*, ns.shared_at as sharedAt, u.nickname as authorNickname, u.avatar as authorAvatar
+    FROM notes n
+    INNER JOIN note_shares ns ON ns.note_id = n.id
+    INNER JOIN users u ON u.id = n.user_id
+    WHERE ns.group_id = ${groupId} AND n.deleted_at IS NULL
+    ORDER BY ns.shared_at DESC
+    LIMIT ${parseInt(limit)} OFFSET ${offset}
+  `) as Array<any>;
+  const totalRow = db.get(sql`
+    SELECT count(*) as count FROM note_shares ns
+    INNER JOIN notes n ON n.id = ns.note_id
+    WHERE ns.group_id = ${groupId} AND n.deleted_at IS NULL
+  `) as { count: number } | undefined;
+
+  // raw SQL 返回 snake_case, 手动映射成 camelCase (跟其他 endpoint 返回格式一致)
+  const data = rows.map(r => ({
+    id: r.id,
+    userId: r.user_id,
+    content: r.content,
+    contentPinyin: r.content_pinyin,
+    summary: r.summary,
+    category: r.category,
+    tags: typeof r.tags === 'string' ? JSON.parse(r.tags) : r.tags,
+    type: r.type,
+    todoStatus: r.todo_status,
+    todoDue: r.todo_due,
+    todoRemindSentAt: r.todo_remind_sent_at,
+    todoRemindRrule: r.todo_remind_rrule,
+    aiProcessed: !!r.ai_processed,
+    pinned: !!r.pinned,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    visibility: r.visibility,
+    sharedAt: r.sharedAt,
+    authorNickname: r.authorNickname,
+    authorAvatar: r.authorAvatar,
+  }));
+  return c.json({
+    data,
+    pagination: { page: parseInt(page), limit: parseInt(limit), total: totalRow?.count ?? 0 },
+  });
+});
+
 app.patch('/:id', async (c) => {
   const userId = c.get('userId');
   const groupId = c.req.param('id');
@@ -268,6 +324,9 @@ app.delete('/:id', async (c) => {
     .where(eq(schema.groupMembers.groupId, groupId))
     .all()).map(r => r.userId);
   db.transaction((tx) => {
+    // PR #2: 群被解散后 note_shares 引用的 group_id 失效, FK constraint 会阻止 DELETE groups,
+    // 先清 note_shares (笔记本体保留, 作者仍能看自己的, 群可见性彻底消失)
+    tx.delete(schema.noteShares).where(eq(schema.noteShares.groupId, groupId)).run();
     tx.delete(schema.groupJoinRequests).where(eq(schema.groupJoinRequests.groupId, groupId)).run();
     tx.delete(schema.groupMembers).where(eq(schema.groupMembers.groupId, groupId)).run();
     tx.delete(schema.groups).where(eq(schema.groups.id, groupId)).run();

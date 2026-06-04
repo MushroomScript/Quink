@@ -20,6 +20,9 @@ const createNoteSchema = z.object({
   tags: z.array(z.string()).optional(),
   todoDue: z.string().optional(), // ISO datetime, 复用为提醒时间
   todoRemindRrule: z.string().nullable().optional(), // RFC 5545 RRULE
+  // PR #2 群组共享: visibility=private (默认, 仅作者) / visibility=shared 必须给 sharedGroupIds[]
+  visibility: z.enum(['private', 'shared']).default('private'),
+  sharedGroupIds: z.array(z.string()).optional(),
 });
 
 const updateNoteSchema = z.object({
@@ -32,20 +35,64 @@ const updateNoteSchema = z.object({
   todoDue: z.string().nullable().optional(),
   todoRemindRrule: z.string().nullable().optional(),
   pinned: z.boolean().optional(),
+  // PR #2: 改可见性 / 重写分享群列表. sharedGroupIds 传值时整批替换 (delete all + insert new)
+  visibility: z.enum(['private', 'shared']).optional(),
+  sharedGroupIds: z.array(z.string()).optional(),
 });
+
+// 校验所有 groupIds 都是 userId 的 active member 的群. 任一不符返回 error string, 全过返回 null
+async function validateSharedGroups(userId: string, groupIds: string[]): Promise<string | null> {
+  if (groupIds.length === 0) return null;
+  const memberships = await db.select({ groupId: schema.groupMembers.groupId })
+    .from(schema.groupMembers)
+    .where(and(
+      eq(schema.groupMembers.userId, userId),
+      eq(schema.groupMembers.status, 'active'),
+      inArray(schema.groupMembers.groupId, groupIds),
+    )).all();
+  const memberGroupIds = new Set(memberships.map(m => m.groupId));
+  const notMember = groupIds.filter(id => !memberGroupIds.has(id));
+  if (notMember.length > 0) return `不是这些群的成员: ${notMember.join(', ')}`;
+  return null;
+}
 
 // GET /api/notes
 app.get('/', async (c) => {
   const userId = c.get('userId');
-  const { search, category, type, tag, tags, types, dateFrom, dateTo, sort, page = '1', limit = '50' } = c.req.query();
+  const { search, category, type, tag, tags, types, dateFrom, dateTo, sort, scope = 'mine', page = '1', limit = '50' } = c.req.query();
   const offset = (parseInt(page) - 1) * parseInt(limit);
   // 排序字段: created (默认, 兼容老行为) / updated. 未知值兜底 createdAt 不报错.
   const sortColumn = sort === 'updated' ? schema.notes.updatedAt : schema.notes.createdAt;
 
+  // PR #2 scope 三种: mine (默认, 只我自己的笔记) / shared (我所在群里别人共享给我的) / group:<id> (某群可见笔记)
   const conditions: any[] = [
-    eq(schema.notes.userId, userId),
     sql`${schema.notes.deletedAt} IS NULL`, // 排除回收站
   ];
+  if (scope === 'mine') {
+    conditions.push(eq(schema.notes.userId, userId));
+  } else if (scope === 'shared') {
+    // 子查询: id IN (note_shares WHERE group_id IN my_active_groups) AND author != me
+    conditions.push(sql`${schema.notes.id} IN (
+      SELECT ns.note_id FROM note_shares ns
+      WHERE ns.group_id IN (
+        SELECT group_id FROM group_members WHERE user_id = ${userId} AND status = 'active'
+      )
+    )`);
+    conditions.push(sql`${schema.notes.userId} != ${userId}`);
+  } else if (scope.startsWith('group:')) {
+    const groupId = scope.slice(6);
+    // 校验我是该群 active member, 否则返回空 (不暴露非成员看群可见笔记)
+    const me = await db.select().from(schema.groupMembers)
+      .where(and(
+        eq(schema.groupMembers.groupId, groupId),
+        eq(schema.groupMembers.userId, userId),
+        eq(schema.groupMembers.status, 'active'),
+      )).get();
+    if (!me) return c.json({ data: [], pagination: { page: parseInt(page), limit: parseInt(limit), total: 0 } });
+    conditions.push(sql`${schema.notes.id} IN (SELECT note_id FROM note_shares WHERE group_id = ${groupId})`);
+  } else {
+    return c.json({ error: '无效的 scope, 应为 mine / shared / group:<id>' }, 400);
+  }
 
   if (search) {
     // 搜索内容、摘要、分类、标签 + 拼音(全拼/首字母,英文输入命中中文笔记)
@@ -162,15 +209,32 @@ app.get('/tags', async (c) => {
 });
 
 // GET /api/notes/:id
+// 作者拿自己的笔记 → 直接返回 (含 sharedGroupIds 给编辑器恢复)
+// 群成员拿别人共享笔记 → 校验 note_shares 跟我所在群有交集才放行
 app.get('/:id', async (c) => {
   const userId = c.get('userId');
   const { id } = c.req.param();
-  const note = await db.select().from(schema.notes)
-    .where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId)))
-    .get();
-
+  const note = await db.select().from(schema.notes).where(eq(schema.notes.id, id)).get();
   if (!note) return c.json({ error: '笔记不存在' }, 404);
-  return c.json({ data: note });
+
+  if (note.userId !== userId) {
+    // 不是作者: 必须笔记 shared 且在我所在群之一
+    const shared = await db.select({ groupId: schema.noteShares.groupId })
+      .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
+    if (shared.length === 0) return c.json({ error: '笔记不存在' }, 404);
+    const myGroups = await db.select({ groupId: schema.groupMembers.groupId })
+      .from(schema.groupMembers)
+      .where(and(
+        eq(schema.groupMembers.userId, userId),
+        eq(schema.groupMembers.status, 'active'),
+        inArray(schema.groupMembers.groupId, shared.map(s => s.groupId)),
+      )).get();
+    if (!myGroups) return c.json({ error: '笔记不存在' }, 404);
+  }
+
+  const shares = await db.select({ groupId: schema.noteShares.groupId })
+    .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
+  return c.json({ data: { ...note, sharedGroupIds: shares.map(s => s.groupId) } });
 });
 
 // POST /api/notes
@@ -179,6 +243,20 @@ app.post('/', async (c) => {
   const body = await c.req.json();
   const parsed = createNoteSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+
+  // PR #2 visibility 校验: shared 必须给非空 sharedGroupIds + 全是我所在的群; private 不能带 sharedGroupIds
+  const visibility = parsed.data.visibility;
+  const sharedGroupIds = parsed.data.sharedGroupIds ?? [];
+  if (visibility === 'shared' && sharedGroupIds.length === 0) {
+    return c.json({ error: 'visibility=shared 必须指定至少 1 个 sharedGroupIds' }, 400);
+  }
+  if (visibility === 'private' && sharedGroupIds.length > 0) {
+    return c.json({ error: 'visibility=private 不能带 sharedGroupIds' }, 400);
+  }
+  if (sharedGroupIds.length > 0) {
+    const err = await validateSharedGroups(userId, sharedGroupIds);
+    if (err) return c.json({ error: err }, 403);
+  }
 
   const now = dayjs().toISOString();
   const note = {
@@ -198,14 +276,23 @@ app.post('/', async (c) => {
     pinned: false,
     createdAt: now,
     updatedAt: now,
+    visibility,
   };
 
-  await db.insert(schema.notes).values(note);
+  // 事务: insert note + insert note_shares 一起写, 防分享列表写一半留脏数据
+  db.transaction((tx) => {
+    tx.insert(schema.notes).values(note).run();
+    if (sharedGroupIds.length > 0) {
+      tx.insert(schema.noteShares).values(
+        sharedGroupIds.map(groupId => ({ noteId: note.id, groupId, sharedAt: now }))
+      ).run();
+    }
+  });
 
   // 异步 AI 处理（不阻塞响应）
   processNoteWithAi(userId, note.id, note.content, note.tags as string[]).catch(() => {});
 
-  return c.json({ data: note }, 201);
+  return c.json({ data: { ...note, sharedGroupIds } }, 201);
 });
 
 // PATCH /api/notes/:id
@@ -244,10 +331,44 @@ app.patch('/:id', async (c) => {
   }
   if (data.todoRemindRrule !== undefined) updates.todoRemindRrule = data.todoRemindRrule;
   if (data.pinned !== undefined) updates.pinned = data.pinned;
+  // PR #2 改 visibility / sharedGroupIds: 校验后整批替换 note_shares (delete all + insert new)
+  // 客户端可以三种方式调: 仅传 visibility (改私密性) / 仅传 sharedGroupIds (改群列表) / 两个一起
+  const willUpdateShares = data.visibility !== undefined || data.sharedGroupIds !== undefined;
+  let newSharedGroupIds: string[] | undefined;
+  if (willUpdateShares) {
+    const newVisibility = data.visibility ?? existing.visibility;
+    newSharedGroupIds = data.sharedGroupIds ?? (newVisibility === 'shared' ? undefined : []);
+    if (newVisibility === 'shared' && (!newSharedGroupIds || newSharedGroupIds.length === 0)) {
+      return c.json({ error: 'visibility=shared 必须指定 sharedGroupIds (≥1 个群)' }, 400);
+    }
+    if (newVisibility === 'private' && newSharedGroupIds && newSharedGroupIds.length > 0) {
+      return c.json({ error: 'visibility=private 不能带 sharedGroupIds' }, 400);
+    }
+    if (newSharedGroupIds && newSharedGroupIds.length > 0) {
+      const err = await validateSharedGroups(userId, newSharedGroupIds);
+      if (err) return c.json({ error: err }, 403);
+    }
+    if (data.visibility !== undefined) updates.visibility = data.visibility;
+  }
 
-  await db.update(schema.notes).set(updates).where(eq(schema.notes.id, id));
+  // 事务: notes update + note_shares 整批替换 一起跑, 防写一半留脏数据
+  const now = updates.updatedAt as string;
+  db.transaction((tx) => {
+    tx.update(schema.notes).set(updates).where(eq(schema.notes.id, id)).run();
+    if (willUpdateShares) {
+      tx.delete(schema.noteShares).where(eq(schema.noteShares.noteId, id)).run();
+      if (newSharedGroupIds && newSharedGroupIds.length > 0) {
+        tx.insert(schema.noteShares).values(
+          newSharedGroupIds.map(groupId => ({ noteId: id, groupId, sharedAt: now }))
+        ).run();
+      }
+    }
+  });
   const updated = await db.select().from(schema.notes).where(eq(schema.notes.id, id)).get();
-  return c.json({ data: updated });
+  // 返回 sharedGroupIds 让前端拿到当前最新分享列表
+  const shares = await db.select({ groupId: schema.noteShares.groupId })
+    .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
+  return c.json({ data: { ...updated, sharedGroupIds: shares.map(s => s.groupId) } });
 });
 
 // DELETE /api/notes/:id — 软删除（移入回收站）

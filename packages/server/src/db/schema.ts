@@ -29,7 +29,20 @@ export const notes = sqliteTable('notes', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   deletedAt: text('deleted_at'), // 软删除时间，null 表示未删除
+  // PR #2 群组共享: 'private' 仅作者可见; 'shared' 走 note_shares 表关联到指定群
+  visibility: text('visibility', { enum: ['private', 'shared'] }).notNull().default('private'),
 });
+
+// PR #2 群组共享: 笔记 → 群组多对多. 一条笔记可分享到多个群, 删 group_members 不影响共享
+// (member 被踢出群后看不到, 但作者重新加群能恢复可见性). 作者软删笔记不动 note_shares 保留意图
+export const noteShares = sqliteTable('note_shares', {
+  noteId: text('note_id').notNull().references(() => notes.id),
+  groupId: text('group_id').notNull().references(() => groups.id),
+  // 分享时间, 群组 feed 默认按这个 DESC 排序 (最近被分享冲顶), 而不是笔记 createdAt
+  sharedAt: text('shared_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.noteId, table.groupId] }),
+}));
 
 export const categories = sqliteTable('categories', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -198,6 +211,9 @@ export type AiMessage = typeof aiMessages.$inferSelect;
 export type VoiceTranscription = typeof voiceTranscriptions.$inferSelect;
 export type ReminderPending = typeof reminderPending.$inferSelect;
 export type NewReminderPending = typeof reminderPending.$inferInsert;
+export type NoteShare = typeof noteShares.$inferSelect;
+export type NewNoteShare = typeof noteShares.$inferInsert;
+export type NoteVisibility = Note['visibility'];
 export type ReminderChannel = typeof reminderChannels.$inferSelect;
 export type NewReminderChannel = typeof reminderChannels.$inferInsert;
 export type ReminderChannelType = ReminderChannel['type'];

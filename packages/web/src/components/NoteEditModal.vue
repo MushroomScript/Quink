@@ -19,7 +19,7 @@ const showConfirm = ref(false);
 const showInner = ref(false);
 onMounted(() => { nextTick(() => { showInner.value = true; }); });
 
-async function onSubmit(data: { html: string; type: string; tags: string[] }) {
+async function onSubmit(data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[] }) {
   if (saving.value) return;
   saving.value = true;
   try {
@@ -27,6 +27,9 @@ async function onSubmit(data: { html: string; type: string; tags: string[] }) {
       content: data.html,
       type: data.type as any,
       tags: data.tags,
+      // PR #2: 传 visibility / sharedGroupIds 让 server 重建 note_shares (整批替换)
+      visibility: data.visibility,
+      sharedGroupIds: data.sharedGroupIds,
     });
     showInner.value = false;
   } finally { saving.value = false; }
@@ -126,6 +129,8 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', onKeydown, true)
             :initial-type="note.type"
             :initial-tags="note.tags || []"
             :initial-fullscreen="initialFullscreen"
+            :initial-visibility="(note as any).visibility || 'private'"
+            :initial-shared-group-ids="(note as any).sharedGroupIds || []"
             :focus-end="true"
             :max-height="450"
             submit-label="保存"

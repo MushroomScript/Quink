@@ -18,11 +18,11 @@ const submitting = ref(false);
 const showToast = ref(false);
 const toastMsg = ref('');
 
-async function onSubmit(data: { html: string; type: string; tags: string[] }) {
+async function onSubmit(data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[] }) {
   if (submitting.value) return;
   submitting.value = true;
   try {
-    const created = await store.createNote(data.html, data.type, data.tags.length ? data.tags : undefined);
+    const created = await store.createNote(data.html, data.type, data.tags.length ? data.tags : undefined, data.visibility, data.sharedGroupIds);
     editorRef.value?.clearContent();
 
     // 通知主窗口刷新 (带 id 让主窗口走单条轮询 patch 而不是全量 fetchNotes; 浏览器场景同 window 内 store listener 也收到)
@@ -83,7 +83,7 @@ onUnmounted(() => {
 <template>
   <div class="h-full flex flex-col bg-transparent tooltip-below capture-drag">
     <!-- Not logged in -->
-    <div v-if="notLoggedIn" class="relative flex-1 flex items-center justify-center bg-white rounded-xl shadow-2xl">
+    <div v-if="notLoggedIn" class="relative flex-1 flex items-center justify-center bg-white rounded-lg shadow-2xl">
       <div class="text-center">
         <p class="text-gray-500 text-sm">请先在主窗口登录</p>
       </div>
@@ -92,9 +92,9 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- Editor -->
-    <div v-else class="capture-editor-host relative flex-1 overflow-hidden bg-white rounded-xl shadow-2xl">
-      <RichEditor ref="editorRef" @submit="onSubmit" @ready="onEditorReady" :show-ai="false" :show-fullscreen-btn="false" :max-height="80" :min-height="60" placeholder="快速记录你的想法..." />
+    <!-- Editor: rounded-lg=8px 匹配 Win11 BrowserWindow frameless OS 圆角, 避免角落露 BrowserWindow bg -->
+    <div v-else class="capture-editor-host relative flex-1 overflow-hidden bg-white rounded-lg shadow-2xl">
+      <RichEditor ref="editorRef" @submit="onSubmit" @ready="onEditorReady" :show-ai="false" :show-fullscreen-btn="false" :show-visibility-chip="false" :max-height="80" :min-height="60" placeholder="快速记录你的想法..." />
       <button @click="closeWindow" class="capture-close-btn" style="-webkit-app-region: no-drag" title="关闭">
         <PhXCircle size="1.125rem" weight="fill" />
       </button>
