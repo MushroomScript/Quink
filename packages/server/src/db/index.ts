@@ -160,6 +160,16 @@ sqlite.exec(`
     handled_by TEXT REFERENCES users(id)
   );
 
+  CREATE TABLE IF NOT EXISTS reminder_pending (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    sent_at TEXT
+  );
+  -- 上线补送只查 unsent (sent_at IS NULL)
+  CREATE INDEX IF NOT EXISTS idx_reminder_pending_user_unsent ON reminder_pending(user_id, sent_at);
+
   -- 邀请 token 反查群组用 (invite/:token 路由)
   CREATE INDEX IF NOT EXISTS idx_groups_invite_token ON groups(invite_token);
   -- 用户的待审申请列表 (owner 看 join-requests pending 用 group_id, 申请人看自己用 user_id)

@@ -59,13 +59,19 @@ contextBridge.exposeInMainWorld('quinkDesktop', {
       ipcRenderer.on('attachment-tasks:abort-uploads', (_e, ids) => cb(ids));
     },
   },
-  // 待办提醒: SSE 推到 renderer 后转给 main 弹 OS 原生通知 (任务栏闪 + 通知中心收纳)
-  showNotification: (payload: { title: string; body: string; noteId?: string }) =>
+  // 待办提醒 / 群组事件: SSE 推到 renderer 后转给 main 弹 OS 原生通知 (任务栏闪 + 通知中心收纳)
+  // path 字段: 通用跳转路径 (如 /groups/<id>); noteId 保留向后兼容 (老 reminder 走 /note/<id>)
+  showNotification: (payload: { title: string; body: string; noteId?: string; path?: string }) =>
     ipcRenderer.send('show-notification', payload),
-  // main → renderer: 用户点击通知 → 跳详情页. App.vue 监听
+  // main → renderer: 用户点击通知 → 跳详情页. App.vue 监听 (老 reminder)
   onOpenNote: (cb: (noteId: string) => void) => {
     ipcRenderer.removeAllListeners('open-note');
     ipcRenderer.on('open-note', (_e, noteId: string) => cb(noteId));
+  },
+  // main → renderer: 用户点击通用通知 → 跳指定 path (群组 / 未来其他场景共用)
+  onOpenPath: (cb: (path: string) => void) => {
+    ipcRenderer.removeAllListeners('open-path');
+    ipcRenderer.on('open-path', (_e, path: string) => cb(path));
   },
   isElectron: true,
 });

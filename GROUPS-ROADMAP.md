@@ -88,12 +88,12 @@ WHERE user_id = me
 - `note-unshared`: 取消分享 → 同上
 - `note-deleted`: 共享笔记被作者删 → 群里看到列表也消失（trigger 群成员 loadGroupNotes）
 
-### 决策待拍板
+### 决策已锁定 ✓
 
-- 笔记列表"灵感/笔记/待办" 默认 scope 是 "只我" 还是 "我 + 群组共享"？
-  - 推荐: 默认"只我"避免视觉拥挤, TopBar 加 scope 切换 chip
-- 群组 feed 排序: createdAt DESC 还是按 sharedAt DESC?
-  - 推荐: sharedAt DESC, 让群成员看到"最近被分享的"
+- ✓ **默认 scope = mine** (只看自己), TopBar 加 scope 切换 chip 让用户主动求"看共享"
+- ✓ **群组 feed 排序 = sharedAt DESC** (最近被分享的冲顶)
+- ✓ **作者删共享笔记时保留 note_shares** (软删除天然过滤; 恢复时自动重新可见)
+- ✓ **PR #2 包 SSE 群播 note-shared** (复用 broadcastGroupChanged helper, 不跨 PR 拆分)
 
 ---
 

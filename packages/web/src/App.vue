@@ -254,9 +254,13 @@ onMounted(async () => {
 
   // 启动提醒 SSE: 长连接接收 server 推送, 收到 reminder 事件 → Electron 原生通知 / 浏览器 Notification
   startReminderSse();
-  // Electron 点击系统通知 → 主窗口跳笔记详情
+  // Electron 点击系统通知 → 主窗口跳笔记详情 (老 reminder 路径)
   (window as any).quinkDesktop?.onOpenNote?.((noteId: string) => {
     if (noteId && noteId !== 'test') router.push(`/note/${noteId}`);
+  });
+  // Electron 点击通用通知 → 跳指定 path (群组事件 / 未来场景共用)
+  (window as any).quinkDesktop?.onOpenPath?.((path: string) => {
+    if (path) router.push(path);
   });
 
   // 清理 HMR 残留

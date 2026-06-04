@@ -737,7 +737,7 @@ ipcMain.on('attachment-tasks:clear-completed', () => attachmentTasksStore.clearC
 
 // 提醒通道: renderer 收到 SSE reminder 事件后转发到这里, 用 Electron 原生 Notification (任务栏图标会闪 + Win11 通知中心收纳)
 // 点击通知 → 激活主窗口 + IPC 转发让 renderer 跳详情页. noteId 透传给 renderer.
-ipcMain.on('show-notification', (_e, payload: { title: string; body: string; noteId?: string }) => {
+ipcMain.on('show-notification', (_e, payload: { title: string; body: string; noteId?: string; path?: string }) => {
   if (!Notification.isSupported()) {
     console.warn('[notification] OS 不支持系统通知');
     return;
@@ -748,12 +748,14 @@ ipcMain.on('show-notification', (_e, payload: { title: string; body: string; not
     silent: false,
   });
   n.on('click', () => {
-    // 激活主窗口 + 让 renderer 跳到对应笔记
+    // 激活主窗口 + 跳转: path 优先 (群组等通用场景), noteId 老 reminder 兼容
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       if (!mainWindow.isVisible()) mainWindow.show();
       mainWindow.focus();
-      if (payload.noteId) {
+      if (payload.path) {
+        mainWindow.webContents.send('open-path', payload.path);
+      } else if (payload.noteId) {
         mainWindow.webContents.send('open-note', payload.noteId);
       }
     }

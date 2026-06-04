@@ -118,6 +118,18 @@ export const reminderChannels = sqliteTable('reminder_channels', {
   createdAt: text('created_at').notNull(),
 });
 
+// browser channel 离线时挂起的提醒. user SSE ready 时补送 (Q1: 防离线丢; Q2: sent_at 防重复).
+// 只追 browser channel (其他 channel: email/bark/webhook 不依赖在线连接, 发完就送达)
+export const reminderPending = sqliteTable('reminder_pending', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  // JSON {noteId, title, body, remindAt} — 跟 sse 事件 payload 一致, ready 时 write 'reminder' event 直接吐
+  payload: text('payload').notNull(),
+  createdAt: text('created_at').notNull(),
+  // 上线推送后标. 多端登录时 atomic update 保证只推一次 (where sent_at IS NULL)
+  sentAt: text('sent_at'),
+});
+
 export const voiceTranscriptions = sqliteTable('voice_transcriptions', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
@@ -184,6 +196,8 @@ export type AiPrompt = typeof aiPrompts.$inferSelect;
 export type AiConversation = typeof aiConversations.$inferSelect;
 export type AiMessage = typeof aiMessages.$inferSelect;
 export type VoiceTranscription = typeof voiceTranscriptions.$inferSelect;
+export type ReminderPending = typeof reminderPending.$inferSelect;
+export type NewReminderPending = typeof reminderPending.$inferInsert;
 export type ReminderChannel = typeof reminderChannels.$inferSelect;
 export type NewReminderChannel = typeof reminderChannels.$inferInsert;
 export type ReminderChannelType = ReminderChannel['type'];
