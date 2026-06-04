@@ -102,6 +102,60 @@ export interface ReminderChannel {
   createdAt: string;
 }
 
+export type GroupRole = 'owner' | 'admin' | 'member';
+
+export interface Group {
+  id: string;
+  ownerId: string;
+  name: string;
+  avatar: string | null;
+  inviteToken: string | null;
+  inviteExpiresAt: string | null;
+  autoJoin: boolean;
+  createdAt: string;
+  memberCount: number;
+  myRole: GroupRole | null;
+}
+
+export interface GroupMemberInfo {
+  userId: string;
+  role: GroupRole;
+  joinedAt: string;
+  username: string;
+  nickname: string;
+  avatar: string | null;
+}
+
+export interface GroupDetail extends Group {
+  members: GroupMemberInfo[];
+}
+
+export interface GroupJoinRequest {
+  id: string;
+  userId: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  createdAt: string;
+  handledAt: string | null;
+  handledBy: string | null;
+  applicant: { username: string; nickname: string; avatar: string | null };
+}
+
+// 公开邀请页返回 (不需登录可见的群组简介)
+export interface InvitePreview {
+  id: string;
+  name: string;
+  avatar: string | null;
+  memberCount: number;
+  autoJoin: boolean;
+  inviteExpiresAt: string | null;
+}
+
+// 申请加入返回: pending = 等审批, joined = 自动加入模式直接进, already_member = 已经是成员幂等
+export type ApplyInviteResult =
+  | { status: 'pending'; requestId: string; groupId: string }
+  | { status: 'joined'; groupId: string }
+  | { status: 'already_member'; groupId: string };
+
 export interface PaginatedResponse<T> {
   data: T[];
   pagination: { page: number; limit: number; total: number };
@@ -536,6 +590,58 @@ export const api = {
   // 立即发测试消息, 失败抛 Error 含原因 (config 拼写错 / token 无效等)
   testReminderChannel(id: string) {
     return request<{ message: string }>(`/reminder-channels/${id}/test`, { method: 'POST' });
+  },
+
+  // Groups (PR #1 群组共享: 任何注册用户可建群, 邀请链接默认走申请审批模式)
+  getGroups() {
+    return request<{ data: Group[] }>('/groups');
+  },
+  createGroup(data: { name: string; avatar?: string | null; autoJoin?: boolean }) {
+    return request<{ data: Group }>('/groups', { method: 'POST', body: JSON.stringify(data) });
+  },
+  getGroup(id: string) {
+    return request<{ data: GroupDetail }>(`/groups/${id}`);
+  },
+  updateGroup(id: string, data: { name?: string; avatar?: string | null; autoJoin?: boolean }) {
+    return request<{ data: Group }>(`/groups/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  // 解散群: 仅 owner. 后端事务清 groups + group_members + group_join_requests (PR #2 加 note_shares 也要清)
+  dissolveGroup(id: string) {
+    return request<{ message: string }>(`/groups/${id}`, { method: 'DELETE' });
+  },
+
+  // Invite (公开邀请页 + 申请加入)
+  resetInvite(groupId: string) {
+    return request<{ data: { inviteToken: string; inviteExpiresAt: string } }>(`/groups/${groupId}/invite/reset`, { method: 'POST' });
+  },
+  closeInvite(groupId: string) {
+    return request<{ message: string }>(`/groups/${groupId}/invite`, { method: 'DELETE' });
+  },
+  // 公开接口: 未登录也能看 (request 带 token 也无害, server 不查)
+  getInvite(token: string) {
+    return request<{ data: InvitePreview }>(`/invite/${token}`);
+  },
+  applyInvite(token: string) {
+    return request<{ data: ApplyInviteResult }>(`/invite/${token}/apply`, { method: 'POST' });
+  },
+
+  // Join requests (owner/admin 审批)
+  getJoinRequests(groupId: string) {
+    return request<{ data: GroupJoinRequest[] }>(`/groups/${groupId}/join-requests`);
+  },
+  approveJoinRequest(groupId: string, requestId: string) {
+    return request<{ message: string }>(`/groups/${groupId}/join-requests/${requestId}/approve`, { method: 'POST' });
+  },
+  rejectJoinRequest(groupId: string, requestId: string) {
+    return request<{ message: string }>(`/groups/${groupId}/join-requests/${requestId}/reject`, { method: 'POST' });
+  },
+
+  // Member 管理 (踢人 / 自己退群: 同一接口, server 按 meId===targetId 区分)
+  removeMember(groupId: string, userId: string) {
+    return request<{ message: string }>(`/groups/${groupId}/members/${userId}`, { method: 'DELETE' });
+  },
+  patchMemberRole(groupId: string, userId: string, role: 'admin' | 'member') {
+    return request<{ message: string }>(`/groups/${groupId}/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) });
   },
 };
 

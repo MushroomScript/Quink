@@ -15,6 +15,7 @@ import aiChatRoutes from './routes/ai-chat.js';
 import exportRoutes from './routes/export.js';
 import reminderChannelsRoutes from './routes/reminder-channels.js';
 import sseRoutes from './routes/sse.js';
+import groupsRoutes, { inviteApp } from './routes/groups.js';
 import { startReminderScheduler } from './reminder/scheduler.js';
 
 const app = new Hono();
@@ -36,6 +37,9 @@ app.route('/api/ai', aiConfigRoutes);
 app.route('/api/data', exportRoutes); // GET /api/data = export, POST /api/data = import
 app.route('/api/reminder-channels', reminderChannelsRoutes);
 app.route('/api/sse', sseRoutes);
+app.route('/api/groups', groupsRoutes);
+// 邀请页 + 申请走独立挂载点 (GET /api/invite/:token 公开不需 auth, POST .../apply 内部加 authMiddleware)
+app.route('/api/invite', inviteApp);
 
 // Health check（不需要登录）
 app.get('/api/health', (c) => {

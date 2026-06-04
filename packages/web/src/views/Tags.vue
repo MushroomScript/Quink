@@ -94,7 +94,7 @@ watch(() => visibleTags.value.length, () => snapshotCards(), { flush: 'sync' });
         <div class="mb-3 flex justify-center text-gray-300">
           <PhTag size="3rem" weight="fill" />
         </div>
-        <p class="text-gray-500 text-sm">还没有任何标签</p>
+        <p class="text-gray-500 text-sm">还没有标签</p>
         <p class="text-gray-400 text-xs mt-1">笔记保存后 AI 会自动生成标签</p>
       </div>
 

@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted, markRaw } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useNotesStore } from '@/stores/notes';
+import { useGroupsStore } from '@/stores/groups';
 import { api, isLoggedIn, type Category } from '@/api';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useToast } from '@/composables/useToast';
@@ -21,15 +22,35 @@ import {
   PhFolderOpen,
   PhFile,
   PhCaretDown,
+  PhCaretLeft,
+  PhCaretRight,
   PhGear,
   PhSignOut,
   PhArrowsDownUp,
+  PhUsersThree,
 } from '@phosphor-icons/vue';
 
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
 const notesStore = useNotesStore();
+const groupsStore = useGroupsStore();
+
+// Sidebar 整体折叠: w-60 → w-14. 折叠后只显示图标 + 红点角标, 隐藏分类区/拖拽 handle
+const SIDEBAR_COLLAPSED_KEY = 'quink_sidebar_collapsed';
+const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1');
+watch(sidebarCollapsed, (v) => { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, v ? '1' : '0'); });
+// 收起按钮: 只在 hover 椭圆位置 200ms 后才显示 (防鼠标划过即触发太碍眼)
+const collapseBtnShow = ref(false);
+let collapseHoverTimer: ReturnType<typeof setTimeout> | null = null;
+function onCollapseEnter() {
+  if (collapseHoverTimer) clearTimeout(collapseHoverTimer);
+  collapseHoverTimer = setTimeout(() => { collapseBtnShow.value = true; }, 200);
+}
+function onCollapseLeave() {
+  if (collapseHoverTimer) { clearTimeout(collapseHoverTimer); collapseHoverTimer = null; }
+  collapseBtnShow.value = false;
+}
 const toast = useToast();
 const stats = ref({ totalNotes: 0, totalTodos: 0, pendingTodos: 0 });
 const showUserMenu = ref(false);
@@ -51,6 +72,7 @@ async function loadCategories() {
 }
 loadStats();
 loadCategories();
+if (isLoggedIn()) groupsStore.loadGroups().catch(() => {});
 // loadStats 是数据库聚合查询. store.notes 变化时同步刷新, 但 debounce 500ms 避免高频触发:
 // loadMore push 多次 / pollNoteAiResult 字段 mutate / 切 view 时 computed 返回新数组引用 等场景
 // 都会触发 watch, 没 debounce 一次操作就会产生 5+ 个 API 请求.
@@ -116,6 +138,7 @@ const mainNav: Array<{ path: string; label: string; icon: any; dropType?: 'note'
   { path: '/notes', label: '笔记', icon: markRaw(PhNotePencil), dropType: 'snippet' },
   { path: '/todos', label: '待办', icon: markRaw(PhCheckSquare), dropType: 'todo' },
   { path: '/ai', label: 'AI', icon: markRaw(PhSparkle), dropAction: 'ai' },
+  { path: '/groups', label: '群组', icon: markRaw(PhUsersThree) },
 ];
 // moreNav 里只有"回收站"接受 drop (= 软删除); 其他 (统计/资源/标签) 不接受
 const moreNav: Array<{ path: string; label: string; icon: any; dropAction?: 'trash' }> = [
@@ -167,7 +190,11 @@ function cancelTrash() {
   confirmTrash.value = false;
 }
 
-function isActive(path: string) { return route.path === path; }
+function isActive(path: string) {
+  // /groups 项要在 /groups + /groups/:id 都高亮 (左侧群列表内切群时 sidebar 保持高亮)
+  if (path === '/groups') return route.path === '/groups' || route.path.startsWith('/groups/');
+  return route.path === path;
+}
 function toggleUserMenu() { showUserMenu.value = !showUserMenu.value; }
 function closeUserMenu() { showUserMenu.value = false; }
 function goSettings() { closeUserMenu(); router.push('/settings'); }
@@ -278,31 +305,56 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <aside ref="sidebarEl" class="w-60 bg-sidebar flex flex-col min-h-full max-h-full shrink-0 overflow-hidden" style="border-right: 1px solid var(--sb-border); box-shadow: 1px 0 4px rgba(0,0,0,0.04)">
-    <!-- User -->
-    <div ref="userBlockEl" class="relative px-3 py-4" style="border-bottom: 1px solid var(--sb-border)">
+  <aside ref="sidebarEl"
+    class="relative bg-sidebar flex flex-col min-h-full max-h-full shrink-0 overflow-visible transition-[width] duration-200"
+    :class="sidebarCollapsed ? 'w-14' : 'w-60'"
+    style="border-right: 1px solid var(--sb-border); box-shadow: 1px 0 4px rgba(0,0,0,0.04)">
+    <!-- 收起按钮: hover trigger zone 完全在 sidebar 内 (right-0 不 translate, 不浮出 border), 防 click 落空挡到 Groups.vue 左列表.
+         按钮独立 absolute 浮出半个宽度, 按钮自己也接 hover 让鼠标移到浮出部分不消失 -->
+    <div class="absolute right-0 top-1/2 -translate-y-1/2 z-20 w-4 h-32"
+      @mouseenter="onCollapseEnter"
+      @mouseleave="onCollapseLeave" />
+    <button @click="sidebarCollapsed = !sidebarCollapsed"
+      class="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-20 w-2.5 h-24 rounded-full flex items-center justify-center transition-opacity duration-150"
+      :class="collapseBtnShow ? 'opacity-100' : 'opacity-0 pointer-events-none'"
+      style="background: var(--sb-dim); color: var(--c-sidebar)"
+      @mouseenter="onCollapseEnter"
+      @mouseleave="onCollapseLeave"
+      :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'">
+      <PhCaretLeft v-if="!sidebarCollapsed" size="0.5rem" weight="bold" />
+      <PhCaretRight v-else size="0.5rem" weight="bold" />
+    </button>
+    <!-- User: 展开态正常布局, 折叠态头像居中. 头像 28px (w-7), 折叠态 padding 必须给头像留够空间
+         (sidebar w-14=56, 头像 28, 不能让 user block + button padding 累计 >= 28). 折叠态 px-1.5/p-1 -->
+    <div ref="userBlockEl" class="relative py-3"
+      :class="sidebarCollapsed ? 'px-1.5' : 'px-3'"
+      style="border-bottom: 1px solid var(--sb-border)">
       <button @click="toggleUserMenu"
-        class="flex items-center gap-3 w-full rounded-xl px-3 py-2.5 transition-colors text-left"
+        class="flex items-center w-full rounded-xl transition-colors text-left"
+        :class="sidebarCollapsed ? 'justify-center p-1' : 'gap-3 px-3 py-2'"
         style="color: var(--sb-text)" @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--sb-hover)'" @mouseleave="($event.currentTarget as HTMLElement).style.background = 'transparent'">
         <!-- <img> 走 thumb URL; @error 一次性降级原图. 比 background-image 路径 downsample 质量好 -->
         <img v-if="auth.avatar" :src="resolveFileThumbUrl(auth.avatar)"
           @error="thumbErrorFallback($event, resolveFileUrl(auth.avatar))"
           draggable="false" alt="头像"
-          class="w-9 h-9 rounded-full object-cover shrink-0" />
-        <div v-else class="w-9 h-9 rounded-full bg-primary/30 text-primary flex items-center justify-center text-sm font-bold shrink-0">
+          class="w-7 h-7 rounded-full object-cover shrink-0 aspect-square" />
+        <div v-else class="w-7 h-7 rounded-full bg-primary/30 text-primary flex items-center justify-center text-sm font-bold shrink-0">
           {{ getInitial(auth.nickname) }}
         </div>
-        <div class="flex-1 min-w-0">
+        <div v-if="!sidebarCollapsed" class="flex-1 min-w-0">
           <div class="text-sm font-medium truncate" style="color: var(--sb-text)">{{ auth.nickname || '未设置' }}</div>
           <div class="text-xs truncate" style="color: var(--sb-dim)">@{{ auth.user?.username }}</div>
         </div>
-        <PhCaretDown size="1rem" weight="fill" class="shrink-0 transition-transform" :class="{ 'rotate-180': showUserMenu }" style="color: var(--sb-dim)" />
+        <PhCaretDown v-if="!sidebarCollapsed" size="1rem" weight="fill" class="shrink-0 transition-transform" :class="{ 'rotate-180': showUserMenu }" style="color: var(--sb-dim)" />
       </button>
 
       <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
         enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-75 ease-in"
         leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
-        <div v-if="showUserMenu" class="absolute left-3 right-3 top-full mt-1 bg-sidebar-light rounded-xl shadow-xl z-[var(--z-sidebar)] py-1" style="border: 1px solid var(--sb-border)">
+        <div v-if="showUserMenu"
+          class="absolute bg-sidebar-light rounded-xl shadow-xl z-[var(--z-sidebar)] py-1"
+          :class="sidebarCollapsed ? 'left-full ml-1 top-3 w-44' : 'left-3 right-3 top-full mt-1'"
+          style="border: 1px solid var(--sb-border)">
           <!-- 传输列表: 常驻入口, 永远可点. 无任务时点开 dock 显示空状态 -->
           <button @click="openTransferDock"
             class="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition-colors"
@@ -329,37 +381,51 @@ onUnmounted(() => {
     </div>
 
     <!-- Nav: 自然高度全显示 (shrink-0 不压缩 + 无 overflow-y). 蘑菇规则: nav 所有入口必须始终可见,
-         不允许被分类区拖大时压缩 / 内部滚动. spacer 跟分类区的 height 互补占满剩余空间 -->
-    <nav ref="navEl" class="shrink-0 px-3 py-3 space-y-0.5">
+         不允许被分类区拖大时压缩 / 内部滚动. spacer 跟分类区的 height 互补占满剩余空间.
+         折叠态 icon-only + 居中 + label 隐藏 + 角标改右上角小红点 -->
+    <nav ref="navEl" class="shrink-0 py-3 space-y-0.5" :class="sidebarCollapsed ? 'px-2' : 'px-3'">
       <!-- Main nav (前 3 项有 dropType: 拖卡片到此改 type); 拖动状态机 (cardDnd) 通过 [data-drop-target] 属性识别 -->
       <router-link v-for="item in mainNav" :key="item.path" :to="item.path"
         :data-nav-path="item.path"
         :data-drop-target="item.dropType ? 'type:' + item.dropType : item.dropAction ? 'action:' + item.dropAction : undefined"
-        class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-150 nav-item"
-        :class="{
-          'drop-target-active': (item.dropType && isActiveDrop('type:' + item.dropType)) || (item.dropAction && isActiveDrop('action:' + item.dropAction))
-        }"
+        :title="sidebarCollapsed ? item.label : ''"
+        class="relative flex items-center rounded-xl text-sm transition-all duration-150 nav-item"
+        :class="[
+          sidebarCollapsed ? 'justify-center p-2' : 'gap-3 px-3 py-2',
+          (item.dropType && isActiveDrop('type:' + item.dropType)) || (item.dropAction && isActiveDrop('action:' + item.dropAction)) ? 'drop-target-active' : '',
+        ]"
         :style="isActive(item.path)
           ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)', fontWeight: 500 }
           : { color: 'var(--sb-dim)' }">
         <component :is="item.icon" size="1.125rem" weight="fill" />
-        <span>{{ item.label }}</span>
-        <span v-if="item.label === '待办' && stats.pendingTodos > 0 && auth.user?.preferences?.showTodoBadge !== false"
+        <span v-if="!sidebarCollapsed">{{ item.label }}</span>
+        <!-- 展开态: 待办数字角标 -->
+        <span v-if="!sidebarCollapsed && item.label === '待办' && stats.pendingTodos > 0 && auth.user?.preferences?.showTodoBadge !== false"
           class="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full">
           {{ stats.pendingTodos > 99 ? '99+' : stats.pendingTodos }}
         </span>
+        <!-- 折叠态: 小红点 (统一暗红跟群组列表折叠态视觉一致) -->
+        <span v-else-if="sidebarCollapsed && item.label === '待办' && stats.pendingTodos > 0 && auth.user?.preferences?.showTodoBadge !== false"
+          class="absolute top-1 right-1 w-2 h-2 bg-red-400/90 rounded-full" />
+        <!-- 群组项折叠态: 总 pending 角标 → 小红点 -->
+        <span v-if="sidebarCollapsed && item.label === '群组' && groupsStore.totalPendingCount > 0"
+          class="absolute top-1 right-1 w-2 h-2 bg-red-400/90 rounded-full" />
       </router-link>
 
       <!-- More (其中"回收站"接受 drop = 软删除, 任何 type/单选多选都可拖入) -->
       <router-link v-for="item in moreNav" :key="item.path" :to="item.path"
         :data-drop-target="item.dropAction ? 'action:' + item.dropAction : undefined"
-        class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-150 nav-item"
-        :class="{ 'drop-target-active': item.dropAction && isActiveDrop('action:' + item.dropAction) }"
+        :title="sidebarCollapsed ? item.label : ''"
+        class="flex items-center rounded-xl text-sm transition-all duration-150 nav-item"
+        :class="[
+          sidebarCollapsed ? 'justify-center p-2' : 'gap-3 px-3 py-2',
+          item.dropAction && isActiveDrop('action:' + item.dropAction) ? 'drop-target-active' : '',
+        ]"
         :style="isActive(item.path)
           ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)', fontWeight: 500 }
           : { color: 'var(--sb-dim)' }">
         <component :is="item.icon" size="1.125rem" weight="fill" />
-        <span>{{ item.label }}</span>
+        <span v-if="!sidebarCollapsed">{{ item.label }}</span>
       </router-link>
     </nav>
 
@@ -367,11 +433,11 @@ onUnmounted(() => {
          spacer = 0 时 dynamic max 阻止再上拖 (nav 必须完整显示, 不允许压挤). -->
     <div class="flex-1"></div>
 
-    <!-- Categories: 原 border-top 改成 6px 可拖拽 handle. cursor 默认 row-resize, pointerdown 立即拖 -->
-    <div class="category-resize-handle"
+    <!-- Categories: 折叠态完全隐藏 (用户切回展开态再看) -->
+    <div v-if="!sidebarCollapsed" class="category-resize-handle"
       @pointerdown="onCategoryResizeStart"
       title="拖动调整分类区高度" />
-    <div class="px-3 py-2 shrink-0">
+    <div v-if="!sidebarCollapsed" class="px-3 py-2 shrink-0">
       <div class="flex items-center justify-between px-3 mb-1">
         <span class="text-[11px] font-medium" style="color: var(--sb-dim)">分类</span>
         <button @click="showAddCategory = true" class="text-xs" style="color: var(--sb-dim)" title="新增分类">+</button>
@@ -466,6 +532,7 @@ onUnmounted(() => {
         </div>
       </div>
     </Transition>
+
   </Teleport>
 </template>
 

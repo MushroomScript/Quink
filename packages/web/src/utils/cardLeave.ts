@@ -30,6 +30,10 @@ function lockToScreen(card: HTMLElement) {
   card.style.height = rect.height + 'px';
   card.style.margin = '0';
   card.style.zIndex = '10';
+  // leaving 卡片渐变期间(300ms)不参与 hit-test, 否则用户在原视觉位置右键/点击会命中
+  // 这张 invisible 的 leaving 卡片而不是下面已重排上来的新卡片. 症状: 右键菜单的"全选"
+  // 选中的是错位卡片内容, 或者点击没反应 (命中 leaving 卡片但它已经在渐变中)
+  card.style.pointerEvents = 'none';
 }
 
 // 纯淡出（删除类操作）

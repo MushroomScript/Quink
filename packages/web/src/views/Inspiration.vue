@@ -110,8 +110,8 @@ onDeactivated(() => {
         <div class="mb-3 flex justify-center text-gray-300">
           <PhLightbulb size="3rem" weight="fill" />
         </div>
-        <p class="text-gray-500 text-sm">还没有记录任何灵感</p>
-        <p class="text-gray-400 text-xs mt-1">在上方输入框写下你的第一个闪念吧</p>
+        <p class="text-gray-500 text-sm">还没有灵感</p>
+        <p class="text-gray-400 text-xs mt-1">在上方输入框写下你的第一个灵感吧</p>
       </div>
 
       <div ref="masonryRoot" class="notes-masonry">

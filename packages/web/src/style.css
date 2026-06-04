@@ -185,6 +185,11 @@
 [data-theme="dark"] .hover\:bg-red-200:hover { background-color: rgba(239,68,68,0.35) !important; }
 [data-theme="dark"] .text-red-500,
 [data-theme="dark"] .text-red-600 { color: #fca5a5 !important; }
+/* 红色角标/红点 (sidebar 待办数 / 群组 pending 数 / 折叠态群头像红点): bg-red-400/70 实色 #f87171 dark 下扎眼,
+   不能用半透明 (会跟深 bg 混色看不清), 换实色暗红 #b91c1c (red-700) 显眼但不刺. */
+[data-theme="dark"] .bg-red-400\/70,
+[data-theme="dark"] .bg-red-400\/80,
+[data-theme="dark"] .bg-red-400\/90 { background-color: #b91c1c !important; }
 /* Toast 撤销按钮: light/dark 统一用鲜艳大红 #FF3B3B (高饱和, 抗 peach/lemon 主题融合). */
 .toast-undo-btn { color: #FF3B3B; }
 .toast-undo-btn:hover { color: #FF5555; }

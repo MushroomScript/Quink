@@ -49,6 +49,27 @@ function onMouseDown(e: MouseEvent) {
   mouseDownAt = Date.now();
 }
 
+// 右键时主动 setSelection 锁定到当前卡片正文 .note-content.
+// Electron setZoomFactor != 1 时浏览器原生右键菜单 hit-test 跨 main/renderer 进程坐标转换有偏差,
+// "全选"会选到错位卡片. 修法: contextmenu 触发时在 renderer 内 (坐标系正确)选中本卡片正文,
+// 浏览器菜单的"全选/复制"看到已有 selection 就作用在它上面, 不再用错位的 hit-test 算 anchor.
+// 不 e.preventDefault() — 让浏览器原生菜单照常弹, 只是 selection 已被我们抢先锁定
+function onContextMenu(e: MouseEvent) {
+  // 用户已经手动选了文字 (非 collapsed) → 不动他的 selection, 让原生菜单按他选的范围工作
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed) return;
+  // 找当前卡片的正文 .note-content (不包含 type/category/time chip + tags)
+  const card = (e.currentTarget as HTMLElement);
+  const content = card.querySelector('.note-content');
+  if (!content) return;
+  const range = document.createRange();
+  range.selectNodeContents(content);
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  // selection 选中本卡片正文 → 浏览器原生菜单的"复制"复制本卡片, "全选"会扩展但已有 selection
+  // 提示用户菜单作用范围明确, 不再被 zoom hit-test 错位影响选到隔壁卡片
+}
+
 function handleClick(e: MouseEvent) {
   if ((e.target as HTMLElement).closest?.('.voice-bubble')) return;
   // 拖动/长按检测放最前: 这种 click 直接 return, 不走任何分支(包括 Ctrl+点击)
@@ -304,7 +325,8 @@ const typeColor: Record<string, string> = {
   <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group relative card-draggable"
     :data-note-id="note.id"
     :class="{ 'ring-2 ring-primary/50': note.pinned, 'ring-2 ring-primary': store.selectedIds.has(note.id), 'opacity-50': isDragging }"
-    @pointerdown="store.selectMode ? onPointerDown($event) : undefined">
+    @pointerdown="store.selectMode ? onPointerDown($event) : undefined"
+    @contextmenu="onContextMenu">
     <div class="px-3 py-2.5 md:px-4 md:py-3 cursor-pointer" @click="handleClick" @mousedown="onMouseDown">
       <div class="flex items-center gap-2 mb-2">
         <!-- 多选 checkbox: 跟 task list 视觉接近 — 空心圆 border (未选) / 实心主色 + 白勾 (已选);

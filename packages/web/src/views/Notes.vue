@@ -76,7 +76,8 @@ watch(() => vs.notes.length, () => snapshotCards(), { flush: 'sync' });
         <div class="mb-3 flex justify-center text-gray-300">
           <PhNotePencil size="3rem" weight="fill" />
         </div>
-        <p class="text-gray-500 text-sm">暂无笔记</p>
+        <p class="text-gray-500 text-sm">还没有笔记</p>
+        <p class="text-gray-400 text-xs mt-1">在上方输入框写下你的第一篇笔记吧</p>
       </div>
 
       <div ref="masonryRoot" class="notes-masonry">

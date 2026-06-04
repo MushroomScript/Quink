@@ -149,7 +149,7 @@ onDeactivated(() => {
       <div class="mb-3 flex justify-center text-gray-300">
         <PhCheckSquare size="3rem" weight="fill" />
       </div>
-      <p class="text-gray-500 text-sm">还没有待办事项</p>
+      <p class="text-gray-500 text-sm">还没有待办</p>
       <p class="text-gray-400 text-xs mt-1">在上方输入框创建一个待办吧</p>
     </div>
 

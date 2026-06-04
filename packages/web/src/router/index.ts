@@ -65,6 +65,25 @@ const router = createRouter({
       meta: { title: '回收站' },
     },
     {
+      path: '/groups',
+      name: 'groups',
+      component: () => import('@/views/Groups.vue'),
+      meta: { title: '群组', hideSearch: true },
+    },
+    {
+      path: '/groups/:id',
+      name: 'group-detail',
+      component: () => import('@/views/Groups.vue'),
+      meta: { title: '群组', hideSearch: true },
+    },
+    {
+      path: '/invite/:token',
+      name: 'invite',
+      component: () => import('@/views/Invite.vue'),
+      // public: 未登录可看邀请页 (点"申请加入"再跳登录回跳)
+      meta: { public: true, hideChrome: true },
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('@/views/Settings.vue'),

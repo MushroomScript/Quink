@@ -1035,7 +1035,7 @@ onUnmounted(() => {
         <div class="mb-3 flex justify-center text-gray-300">
           <PhFolder size="3rem" weight="fill" />
         </div>
-        <p class="text-gray-500 text-sm">此处暂无文件</p>
+        <p class="text-gray-500 text-sm">还没有文件</p>
         <p class="text-gray-400 text-xs mt-1">点击右上角"上传文件"或"新建文件夹"</p>
       </div>
 

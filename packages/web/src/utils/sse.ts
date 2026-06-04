@@ -75,6 +75,94 @@ export function startReminderSse() {
     }
   });
 
+  // ── 群组共享 PR #1 SSE 事件 ──
+  // group-join-request: owner 收到 "X 申请加入" → pendingCount++ + toast
+  es.addEventListener('group-join-request', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as {
+        requestId: string; groupId: string; groupName: string;
+        applicant: { id: string; username: string; nickname: string; avatar: string | null };
+      };
+      Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
+        useGroupsStore().onJoinRequest(data.groupId);
+        // 5 秒 (默认 1.6s 太短易错过) + success 风格高亮重要事件
+        useToast().show(`${data.applicant.nickname} 申请加入「${data.groupName}」`, { kind: 'success', duration: 5000 });
+      });
+    } catch (e) { console.error('[sse] group-join-request parse failed:', e); }
+  });
+
+  // group-join-approved: 我被同意 → 刷新群列表 + toast
+  es.addEventListener('group-join-approved', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
+      Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
+        useGroupsStore().onJoinApproved();
+        useToast().show('申请已通过, 加入群组成功', 'success');
+        void data;
+      });
+    } catch (e) { console.error('[sse] group-join-approved parse failed:', e); }
+  });
+
+  // group-join-rejected: 我被拒绝 → toast (不存历史, 申请记录 server 保留)
+  es.addEventListener('group-join-rejected', (_ev) => {
+    import('@/composables/useToast').then(({ useToast }) => {
+      useToast().show('管理员拒绝了你的申请', 'error');
+    });
+  });
+
+  // group-dissolved: 我所在群被 owner 解散 → 从 sidebar 移除 + toast
+  es.addEventListener('group-dissolved', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
+      Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
+        useGroupsStore().onDissolved(data.groupId);
+        useToast().show('群组已被解散', 'default');
+      });
+    } catch (e) { console.error('[sse] group-dissolved parse failed:', e); }
+  });
+
+  // group-member-removed: 我被踢 (self=true) 或 别人被踢 (self=false)
+  es.addEventListener('group-member-removed', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { groupId: string; by: string; self: boolean };
+      Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
+        useGroupsStore().onMemberRemoved(data.groupId, data.self);
+        if (data.self) useToast().show('你已被移出群组', 'error');
+      });
+    } catch (e) { console.error('[sse] group-member-removed parse failed:', e); }
+  });
+
+  // group-member-joined: autoJoin 模式下有新成员加入 (owner 收到, 不弹 toast 避免噪音, 仅同步状态)
+  es.addEventListener('group-member-joined', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { groupId: string; userId: string };
+      import('@/stores/groups').then(({ useGroupsStore }) => {
+        useGroupsStore().onMemberJoined(data.groupId);
+      });
+      void data;
+    } catch (e) { console.error('[sse] group-member-joined parse failed:', e); }
+  });
+
+  // group-changed: 任何群组写操作后 broadcast 给所有 active 成员 (排除操作者).
+  // 触发场景: 成员变化 / 角色变更 / 群信息修改. 不弹 toast (避免噪音), 静默刷新当前打开的群 + 群列表
+  es.addEventListener('group-changed', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
+      import('@/stores/groups').then(({ useGroupsStore }) => {
+        const store = useGroupsStore();
+        // 当前正在看这个群 → 刷新详情 + 待审 (owner/admin 才有 join requests 权限)
+        if (store.currentDetail?.id === data.groupId) {
+          store.loadGroup(data.groupId).catch(() => {});
+          if (store.currentDetail?.myRole === 'owner' || store.currentDetail?.myRole === 'admin') {
+            store.loadJoinRequests(data.groupId).catch(() => {});
+          }
+        }
+        // 群列表也刷新 (memberCount / 群名 / 头像 变化)
+        store.loadGroups().catch(() => {});
+      });
+    } catch (e) { console.error('[sse] group-changed parse failed:', e); }
+  });
+
   es.onerror = (e) => {
     // EventSource readyState: 0=CONNECTING (重连中), 1=OPEN, 2=CLOSED
     // 401 时浏览器把状态置 CLOSED, 此时不会自动重连, 退出

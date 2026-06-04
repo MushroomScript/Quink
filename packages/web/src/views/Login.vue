@@ -46,7 +46,7 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
       <div class="text-center mb-8 select-none">
         <img :src="`/quink-${currentTheme}-192.png`" alt="Quink" class="w-20 h-20 mx-auto mb-4" draggable="false" />
         <h1 class="text-4xl font-bold tracking-tight" style="color: rgb(var(--c-accent))">Quink</h1>
-        <p class="text-sm mt-2" style="color: var(--sb-dim)">一念 - 记录你的每一个闪念</p>
+        <p class="text-sm mt-2" style="color: var(--sb-dim)">一念 - 记录你的每一个灵感</p>
       </div>
 
       <div class="login-card rounded-2xl border p-7 shadow-xl">

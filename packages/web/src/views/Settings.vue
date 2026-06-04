@@ -1291,7 +1291,7 @@ function goBack() {
         </div>
 
         <div class="space-y-3 text-sm text-gray-500 mb-6">
-          <p class="text-center">按下快捷键，闪电记录脑中闪念</p>
+          <p class="text-center">按下快捷键，闪电记录脑中灵感</p>
           <p class="text-center">AI 自动归类总结，随时回顾</p>
         </div>
 

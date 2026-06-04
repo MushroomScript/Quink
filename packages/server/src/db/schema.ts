@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core';
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(), // nanoid
@@ -126,6 +126,51 @@ export const voiceTranscriptions = sqliteTable('voice_transcriptions', {
   status: text('status', { enum: ['pending', 'done', 'failed'] }).notNull().default('pending'),
   createdAt: text('created_at').notNull(),
 });
+
+// 群组共享 PR #1: 用户可建群组邀请别人加入, 后续 PR 用 note_shares 决定笔记可见性
+export const groups = sqliteTable('groups', {
+  id: text('id').primaryKey(), // nanoid
+  ownerId: text('owner_id').notNull().references(() => users.id),
+  name: text('name').notNull(),
+  avatar: text('avatar'), // 复用 uploads/ 文件 URL 或 null
+  // 当前有效邀请 token (重置后旧 token 立即失效). null = 邀请关闭
+  inviteToken: text('invite_token'),
+  inviteExpiresAt: text('invite_expires_at'), // ISO datetime, null = 永不过期
+  // 0 = 申请审批模式 (默认, owner SSE 收申请), 1 = 自动加入模式 (信任圈子)
+  autoJoin: integer('auto_join', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
+});
+
+// 复合主键 (groupId, userId): 一个用户在一个群最多一条记录. status='removed' 保留审计痕迹, 不物理删
+export const groupMembers = sqliteTable('group_members', {
+  groupId: text('group_id').notNull().references(() => groups.id),
+  userId: text('user_id').notNull().references(() => users.id),
+  role: text('role', { enum: ['owner', 'admin', 'member'] }).notNull().default('member'),
+  status: text('status', { enum: ['active', 'removed'] }).notNull().default('active'),
+  joinedAt: text('joined_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.groupId, table.userId] }),
+}));
+
+// 申请加入记录: pending → owner 审批 → approved/rejected. cancelled = 申请人主动撤回
+export const groupJoinRequests = sqliteTable('group_join_requests', {
+  id: text('id').primaryKey(), // nanoid
+  groupId: text('group_id').notNull().references(() => groups.id),
+  userId: text('user_id').notNull().references(() => users.id),
+  status: text('status', { enum: ['pending', 'approved', 'rejected', 'cancelled'] }).notNull().default('pending'),
+  inviteToken: text('invite_token'), // 申请时用的 token (审计用, 后续 token 重置不影响历史记录)
+  createdAt: text('created_at').notNull(),
+  handledAt: text('handled_at'), // owner 处理时间
+  handledBy: text('handled_by').references(() => users.id), // 谁处理的 (owner 或 admin)
+});
+
+export type Group = typeof groups.$inferSelect;
+export type NewGroup = typeof groups.$inferInsert;
+export type GroupMember = typeof groupMembers.$inferSelect;
+export type NewGroupMember = typeof groupMembers.$inferInsert;
+export type GroupJoinRequest = typeof groupJoinRequests.$inferSelect;
+export type NewGroupJoinRequest = typeof groupJoinRequests.$inferInsert;
+export type GroupRole = GroupMember['role'];
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

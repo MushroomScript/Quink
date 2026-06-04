@@ -30,7 +30,7 @@ const router = useRouter();
 const auth = useAuthStore();
 const store = useNotesStore();
 
-const showChrome = computed(() => !['login', 'capture', 'float', 'ai-chat'].includes(route.name as string));
+const showChrome = computed(() => !['login', 'capture', 'float', 'ai-chat', 'invite'].includes(route.name as string));
 const isElectron = !!(window as any).quinkDesktop?.isElectron;
 const desk = (window as any).quinkDesktop;
 const showMobileSidebar = ref(false);

@@ -128,6 +128,43 @@ sqlite.exec(`
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS groups (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    avatar TEXT,
+    invite_token TEXT,
+    invite_expires_at TEXT,
+    auto_join INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS group_members (
+    group_id TEXT NOT NULL REFERENCES groups(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    role TEXT NOT NULL DEFAULT 'member',
+    status TEXT NOT NULL DEFAULT 'active',
+    joined_at TEXT NOT NULL,
+    PRIMARY KEY (group_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS group_join_requests (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES groups(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'pending',
+    invite_token TEXT,
+    created_at TEXT NOT NULL,
+    handled_at TEXT,
+    handled_by TEXT REFERENCES users(id)
+  );
+
+  -- 邀请 token 反查群组用 (invite/:token 路由)
+  CREATE INDEX IF NOT EXISTS idx_groups_invite_token ON groups(invite_token);
+  -- 用户的待审申请列表 (owner 看 join-requests pending 用 group_id, 申请人看自己用 user_id)
+  CREATE INDEX IF NOT EXISTS idx_join_requests_group_status ON group_join_requests(group_id, status);
+  CREATE INDEX IF NOT EXISTS idx_join_requests_user ON group_join_requests(user_id);
 `);
 // Migrate: notes.todo_remind_sent_at + todo_remind_rrule (提醒功能, 复用 todoDue 作触发时间)
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN todo_remind_sent_at TEXT'); } catch {}
