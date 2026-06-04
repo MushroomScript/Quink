@@ -23,6 +23,7 @@
 | 根 `RENDERING-PITFALLS.md` | 渲染相关坑（DOM/CSS/Vue/HMR/markdown/Vditor/动画/鼠标事件） | 手动（改 UI / markdown / 编辑器 / 列表动画时来读） |
 | 根 `THUMBNAILS.md` | 静态图片缩略图体系（sharp 后端生成 / thumb URL helper / 显示约定） | 手动（改头像 / 资源缩略图 / upload.ts sharp / 加新图片显示场景时来读） |
 | 根 `Z-INDEX-SCALE.md` | z-index 体系（CSS 变量 scale 总表 / 用法 / 现存 quirks） | 手动（加新弹层 / popup / modal / overlay 时来读） |
+| 根 `GROUPS-ROADMAP.md` | 群组共享 6 个 PR 拆分 + 已拍板决策 + 扩展点子（PR #1 已 ship, PR #2-#6 pending） | 手动（做群组任何 PR / 想接群组扩展前来读） |
 | `packages/server/CLAUDE.md` | 后端专属（认证 / 数据库 / 文件上传后端逻辑 / 重命名同步） | 在该 package 工作时自动 |
 | `packages/server/src/ai/CLAUDE.md` | AI 系统（多配置 / FC v2 / 自动处理 / `{categories}` 占位 / 弱模型适配 / chat prompt / label 透传） | 在该子目录工作时自动 |
 | `packages/web/CLAUDE.md` | 前端专属（主题系统 / 移动端 / Vditor 静态文件 / 笔记类型→view 映射 / 文件 url helper） | 在该 package 工作时自动 |
