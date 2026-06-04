@@ -910,7 +910,7 @@ onUnmounted(() => {
     @drop="onExtDrop">
     <!-- Sticky toolbar — 在 wrapper 之外, 不被 blur. data-resources-toolbar 给遮罩计算 top 用 (遮罩贴它的下边线) -->
     <div data-resources-toolbar
-      class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-6 pt-[8px] pb-[10px] mb-4 flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/80"
+      class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-6 pt-[8px] pb-[10px] mb-4 flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50"
       style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <template v-if="selectMode">
         <p class="text-xs text-primary-dark font-medium">已选 {{ selectedIds.size }} 项</p>
@@ -984,7 +984,7 @@ onUnmounted(() => {
             新建文件夹
           </button>
           <button @click="triggerUpload"
-            class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark transition-colors">
+            class="px-3 py-1 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark transition-colors">
             上传文件
           </button>
         </div>

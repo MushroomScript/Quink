@@ -41,6 +41,7 @@ const streamingLastRenderVer = new Map<string, number>();
 const confirmDeleteId = ref('');
 useEscToClose(confirmDeleteId, '');
 const searchConv = ref('');
+const searchConvIndex = ref(0);
 const showMobileConvs = ref(false);
 const abortControllers = new Map<string, AbortController>();
 const editingMsgId = ref('');
@@ -223,12 +224,13 @@ function onSearchInput() {
       const res = await api.getConversations({ search: q });
       filteredConversations.value = res.data;
       if (!res.data.length) return;
-      // 当前对话在结果中 → 原地高亮跳转
-      const inCurrent = res.data.find(c => c.id === currentConvId.value);
-      if (inCurrent) {
+      // 当前对话在结果中 → 原地高亮跳转, 否则打开第一个结果. 同步导航 index 到当前对话所在位置
+      const curIdx = res.data.findIndex(c => c.id === currentConvId.value);
+      if (curIdx >= 0) {
+        searchConvIndex.value = curIdx;
         nextTick(() => highlightAndJump(q));
       } else {
-        // 打开第一个结果
+        searchConvIndex.value = 0;
         await selectConversation(res.data[0].id);
         nextTick(() => highlightAndJump(q));
       }
@@ -270,8 +272,23 @@ function highlightAndJump(keyword: string) {
   }
 }
 
+function searchConvPrev() {
+  const list = filteredConversations.value;
+  if (!list.length) return;
+  searchConvIndex.value = (searchConvIndex.value - 1 + list.length) % list.length;
+  selectConversation(list[searchConvIndex.value].id);
+}
+
+function searchConvNext() {
+  const list = filteredConversations.value;
+  if (!list.length) return;
+  searchConvIndex.value = (searchConvIndex.value + 1) % list.length;
+  selectConversation(list[searchConvIndex.value].id);
+}
+
 async function clearSearchConv() {
   searchConv.value = '';
+  searchConvIndex.value = 0;
   clearHighlights();
   await loadConversations();
 }
@@ -284,6 +301,11 @@ async function selectConversation(id: string) {
   saveConvState();
   clearHighlights();
   currentConvId.value = id;
+  // 同步搜索导航 index 到当前对话在结果中的位置 (鼠标点击 / Next-Prev 都走这条路, 后者已是目标值不会有偏移)
+  if (searchConv.value.trim()) {
+    const idx = filteredConversations.value.findIndex(c => c.id === id);
+    if (idx >= 0) searchConvIndex.value = idx;
+  }
   sessionStorage.setItem('quink_ai_conv', id);
   showMobileConvs.value = false;
   router.replace({ query: { conv: id } });
@@ -668,9 +690,22 @@ async function retryLastMessage() {
           + 新对话
         </button>
         <div class="relative">
-          <input v-model="searchConv" @input="onSearchInput" placeholder="搜索对话..." class="w-full px-2.5 py-1.5 pr-7 bg-white border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/20 placeholder-gray-400" />
+          <input v-model="searchConv" @input="onSearchInput"
+            @keydown.up.prevent="searchConvPrev"
+            @keydown.down.prevent="searchConvNext"
+            @keydown.enter.prevent="searchConvNext"
+            placeholder="搜索对话..." class="w-full px-2.5 py-1.5 pr-7 bg-white border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-primary/20 placeholder-gray-400" />
           <button v-if="searchConv" @click="clearSearchConv" class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
             <PhXCircle size="0.875rem" weight="fill" />
+          </button>
+        </div>
+        <div v-if="searchConv && filteredConversations.length" class="flex items-center gap-0.5 text-[10px] text-gray-400 px-0.5">
+          <span class="flex-1">{{ searchConvIndex + 1 }}/{{ filteredConversations.length }}</span>
+          <button @click="searchConvPrev" class="p-1 hover:text-gray-600" title="上一个 ↑">
+            <PhCaretUp size="0.75rem" weight="fill" />
+          </button>
+          <button @click="searchConvNext" class="p-1 hover:text-gray-600" title="下一个 ↓ / Enter">
+            <PhCaretDown size="0.75rem" weight="fill" />
           </button>
         </div>
       </div>
@@ -707,9 +742,22 @@ async function retryLastMessage() {
         <div class="p-3 space-y-2">
           <button @click="newConversation" class="w-full px-3 py-2 text-xs font-medium rounded-lg text-white" style="background: rgb(var(--c-accent))">+ 新对话</button>
           <div class="relative">
-            <input v-model="searchConv" @input="onSearchInput" placeholder="搜索对话..." class="w-full px-2.5 py-1.5 pr-7 bg-gray-50 border border-gray-200 rounded-lg text-xs outline-none placeholder-gray-400" />
+            <input v-model="searchConv" @input="onSearchInput"
+              @keydown.up.prevent="searchConvPrev"
+              @keydown.down.prevent="searchConvNext"
+              @keydown.enter.prevent="searchConvNext"
+              placeholder="搜索对话..." class="w-full px-2.5 py-1.5 pr-7 bg-gray-50 border border-gray-200 rounded-lg text-xs outline-none placeholder-gray-400" />
             <button v-if="searchConv" @click="clearSearchConv" class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
               <PhXCircle size="0.875rem" weight="fill" />
+            </button>
+          </div>
+          <div v-if="searchConv && filteredConversations.length" class="flex items-center gap-0.5 text-[10px] text-gray-400 px-0.5">
+            <span class="flex-1">{{ searchConvIndex + 1 }}/{{ filteredConversations.length }}</span>
+            <button @click="searchConvPrev" class="p-1 hover:text-gray-600" title="上一个">
+              <PhCaretUp size="0.75rem" weight="fill" />
+            </button>
+            <button @click="searchConvNext" class="p-1 hover:text-gray-600" title="下一个">
+              <PhCaretDown size="0.75rem" weight="fill" />
             </button>
           </div>
         </div>

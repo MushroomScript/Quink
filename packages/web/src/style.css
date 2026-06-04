@@ -163,6 +163,8 @@
 [data-theme="dark"] .bg-gray-100\/80,
 [data-theme="dark"] .bg-gray-50\/80,
 [data-theme="dark"] .bg-gray-50\/50 { background: rgba(255,255,255,0.05) !important; }
+/* Resources sticky toolbar 蘑菇要不透明: 跳过上面统一的 5% 白雾, 用 body 同色让它实心(滚动不透出卡片) */
+[data-theme="dark"] [data-resources-toolbar] { background: var(--c-body) !important; }
 /* Settings 主题色选择器: dark 主题下选中态需要更亮的背景,否则选中按钮跟周围非选中按钮的 5% 白雾几乎一样,加上 dark 图标的 squircle 也是深色 → 整个按钮溶进页面背景看不清 */
 [data-theme="dark"] .theme-pick-selected { background: rgba(255,255,255,0.22) !important; }
 /* Type chip (todo/snippet/link): bg-X-100 + text-X-600 在 dark 下太亮, 半透明 + 中亮文字色重做 */
