@@ -5,11 +5,26 @@
 //
 // 兼容: 老数据(已带 / 前缀)和新数据(裸名)都能识别——detect 是否以 `/`/`http(s)://`/`data:`/`blob:` 开头
 // 则视为 absolute URL 不动,否则当裸文件名拼前缀。
+//
+// PR #3 群组文件授权: /api/uploads/* 后端中间件按 noteShares 鉴权. <img> 不能带 Authorization header,
+// 走 query token 模式: url 尾部拼 ?token=<jwt>. token 跟 localStorage quink_token 共用 SSE 同一套.
+
+function getAuthToken(): string | null {
+  return localStorage.getItem('quink_token');
+}
+
+function withToken(url: string): string {
+  // 已含 query 用 & 拼; 否则用 ?
+  const token = getAuthToken();
+  if (!token) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}token=${encodeURIComponent(token)}`;
+}
 
 export function resolveFileUrl(url: string | null | undefined): string {
   if (!url) return '';
   if (url.startsWith('/') || /^(https?|data|blob):/.test(url)) return url;
-  return '/api/uploads/' + url;
+  return withToken('/api/uploads/' + url);
 }
 
 // 缩略图 URL: 上传时后端 sharp 生成 <裸名>.thumb.jpg (长边 600). 头像 / 资源缩略图 / 笔记小图用.
@@ -18,9 +33,9 @@ export function resolveFileUrl(url: string | null | undefined): string {
 export function resolveFileThumbUrl(url: string | null | undefined): string {
   if (!url) return '';
   if (/^(https?|data|blob):/.test(url)) return url;
-  const bare = url.startsWith('/api/uploads/') ? url.slice('/api/uploads/'.length) : url.replace(/^\/+/, '');
+  const bare = url.startsWith('/api/uploads/') ? url.slice('/api/uploads/'.length).replace(/\?.*$/, '') : url.replace(/^\/+/, '');
   if (!bare) return '';
-  return '/api/uploads/' + bare + '.thumb.jpg';
+  return withToken('/api/uploads/' + bare + '.thumb.jpg');
 }
 
 // <img :src="resolveFileThumbUrl(url)" @error="thumbErrorFallback($event, resolveFileUrl(url))">
@@ -44,15 +59,18 @@ const MD_FILE_LINK_RE = /\]\(([^)\/?#:\s][^)\/?#:\s]*\.[A-Za-z0-9]{1,8})\)/g;
 
 export function resolveMarkdownFileUrls(md: string): string {
   if (!md) return md;
-  return md.replace(MD_FILE_LINK_RE, '](/api/uploads/$1)');
+  const token = getAuthToken();
+  const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
+  return md.replace(MD_FILE_LINK_RE, `](/api/uploads/$1${suffix})`);
 }
 
 // 反向: 把 `](/api/uploads/xxx)` 剥回 `](xxx)`,用于编辑器 getValue 后保存进 DB(保持裸名约定)。
 // 编辑器内部 markdown 始终用 absolute path 让 Vditor IR 渲染 img/anchor 能加载,
-// 保存时剥前缀,DB 永远裸名。
+// 保存时剥前缀 + 剥 query token, DB 永远裸名。
 export function stripMarkdownFileUrls(md: string): string {
   if (!md) return md;
-  return md.replace(/\]\(\/api\/uploads\/([^)\s]+)\)/g, ']($1)');
+  // 剥 /api/uploads/ 前缀; 同时剥 ?token=... 后缀防 token 进 DB
+  return md.replace(/\]\(\/api\/uploads\/([^)\s?]+)(?:\?[^)\s]*)?\)/g, ']($1)');
 }
 
 // 文件不存在的视觉提示:

@@ -2,9 +2,9 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { serve } from '@hono/node-server';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray, like } from 'drizzle-orm';
 import { db, schema } from './db/index.js';
-import { authMiddleware } from './auth.js';
+import { authMiddleware, verifyToken } from './auth.js';
 import { serveStatic } from '@hono/node-server/serve-static';
 import authRoutes from './routes/auth.js';
 import notesRoutes from './routes/notes.js';
@@ -25,6 +25,66 @@ app.use('*', cors());
 app.use('*', logger());
 
 // Static files (uploaded avatars etc.)
+// PR #3 群组文件授权: query token 鉴权 + files 表查作者 + note_shares 查群可见性.
+// avatar 不入 files 表 → 默认公开放行 (跨用户能看头像). file 入 files 表 → 走鉴权
+app.use('/api/uploads/*', async (c, next) => {
+  // 1. 拿 token (优先 query, 兼容 Authorization header / Cookie 给 fetch 客户端)
+  const queryToken = c.req.query('token');
+  const headerAuth = c.req.header('Authorization');
+  const headerToken = headerAuth?.startsWith('Bearer ') ? headerAuth.slice(7) : null;
+  const token = queryToken || headerToken;
+  if (!token) return c.json({ error: '未登录' }, 401);
+  const payload = verifyToken(token);
+  if (!payload) return c.json({ error: '登录已过期' }, 401);
+  const userId = payload.sub;
+
+  // 2. 拿 url path 最后一段 (含 .thumb.jpg 后缀的也对应原 url 鉴权)
+  const path = new URL(c.req.url).pathname;
+  let filename = path.replace(/^\/api\/uploads\//, '');
+  // .thumb.jpg 缩略图对应原文件鉴权 (作者裸名 xxx.png, thumb 路径 xxx.png.thumb.jpg)
+  const isThumb = filename.endsWith('.thumb.jpg');
+  if (isThumb) filename = filename.slice(0, -('.thumb.jpg'.length));
+
+  // 3. 查 files 表 (avatar 不入表所以查不到 → 公开放行)
+  const file = await db.select().from(schema.files).where(eq(schema.files.url, filename)).get();
+  if (!file) {
+    // 头像 / 历史孤儿: 公开. 让 serveStatic 处理或返回 404
+    return next();
+  }
+
+  // 4. 作者本人 → 放行
+  if (file.userId === userId) return next();
+
+  // 5. 查 url 是否出现在某 shared 笔记 content + 我是该群 active member → 放行
+  // LIKE %filename% 简化匹配 (笔记 content markdown 内嵌的 url 是裸名, 直接 LIKE 命中)
+  const linked = await db.select({ id: schema.notes.id })
+    .from(schema.notes)
+    .where(and(
+      sql`${schema.notes.deletedAt} IS NULL`,
+      eq(schema.notes.visibility, 'shared'),
+      like(schema.notes.content, `%${filename}%`),
+    )).all();
+  if (linked.length === 0) return c.json({ error: '无权访问此文件' }, 403);
+
+  // 该文件出现在 N 个共享笔记里, 任一笔记在我所在群 → 放行
+  const linkedIds = linked.map(n => n.id);
+  const shared = await db.select({ noteId: schema.noteShares.noteId, groupId: schema.noteShares.groupId })
+    .from(schema.noteShares)
+    .where(inArray(schema.noteShares.noteId, linkedIds))
+    .all();
+  if (shared.length === 0) return c.json({ error: '无权访问此文件' }, 403);
+
+  const myGroups = await db.select({ groupId: schema.groupMembers.groupId })
+    .from(schema.groupMembers)
+    .where(and(
+      eq(schema.groupMembers.userId, userId),
+      eq(schema.groupMembers.status, 'active'),
+      inArray(schema.groupMembers.groupId, [...new Set(shared.map(s => s.groupId))]),
+    )).all();
+  if (myGroups.length === 0) return c.json({ error: '无权访问此文件' }, 403);
+
+  return next();
+});
 app.use('/api/uploads/*', serveStatic({ root: './', rewriteRequestPath: (path) => path.replace('/api/uploads', '/uploads') }));
 
 // Routes

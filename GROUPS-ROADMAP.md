@@ -18,9 +18,9 @@
 | PR | 内容 | 状态 | 代码量估 |
 |---|---|---|---|
 | **#1 地基** | DB 迁移 + groups/members CRUD + 邀请 + 申请审批 + 踢人 + 角色管理 + SSE 自动刷新 | ✅ done (cef1924) | ~1500 行 |
-| **#2 笔记可见性** | notes.visibility + note_shares + 编辑器底栏 "选可见群组" chip + 列表过滤 + 群组 feed 页 | 🔜 next | ~850 行 |
-| **#3 文件授权** | `/api/uploads/*` 加访问中间件按 noteShares 判 + 缩略图同套逻辑 | pending | ~150 行 |
-| **#4 SSE 拓展 + AI 共享上下文** | `note-shared` / `note-updated` 群播 + AI RAG 拉笔记范围扩到群组 | pending | ~200 行 |
+| **#2 笔记可见性** | notes.visibility + note_shares + 编辑器底栏 "选可见群组" chip + 列表过滤 + 群组 feed 页 + SSE note-shared 群播 | ✅ done (de8a827 + d3bf481) | ~810 行 |
+| **#3 文件授权** | `/api/uploads/*` 加访问中间件按 noteShares 判 + 缩略图同套逻辑 | ✅ done | ~90 行 (实际比估算少, files 表 + LIKE notes content 即可, avatar 不在 files 表自动公开) |
+| **#4 SSE 拓展 + AI 共享上下文** | AI RAG 拉笔记范围扩到群组 (SSE note-shared 群播已在 PR #2 一起做了) | 🔜 next | ~100 行 (变少了, SSE 部分已 done) |
 | **#5 编辑锁（极简）** | lock/heartbeat/release API + 心跳 + sendBeacon + 提示 toast + version 校验 | pending | ~350 行 |
 | **#6 表情 reaction + 评论** | note_reactions + note_comments thread + UI | pending | ~500 行 |
 
