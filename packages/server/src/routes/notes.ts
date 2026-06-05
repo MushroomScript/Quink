@@ -260,8 +260,9 @@ app.post('/trash/:id/restore', async (c) => {
 app.delete('/trash/:id', async (c) => {
   const userId = c.get('userId');
   const { id } = c.req.param();
-  // PR #2: 永久删除事务清 note_shares (防 FK constraint 阻 delete notes)
+  // PR #2: 永久删除事务清 note_shares + group_note_pins (防 FK constraint 阻 delete notes)
   db.transaction((tx) => {
+    tx.delete(schema.groupNotePins).where(eq(schema.groupNotePins.noteId, id)).run();
     tx.delete(schema.noteShares).where(eq(schema.noteShares.noteId, id)).run();
     tx.delete(schema.notes).where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId))).run();
   });
@@ -278,6 +279,7 @@ app.delete('/trash', async (c) => {
   if (trashed.length === 0) return c.json({ message: '已清空' });
   const ids = trashed.map(t => t.id);
   db.transaction((tx) => {
+    tx.delete(schema.groupNotePins).where(inArray(schema.groupNotePins.noteId, ids)).run();
     tx.delete(schema.noteShares).where(inArray(schema.noteShares.noteId, ids)).run();
     tx.delete(schema.notes).where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`)).run();
   });

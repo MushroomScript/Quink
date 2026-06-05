@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, provide } from 'vue';
 import { useRouter } from 'vue-router';
 import { useGroupsStore } from '@/stores/groups';
 import { useAuthStore } from '@/stores/auth';
@@ -26,6 +26,9 @@ const groupId = computed(() => props.groupId);
 const detail = computed(() => store.currentDetail);
 const isOwner = computed(() => detail.value?.myRole === 'owner');
 const isOwnerOrAdmin = computed(() => detail.value?.myRole === 'owner' || detail.value?.myRole === 'admin');
+
+// 给子 NoteCard provide 群角色, 让 NoteCard 的"群内置顶"菜单项按 owner/admin 才显示
+provide('groupRole', computed(() => detail.value?.myRole || null));
 
 // 成员列表显示用: server 已按 (role asc, joinedAt asc) 排好, 这里只把"自己"提到所在角色段首位.
 // 其他人保持加入时间顺序不动 (owner 段一般只 1 人无影响, admin / member 段才有效果).

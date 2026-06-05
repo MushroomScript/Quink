@@ -259,15 +259,18 @@ app.get('/:id/notes', async (c) => {
   const { page = '1', limit = '50' } = c.req.query();
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
-  // 子查询: notes JOIN note_shares JOIN users (作者头像/昵称 给 NoteCard 用)
-  // ORDER BY shared_at DESC (蘑菇决策: 最近被分享冲顶, 老笔记重新分享会再次置顶)
+  // 子查询: notes JOIN note_shares JOIN users (作者头像/昵称 给 NoteCard 用) LEFT JOIN group_note_pins (群内独立置顶)
+  // 排序: 群内置顶冲顶 (pinned_at DESC), 同档按分享时间 (shared_at DESC)
+  // 不取 notes.pinned (作者全局置顶) 因为群组语义独立, A 群里置顶跟作者在自己页里置顶完全无关
   const rows = db.all(sql`
-    SELECT n.*, ns.shared_at as sharedAt, u.nickname as authorNickname, u.avatar as authorAvatar
+    SELECT n.*, ns.shared_at as sharedAt, u.nickname as authorNickname, u.avatar as authorAvatar,
+           gnp.pinned_at as groupPinnedAt
     FROM notes n
     INNER JOIN note_shares ns ON ns.note_id = n.id
     INNER JOIN users u ON u.id = n.user_id
+    LEFT JOIN group_note_pins gnp ON gnp.note_id = n.id AND gnp.group_id = ${groupId}
     WHERE ns.group_id = ${groupId} AND n.deleted_at IS NULL
-    ORDER BY ns.shared_at DESC
+    ORDER BY (gnp.pinned_at IS NOT NULL) DESC, gnp.pinned_at DESC, ns.shared_at DESC
     LIMIT ${parseInt(limit)} OFFSET ${offset}
   `) as Array<any>;
   const totalRow = db.get(sql`
@@ -314,11 +317,63 @@ app.get('/:id/notes', async (c) => {
     sharedAt: r.sharedAt,
     authorNickname: r.authorNickname,
     authorAvatar: r.authorAvatar,
+    groupPinned: !!r.groupPinnedAt, // 群内独立置顶状态 (跟 pinned 作者全局置顶分离)
   }));
   return c.json({
     data,
     pagination: { page: parseInt(page), limit: parseInt(limit), total: totalRow?.count ?? 0 },
   });
+});
+
+// 群内独立置顶: owner/admin 才能操作, 必须是该群已分享的笔记
+async function assertCanGroupPin(groupId: string, noteId: string, userId: string) {
+  const me = await getActiveMember(groupId, userId);
+  if (!me) return { error: '群组不存在或你不是成员', code: 404 } as const;
+  if (me.role !== 'owner' && me.role !== 'admin') return { error: '只有管理员可以置顶群内笔记', code: 403 } as const;
+  const shared = await db.select().from(schema.noteShares)
+    .where(and(eq(schema.noteShares.groupId, groupId), eq(schema.noteShares.noteId, noteId))).get();
+  if (!shared) return { error: '该笔记未分享到本群', code: 404 } as const;
+  return null;
+}
+
+app.post('/:id/notes/:noteId/pin', async (c) => {
+  const userId = c.get('userId');
+  const groupId = c.req.param('id');
+  const noteId = c.req.param('noteId');
+  const err = await assertCanGroupPin(groupId, noteId, userId);
+  if (err) return c.json({ error: err.error }, err.code);
+  // INSERT OR REPLACE: 重复 pin 时刷新 pinned_at + pinned_by (重新冲顶), 幂等
+  db.run(sql`
+    INSERT OR REPLACE INTO group_note_pins (group_id, note_id, pinned_by, pinned_at)
+    VALUES (${groupId}, ${noteId}, ${userId}, ${dayjs().toISOString()})
+  `);
+  // 广播给该群其他成员让群 feed 重排
+  const members = await db.select({ userId: schema.groupMembers.userId })
+    .from(schema.groupMembers)
+    .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.status, 'active')))
+    .all();
+  for (const m of members) {
+    if (m.userId !== userId) publish(m.userId, 'group-notes-changed', { groupId });
+  }
+  return c.json({ message: '已置顶' });
+});
+
+app.delete('/:id/notes/:noteId/pin', async (c) => {
+  const userId = c.get('userId');
+  const groupId = c.req.param('id');
+  const noteId = c.req.param('noteId');
+  const err = await assertCanGroupPin(groupId, noteId, userId);
+  if (err) return c.json({ error: err.error }, err.code);
+  await db.delete(schema.groupNotePins)
+    .where(and(eq(schema.groupNotePins.groupId, groupId), eq(schema.groupNotePins.noteId, noteId)));
+  const members = await db.select({ userId: schema.groupMembers.userId })
+    .from(schema.groupMembers)
+    .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.status, 'active')))
+    .all();
+  for (const m of members) {
+    if (m.userId !== userId) publish(m.userId, 'group-notes-changed', { groupId });
+  }
+  return c.json({ message: '已取消置顶' });
 });
 
 // PR #5b 群级汇总: 该群所有 shared 笔记的 pending 编辑权申请 (作者+admin 看)
@@ -419,6 +474,7 @@ app.delete('/:id', async (c) => {
     // PR #2: 群被解散后 note_shares 引用的 group_id 失效, FK constraint 会阻止 DELETE groups,
     // 先清 note_shares (笔记本体保留, 作者仍能看自己的, 群可见性彻底消失)
     tx.delete(schema.noteShares).where(eq(schema.noteShares.groupId, groupId)).run();
+    tx.delete(schema.groupNotePins).where(eq(schema.groupNotePins.groupId, groupId)).run();
     tx.delete(schema.groupJoinRequests).where(eq(schema.groupJoinRequests.groupId, groupId)).run();
     tx.delete(schema.groupMembers).where(eq(schema.groupMembers.groupId, groupId)).run();
     tx.delete(schema.groups).where(eq(schema.groups.id, groupId)).run();

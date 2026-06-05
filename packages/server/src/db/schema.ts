@@ -228,6 +228,17 @@ export const groupJoinRequests = sqliteTable('group_join_requests', {
   handledBy: text('handled_by').references(() => users.id), // 谁处理的 (owner 或 admin)
 });
 
+// 群内独立置顶: 复合主键 (groupId, noteId), 每个群每条笔记最多 1 条. 跟 notes.pinned (作者全局置顶) 完全独立.
+// A 群置顶不影响 B 群 / 作者个人页. 权限: owner/admin 可操作 (避免普通成员误置顶刷屏)
+export const groupNotePins = sqliteTable('group_note_pins', {
+  groupId: text('group_id').notNull().references(() => groups.id),
+  noteId: text('note_id').notNull().references(() => notes.id),
+  pinnedBy: text('pinned_by').notNull().references(() => users.id),
+  pinnedAt: text('pinned_at').notNull(), // ISO datetime, 多条置顶按时间 DESC (最新置顶冲顶)
+}, (table) => ({
+  pk: primaryKey({ columns: [table.groupId, table.noteId] }),
+}));
+
 export type Group = typeof groups.$inferSelect;
 export type NewGroup = typeof groups.$inferInsert;
 export type GroupMember = typeof groupMembers.$inferSelect;
@@ -235,6 +246,8 @@ export type NewGroupMember = typeof groupMembers.$inferInsert;
 export type GroupJoinRequest = typeof groupJoinRequests.$inferSelect;
 export type NewGroupJoinRequest = typeof groupJoinRequests.$inferInsert;
 export type GroupRole = GroupMember['role'];
+export type GroupNotePin = typeof groupNotePins.$inferSelect;
+export type NewGroupNotePin = typeof groupNotePins.$inferInsert;
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

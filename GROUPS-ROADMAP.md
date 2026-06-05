@@ -352,7 +352,93 @@ CREATE TABLE note_comments (
 
 ---
 
-## 扩展点子清单（PR #6 之后可选）
+## PR #7 共享笔记 COW (Copy-on-Write) 分叉模型 + 列表显示开关
+
+**核心理念**: 作者发布到群 = 把内容**贡献给群**, 自己不留独立备份. 作者列表只是"展示", 跟着群内现状走. 谁先动手改才分叉.
+
+### 模型示例
+
+note A 共享到 1/2/3 群 (作者开启了"显示分享到群组的"开关):
+
+| 状态 | 数据库 | 作者列表 |
+|---|---|---|
+| 初始 (没人改) | `note_shares: (g1,A) (g2,A) (g3,A)` | 1 条 (A) |
+| 1 群被改 | 新建 `A'` (parent=A, userId 仍是原作者), `note_shares: (g1,A') (g2,A) (g3,A)` | 2 条 (A, A') |
+| 2 群也被改 | 新建 `A''`, `note_shares: (g1,A') (g2,A'') (g3,A)` | 3 条 (A, A', A'') |
+| 3 群也被改 | 新建 `A'''`, `note_shares: (g1,A') (g2,A'') (g3,A''')`, A 变孤儿被物理删 | 3 条 (A', A'', A''') |
+
+**作者修改语义**:
+- 仅 1 群分叉时, 作者从灵感页改"共享版"(A) → 改 A → 2/3 群同步
+- 2/3 群也分叉后, 灵感页 3 条独立, 改谁只影响谁
+- 作者从群组页面进入改 → 永远只改"该群当前版本", 不一次性影响多群
+- **UI 必须明确标记"现在改的是哪一版"** (本群独占版 / N 群共享版), 避免误改
+
+### 偏好设置: 作者列表是否显示群组内容 (4 选 1 下拉)
+
+- 默认 `self`: **仅显示自己分享到群组的** (作者列表能看到 A 及其所有 fork)
+- `none`: 都不显示 (作者列表只显示 visibility='private' 的)
+- `others`: 仅显示别人分享到群组的 (用户作为群成员, 看群里别人发的笔记)
+- `all`: 全部显示 (self + others)
+
+(实现要点: GET /api/notes 加 query 参数 `sharedDisplay`, JOIN note_shares + groupMembers 过滤. 偏好存 `prefs.sharedDisplay`)
+
+### Corner case 决策 (2026-06-05 跟蘑菇定)
+
+| # | 问题 | 决策 |
+|---|---|---|
+| 1 | fork 时 AI 标签/分类/摘要 | **不重跑**, 复制旧标签 (接受可能跟新内容不符) |
+| 2 | 修改历史 (谁改过) | **要做**: 加 `note_edit_history` 表 (note_id, user_id, edited_at), UI 显示"原作者发布 · B、C 编辑过" |
+| 3 | 作者改时上下文混淆 | **要做**: UI 明确标"本群独占版" / "N 群共享版", 灵感页改共享版同步多群, 群组页改只影响该群 |
+| 4 | 孤儿笔记 (所有共享群都 fork 走了, 或群解散后没引用) | **物理删** (作者发出去就不留备份, 没群引用 = 该内容已不属于任何人) |
+| 5 | shared → private 转换 | **仅未被任何群修改过的版本能改 private**, 改后从所有群移除 (等于撤回 + 加到自己列表). 被别人编辑过的 fork 版**不能改 private** (已是群的资产) |
+| 6 | 统计计数 | **fork 算 1 条**, 按 origin 维度 (有 parent_note_id 链可追溯) |
+| 7 | AI Chat `update_note` / `search_notes` | **明确哪个 fork 改哪个**. AI 不知道是哪个群的版本 → 主动问用户 |
+| 8 | 导出 ZIP | 按"作者列表能看到的"导 (跟显示开关一致, 默认 self 模式只导自己分享的所有 fork) |
+| 9 | 作者删 fork 版的 UX | **弹确认**: "该版本由 B、C 编辑过, 确认删除？" (作者技术上有删除权, 但要警醒) |
+
+### Schema 改动 (草稿)
+
+```sql
+-- notes 表加 parent_note_id 字段 (origin = 最初的 root note id)
+ALTER TABLE notes ADD COLUMN parent_note_id TEXT REFERENCES notes(id);
+
+-- 修改历史 (Corner case #2)
+CREATE TABLE note_edit_history (
+  id TEXT PRIMARY KEY,
+  note_id TEXT NOT NULL REFERENCES notes(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  edited_at TEXT NOT NULL
+);
+CREATE INDEX idx_note_edit_history_note ON note_edit_history(note_id, edited_at DESC);
+
+-- 偏好: prefs.sharedDisplay enum ('self' | 'none' | 'others' | 'all'), 默认 'self'
+```
+
+### 资源跟随 (fork 时怎么处理关联资源)
+
+| 关联 | 跟随策略 |
+|---|---|
+| 附件 (file uploads, markdown 内嵌的图片/录音) | A 和 A' 都引用同一物理文件. GC 按 "还有 note 引用就保留" |
+| 群内置顶 (group_note_pins, PR #6 做的) | fork 时 update `(g1, A)` → `(g1, A')`, 否则置顶视觉断 |
+| 编辑锁 (edit_lock, PR #5) | fork 后各自独立锁, 互不影响 |
+| 编辑权限 (editPermission, PR #5b) | A 的设置原样复制给 A', 后续 A 改设置不影响 A' |
+| AI 标签 (tags / category / summary) | 直接复制, 不重跑 (Corner case #1) |
+| sharedGroupIds 字段 | fork 时 A' 只 belong to 该 fork 出来的群 (单群) |
+
+### 实施顺序 (PR #7 拆 phase)
+
+1. **Phase A**: schema 改造 (parent_note_id + note_edit_history) + 偏好 sharedDisplay
+2. **Phase B**: fork 写入逻辑 (PATCH /api/notes/:id 在 non-author 改 shared 笔记时触发 fork, 资源跟随)
+3. **Phase C**: GET /api/notes 按 sharedDisplay 过滤 + 灵感页 v-if 显示 fork 标签 + "本群独占版/N 群共享版"标
+4. **Phase D**: AI Chat 工具适配 (Corner #7), 导出适配 (Corner #8), 作者删 fork 版 UX (Corner #9)
+5. **Phase E**: shared → private 转换约束 (Corner #5)
+6. **Phase F**: 统计按 origin 维度 (Corner #6), 孤儿物理删后台任务 (Corner #4)
+
+**工程量估算**: 比 PR #5 + PR #5b 加起来还大. 必须独立 PR. 当前 PR (群组重构 + 群内置顶) 跟 COW **不冲突**, 先 ship.
+
+---
+
+## 扩展点子清单（PR #7 之后可选）
 
 按价值排：
 

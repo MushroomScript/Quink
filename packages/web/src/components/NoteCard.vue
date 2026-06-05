@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, inject, watchEffect } from 'vue';
+import { ref, computed, inject, watchEffect, type ComputedRef } from 'vue';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useRouter, useRoute } from 'vue-router';
 import dayjs from 'dayjs';
@@ -9,6 +9,7 @@ import { useNotesStore } from '@/stores/notes';
 import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import type { Note } from '@/api';
+import { api } from '@/api';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import { PhUsersThree, PhArrowsClockwise } from '@phosphor-icons/vue';
 import {
@@ -45,6 +46,32 @@ const sharedCount = computed(() => props.note.sharedGroupIds?.length ?? 0);
 // PR #5b: 编辑权限胶囊只在群组上下文显示 (/groups/:id 路径), 避免污染灵感/笔记/待办主 view
 const route = useRoute();
 const inGroupContext = computed(() => route.path.startsWith('/groups/'));
+// 群组上下文下用 groupId + 群角色 (GroupDetail provide) 走群级置顶 API, 不走 store.togglePin
+const groupIdFromRoute = computed(() => inGroupContext.value ? (route.params.id as string) : null);
+const groupRole = inject<ComputedRef<'owner' | 'admin' | 'member' | null>>('groupRole', computed(() => null));
+const canPinInGroup = computed(() => inGroupContext.value && (groupRole.value === 'owner' || groupRole.value === 'admin'));
+// 视觉用的"是否置顶": 群组上下文看 groupPinned (独立于作者全局 pinned), 否则看 note.pinned
+const displayPinned = computed(() => inGroupContext.value ? !!props.note.groupPinned : props.note.pinned);
+
+// 置顶 handler: 群组上下文走群级 API + 派事件让 GroupDetail 重拉; 否则走 store.togglePin (主 view 内 vs.notes)
+async function handleTogglePin() {
+  if (inGroupContext.value && groupIdFromRoute.value) {
+    const willPin = !props.note.groupPinned;
+    (props.note as any).groupPinned = willPin; // 乐观更新 (props.note 是 reactive, ring 边框立即反映)
+    try {
+      if (willPin) await api.pinGroupNote(groupIdFromRoute.value, props.note.id);
+      else await api.unpinGroupNote(groupIdFromRoute.value, props.note.id);
+      toast.show(willPin ? '已置顶' : '已取消置顶', 'success');
+      // 派事件让 GroupDetail 重拉群笔记 (server 按 pinned_at DESC 重排, 卡片到顶)
+      window.dispatchEvent(new CustomEvent('quink-group-notes-changed', { detail: { groupId: groupIdFromRoute.value } }));
+    } catch (e: any) {
+      (props.note as any).groupPinned = !willPin;
+      toast.show(e?.message || '操作失败', 'error');
+    }
+  } else {
+    store.togglePin(props.note.id);
+  }
+}
 
 // 作者本人可在卡片直接切换 editPermission. store.updateNote 只同步主 view 的 vs.notes,
 // GroupDetail.groupNotes 是组件本地 ref → 必须 mutate props.note 让 reactive UI 立刻反映
@@ -350,7 +377,7 @@ const typeColor: Record<string, string> = {
        自定义拖动 (cardDnd.ts), 非 HTML5 DnD: selectMode 时整卡片 @pointerdown; 非 selectMode 时 type chip @pointerdown -->
   <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group relative card-draggable"
     :data-note-id="note.id"
-    :class="{ 'ring-2 ring-primary/50': note.pinned, 'ring-2 ring-primary': store.selectedIds.has(note.id), 'opacity-50': isDragging }"
+    :class="{ 'ring-2 ring-primary/50': displayPinned, 'ring-2 ring-primary': store.selectedIds.has(note.id), 'opacity-50': isDragging }"
     @pointerdown="store.selectMode ? onPointerDown($event) : undefined"
     @contextmenu="onContextMenu">
     <div class="px-3 py-2.5 md:px-4 md:py-3 cursor-pointer" @click="handleClick" @mousedown="onMouseDown">
@@ -436,11 +463,12 @@ const typeColor: Record<string, string> = {
         leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
         <div v-if="showMenu" class="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[var(--z-overlay)] min-w-[110px] [&_svg]:mt-px"
           :style="menuPos">
-          <button @click.stop="store.togglePin(note.id); showMenu = false"
+          <button v-if="!inGroupContext || canPinInGroup"
+            @click.stop="handleTogglePin(); showMenu = false"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
-            <PhPushPin v-if="note.pinned" size="0.875rem" weight="fill" />
+            <PhPushPin v-if="displayPinned" size="0.875rem" weight="fill" />
             <PhMapPin v-else size="0.875rem" weight="fill" />
-            <span>{{ note.pinned ? '取消置顶' : '置顶' }}</span>
+            <span>{{ displayPinned ? (inGroupContext ? '取消群内置顶' : '取消置顶') : (inGroupContext ? '群内置顶' : '置顶') }}</span>
           </button>
           <button @click.stop="openEditModal?.(note); showMenu = false"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">

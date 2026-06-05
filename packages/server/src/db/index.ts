@@ -172,6 +172,17 @@ sqlite.exec(`
   -- 删笔记 / 取消分享: DELETE FROM note_shares WHERE note_id=?
   CREATE INDEX IF NOT EXISTS idx_note_shares_note ON note_shares(note_id);
 
+  -- 群内独立置顶 (跟 notes.pinned 作者全局置顶完全分离). owner/admin 操作, 多群独立
+  CREATE TABLE IF NOT EXISTS group_note_pins (
+    group_id TEXT NOT NULL REFERENCES groups(id),
+    note_id TEXT NOT NULL REFERENCES notes(id),
+    pinned_by TEXT NOT NULL REFERENCES users(id),
+    pinned_at TEXT NOT NULL,
+    PRIMARY KEY (group_id, note_id)
+  );
+  -- 群 feed 排序: LEFT JOIN group_note_pins ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC, shared_at DESC
+  CREATE INDEX IF NOT EXISTS idx_group_note_pins_group_pinned ON group_note_pins(group_id, pinned_at DESC);
+
   -- PR #5b 编辑权限白名单 (申请通过后永久授权, 作者/admin 可撤销)
   CREATE TABLE IF NOT EXISTS note_edit_grants (
     note_id TEXT NOT NULL REFERENCES notes(id),

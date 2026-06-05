@@ -103,6 +103,8 @@ export interface Note {
   // PR #5b 编辑权限分级 (仅 shared 笔记用): admin (默认, 仅作者+群 owner/admin 能改) / all (所有 active member 能改)
   // 作者本人永远能改 (不在 enum 里). 没权限的可通过 POST /:id/edit-request 申请永久授权.
   editPermission?: 'admin' | 'all';
+  // 群内独立置顶 (仅 GET /api/groups/:id/notes 返回, 跟 pinned 作者全局置顶完全独立). owner/admin 操作
+  groupPinned?: boolean;
 }
 
 // PR #5b 编辑权限申请记录
@@ -742,10 +744,17 @@ export const api = {
   getGroup(id: string) {
     return request<{ data: GroupDetail }>(`/groups/${id}`);
   },
-  // PR #2 群组共享: 拉群内共享的笔记 (sharedAt DESC 排序), 含 authorNickname/Avatar 给 NoteCard 用
+  // PR #2 群组共享: 拉群内共享的笔记 (群内置顶 DESC + sharedAt DESC 排序), 含 authorNickname/Avatar + groupPinned 给 NoteCard 用
   getGroupNotes(groupId: string, params?: { page?: number; limit?: number }) {
     const qs = params ? '?' + new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString() : '';
     return request<PaginatedResponse<Note>>(`/groups/${groupId}/notes${qs}`);
+  },
+  // 群内独立置顶 (跟 notes.pinned 作者全局置顶分离). owner/admin 才能操作
+  pinGroupNote(groupId: string, noteId: string) {
+    return request<{ message: string }>(`/groups/${groupId}/notes/${noteId}/pin`, { method: 'POST' });
+  },
+  unpinGroupNote(groupId: string, noteId: string) {
+    return request<{ message: string }>(`/groups/${groupId}/notes/${noteId}/pin`, { method: 'DELETE' });
   },
   updateGroup(id: string, data: { name?: string; avatar?: string | null; autoJoin?: boolean; announcement?: string | null }) {
     return request<{ data: Group }>(`/groups/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
