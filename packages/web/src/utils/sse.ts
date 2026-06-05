@@ -242,6 +242,37 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] note-edit-request-resolved parse failed:', e); }
   });
 
+// PR #6: 共享笔记 reaction / 评论增删改事件. server publish 给该笔记所属群所有 active member + 作者.
+  // 前端 dispatchEvent 让打开的 NoteDetail / NoteEditModal / CommentThread 接住做增量更新.
+  // NoteCard 不直接监听 (避免 N 个 listener), 它的 commentCount/reactionSummary 等下次 fetchNotes / group-notes-changed 时同步.
+  es.addEventListener('note-reaction-changed', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; summary: any[] };
+      window.dispatchEvent(new CustomEvent('quink-note-reaction-changed', { detail: data }));
+    } catch (e) { console.error('[sse] note-reaction-changed parse failed:', e); }
+  });
+
+  es.addEventListener('note-comment-added', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; comment: any };
+      window.dispatchEvent(new CustomEvent('quink-note-comment-added', { detail: data }));
+    } catch (e) { console.error('[sse] note-comment-added parse failed:', e); }
+  });
+
+  es.addEventListener('note-comment-updated', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; commentId: string; content: string; updatedAt: string };
+      window.dispatchEvent(new CustomEvent('quink-note-comment-updated', { detail: data }));
+    } catch (e) { console.error('[sse] note-comment-updated parse failed:', e); }
+  });
+
+  es.addEventListener('note-comment-deleted', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; commentId: string };
+      window.dispatchEvent(new CustomEvent('quink-note-comment-deleted', { detail: data }));
+    } catch (e) { console.error('[sse] note-comment-deleted parse failed:', e); }
+  });
+
   // presence-changed: 同群成员上下线 (bus.ts subscribe size 从 0→1 / 1→0 触发).
   // 只在打开群详情页时有意义, 静默 mutate currentDetail.members[i].online, 不弹 toast
   es.addEventListener('presence-changed', (ev) => {

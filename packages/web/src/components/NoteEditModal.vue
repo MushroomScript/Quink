@@ -3,6 +3,8 @@ import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue';
 import { useNotesStore } from '@/stores/notes';
 import { useToast } from '@/composables/useToast';
 import RichEditor from './RichEditor.vue';
+import CommentThread from './CommentThread.vue';
+import { useAuthStore } from '@/stores/auth';
 import { api, type Note } from '@/api';
 import { PhXCircle } from '@phosphor-icons/vue';
 
@@ -11,6 +13,9 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 
 const store = useNotesStore();
 const toast = useToast();
+const auth = useAuthStore();
+// PR #6: 共享笔记 sidebar 评论需要判断"是不是作者本人" 给 CommentThread 决定删除权
+const isAuthor = computed(() => !props.note.userId || props.note.userId === auth.user?.id);
 const saving = ref(false);
 const editorRef = ref<InstanceType<typeof RichEditor>>();
 const modalCardRef = ref<HTMLElement>();
@@ -233,8 +238,9 @@ onBeforeUnmount(() => {
       <!-- Backdrop: 毛玻璃 -->
       <div class="absolute inset-0 bg-black/40 backdrop-blur-md" @click="tryClose" />
 
-      <!-- Modal -->
-      <div ref="modalCardRef" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[80vh] flex flex-col overflow-hidden ring-1 ring-black/5">
+      <!-- Modal: shared 笔记多挂 sidebar 评论时拓宽到 max-w-5xl 给评论 320px 留地方 -->
+      <div ref="modalCardRef" class="relative bg-white rounded-2xl shadow-2xl w-full mx-4 max-h-[80vh] flex flex-col overflow-hidden ring-1 ring-black/5"
+        :class="isSharedNote ? 'max-w-5xl' : 'max-w-4xl'">
         <!-- Header -->
         <div class="flex items-center justify-between px-5 py-3 bg-gray-50/80">
           <span class="text-xs font-medium text-gray-500">编辑笔记</span>
@@ -249,21 +255,28 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- Shared RichEditor -->
-        <div class="overflow-hidden">
-          <RichEditor
-            ref="editorRef"
-            :initial-content="note.content"
-            :initial-type="note.type"
-            :initial-tags="note.tags || []"
-            :initial-fullscreen="initialFullscreen"
-            :initial-visibility="(note as any).visibility || 'private'"
-            :initial-shared-group-ids="(note as any).sharedGroupIds || []"
-            :focus-end="true"
-            :max-height="450"
-            submit-label="保存"
-            @submit="onSubmit"
-          />
+        <!-- PR #6: shared 笔记走 flex 横排, 左编辑器 + 右评论 sidebar; private 笔记仍单栏 -->
+        <div :class="isSharedNote ? 'flex flex-1 min-h-0' : 'overflow-hidden'">
+          <div :class="isSharedNote ? 'flex-1 overflow-hidden min-w-0' : ''">
+            <RichEditor
+              ref="editorRef"
+              :initial-content="note.content"
+              :initial-type="note.type"
+              :initial-tags="note.tags || []"
+              :initial-fullscreen="initialFullscreen"
+              :initial-visibility="(note as any).visibility || 'private'"
+              :initial-shared-group-ids="(note as any).sharedGroupIds || []"
+              :focus-end="true"
+              :max-height="450"
+              submit-label="保存"
+              @submit="onSubmit"
+            />
+          </div>
+          <aside v-if="isSharedNote"
+            class="w-80 shrink-0 border-l border-gray-100 bg-gray-50/40 overflow-y-auto p-4">
+            <h3 class="text-xs font-medium text-gray-500 mb-3">评论</h3>
+            <CommentThread :note-id="note.id" :can-delete-any="isAuthor" />
+          </aside>
         </div>
       </div>
 

@@ -23,6 +23,7 @@ import {
   PhTrash,
   PhBell,
   PhBellRinging,
+  PhChatCircleDots,
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
@@ -42,6 +43,12 @@ const auth = useAuthStore();
 const isMyNote = computed(() => !props.note.userId || props.note.userId === auth.user?.id);
 const isShared = computed(() => props.note.visibility === 'shared');
 const sharedCount = computed(() => props.note.sharedGroupIds?.length ?? 0);
+
+// PR #6: shared 笔记底部 reaction summary + 评论计数 (readonly 展示, 点 NoteCard 走详情交互).
+// 只显示 count>0 的 emoji 避免 5 个胶囊占满, 0 评论时整行不显示
+const visibleReactions = computed(() => (props.note.reactionSummary || []).filter(r => r.count > 0));
+const commentCount = computed(() => props.note.commentCount || 0);
+const showSocialMeta = computed(() => isShared.value && (visibleReactions.value.length > 0 || commentCount.value > 0));
 
 // PR #5b: 编辑权限胶囊只在群组上下文显示 (/groups/:id 路径), 避免污染灵感/笔记/待办主 view
 const route = useRoute();
@@ -452,6 +459,18 @@ const typeColor: Record<string, string> = {
       <div v-if="note.tags && note.tags.length > 0" class="flex flex-wrap gap-1.5 mt-2">
         <span v-for="tag in note.tags" :key="tag" class="text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
           #{{ tag }}
+        </span>
+      </div>
+
+      <!-- PR #6: 共享笔记底部 reaction + 评论计数 (readonly 展示, 点 NoteCard 走 NoteDetail 交互) -->
+      <div v-if="showSocialMeta" class="flex items-center gap-3 mt-2 text-[11px] text-gray-500">
+        <span v-for="r in visibleReactions" :key="r.emoji" class="inline-flex items-center gap-0.5">
+          <span class="text-[13px] leading-none">{{ r.emoji }}</span>
+          <span class="tabular-nums">{{ r.count }}</span>
+        </span>
+        <span v-if="commentCount > 0" class="inline-flex items-center gap-1">
+          <PhChatCircleDots size="0.875rem" weight="fill" />
+          <span class="tabular-nums">{{ commentCount }}</span>
         </span>
       </div>
     </div>

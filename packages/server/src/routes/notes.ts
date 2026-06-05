@@ -198,12 +198,19 @@ app.get('/', async (c) => {
         .all();
       authorMap = new Map(authors.map(u => [u.id, { nickname: u.nickname, avatar: u.avatar }]));
     }
+    // PR #6: 给 shared 笔记拼 reaction summary + comment count (NoteCard 底部显示). private 笔记跳过.
+    const sharedNoteIds = results.filter(n => n.visibility === 'shared').map(n => n.id);
+    const { reactionMap, commentCountMap } = await loadSocialMetaMaps(sharedNoteIds, userId);
     data = results.map(n => {
       const enriched: any = { ...n, sharedGroupIds: sharesMap.get(n.id) || [] };
       if (authorMap) {
         const a = authorMap.get(n.userId);
         enriched.authorNickname = a?.nickname ?? null;
         enriched.authorAvatar = a?.avatar ?? null;
+      }
+      if (n.visibility === 'shared') {
+        enriched.reactionSummary = reactionMap.get(n.id) || ALLOWED_REACTION_EMOJIS.map(e => ({ emoji: e, count: 0, mine: false }));
+        enriched.commentCount = commentCountMap.get(n.id) || 0;
       }
       return enriched;
     });
@@ -362,6 +369,13 @@ async function isAdminOfSharedNote(userId: string, noteId: string): Promise<bool
 // PR #5 编辑锁: 5 分钟 TTL + 30s 前端心跳续约 + sendBeacon 离开释放 + cron 60s 兜底清过期.
 // 仅 shared 笔记走锁逻辑 (private 笔记不需协作, lock API 调用会 400).
 const LOCK_TTL_MS = 5 * 60 * 1000;
+
+// PR #6 表情 reaction 固定 5 个白名单 (前端 ReactionBar 同一份). 防极端搞怪 / 垃圾数据 / 兼容性差的 emoji.
+const ALLOWED_REACTION_EMOJIS = ['👍', '❤️', '🤔', '✅', '😂'] as const;
+type AllowedReactionEmoji = typeof ALLOWED_REACTION_EMOJIS[number];
+
+// PR #6 评论长度上限 (字符数, 中文也算 1). 防灌水 / 过长评论撑爆界面.
+const COMMENT_MAX_LEN = 1000;
 
 // POST /api/notes/:id/lock — 申请编辑锁. 别人持锁未过期 → 409 带 lockByNickname + expiresAt
 app.post('/:id/lock', async (c) => {
@@ -669,6 +683,272 @@ app.delete('/:id/edit-grants/:userId', async (c) => {
   return c.json({ data: { message: '已撤销编辑权' } });
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// PR #6 表情 reaction + 评论 thread (共享笔记互动)
+// 鉴权: getNoteForAccess(read) 让所有"能看到笔记"的人都能 reaction / 评论 (跟 read 同范围, 比 write 宽).
+// 范围: 仅 shared 笔记 (private 笔记自己跟自己 reaction / 评论无语义).
+// SSE: broadcastNoteSocial 推该笔记所属群所有 active 成员 + 作者 (除发起人)
+// ─────────────────────────────────────────────────────────────────────────
+
+// PR #6 broadcast 给笔记可见范围内所有人 (该笔记所属群所有 active member ∪ 作者). reaction / comment 增删改用.
+// 跟 broadcastNoteShared (给群 feed reload 用) 不同: 这个直接推 note-level 事件让 NoteDetail / NoteEditModal 增量更新.
+async function broadcastNoteSocial(noteId: string, eventName: string, payload: any, exceptUserId: string) {
+  const shared = await db.select({ groupId: schema.noteShares.groupId })
+    .from(schema.noteShares).where(eq(schema.noteShares.noteId, noteId)).all();
+  if (shared.length === 0) return;
+  const members = await db.select({ userId: schema.groupMembers.userId })
+    .from(schema.groupMembers)
+    .where(and(
+      inArray(schema.groupMembers.groupId, shared.map(s => s.groupId)),
+      eq(schema.groupMembers.status, 'active'),
+    )).all();
+  const note = await db.select({ userId: schema.notes.userId }).from(schema.notes)
+    .where(eq(schema.notes.id, noteId)).get();
+  const recipients = new Set<string>(members.map(m => m.userId));
+  if (note) recipients.add(note.userId); // 作者可能不在任一目标群里仍要收到
+  recipients.delete(exceptUserId);
+  for (const uid of recipients) {
+    publish(uid, eventName, payload);
+  }
+}
+
+// PR #6 helper: 批量拉一组笔记的 reaction summary + comment count, 给列表 API enrich 用
+// (GET /api/notes 主列表, GET /api/groups/:id/notes 群 feed 同款 NoteCard 渲染需要).
+// 只对 shared 笔记有数据 (private 笔记 reaction/comment 不存在表里); private 笔记拉到也是空, 不区分.
+// reactionMap 按白名单 5 个 emoji 固定顺序输出 (有数据的笔记才进 map; 没数据的调用方按缺省视为空 array).
+export async function loadSocialMetaMaps(noteIds: string[], userId: string): Promise<{
+  reactionMap: Map<string, Array<{ emoji: string; count: number; mine: boolean }>>;
+  commentCountMap: Map<string, number>;
+}> {
+  if (noteIds.length === 0) return { reactionMap: new Map(), commentCountMap: new Map() };
+  const [reactionRows, commentRows] = await Promise.all([
+    db.select({
+      noteId: schema.noteReactions.noteId,
+      emoji: schema.noteReactions.emoji,
+      userId: schema.noteReactions.userId,
+    }).from(schema.noteReactions).where(inArray(schema.noteReactions.noteId, noteIds)).all(),
+    db.select({
+      noteId: schema.noteComments.noteId,
+      count: sql<number>`count(*)`,
+    }).from(schema.noteComments)
+      .where(and(
+        inArray(schema.noteComments.noteId, noteIds),
+        sql`${schema.noteComments.deletedAt} IS NULL`,
+      ))
+      .groupBy(schema.noteComments.noteId).all(),
+  ]);
+  const perNote = new Map<string, Map<string, { count: number; mine: boolean }>>();
+  for (const r of reactionRows) {
+    let nm = perNote.get(r.noteId);
+    if (!nm) { nm = new Map(); perNote.set(r.noteId, nm); }
+    const cur = nm.get(r.emoji) || { count: 0, mine: false };
+    cur.count += 1;
+    if (r.userId === userId) cur.mine = true;
+    nm.set(r.emoji, cur);
+  }
+  const reactionMap = new Map<string, Array<{ emoji: string; count: number; mine: boolean }>>();
+  for (const noteId of perNote.keys()) {
+    const nm = perNote.get(noteId)!;
+    reactionMap.set(noteId, ALLOWED_REACTION_EMOJIS.map(e => ({ emoji: e, ...(nm.get(e) || { count: 0, mine: false }) })));
+  }
+  const commentCountMap = new Map<string, number>();
+  for (const c of commentRows) commentCountMap.set(c.noteId, c.count);
+  return { reactionMap, commentCountMap };
+}
+
+// PR #6 helper: 拉单笔记 reaction 汇总 (POST/GET reactions 用). 复用 loadSocialMetaMaps 保口径一致.
+async function getReactionSummary(noteId: string, userId: string): Promise<Array<{ emoji: string; count: number; mine: boolean }>> {
+  const { reactionMap } = await loadSocialMetaMaps([noteId], userId);
+  return reactionMap.get(noteId) || ALLOWED_REACTION_EMOJIS.map(e => ({ emoji: e, count: 0, mine: false }));
+}
+
+// POST /api/notes/:id/reactions — toggle 自己的 reaction. body { emoji }
+// 已有 (note,user,emoji) → DELETE 取消; 否则 INSERT 添加. 返回新 summary + action.
+app.post('/:id/reactions', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const body = await c.req.json().catch(() => ({} as any));
+  const emoji = typeof body?.emoji === 'string' ? body.emoji : null;
+  if (!emoji || !(ALLOWED_REACTION_EMOJIS as readonly string[]).includes(emoji)) {
+    return c.json({ error: '不支持的 emoji' }, 400);
+  }
+
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  if (note.visibility !== 'shared') return c.json({ error: '私有笔记不支持表情' }, 400);
+
+  const existing = await db.select().from(schema.noteReactions)
+    .where(and(
+      eq(schema.noteReactions.noteId, id),
+      eq(schema.noteReactions.userId, userId),
+      eq(schema.noteReactions.emoji, emoji),
+    )).get();
+
+  let action: 'added' | 'removed';
+  if (existing) {
+    await db.delete(schema.noteReactions).where(and(
+      eq(schema.noteReactions.noteId, id),
+      eq(schema.noteReactions.userId, userId),
+      eq(schema.noteReactions.emoji, emoji),
+    ));
+    action = 'removed';
+  } else {
+    await db.insert(schema.noteReactions).values({
+      noteId: id, userId, emoji, createdAt: dayjs().toISOString(),
+    });
+    action = 'added';
+  }
+
+  const summary = await getReactionSummary(id, userId);
+  broadcastNoteSocial(id, 'note-reaction-changed', { noteId: id, summary }, userId)
+    .catch(e => console.error('[reactions] broadcast failed:', e));
+  return c.json({ data: { action, summary } });
+});
+
+// GET /api/notes/:id/reactions — 列汇总, 含 mine 标记 (用户已加的 emoji)
+app.get('/:id/reactions', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  const summary = await getReactionSummary(id, userId);
+  return c.json({ data: summary });
+});
+
+const createCommentSchema = z.object({
+  content: z.string().trim().min(1).max(COMMENT_MAX_LEN),
+  parentId: z.string().nullable().optional(),
+});
+const updateCommentSchema = z.object({
+  content: z.string().trim().min(1).max(COMMENT_MAX_LEN),
+});
+
+// POST /api/notes/:id/comments — 创建评论. parentId 走单层 thread normalize:
+// 顶层评论传 null/undefined; 一级回复传顶层 id; 二级及以下传任意已存在 id → 最终 parentId 落到根 (顶层) 上.
+app.post('/:id/comments', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = createCommentSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  if (note.visibility !== 'shared') return c.json({ error: '私有笔记不支持评论' }, 400);
+
+  let normalizedParentId: string | null = null;
+  if (parsed.data.parentId) {
+    const parent = await db.select().from(schema.noteComments)
+      .where(and(
+        eq(schema.noteComments.id, parsed.data.parentId),
+        eq(schema.noteComments.noteId, id),
+        sql`${schema.noteComments.deletedAt} IS NULL`,
+      )).get();
+    if (!parent) return c.json({ error: '父评论不存在' }, 404);
+    // 顶层 parent.parentId == null → 用 parent.id (一级回复); 一级回复 parent.parentId != null → 用 parent.parentId (归到根)
+    normalizedParentId = parent.parentId ?? parent.id;
+  }
+
+  const cid = nanoid(12);
+  const now = dayjs().toISOString();
+  const newComment: schema.NewNoteComment = {
+    id: cid, noteId: id, userId, parentId: normalizedParentId,
+    content: parsed.data.content, createdAt: now, updatedAt: now, deletedAt: null,
+  };
+  await db.insert(schema.noteComments).values(newComment);
+
+  // 拼 user info: SSE payload 跟返回值同款 (前端不用再 fetch 用户信息)
+  const user = await db.select({ nickname: schema.users.nickname, avatar: schema.users.avatar })
+    .from(schema.users).where(eq(schema.users.id, userId)).get();
+  const enriched = { ...newComment, userNickname: user?.nickname || '用户', userAvatar: user?.avatar || null };
+
+  broadcastNoteSocial(id, 'note-comment-added', { noteId: id, comment: enriched }, userId)
+    .catch(e => console.error('[comments] broadcast failed:', e));
+  return c.json({ data: enriched }, 201);
+});
+
+// GET /api/notes/:id/comments — 列所有未删评论 (含 user nickname/avatar). 前端组 thread.
+app.get('/:id/comments', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+
+  const rows = await db.select({
+    id: schema.noteComments.id,
+    noteId: schema.noteComments.noteId,
+    userId: schema.noteComments.userId,
+    parentId: schema.noteComments.parentId,
+    content: schema.noteComments.content,
+    createdAt: schema.noteComments.createdAt,
+    updatedAt: schema.noteComments.updatedAt,
+    userNickname: schema.users.nickname,
+    userAvatar: schema.users.avatar,
+  }).from(schema.noteComments)
+    .leftJoin(schema.users, eq(schema.users.id, schema.noteComments.userId))
+    .where(and(
+      eq(schema.noteComments.noteId, id),
+      sql`${schema.noteComments.deletedAt} IS NULL`,
+    ))
+    .orderBy(schema.noteComments.createdAt)
+    .all();
+  return c.json({ data: rows });
+});
+
+// PATCH /api/notes/:id/comments/:cid — 编辑评论 (仅本人, 无时限)
+app.patch('/:id/comments/:cid', async (c) => {
+  const userId = c.get('userId');
+  const { id, cid } = c.req.param();
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = updateCommentSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+
+  const comment = await db.select().from(schema.noteComments)
+    .where(and(eq(schema.noteComments.id, cid), eq(schema.noteComments.noteId, id))).get();
+  if (!comment || comment.deletedAt) return c.json({ error: '评论不存在' }, 404);
+  if (comment.userId !== userId) return c.json({ error: '只能编辑自己的评论' }, 403);
+
+  const now = dayjs().toISOString();
+  await db.update(schema.noteComments).set({
+    content: parsed.data.content, updatedAt: now,
+  }).where(eq(schema.noteComments.id, cid));
+
+  broadcastNoteSocial(id, 'note-comment-updated', {
+    noteId: id, commentId: cid, content: parsed.data.content, updatedAt: now,
+  }, userId).catch(e => console.error('[comments] broadcast failed:', e));
+  return c.json({ data: { ...comment, content: parsed.data.content, updatedAt: now } });
+});
+
+// DELETE /api/notes/:id/comments/:cid — 软删 (deletedAt). 本人 OR 笔记作者 OR 群 admin 都能删.
+app.delete('/:id/comments/:cid', async (c) => {
+  const userId = c.get('userId');
+  const { id, cid } = c.req.param();
+
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  const comment = await db.select().from(schema.noteComments)
+    .where(and(eq(schema.noteComments.id, cid), eq(schema.noteComments.noteId, id))).get();
+  if (!comment || comment.deletedAt) return c.json({ error: '评论不存在' }, 404);
+
+  const isOwn = comment.userId === userId;
+  const isAuthor = note.userId === userId;
+  const isAdmin = !isAuthor && !isOwn && (await isAdminOfSharedNote(userId, id));
+  if (!isOwn && !isAuthor && !isAdmin) {
+    return c.json({ error: '只能删除自己的评论 (作者或群管理员可删任何评论)' }, 403);
+  }
+
+  const now = dayjs().toISOString();
+  await db.update(schema.noteComments).set({ deletedAt: now })
+    .where(eq(schema.noteComments.id, cid));
+
+  broadcastNoteSocial(id, 'note-comment-deleted', { noteId: id, commentId: cid }, userId)
+    .catch(e => console.error('[comments] broadcast failed:', e));
+  return c.json({ data: { message: '已删除' } });
+});
+
 // GET /api/notes/:id
 // 作者拿自己的笔记 → 直接返回 (含 sharedGroupIds 给编辑器恢复)
 // 群成员拿别人共享笔记 → 校验 note_shares 跟我所在群有交集才放行
@@ -695,7 +975,14 @@ app.get('/:id', async (c) => {
 
   const shares = await db.select({ groupId: schema.noteShares.groupId })
     .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
-  return c.json({ data: { ...note, sharedGroupIds: shares.map(s => s.groupId) } });
+  // PR #6: shared 笔记带 reaction summary + comment count, NoteDetail 直接用 (省一个 round trip + SSE 增量更新)
+  let enriched: any = { ...note, sharedGroupIds: shares.map(s => s.groupId) };
+  if (note.visibility === 'shared') {
+    const { reactionMap, commentCountMap } = await loadSocialMetaMaps([id], userId);
+    enriched.reactionSummary = reactionMap.get(id) || ALLOWED_REACTION_EMOJIS.map(e => ({ emoji: e, count: 0, mine: false }));
+    enriched.commentCount = commentCountMap.get(id) || 0;
+  }
+  return c.json({ data: enriched });
 });
 
 // POST /api/notes

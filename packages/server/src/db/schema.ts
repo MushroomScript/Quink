@@ -79,6 +79,31 @@ export const noteEditRequests = sqliteTable('note_edit_requests', {
   handledBy: text('handled_by').references(() => users.id), // 处理人 (作者或群 admin)
 });
 
+// PR #6 表情 reaction: 群共享笔记上的快速表态. 复合主键 (note_id, user_id, emoji) 保证每人每 emoji 最多 1 条.
+// emoji 字段为前端固定 5 个之一 (后端白名单校验), 防极端搞怪与垃圾数据. 取消 = 直接 DELETE 行 (无审计需求, 不做软删)
+export const noteReactions = sqliteTable('note_reactions', {
+  noteId: text('note_id').notNull().references(() => notes.id),
+  userId: text('user_id').notNull().references(() => users.id),
+  emoji: text('emoji').notNull(),
+  createdAt: text('created_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.noteId, table.userId, table.emoji] }),
+}));
+
+// PR #6 评论 thread: 共享笔记下挂评论, parent_id 单层 thread (二层及以下 normalize 到根 parent).
+// 软删 deleted_at: 删除后前端直接隐藏 (不像 notes 走 30 天回收站, 评论不需要恢复入口). 计数也不算.
+// parent_id 不加 drizzle references 自引用 (跟 categories/folders 同款约定保持一致, SQLite 层强约束在 db/index.ts)
+export const noteComments = sqliteTable('note_comments', {
+  id: text('id').primaryKey(), // nanoid
+  noteId: text('note_id').notNull().references(() => notes.id),
+  userId: text('user_id').notNull().references(() => users.id),
+  parentId: text('parent_id'), // 单层 thread: 顶层评论 null; 一级回复 = 顶层 id; 二级及以下也存顶层 id (后端 normalize)
+  content: text('content').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  deletedAt: text('deleted_at'),
+});
+
 export const categories = sqliteTable('categories', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: text('user_id').notNull().references(() => users.id),
@@ -268,6 +293,10 @@ export type NoteEditGrant = typeof noteEditGrants.$inferSelect;
 export type NewNoteEditGrant = typeof noteEditGrants.$inferInsert;
 export type NoteEditRequest = typeof noteEditRequests.$inferSelect;
 export type NewNoteEditRequest = typeof noteEditRequests.$inferInsert;
+export type NoteReaction = typeof noteReactions.$inferSelect;
+export type NewNoteReaction = typeof noteReactions.$inferInsert;
+export type NoteComment = typeof noteComments.$inferSelect;
+export type NewNoteComment = typeof noteComments.$inferInsert;
 export type NewNoteShare = typeof noteShares.$inferInsert;
 export type NoteVisibility = Note['visibility'];
 export type ReminderChannel = typeof reminderChannels.$inferSelect;

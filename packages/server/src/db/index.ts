@@ -209,6 +209,30 @@ sqlite.exec(`
   -- 申请人查自己所有申请: WHERE user_id=? ORDER BY created_at DESC
   CREATE INDEX IF NOT EXISTS idx_note_edit_requests_user ON note_edit_requests(user_id, created_at DESC);
 
+  -- PR #6 表情 reaction: 共享笔记快速表态. (note_id, user_id, emoji) 复合主键防重复
+  CREATE TABLE IF NOT EXISTS note_reactions (
+    note_id TEXT NOT NULL REFERENCES notes(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    emoji TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (note_id, user_id, emoji)
+  );
+  -- 列某笔记所有 reaction: WHERE note_id=? GROUP BY emoji (复合主键 (note_id, user_id, emoji) 已自带 note_id 前缀索引, 不需额外)
+
+  -- PR #6 评论 thread: 单层 thread (parent_id 二级及以下 normalize 到根 parent), 软删 deleted_at
+  CREATE TABLE IF NOT EXISTS note_comments (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL REFERENCES notes(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    parent_id TEXT REFERENCES note_comments(id),
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT
+  );
+  -- 列某笔记所有评论: WHERE note_id=? AND deleted_at IS NULL ORDER BY created_at ASC
+  CREATE INDEX IF NOT EXISTS idx_note_comments_note_created ON note_comments(note_id, created_at);
+
   CREATE TABLE IF NOT EXISTS reminder_pending (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),

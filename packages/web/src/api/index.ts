@@ -105,6 +105,30 @@ export interface Note {
   editPermission?: 'admin' | 'all';
   // 群内独立置顶 (仅 GET /api/groups/:id/notes 返回, 跟 pinned 作者全局置顶完全独立). owner/admin 操作
   groupPinned?: boolean;
+  // PR #6 表情 reaction + 评论. 仅 shared 笔记返回. 列表 API 已 enrich (NoteCard 直接渲染), 详情走专用 API 增量更新.
+  // reactionSummary 按白名单 5 个 emoji 固定顺序 (count=0 也含); NoteCard 按需过滤 count>0 显示, ReactionBar 永远渲染 5 个
+  reactionSummary?: NoteReactionSummaryItem[];
+  commentCount?: number;
+}
+
+// PR #6 单个 emoji 的反应汇总. mine = 我自己加过该 emoji (点击 toggle 移除).
+export interface NoteReactionSummaryItem {
+  emoji: string;
+  count: number;
+  mine: boolean;
+}
+
+// PR #6 评论. 后端 join users 给 nickname / avatar. parentId 走单层 thread normalize (顶层 null; 回复任意级最终归到根 id)
+export interface NoteComment {
+  id: string;
+  noteId: string;
+  userId: string;
+  parentId: string | null;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  userNickname: string | null;
+  userAvatar: string | null;
 }
 
 // PR #5b 编辑权限申请记录
@@ -411,6 +435,43 @@ export const api = {
 
   listGroupEditGrants(groupId: string) {
     return request<{ data: GroupNoteEditGrantRow[] }>(`/groups/${groupId}/note-edit-grants`);
+  },
+
+  // PR #6 Reactions: toggle 自己的 reaction + 拉汇总. 仅 shared 笔记可用.
+  toggleNoteReaction(noteId: string, emoji: string) {
+    return request<{ data: { action: 'added' | 'removed'; summary: NoteReactionSummaryItem[] } }>(`/notes/${noteId}/reactions`, {
+      method: 'POST',
+      body: JSON.stringify({ emoji }),
+    });
+  },
+
+  listNoteReactions(noteId: string) {
+    return request<{ data: NoteReactionSummaryItem[] }>(`/notes/${noteId}/reactions`);
+  },
+
+  // PR #6 Comments: 单层 thread (parentId 后端 normalize). 软删本人+作者+admin 可操作; 编辑仅本人.
+  listNoteComments(noteId: string) {
+    return request<{ data: NoteComment[] }>(`/notes/${noteId}/comments`);
+  },
+
+  createNoteComment(noteId: string, content: string, parentId?: string | null) {
+    return request<{ data: NoteComment }>(`/notes/${noteId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ content, parentId: parentId ?? null }),
+    });
+  },
+
+  updateNoteComment(noteId: string, commentId: string, content: string) {
+    return request<{ data: NoteComment }>(`/notes/${noteId}/comments/${commentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    });
+  },
+
+  deleteNoteComment(noteId: string, commentId: string) {
+    return request<{ data: { message: string } }>(`/notes/${noteId}/comments/${commentId}`, {
+      method: 'DELETE',
+    });
   },
 
   // Categories

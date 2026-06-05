@@ -32,6 +32,9 @@ import {
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import ReminderPicker from '@/components/ReminderPicker.vue';
+import ReactionBar from '@/components/ReactionBar.vue';
+import CommentThread from '@/components/CommentThread.vue';
+import type { NoteReactionSummaryItem } from '@/api';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -305,13 +308,35 @@ function onKeydown(e: KeyboardEvent) {
   goBack();
 }
 
-onMounted(() => { document.addEventListener('keydown', onKeydown); loadNote(); });
+// PR #6: reaction summary 本地 ref 让 ReactionBar 走 v-model 模式. loadNote 完成后从 note.value 同步过来.
+// SSE 别人 reaction 变化时增量更新 (server publish 给所有共享群成员 + 作者).
+const reactionSummary = ref<NoteReactionSummaryItem[]>([]);
+function onReactionUpdate(newSummary: NoteReactionSummaryItem[]) {
+  reactionSummary.value = newSummary;
+  if (note.value) note.value.reactionSummary = newSummary;
+}
+function onReactionChangedSSE(e: any) {
+  const { noteId, summary } = e.detail || {};
+  if (!note.value || noteId !== note.value.id) return;
+  reactionSummary.value = summary;
+  note.value.reactionSummary = summary;
+}
+watch(() => note.value?.reactionSummary, (newSum) => {
+  if (newSum) reactionSummary.value = newSum;
+}, { immediate: true });
+
+onMounted(() => {
+  document.addEventListener('keydown', onKeydown);
+  window.addEventListener('quink-note-reaction-changed' as any, onReactionChangedSSE);
+  loadNote();
+});
 
 
 watch(() => route.params.id, () => { loadNote(); });
 onUnmounted(() => {
   if (detailTitle) detailTitle.value = '';
   document.removeEventListener('keydown', onKeydown);
+  window.removeEventListener('quink-note-reaction-changed' as any, onReactionChangedSSE);
 });
 </script>
 
@@ -515,6 +540,26 @@ onUnmounted(() => {
       <div class="bg-white rounded-2xl shadow-sm p-6 md:p-8 note-content note-detail-content" @click="onContentClick">
         <div class="vditor-reset" v-html="rendered" />
       </div>
+
+      <!-- PR #6: 共享笔记的 reaction + 评论区 (private 笔记无意义不显示) -->
+      <section v-if="isShared" class="mt-4 bg-white rounded-2xl shadow-sm p-6 md:p-8">
+        <div class="mb-4">
+          <h3 class="text-xs font-medium text-gray-500 mb-2">反应</h3>
+          <ReactionBar
+            :note-id="note.id"
+            :summary="reactionSummary"
+            mode="full"
+            @update:summary="onReactionUpdate"
+          />
+        </div>
+        <div class="border-t border-gray-100 pt-4">
+          <h3 class="text-xs font-medium text-gray-500 mb-3">评论</h3>
+          <CommentThread
+            :note-id="note.id"
+            :can-delete-any="!!isMyNote"
+          />
+        </div>
+      </section>
     </div>
   </div>
 </template>

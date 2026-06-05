@@ -6,6 +6,7 @@ import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
 import { publish, isOnline } from '../reminder/bus.js';
+import { loadSocialMetaMaps } from './notes.js';
 
 const app = new Hono();
 
@@ -293,6 +294,9 @@ app.get('/:id/notes', async (c) => {
     }
   }
 
+  // PR #6: 拼 reaction summary + comment count (群 feed NoteCard 底部显示). 群里都是 shared 笔记, 不分支
+  const { reactionMap, commentCountMap } = await loadSocialMetaMaps(noteIds, userId);
+
   // raw SQL 返回 snake_case, 手动映射成 camelCase (跟其他 endpoint 返回格式一致)
   const data = rows.map(r => ({
     id: r.id,
@@ -318,6 +322,8 @@ app.get('/:id/notes', async (c) => {
     authorNickname: r.authorNickname,
     authorAvatar: r.authorAvatar,
     groupPinned: !!r.groupPinnedAt, // 群内独立置顶状态 (跟 pinned 作者全局置顶分离)
+    reactionSummary: reactionMap.get(r.id) || [],
+    commentCount: commentCountMap.get(r.id) || 0,
   }));
   return c.json({
     data,

@@ -24,7 +24,7 @@
 | **#5 编辑锁（极简）** | 4 lock API + cron 60s 清锁 + version 乐观锁 + NoteEditModal 锁交互 + chat update_note 扩到群成员 | ✅ done | ~470 行 (含 chat update_note 同步扩 + getNoteForAccess helper) |
 | **#5b 编辑权限分级 + 申请流程** | 笔记加 edit_permission (admin/all 两档, 默认 admin) + 申请编辑权 6 API + admin 可删 + SSE + GroupDetail 申请管理面板 + NoteCard/NoteDetail 切换胶囊 + 额外授权 popover + Electron 通知唤窗修 + 各种 UX | ✅ done (完整) | ~1500 行 (后端 + 完整前端 UI + 文档) |
 | **#5c scope preferences** | preferences.showSharedInMain 全局开关 (默认 false, 开后 3 主 view 显示共享笔记) + scope='all' 子查询 | pending | ~150 行 |
-| **#6 表情 reaction + 评论** | note_reactions + note_comments thread + UI | pending | ~500 行 |
+| **#6 表情 reaction + 评论** | note_reactions + note_comments thread + ReactionBar/CommentThread 组件 + NoteCard summary + NoteDetail/NoteEditModal 集成 + SSE 4 事件 | ✅ done | ~1000 行 |
 
 总量预估 ~3550 行。每个 PR 独立 ship 不破坏现有功能。
 
@@ -320,35 +320,75 @@ PR #2 注释里说"TopBar 加 scope chip 让用户主动求看共享"实际**没
 
 ---
 
-## PR #6 表情 reaction + 评论
+## PR #6 表情 reaction + 评论（已完成 ✅）
 
-### Schema
+### 决策锁定 ✓
+
+- ✓ **emoji 固定 5 个白名单** (`👍 ❤️ 🤔 ✅ 😂`, 前后端共用同一份), 不让用户自选 (防垃圾 / 兼容性 / picker UI 复杂度)
+- ✓ **单层 thread**: 顶层评论 (parentId=null) + 一级回复 (parentId=顶层 id). 二级及以下后端 normalize 到根 parent. UI 顶多 2 层缩进
+- ✓ **NoteDetail + NoteEditModal 都加** 评论区. NoteCard 上只 readonly 显示 summary (`👍 1  💬 2`) 点 NoteCard 走详情
+- ✓ **NoteCard 显示计数**: shared 笔记底部 visibleReactions (filter count>0) + commentCount > 0 才显示一行, private 不显示
+
+### Schema 改动 (2 新表)
 
 ```sql
 CREATE TABLE note_reactions (
   note_id TEXT NOT NULL REFERENCES notes(id),
   user_id TEXT NOT NULL REFERENCES users(id),
-  emoji TEXT NOT NULL,
+  emoji TEXT NOT NULL,                    -- 5 白名单之一 (后端 ALLOWED_REACTION_EMOJIS)
   created_at TEXT NOT NULL,
-  PRIMARY KEY (note_id, user_id, emoji)
+  PRIMARY KEY (note_id, user_id, emoji)  -- 每人每 emoji 最多 1 条; 取消 = DELETE row 无审计
 );
 
 CREATE TABLE note_comments (
   id TEXT PRIMARY KEY,
   note_id TEXT NOT NULL REFERENCES notes(id),
   user_id TEXT NOT NULL REFERENCES users(id),
-  parent_id TEXT REFERENCES note_comments(id),  -- thread 支持
+  parent_id TEXT REFERENCES note_comments(id),  -- 顶层 null; 一级回复 = 顶层 id; 二级 normalize 到根 parent
   content TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT                        -- 软删 (deletedAt IS NOT NULL 直接前端隐藏, 计数也不算)
 );
+CREATE INDEX idx_note_comments_note_created ON note_comments(note_id, created_at);
 ```
 
-### UI
+### 后端 (`routes/notes.ts`, 6 API + helpers)
 
-- `NoteCard` 底部 reaction bar（共享笔记才显示）: 默认 emoji `👍 ❤️ 🤔 ✅`, 点击切换我自己的
-- `NoteDetail` / `NoteEditModal` 加评论 thread 区
-- SSE `note-reaction-changed` / `note-comment-added` 群播给群成员
+- `POST /:id/reactions` body `{ emoji }` —— toggle (有 DELETE / 无 INSERT). 白名单校验 + getNoteForAccess(read) + 仅 shared. 返新 summary + action
+- `GET /:id/reactions` —— 列 summary (5 个 emoji 固定顺序, count + mine)
+- `POST /:id/comments` body `{ content, parentId? }` —— 单层 thread normalize: `parent.parentId ?? parent.id`. 1000 字上限. shared 笔记限制
+- `GET /:id/comments` —— flat list + join users 拿 nickname/avatar, ASC by createdAt. 前端组 thread
+- `PATCH /:id/comments/:cid` body `{ content }` —— 仅本人, 无时限
+- `DELETE /:id/comments/:cid` —— 软删 (deletedAt). 本人 OR 笔记作者 OR 群 admin
+- **broadcastNoteSocial helper**: 推该笔记所属群所有 active member ∪ 作者 (除发起人). reaction / comment 增删改全用
+- **loadSocialMetaMaps export helper**: 批量拉 noteIds 的 reactionSummary + commentCount, 给 GET /api/notes 跟 GET /api/groups/:id/notes enrich 共用
+- **GET /api/notes + GET /:id + GET /api/groups/:id/notes 全 enrich `reactionSummary` + `commentCount`**: shared 笔记直接 NoteCard 渲染, 不用 N+1 fetch
+
+### SSE 4 事件 (`utils/sse.ts` + `routes/notes.ts`)
+
+- `note-reaction-changed`: payload `{ noteId, summary }`. 前端 dispatchEvent → NoteDetail listener mutate reactionSummary
+- `note-comment-added`: payload `{ noteId, comment: 含 userNickname/userAvatar }`. CommentThread listener push
+- `note-comment-updated`: payload `{ noteId, commentId, content, updatedAt }`. CommentThread listener 替换字段
+- `note-comment-deleted`: payload `{ noteId, commentId }`. CommentThread listener filter 移除
+
+**NoteCard 不直接监听** (避免 N 个 listener 性能), 其 summary 下次 fetchNotes / group-notes-changed 时同步.
+
+### 前端 (2 新组件 + 3 处集成)
+
+- **`components/ReactionBar.vue`** —— 5 个固定 emoji + count + mine 高亮. `mode='full'` (NoteDetail/NoteEditModal 永远渲染 5 个) / `mode='compact'` (只 count>0). 乐观更新 toggle + emit `update:summary`
+- **`components/CommentThread.vue`** —— 单层 thread + 顶部输入框 + 编辑/删除/回复 + @xxx 引用. SSE 增量更新自管. props: `noteId` + `canDeleteAny` (作者+admin)
+- `NoteCard.vue`: shared 笔记 tags 行后加 inline summary 行 (👍 1  💬 2). 不用 ReactionBar 组件 (readonly inline 更省)
+- `NoteDetail.vue`: 三胶囊行下加 reaction section + comment section (本地 reactionSummary ref + SSE 监听)
+- `NoteEditModal.vue`: shared 笔记 modal 改 max-w-5xl + flex 横排 + 右侧 sidebar 320px 装 CommentThread; private 笔记保持 max-w-4xl 单栏
+
+### 已知未做 (PR #6 范围外)
+
+- **AI chat 工具 `update_note` / `search_notes` 无 reaction/comment 感知**: AI 拿不到 "@张三在评论里说..." 这种 context. 未来加 `get_note_comments` 工具可扩
+- **NoteCard 不实时 SSE 同步**: 别人 reaction/评论时 NoteCard 上的 summary 不自动更新 (需重新 fetchNotes 或进 NoteDetail 看). 性能考量, N 个 NoteCard listener 代价大
+- **群级"未读"提示**: 群里别人评论了我的笔记 / 我参与过 thread 的新回复 → 没有未读红点. 未来加 noteCommentLastRead 表可扩
+- **评论编辑无时限**: 蘑菇明确不加 5 分钟时限 (PR #5 锁已防同时编笔记, 评论频率低无所谓)
+- **评论 markdown 渲染**: 当前 textarea 输入纯文本, 不渲染 markdown. 未来想要可在 CommentThread 加 Vditor.md2html (但评论简短, 大多无意义)
 
 ---
 
