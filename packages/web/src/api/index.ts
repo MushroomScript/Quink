@@ -185,6 +185,11 @@ export interface Group {
   createdAt: string;
   memberCount: number;
   myRole: GroupRole | null;
+  // 群公告 (markdown, owner/admin 可编辑)
+  announcement?: string | null;
+  announcementUpdatedAt?: string | null;
+  announcementUpdatedBy?: string | null;
+  announcementUpdatedByNickname?: string | null;
 }
 
 export interface GroupMemberInfo {
@@ -194,6 +199,8 @@ export interface GroupMemberInfo {
   username: string;
   nickname: string;
   avatar: string | null;
+  // SSE 连接活跃即视为在线; bus.ts presence 追踪
+  online?: boolean;
 }
 
 export interface GroupDetail extends Group {
@@ -740,7 +747,7 @@ export const api = {
     const qs = params ? '?' + new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString() : '';
     return request<PaginatedResponse<Note>>(`/groups/${groupId}/notes${qs}`);
   },
-  updateGroup(id: string, data: { name?: string; avatar?: string | null; autoJoin?: boolean }) {
+  updateGroup(id: string, data: { name?: string; avatar?: string | null; autoJoin?: boolean; announcement?: string | null }) {
     return request<{ data: Group }>(`/groups/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   // 解散群: 仅 owner. 后端事务清 groups + group_members + group_join_requests (PR #2 加 note_shares 也要清)

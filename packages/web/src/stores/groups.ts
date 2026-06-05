@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed, reactive } from 'vue';
-import { api, type Group, type GroupDetail, type GroupJoinRequest, type GroupMemberInfo } from '@/api';
+import { api, type Group, type GroupDetail, type GroupJoinRequest } from '@/api';
 
 // 群组共享 PR #1: 我的群列表 + 当前群详情 + 待审申请角标
 // SSE 群组事件由 App.vue 监听 (复用现有 SSE 通道), 命中后调本 store 方法同步状态
@@ -60,11 +60,12 @@ export const useGroupsStore = defineStore('groups', () => {
     return res.data;
   }
 
-  async function updateGroup(id: string, data: { name?: string; autoJoin?: boolean; avatar?: string | null }) {
+  async function updateGroup(id: string, data: { name?: string; autoJoin?: boolean; avatar?: string | null; announcement?: string | null }) {
     const res = await api.updateGroup(id, data);
     const idx = groups.value.findIndex(g => g.id === id);
     if (idx >= 0) groups.value[idx] = res.data;
     if (currentDetail.value?.id === id) {
+      // Object.assign 而非 reassign: 保留 members (PATCH 接口不返成员列表)
       Object.assign(currentDetail.value, res.data);
     }
     return res.data;
@@ -195,6 +196,14 @@ export const useGroupsStore = defineStore('groups', () => {
     }
   }
 
+  // SSE 上下线: 后端 bus.ts 检测某 user 第一条 SSE 上线/最后一条断开 → 推同群其他成员.
+  // 直接 mutate 当前打开的详情页成员的 online 字段, Vue reactive 自动更新圆点
+  function onPresenceChanged(userId: string, online: boolean) {
+    if (!currentDetail.value) return;
+    const m = currentDetail.value.members.find(x => x.userId === userId);
+    if (m) m.online = online;
+  }
+
   // 登出时清状态 (auth store logout 调)
   function reset() {
     groups.value = [];
@@ -208,7 +217,7 @@ export const useGroupsStore = defineStore('groups', () => {
     loadGroups, loadGroup, refreshPendingCount, createGroup, updateGroup, dissolveGroup,
     resetInvite, closeInvite, loadJoinRequests, approveRequest, rejectRequest,
     removeMember, patchMemberRole,
-    onJoinRequest, onJoinApproved, onDissolved, onMemberRemoved, onMemberJoined,
+    onJoinRequest, onJoinApproved, onDissolved, onMemberRemoved, onMemberJoined, onPresenceChanged,
     reset,
   };
 });

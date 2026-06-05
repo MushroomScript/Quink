@@ -242,6 +242,17 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] note-edit-request-resolved parse failed:', e); }
   });
 
+  // presence-changed: 同群成员上下线 (bus.ts subscribe size 从 0→1 / 1→0 触发).
+  // 只在打开群详情页时有意义, 静默 mutate currentDetail.members[i].online, 不弹 toast
+  es.addEventListener('presence-changed', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { userId: string; online: boolean };
+      import('@/stores/groups').then(({ useGroupsStore }) => {
+        useGroupsStore().onPresenceChanged(data.userId, data.online);
+      });
+    } catch (e) { console.error('[sse] presence-changed parse failed:', e); }
+  });
+
   // group-changed: 任何群组写操作后 broadcast 给所有 active 成员 (排除操作者).
   // 触发场景: 成员变化 / 角色变更 / 群信息修改. 不弹 toast (避免噪音), 静默刷新当前打开的群 + 群列表
   es.addEventListener('group-changed', (ev) => {

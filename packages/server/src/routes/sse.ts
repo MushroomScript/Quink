@@ -1,9 +1,44 @@
 import { Hono } from 'hono';
 import { verifyToken } from '../auth.js';
-import { subscribe } from '../reminder/bus.js';
+import { subscribe, onPresenceChange, publish } from '../reminder/bus.js';
 import { db, schema } from '../db/index.js';
-import { and, eq, isNull, gte } from 'drizzle-orm';
+import { and, eq, isNull, gte, inArray } from 'drizzle-orm';
 import dayjs from 'dayjs';
+
+// 上下线广播: bus 检测到某 user 第一条 SSE 上线 / 最后一条断开时, 给该 user 所有共同群成员推送 presence-changed.
+// 模块加载时注册一次, 不要在每个 connect 里注册 (否则同一事件被推 N 次)
+onPresenceChange((userId, online) => {
+  void broadcastPresence(userId, online);
+});
+
+async function broadcastPresence(userId: string, online: boolean) {
+  try {
+    // 该用户所在所有 active 群组
+    const myGroups = await db.select({ groupId: schema.groupMembers.groupId })
+      .from(schema.groupMembers)
+      .where(and(eq(schema.groupMembers.userId, userId), eq(schema.groupMembers.status, 'active')))
+      .all();
+    if (myGroups.length === 0) return;
+    const groupIds = myGroups.map(g => g.groupId);
+    // 这些群的所有 active 成员 (去重, 排除本人 - 自己刚上线不需要通知自己)
+    const otherMembers = await db.select({ userId: schema.groupMembers.userId })
+      .from(schema.groupMembers)
+      .where(and(
+        inArray(schema.groupMembers.groupId, groupIds),
+        eq(schema.groupMembers.status, 'active'),
+      ))
+      .all();
+    const seen = new Set<string>();
+    for (const m of otherMembers) {
+      if (m.userId !== userId && !seen.has(m.userId)) {
+        seen.add(m.userId);
+        publish(m.userId, 'presence-changed', { userId, online });
+      }
+    }
+  } catch (e) {
+    console.error('[sse] broadcastPresence failed:', e);
+  }
+}
 
 // 补送 browser channel 离线期间挂起的提醒. 24h 内未送达的才补 (太老了像 spam).
 // atomic update sentAt 保证多端登录只推一次, where sentAt IS NULL 防重复送

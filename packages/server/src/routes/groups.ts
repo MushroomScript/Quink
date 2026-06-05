@@ -5,7 +5,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
-import { publish } from '../reminder/bus.js';
+import { publish, isOnline } from '../reminder/bus.js';
 
 const app = new Hono();
 
@@ -51,7 +51,14 @@ async function enrichGroup(groupId: string, viewerId?: string) {
     const me = await getActiveMember(groupId, viewerId);
     myRole = me?.role ?? null;
   }
-  return { ...g, memberCount, myRole };
+  // 公告作者昵称 (UI 展示"X 发布于 YYYY-MM-DD")
+  let announcementUpdatedByNickname: string | null = null;
+  if (g.announcementUpdatedBy) {
+    const author = await db.select({ nickname: schema.users.nickname })
+      .from(schema.users).where(eq(schema.users.id, g.announcementUpdatedBy)).get();
+    announcementUpdatedByNickname = author?.nickname ?? null;
+  }
+  return { ...g, memberCount, myRole, announcementUpdatedByNickname };
 }
 
 // =========================================================
@@ -164,6 +171,8 @@ const updateSchema = z.object({
   name: z.string().min(1).max(50).optional(),
   avatar: z.string().nullable().optional(),
   autoJoin: z.boolean().optional(),
+  // 群公告: markdown / 空字符串视为清空. owner + admin 都能改 (其他字段仅 owner)
+  announcement: z.string().max(2000).nullable().optional(),
 });
 
 // 我的群列表: 我作为 active member 的群, 含成员数 + 我的角色
@@ -234,6 +243,7 @@ app.get('/:id', async (c) => {
       members: members.map(m => ({
         userId: m.user_id, role: m.role, joinedAt: m.joined_at,
         username: m.username, nickname: m.nickname, avatar: m.avatar,
+        online: isOnline(m.user_id),
       })),
     },
   });
@@ -364,16 +374,31 @@ app.patch('/:id', async (c) => {
   const userId = c.get('userId');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
-  if (!me || me.role !== 'owner') return c.json({ error: '仅创建者可修改群设置' }, 403);
+  if (!me) return c.json({ error: '群组不存在或你不是成员' }, 403);
   const parsed = updateSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  // 权限分级: name/avatar/autoJoin 仅 owner, announcement 允许 owner+admin
+  const ownerOnly = parsed.data.name !== undefined
+    || parsed.data.avatar !== undefined
+    || parsed.data.autoJoin !== undefined;
+  if (ownerOnly && me.role !== 'owner') return c.json({ error: '仅创建者可修改群设置' }, 403);
+  if (parsed.data.announcement !== undefined && me.role !== 'owner' && me.role !== 'admin') {
+    return c.json({ error: '仅管理员可修改群公告' }, 403);
+  }
   const updates: Record<string, any> = {};
   if (parsed.data.name !== undefined) updates.name = parsed.data.name;
   if (parsed.data.avatar !== undefined) updates.avatar = parsed.data.avatar;
   if (parsed.data.autoJoin !== undefined) updates.autoJoin = parsed.data.autoJoin;
+  if (parsed.data.announcement !== undefined) {
+    // 空串/纯空白 trim 后视为清空公告; 否则写入并记 updater
+    const ann = parsed.data.announcement?.trim() || null;
+    updates.announcement = ann;
+    updates.announcementUpdatedAt = ann ? dayjs().toISOString() : null;
+    updates.announcementUpdatedBy = ann ? userId : null;
+  }
   if (Object.keys(updates).length === 0) return c.json({ error: '无变更字段' }, 400);
   await db.update(schema.groups).set(updates).where(eq(schema.groups.id, groupId));
-  // 广播给所有成员 (排除操作者) 让群名/头像/autoJoin 实时更新
+  // 广播给所有成员 (排除操作者) 让群名/头像/autoJoin/公告 实时更新
   await broadcastGroupChanged(groupId, [userId]);
   const enriched = await enrichGroup(groupId, userId);
   return c.json({ data: enriched });

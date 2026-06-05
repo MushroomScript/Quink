@@ -262,6 +262,10 @@ try { sqlite.exec('ALTER TABLE notes ADD COLUMN version INTEGER NOT NULL DEFAULT
 // Migrate: PR #5b notes.edit_permission (admin/all). 老 shared 笔记自动归 'admin' (PR #5b 默认), 收紧权限.
 // 这是行为破坏更新 (PR #5 默认 all, PR #5b 默认 admin), dev 环境 OK
 try { sqlite.exec("ALTER TABLE notes ADD COLUMN edit_permission TEXT NOT NULL DEFAULT 'admin'"); } catch {}
+// Migrate: 群公告 (groups 表加 3 列). owner/admin 可编辑, 全群唯一
+try { sqlite.exec('ALTER TABLE groups ADD COLUMN announcement TEXT'); } catch {}
+try { sqlite.exec('ALTER TABLE groups ADD COLUMN announcement_updated_at TEXT'); } catch {}
+try { sqlite.exec('ALTER TABLE groups ADD COLUMN announcement_updated_by TEXT REFERENCES users(id)'); } catch {}
 // 一次性回填 + 升级重算: PINYIN_SCHEMA_VERSION 每次 toPinyinSearchable 算法升级时 +1,
 // 启动检测 config 表里存的版本号,低于当前版本就把所有 content_pinyin 清空让下面回填重算。
 // v1: 全拼 + 单读音首字母. v2: 多音字首字母穷举. v3: 多音字只取前 2 读音. v4: 加罕用读音黑名单.

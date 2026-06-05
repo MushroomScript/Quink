@@ -198,6 +198,10 @@ export const groups = sqliteTable('groups', {
   inviteExpiresAt: text('invite_expires_at'), // ISO datetime, null = 永不过期
   // 0 = 申请审批模式 (默认, owner SSE 收申请), 1 = 自动加入模式 (信任圈子)
   autoJoin: integer('auto_join', { mode: 'boolean' }).notNull().default(false),
+  // 群公告 (markdown), 全群只 1 条, owner/admin 可编辑
+  announcement: text('announcement'),
+  announcementUpdatedAt: text('announcement_updated_at'),
+  announcementUpdatedBy: text('announcement_updated_by').references(() => users.id),
   createdAt: text('created_at').notNull(),
 });
 

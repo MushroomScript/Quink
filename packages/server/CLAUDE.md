@@ -41,6 +41,7 @@ AI 系统专属指引（多配置 / 按功能绑定 / FC v2 / 自动处理 / 自
 - **测试发送** (`POST /api/reminder-channels/:id/test`): 用 `dispatchToSingleChannel` 跑同条 adapter, 失败抛 Error 含具体原因(config 缺字段 / token 无效等), Settings 测试按钮直接展示给用户
 - **加新 channel adapter**: ① `adapters/<name>.ts` 实现 `AdapterFn` (接 ctx, 用 ctx.config + ctx.payload + fetch/sdk) → ② `sender.ts` adapters 表加映射 → ③ `schema.ts` reminderChannels type enum 加新值 → ④ `db/index.ts` 不用动 (type 是 string, enum 仅 Drizzle 类型层级) → ⑤ 前端 `Settings.vue` `channelTypeOptions` + `channelTypeFields` 加配置字段定义
 - **browser 通道唯一性**: 同一 user 只能有一条 `type='browser'` channel. `POST /reminder-channels` 服务端拦截 + 前端 `<select>` UI disable 已有 browser 时的选项. 多条 browser 会让同一 SSE 推送的事件触发 OS 弹通知 N 次
+- **Presence (在线状态)**: `reminder/bus.ts` 暴露 `isOnline(userId)` / `onPresenceChange(cb)`. SSE subscribe 让某 user subscribers Set size 从 0→1 视为上线, 1→0 视为下线 (多设备/多 tab 用 ref count). `routes/sse.ts` 模块加载时注册一次监听器, 触发时查该 user 所在所有 active 群成员, 给在线的其他人 publish `presence-changed` 事件 (隐私: 仅同群可见). 群详情 GET 给 `members[].online` 注入. 加新"需要在线状态"的场景 (如聊天 typing indicator) 直接调 `isOnline` 不要再起 presence 系统
 
 ## 文件重命名
 
