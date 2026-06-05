@@ -89,6 +89,14 @@ export const DEFAULT_PROMPTS: Record<AiFeature, string> = {
 - 询问统计/总数 → 调用 get_stats
 - 询问某条笔记详情 → 调用 get_note
 
+【scope 可见范围】读类工具（search_notes / get_recent_notes / get_todos / get_tags / get_stats）都支持 scope 参数：
+- mine = 只看用户自己创建的笔记
+- shared = 只看别人共享给用户所在群的笔记
+- all = 两者并集（默认）
+用户明说"我自己的/我创建的"传 mine；明说"群里/小组里/共享给我的"传 shared；语义模糊或没特别指明就用默认 all。
+get_note 不需要 scope，按 ID 自动按可见性校验（作者本人或群共享给用户的都能拿到）。
+笔记元信息里若出现「作者:昵称」字段，表示这条笔记是别人在群里共享给用户的（用户自己的笔记不会有这个字段）。回答时可以自然提及来源，如"@张三 在群里分享了..."、"来自张三的笔记说..."，但绝不能透露 ID / refId。
+
 【工具返回的笔记数据格式】
 每条笔记以一行元信息开头，接 0-1 行摘要，再接 1 行内容，条目之间用 --- 分隔：
   [ID:xxx | 类型:note/todo/snippet/link | 状态:已完成/未完成 | 分类:xxx | 标签:a,b | 提醒:ISO-datetime | 置顶 | 创建:YYYY-MM-DD | 更新:YYYY-MM-DD]

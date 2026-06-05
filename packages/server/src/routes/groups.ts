@@ -62,6 +62,7 @@ async function enrichGroup(groupId: string, viewerId?: string) {
 const inviteApp = new Hono();
 inviteApp.get('/:token', async (c) => {
   const token = c.req.param('token');
+  if (!token) return c.json({ error: '邀请链接无效或已被重置' }, 404);
   const g = await db.select().from(schema.groups).where(eq(schema.groups.inviteToken, token)).get();
   if (!g || !g.inviteToken) return c.json({ error: '邀请链接无效或已被重置' }, 404);
   if (g.inviteExpiresAt && dayjs(g.inviteExpiresAt).isBefore(dayjs())) {
@@ -87,6 +88,7 @@ inviteApp.get('/:token', async (c) => {
 inviteApp.post('/:token/apply', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const token = c.req.param('token');
+  if (!token) return c.json({ error: '邀请链接无效或已被重置' }, 404);
   const g = await db.select().from(schema.groups).where(eq(schema.groups.inviteToken, token)).get();
   if (!g || !g.inviteToken) return c.json({ error: '邀请链接无效或已被重置' }, 404);
   if (g.inviteExpiresAt && dayjs(g.inviteExpiresAt).isBefore(dayjs())) {

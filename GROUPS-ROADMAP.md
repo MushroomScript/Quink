@@ -20,7 +20,7 @@
 | **#1 地基** | DB 迁移 + groups/members CRUD + 邀请 + 申请审批 + 踢人 + 角色管理 + SSE 自动刷新 | ✅ done (cef1924) | ~1500 行 |
 | **#2 笔记可见性** | notes.visibility + note_shares + 编辑器底栏 "选可见群组" chip + 列表过滤 + 群组 feed 页 + SSE note-shared 群播 | ✅ done (de8a827 + d3bf481) | ~810 行 |
 | **#3 文件授权** | `/api/uploads/*` 加访问中间件按 noteShares 判 + 缩略图同套逻辑 | ✅ done | ~90 行 (实际比估算少, files 表 + LIKE notes content 即可, avatar 不在 files 表自动公开) |
-| **#4 SSE 拓展 + AI 共享上下文** | AI RAG 拉笔记范围扩到群组 (SSE note-shared 群播已在 PR #2 一起做了) | 🔜 next | ~100 行 (变少了, SSE 部分已 done) |
+| **#4 SSE 拓展 + AI 共享上下文** | AI chat 10 工具加 scope/author + 群共享可见性 helper + voice_transcription 共享授权链 | ✅ done | ~145 行 (含 author 字段 + groups.ts:90 TS 修 + context.ts 死代码清 -200) |
 | **#5 编辑锁（极简）** | lock/heartbeat/release API + 心跳 + sendBeacon + 提示 toast + version 校验 | pending | ~350 行 |
 | **#6 表情 reaction + 评论** | note_reactions + note_comments thread + UI | pending | ~500 行 |
 
@@ -122,30 +122,41 @@ WHERE user_id = me
 
 ---
 
-## PR #4 SSE 群播 + AI 共享上下文
+## PR #4 SSE 群播 + AI 共享上下文（已完成 ✅）
 
 ### SSE 事件
 
-- `note-shared`: 别人在群里发新笔记 → 推给所有群成员 → 前端 loadGroupNotes 刷 feed
-- `note-updated`: 共享笔记被作者修改 → 推给群成员 → refreshSingleNote
-- `note-deleted`: 作者删共享笔记 → 推给群成员 → splice 移除
+PR #2 阶段 5c 已带（`broadcastNoteShared` helper + `routes/notes.ts` POST/PATCH/permanent delete 调用），本 PR 不再单独拆。
 
-### AI 上下文扩展
+### 实际做的事
 
-`packages/server/src/ai/` 内所有 `getNotes` / chat RAG 查询：
+**`tools.ts` chat 10 工具按可见范围分层处理：**
 
-```ts
-// 之前: WHERE user_id = me
-// 改成: WHERE user_id = me OR id IN (note_shares where my groups)
-```
+- `getVisibilityCondition(userId, scope)` helper —— `mine` / `shared` / `all` 三档 SQL 子查询拼"我的 OR 别人共享给我所在 active 群"
+- 5 个读类工具加 `scope` 参数（默认 `all`）：`search_notes` / `get_recent_notes` / `get_todos` / `get_tags` / `get_stats`
+- `get_note` 不加 scope，按 id 拿后做"作者本人 OR `note_shares ∩ my_active_groups`"校验
+- `get_voice_transcription` 复用 PR #3 文件授权链（audioName LIKE `notes.content` + `visibility='shared'` + note_shares + group_members）
+- `get_categories` / `create_note` / `update_note` 不动（分类私有 / 创建归自己 / update 只能改自己）
 
-让 AI 问 "上周咱们小组开会决定了什么" 能拿到群组共享笔记。
+**author 字段透传（让 AI 区分笔记来源）：**
 
-### 影响范围
+- `fillAuthorNicknames(userId, notes)` helper 批量 join `users.nickname` 给非本人笔记填 `authorNickname`
+- `formatNote` 加 `作者:xxx` 字段（本人笔记不带）
+- `prompts.ts` chat 段加【scope 可见范围】说明 + `作者:` 字段语义，让 AI 自然提及"@张三 在群里分享了..."
 
-- `ai-config.ts` 的 transcribe / polish 等只看作者自己（不动）
-- `ai-chat.ts` 的 RAG 查询要扩到群组
-- 自动打标签 / 自动分类（processNoteWithAi）只看作者自己（不动，私域操作）
+### 不动的（roadmap 已锁定）
+
+- `ai-config.ts` 的 transcribe / polish 等：私域操作
+- `processNoteWithAi` 的自动打标签 / 自动分类 / 摘要：私域
+
+### 顺带做的
+
+- `routes/groups.ts:90` PR #1 历史 TS 错误修（`c.req.param('token')` 空判）
+- `context.ts` 清死代码 -200 行（v2 FC 重构后老 RAG 全废，只剩 `estimateTokens`）
+
+### 已知未做（PR #4 范围外）
+
+- **前端 NoteCard 显示共享语音转写**：`ai-config.ts` 的 `transcribe-status` / `transcribe-async` HTTP 接口仍限 `userId`，群成员前端 NoteCard 直接调拉转写还拿不到。AI chat 工具能拉（`get_voice_transcription` 已扩），但 NoteCard 直接 fetch 不行。如未来要做"群里 NoteCard 显示别人共享语音转写"体验需扩这两接口同款授权链。
 
 ---
 
