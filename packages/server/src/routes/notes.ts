@@ -91,14 +91,34 @@ app.get('/', async (c) => {
   // 排序字段: created (默认, 兼容老行为) / updated. 未知值兜底 createdAt 不报错.
   const sortColumn = sort === 'updated' ? schema.notes.updatedAt : schema.notes.createdAt;
 
-  // PR #2 scope 三种: mine (默认, 只我自己的笔记) / shared (我所在群里别人共享给我的) / group:<id> (某群可见笔记)
+  // scope 列表 (PR #7a 后): private 笔记始终显示, sharedDisplay 偏好控制纳入哪些群组共享笔记.
+  // PR #2 遗留: mine (默认, 作者本人全部含 shared) / shared (仅他人共享给我, 兼容旧 API, 现偏好不再映射) / group:<id> (某群可见笔记)
+  // PR #7a 新增 3 个:
+  //   private        = 仅作者本人 private (偏好 'none', 排除任何 shared)
+  //   others_shared  = 作者本人 private + 他人共享给我所在群的 shared (偏好 'others', 排除我分享出去的 shared)
+  //   all            = mine + 他人共享给我所在群的 shared (偏好 'all')
   const conditions: any[] = [
     sql`${schema.notes.deletedAt} IS NULL`, // 排除回收站
   ];
   if (scope === 'mine') {
     conditions.push(eq(schema.notes.userId, userId));
+  } else if (scope === 'private') {
+    // 仅作者本人 private (任何 shared 都过滤). 对应 sharedDisplay='none'
+    conditions.push(eq(schema.notes.userId, userId));
+    conditions.push(eq(schema.notes.visibility, 'private'));
+  } else if (scope === 'others_shared') {
+    // 作者本人 private + 他人共享给我所在群的 shared (排除作者本人 shared). 对应 sharedDisplay='others'
+    conditions.push(sql`(
+      (${schema.notes.userId} = ${userId} AND ${schema.notes.visibility} = 'private')
+      OR (${schema.notes.userId} != ${userId} AND ${schema.notes.id} IN (
+        SELECT ns.note_id FROM note_shares ns
+        WHERE ns.group_id IN (
+          SELECT group_id FROM group_members WHERE user_id = ${userId} AND status = 'active'
+        )
+      ))
+    )`);
   } else if (scope === 'shared') {
-    // 子查询: id IN (note_shares WHERE group_id IN my_active_groups) AND author != me
+    // PR #2 遗留字段. 仅他人共享给我所在群的 shared (不含作者本人 private). sharedDisplay 不映射到此, 保留兼容旧调用方
     conditions.push(sql`${schema.notes.id} IN (
       SELECT ns.note_id FROM note_shares ns
       WHERE ns.group_id IN (
@@ -106,6 +126,17 @@ app.get('/', async (c) => {
       )
     )`);
     conditions.push(sql`${schema.notes.userId} != ${userId}`);
+  } else if (scope === 'all') {
+    // mine ∪ 他人共享给我所在群的 shared. 对应 sharedDisplay='all'
+    conditions.push(sql`(
+      ${schema.notes.userId} = ${userId}
+      OR ${schema.notes.id} IN (
+        SELECT ns.note_id FROM note_shares ns
+        WHERE ns.group_id IN (
+          SELECT group_id FROM group_members WHERE user_id = ${userId} AND status = 'active'
+        )
+      )
+    )`);
   } else if (scope.startsWith('group:')) {
     const groupId = scope.slice(6);
     // 校验我是该群 active member, 否则返回空 (不暴露非成员看群可见笔记)
@@ -118,7 +149,7 @@ app.get('/', async (c) => {
     if (!me) return c.json({ data: [], pagination: { page: parseInt(page), limit: parseInt(limit), total: 0 } });
     conditions.push(sql`${schema.notes.id} IN (SELECT note_id FROM note_shares WHERE group_id = ${groupId})`);
   } else {
-    return c.json({ error: '无效的 scope, 应为 mine / shared / group:<id>' }, 400);
+    return c.json({ error: '无效的 scope, 应为 mine / private / others_shared / shared / all / group:<id>' }, 400);
   }
 
   if (search) {
@@ -188,9 +219,9 @@ app.get('/', async (c) => {
       arr.push(s.groupId);
       sharesMap.set(s.noteId, arr);
     }
-    // scope!=mine 时多查 author info (mine scope 作者就是自己, 前端 auth.user 已知)
+    // scope 含他人笔记时多查 author info (mine / private 作者就是自己, 前端 auth.user 已知, 跳过)
     let authorMap: Map<string, { nickname: string; avatar: string | null }> | null = null;
-    if (scope !== 'mine') {
+    if (scope !== 'mine' && scope !== 'private') {
       const authorIds = [...new Set(results.map(n => n.userId))];
       const authors = await db.select({ id: schema.users.id, nickname: schema.users.nickname, avatar: schema.users.avatar })
         .from(schema.users)

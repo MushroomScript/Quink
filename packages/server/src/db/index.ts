@@ -297,6 +297,20 @@ try { sqlite.exec('ALTER TABLE notes ADD COLUMN version INTEGER NOT NULL DEFAULT
 // Migrate: PR #5b notes.edit_permission (admin/all). 老 shared 笔记自动归 'admin' (PR #5b 默认), 收紧权限.
 // 这是行为破坏更新 (PR #5 默认 all, PR #5b 默认 admin), dev 环境 OK
 try { sqlite.exec("ALTER TABLE notes ADD COLUMN edit_permission TEXT NOT NULL DEFAULT 'admin'"); } catch {}
+// Migrate: PR #7a COW 分叉模型 - notes.parent_note_id 自引用 root note (默认 NULL = root), 字段先加 7b 用.
+// SQLite ALTER TABLE 不支持加 FK 约束, 跟其他自引用 (folders.parent_id / categories.parent_id) 同款弱约束业务保证.
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN parent_note_id TEXT'); } catch {}
+// PR #7a 修改历史表 (空间换简洁, 只记 who+when 不存 content snapshot, 给 UI "@B、@C 编辑过" 用)
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS note_edit_history (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL REFERENCES notes(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    edited_at TEXT NOT NULL
+  );
+  -- 列某笔记编辑历史: WHERE note_id=? ORDER BY edited_at DESC
+  CREATE INDEX IF NOT EXISTS idx_note_edit_history_note ON note_edit_history(note_id, edited_at DESC);
+`);
 // Migrate: 群公告 (groups 表加 3 列). owner/admin 可编辑, 全群唯一
 try { sqlite.exec('ALTER TABLE groups ADD COLUMN announcement TEXT'); } catch {}
 try { sqlite.exec('ALTER TABLE groups ADD COLUMN announcement_updated_at TEXT'); } catch {}

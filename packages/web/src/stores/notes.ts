@@ -19,10 +19,25 @@ interface ViewState {
   // 真实卡片高度 → 全走 estimateHeight 偏低 → pickShortest 错把所有卡塞同列). 改打 dirty,
   // 目标 view 下次 onActivated 时走 keepCount fetch 同步.
   dirty?: boolean;
-  // PR #2 群组共享: 笔记 scope (mine 只看我 / shared 群里别人共享给我). 群 feed 不走这里,
-  // GroupDetail 内 local ref 自管. TopBar 加 scope 切换 chip 让用户主动求"看共享"
-  scope?: 'mine' | 'shared';
+  // PR #2 / PR #7a 笔记 scope (语义: private 笔记始终显示, sharedDisplay 偏好控制纳入哪些群组共享笔记):
+  //   mine          = 作者本人全部 (private + 我分享出去的 shared, 偏好 'own', 默认)
+  //   private       = 仅 private (偏好 'none', 排除任何 shared)
+  //   others_shared = 我的 private + 他人共享给我所在群的 shared (偏好 'others', 排除我分享出去的 shared)
+  //   shared        = PR #2 遗留字段, 仅他人 shared (不含我的 private), 偏好不映射到此, 保留兼容旧 API
+  //   all           = mine + 他人共享给我所在群的 shared (偏好 'all')
+  // 群 feed 不走这里, GroupDetail 内 local ref 自管.
+  scope?: 'mine' | 'private' | 'others_shared' | 'shared' | 'all';
 }
+
+// PR #7a sharedDisplay 偏好 → 后端 scope 映射. Settings 改 sharedDisplay → store watch 推到各 view vs.scope.
+// 4 个值跟 UI 4 个选项一一对应 (own=仅我发布的 / others=仅他人发布的 / none=全部隐藏 / all=全部显示)
+const SHARED_DISPLAY_TO_SCOPE = {
+  own: 'mine',
+  others: 'others_shared',
+  none: 'private',
+  all: 'all',
+} as const;
+type SharedDisplay = keyof typeof SHARED_DISPLAY_TO_SCOPE;
 
 function createInitState(): ViewState {
   return { notes: [], total: 0, currentPage: 1, scrollTop: 0, lastExtra: undefined, dirty: false, scope: 'mine' };
@@ -71,6 +86,20 @@ export const useNotesStore = defineStore('notes', () => {
       v.total = 0;
       v.currentPage = 1;
       v.dirty = false;
+    }
+  });
+  // PR #7a 主页共享笔记显示策略: Settings 改 sharedDisplay → 推到这里 → watch 更新各 view scope + 清缓存,
+  // 切回主 view 时 onActivated wasEmpty 走 reset 拉新 scope 数据. 跟 sortBy 同款套路 (用户没打开过 Settings
+  // 时 store 保持 'own' 默认值 = mine scope, 跟历史行为完全一致)
+  const sharedDisplay = ref<SharedDisplay>('own');
+  watch(sharedDisplay, (v) => {
+    const newScope = SHARED_DISPLAY_TO_SCOPE[v];
+    for (const vs of Object.values(_viewState)) {
+      vs.notes = [];
+      vs.total = 0;
+      vs.currentPage = 1;
+      vs.dirty = false;
+      vs.scope = newScope;
     }
   });
   // 资源页筛选: 跟 TopBar 筛选面板共享(类型 + 日期),不属于笔记 fetchNotes 参数,Resources view 自己 watch
@@ -135,7 +164,7 @@ export const useNotesStore = defineStore('notes', () => {
       // 排序字段 (created 默认, updated = 按最后编辑时间). Settings 偏好驱动, 改后 watch(sortBy) 清缓存
       // 让各 view onActivated 走 wasEmpty 分支重新 fetch (server 真正按时间字段 ORDER BY 排好返回)
       if (sortBy.value === 'updated') params.sort = 'updated';
-      // PR #2 scope: mine (默认) / shared (群里别人共享给我). TopBar scope chip 切换时改 vs.scope
+      // PR #7a scope: 由 sharedDisplay 偏好 watch 推到 vs.scope, mine 默认不传 (server 也默认 mine)
       if (vs.scope && vs.scope !== 'mine') params.scope = vs.scope;
 
       const res = await api.getNotes(params);
@@ -534,6 +563,7 @@ export const useNotesStore = defineStore('notes', () => {
     fileDateTo,
     currentRefresh,
     sortBy,
+    sharedDisplay,
     fetchNotes,
     createNote,
     pollNoteAiResult,

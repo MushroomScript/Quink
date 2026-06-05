@@ -42,6 +42,12 @@ export const notes = sqliteTable('notes', {
   // 'admin' (默认) = 群 owner + admin 能改; 'all' = 所有 active member 能改. 作者本人永远能改.
   // 没权限的可申请加入 note_edit_grants 白名单 (永久授权)
   editPermission: text('edit_permission', { enum: ['admin', 'all'] }).notNull().default('admin'),
+  // PR #7 COW 分叉模型: 共享笔记被非作者改 / 作者从群组页改时触发 fork, 新建一行 parent_note_id 指向原始 root.
+  // root note 该字段 NULL; fork 出来的 child note 指向其 root note id (单层链, 不嵌套 fork-of-fork).
+  // 跟 noteComments.parentId / folders.parentId / categories.parentId 同款约定不加 drizzle references 自引用,
+  // SQLite 层一致弱约束 (业务保证只往 root 指, 不构造循环).
+  // 7a 阶段仅加字段不动 PATCH 逻辑, 等 7b fork 写入逻辑接入.
+  parentNoteId: text('parent_note_id'),
 });
 
 // PR #2 群组共享: 笔记 → 群组多对多. 一条笔记可分享到多个群, 删 group_members 不影响共享
@@ -253,6 +259,16 @@ export const groupJoinRequests = sqliteTable('group_join_requests', {
   handledBy: text('handled_by').references(() => users.id), // 谁处理的 (owner 或 admin)
 });
 
+// PR #7 COW 修改历史: 每次共享笔记被编辑写一条 (作者改不算, 不然历史会被自己 spam),
+// 给 UI "原作者发布 · @B、@C 编辑过" 用. 不带 content snapshot (空间换简洁, 只记 who+when).
+// note 被永久删除时 cascade 清. 不软删 (历史无恢复需求).
+export const noteEditHistory = sqliteTable('note_edit_history', {
+  id: text('id').primaryKey(), // nanoid
+  noteId: text('note_id').notNull().references(() => notes.id),
+  userId: text('user_id').notNull().references(() => users.id),
+  editedAt: text('edited_at').notNull(),
+});
+
 // 群内独立置顶: 复合主键 (groupId, noteId), 每个群每条笔记最多 1 条. 跟 notes.pinned (作者全局置顶) 完全独立.
 // A 群置顶不影响 B 群 / 作者个人页. 权限: owner/admin 可操作 (避免普通成员误置顶刷屏)
 export const groupNotePins = sqliteTable('group_note_pins', {
@@ -273,6 +289,8 @@ export type NewGroupJoinRequest = typeof groupJoinRequests.$inferInsert;
 export type GroupRole = GroupMember['role'];
 export type GroupNotePin = typeof groupNotePins.$inferSelect;
 export type NewGroupNotePin = typeof groupNotePins.$inferInsert;
+export type NoteEditHistory = typeof noteEditHistory.$inferSelect;
+export type NewNoteEditHistory = typeof noteEditHistory.$inferInsert;
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

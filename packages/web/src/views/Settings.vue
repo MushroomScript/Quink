@@ -66,6 +66,13 @@ const prefs = reactive({
   // 笔记列表排序字段: created (默认, 按创建时间) / updated (按最后编辑时间).
   // 改后 store watch(sortBy) 清各 view 缓存, 切回 view 时 onActivated 走 reset 拉新顺序
   notesSortBy: 'created' as 'created' | 'updated',
+  // PR #7a 群组共享笔记可见范围 (3 主 view 灵感/笔记/待办). 私密笔记始终显示, 此偏好仅控制
+  // 主页面纳入哪些群组共享笔记, 映射到 vs.scope:
+  //   own     = 仅我发布的群组共享笔记 (= mine scope, private + 我分享出去的 shared, 默认, 跟历史行为一致)
+  //   others  = 仅他人发布的群组共享笔记 (= others_shared scope, 我的 private + 他人分享给我的, 我的 shared 被过滤)
+  //   none    = 群组共享笔记全部隐藏 (= private scope, 仅 private)
+  //   all     = 群组共享笔记全部显示 (= all scope, private + 我分享的 + 他人分享的)
+  sharedDisplay: 'own' as 'own' | 'others' | 'none' | 'all',
   aiChatMaxTokens: 8192,
   aiPersona: 'concise',
   aiPersonaCustom: '',
@@ -457,6 +464,7 @@ onMounted(async () => {
   // 否则 store.sortBy 可能残留前一次 session 的值. 用户偏好跟 store 默认值不同时触发 store watch
   // 清缓存 → 主 view 在 KeepAlive 后台 vs.notes 清空, 切回时 onActivated wasEmpty 走 reset 拉新顺序)
   notesStore.sortBy = prefs.notesSortBy;
+  notesStore.sharedDisplay = prefs.sharedDisplay;
   loadAiData();
   loadReminderChannels();
   // 延到下一个 tick 再开启 watch,避免初始化赋值触发自动保存
@@ -620,6 +628,11 @@ watch(prefs, () => {
 watch(() => prefs.notesSortBy, (v) => {
   if (!prefsLoaded) return;
   notesStore.sortBy = v;
+});
+// PR #7a 共享显示策略同步到 notesStore (同款套路): 用户改 select → 推到 store → store watch 清缓存 + 改各 view scope
+watch(() => prefs.sharedDisplay, (v) => {
+  if (!prefsLoaded) return;
+  notesStore.sharedDisplay = v;
 });
 
 async function saveShortcuts() {
@@ -846,6 +859,22 @@ function goBack() {
             <CustomSelect v-model="prefs.notesSortBy" size="compact" :options="[
               { value: 'created', label: '创建时间' },
               { value: 'updated', label: '最后编辑时间' },
+            ]" />
+          </div>
+        </div>
+        <!-- PR #7a 群组共享笔记可见范围: 改后清各 view 缓存, 切回主 view 时 onActivated wasEmpty 走 reset 拉新 scope 数据.
+             私密笔记不受此设置影响, 始终显示; 此设置仅决定主页面是否纳入群组共享笔记 -->
+        <div class="pt-2 border-t border-gray-100">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm text-gray-700 font-medium">群组共享笔记可见范围</div>
+              <div class="text-xs text-gray-400 mt-0.5">私密笔记始终显示, 此设置仅决定主页面纳入哪些群组共享笔记</div>
+            </div>
+            <CustomSelect v-model="prefs.sharedDisplay" size="compact" :options="[
+              { value: 'own', label: '仅我发布的' },
+              { value: 'others', label: '仅他人发布的' },
+              { value: 'none', label: '全部隐藏' },
+              { value: 'all', label: '全部显示' },
             ]" />
           </div>
         </div>

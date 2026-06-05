@@ -23,8 +23,11 @@
 | **#4 SSE 拓展 + AI 共享上下文** | AI chat 10 工具加 scope/author + 群共享可见性 helper + voice_transcription 共享授权链 | ✅ done | ~145 行 (含 author 字段 + groups.ts:90 TS 修 + context.ts 死代码清 -200) |
 | **#5 编辑锁（极简）** | 4 lock API + cron 60s 清锁 + version 乐观锁 + NoteEditModal 锁交互 + chat update_note 扩到群成员 | ✅ done | ~470 行 (含 chat update_note 同步扩 + getNoteForAccess helper) |
 | **#5b 编辑权限分级 + 申请流程** | 笔记加 edit_permission (admin/all 两档, 默认 admin) + 申请编辑权 6 API + admin 可删 + SSE + GroupDetail 申请管理面板 + NoteCard/NoteDetail 切换胶囊 + 额外授权 popover + Electron 通知唤窗修 + 各种 UX | ✅ done (完整) | ~1500 行 (后端 + 完整前端 UI + 文档) |
-| **#5c scope preferences** | preferences.showSharedInMain 全局开关 (默认 false, 开后 3 主 view 显示共享笔记) + scope='all' 子查询 | pending | ~150 行 |
+| **#5c scope preferences** | preferences.showSharedInMain 全局开关 (默认 false, 开后 3 主 view 显示共享笔记) + scope='all' 子查询 | 被 PR #7a 吸收 (4 选偏好 + 多 scope 分支替代 bool 开关) | — |
 | **#6 表情 reaction + 评论** | note_reactions + note_comments thread + ReactionBar/CommentThread 组件 + NoteCard summary + NoteDetail 集成 + SSE 4 事件 | ✅ done | ~1000 行 |
+| **#7a Phase A + 偏好生效** | notes.parent_note_id + note_edit_history 表 (仅存储, 7b 接入 fork) + sharedDisplay 偏好 4 选 (own/others/none/all) + 后端 scope 加 'private' / 'others_shared' / 'all' 3 个新分支 + Settings 下拉 + store/App.vue 同步链 | ✅ done | ~150 行 |
+| **#7b fork 写入 + UI 标记** | PATCH /:id fork 写入逻辑 (含 editContext 字段) + 资源跟随 (group_note_pins / sharedGroupIds / 锁 / version) + note_edit_history 写入 + UI "本群独占版" / "N 群共享版" 标 + NoteCard/NoteDetail/NoteEditModal 显示 fork 来源 | pending | ~800 行 (估) |
+| **#7c AI/导出/孤儿收尾** | AI chat update_note 适配 fork (主动问用户) + 导出按 sharedDisplay + 作者删 fork 版 UX 确认 + shared→private 转换约束 + 统计按 origin + 孤儿物理删后台任务 | pending | ~500 行 (估) |
 
 总量预估 ~3550 行。每个 PR 独立 ship 不破坏现有功能。
 
@@ -413,14 +416,16 @@ note A 共享到 1/2/3 群 (作者开启了"显示分享到群组的"开关):
 - 作者从群组页面进入改 → 永远只改"该群当前版本", 不一次性影响多群
 - **UI 必须明确标记"现在改的是哪一版"** (本群独占版 / N 群共享版), 避免误改
 
-### 偏好设置: 作者列表是否显示群组内容 (4 选 1 下拉)
+### 偏好设置: 主页面群组共享笔记可见范围 (4 选 1 下拉)
 
-- 默认 `self`: **仅显示自己分享到群组的** (作者列表能看到 A 及其所有 fork)
-- `none`: 都不显示 (作者列表只显示 visibility='private' 的)
-- `others`: 仅显示别人分享到群组的 (用户作为群成员, 看群里别人发的笔记)
-- `all`: 全部显示 (self + others)
+private 笔记始终显示, 此偏好仅控制纳入哪些群组共享笔记:
 
-(实现要点: GET /api/notes 加 query 参数 `sharedDisplay`, JOIN note_shares + groupMembers 过滤. 偏好存 `prefs.sharedDisplay`)
+- 默认 `own` (UI: 仅我发布的): 作者本人 private + 作者本人分享出去的 shared (跟历史行为完全一致)
+- `others` (UI: 仅他人发布的): 作者本人 private + 他人共享给我所在群的 shared (作者本人 shared 被过滤)
+- `none` (UI: 全部隐藏): 仅作者本人 private (任何 shared 都过滤)
+- `all` (UI: 全部显示): 作者本人 private + 作者本人 shared + 他人 shared
+
+实施: 偏好存 `users.preferences.sharedDisplay`, 4 个值映射到 GET /api/notes 的 `scope` 参数 (mine / others_shared / private / all).
 
 ### Corner case 决策 (2026-06-05 跟蘑菇定)
 
@@ -451,7 +456,7 @@ CREATE TABLE note_edit_history (
 );
 CREATE INDEX idx_note_edit_history_note ON note_edit_history(note_id, edited_at DESC);
 
--- 偏好: prefs.sharedDisplay enum ('self' | 'none' | 'others' | 'all'), 默认 'self'
+-- 偏好: prefs.sharedDisplay enum ('own' | 'others' | 'none' | 'all'), 默认 'own'
 ```
 
 ### 资源跟随 (fork 时怎么处理关联资源)
@@ -475,6 +480,40 @@ CREATE INDEX idx_note_edit_history_note ON note_edit_history(note_id, edited_at 
 6. **Phase F**: 统计按 origin 维度 (Corner #6), 孤儿物理删后台任务 (Corner #4)
 
 **工程量估算**: 比 PR #5 + PR #5b 加起来还大. 必须独立 PR. 当前 PR (群组重构 + 群内置顶) 跟 COW **不冲突**, 先 ship.
+
+### Sub-PR 7a 实施细节 (已 ship)
+
+完整覆盖 Phase A + Phase C 的偏好生效部分, 落地命名:
+
+- **Schema** (`packages/server/src/db/`):
+  - `notes.parent_note_id TEXT` (自引用, root note 为 NULL, 7b fork 时填). 跟 `noteComments.parentId` 同款不加 Drizzle references
+  - `note_edit_history` 新表 (id / note_id / user_id / edited_at), 索引 `idx_note_edit_history_note (note_id, edited_at DESC)`. 7b 接入 fork 时写入
+  - `notes.parentNoteId` Drizzle column + `noteEditHistory` table export + `NoteEditHistory` / `NewNoteEditHistory` types
+
+- **后端 scope 接口** (`packages/server/src/routes/notes.ts` GET `/`):
+  - 新增 3 个 scope 分支: `private` (作者本人 private only) / `others_shared` (作者本人 private + 他人 shared) / `all` (mine ∪ 他人 shared)
+  - 保留 PR #2 的 `mine` / `shared` (后者不被偏好映射, 仅兼容旧调用方)
+  - `enrich author info` 段保持 `scope !== 'mine' && scope !== 'private'` 拼装条件 (others_shared / all / shared 走拼装)
+
+- **前端 store** (`packages/web/src/stores/notes.ts`):
+  - `ViewState.scope` 类型扩到 `'mine' | 'private' | 'others_shared' | 'shared' | 'all'`
+  - `SHARED_DISPLAY_TO_SCOPE` 映射: `own→mine` / `others→others_shared` / `none→private` / `all→all`
+  - `sharedDisplay` ref (默认 `'own'`) + watch 触发清各 view notes/total/page + 改 vs.scope (跟 sortBy 同款套路)
+  - export `sharedDisplay`
+
+- **前端偏好持久化链** (`packages/web/src/views/Settings.vue` + `App.vue`):
+  - `prefs.sharedDisplay` 默认 `'own'`, 走现有 prefs reactive 防抖保存到 `users.preferences`
+  - Settings 偏好设置 tab 新加 CustomSelect (标题"群组共享笔记可见范围", 4 选 仅我发布的 / 仅他人发布的 / 全部隐藏 / 全部显示)
+  - Settings onMounted + watch `prefs.sharedDisplay` → `notesStore.sharedDisplay = v`
+  - App.vue `applyUserPreferences` 加 sharedDisplay 推到 store (启动时 + auth.user 变化时, 用户没打开过 Settings 也生效)
+
+### Sub-PR 7a 不做的 (留给 7b/7c)
+
+- fork 写入 (PATCH /:id 写入仍按原逻辑, 非作者改 shared 直接更新原 note, **不分叉**)
+- editContext 字段 (前端 PATCH body 暂未加这字段, 7b 接入)
+- note_edit_history 写入 (表已建但没写入逻辑)
+- UI "本群独占版" / "N 群共享版" 标
+- AI chat 工具适配 / 导出 / 孤儿清理
 
 ---
 
