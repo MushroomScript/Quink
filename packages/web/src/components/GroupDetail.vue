@@ -662,15 +662,21 @@ async function saveAnnouncement() {
                     class="px-3 py-1 text-xs rounded-lg bg-primary text-white hover:bg-primary-dark">保存</button>
                 </div>
               </div>
-              <!-- 显示态: 已有公告 (line-clamp 5 行截断, 长内容点"查看全文"弹 Modal) -->
+              <!-- 显示态: 已有公告 (line-clamp 5 行截断, 长内容点"查看全文"弹 Modal).
+                   leading-5 (20px) 整数像素, 避免 150% DPI 下浮点行距子像素舍入 1px 偏差 -->
               <template v-else-if="detail.announcement">
-                <p class="text-xs text-gray-700 break-words leading-relaxed announcement-clamp">{{ detail.announcement }}</p>
-                <button v-if="announcementShouldExpand" @click="announcementDetailOpen = true"
-                  class="text-[11px] text-primary-dark hover:underline mt-1.5">
-                  查看全文 →
-                </button>
-                <div v-if="detail.announcementUpdatedByNickname" class="text-[10px] text-gray-400 mt-2 pt-2 border-t border-gray-200">
-                  {{ detail.announcementUpdatedByNickname }} · {{ dayjs(detail.announcementUpdatedAt).format('MM-DD HH:mm') }}
+                <p class="text-xs text-gray-700 break-words leading-5 announcement-clamp">{{ detail.announcement }}</p>
+                <div v-if="detail.announcementUpdatedByNickname || announcementShouldExpand"
+                  class="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-gray-200">
+                  <span class="text-[10px] text-gray-400 truncate">
+                    <template v-if="detail.announcementUpdatedByNickname">
+                      {{ detail.announcementUpdatedByNickname }} · {{ dayjs(detail.announcementUpdatedAt).format('MM-DD HH:mm') }}
+                    </template>
+                  </span>
+                  <button v-if="announcementShouldExpand" @click="announcementDetailOpen = true"
+                    class="px-2 py-0.5 text-[10px] rounded-full bg-primary-light text-primary-dark hover:bg-primary/20 shrink-0">
+                    查看全文
+                  </button>
                 </div>
               </template>
               <!-- 显示态: 无公告 (owner/admin 点击发布 / 普通成员只看 placeholder) -->
@@ -836,7 +842,7 @@ async function saveAnnouncement() {
                   <PhX size="0.875rem" weight="bold" />
                 </button>
               </div>
-              <p class="text-sm text-gray-700 whitespace-pre-wrap break-words leading-relaxed overflow-y-auto flex-1">{{ detail.announcement }}</p>
+              <p class="text-sm text-gray-700 whitespace-pre-wrap break-words leading-6 overflow-y-auto flex-1">{{ detail.announcement }}</p>
               <div v-if="detail.announcementUpdatedByNickname" class="text-[11px] text-gray-400 mt-3 pt-3 border-t border-gray-100">
                 {{ detail.announcementUpdatedByNickname }} · {{ dayjs(detail.announcementUpdatedAt).format('YYYY-MM-DD HH:mm') }}
               </div>
