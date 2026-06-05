@@ -47,3 +47,19 @@ AI 系统专属指引（多配置 / 按功能绑定 / FC v2 / 自动处理 / 自
 - `PATCH /api/upload/files/:id` 只改 DB `filename`（display name），磁盘真实文件名 + url 不动，避免历史笔记 link 失效。
 - 同时扫该用户所有笔记 content，把 `[label](url)` 里 label === 历史曾用过的文件名（`filename_history` JSON 数组累积，每次重命名追加旧名）的同步改成新名；用户自定义过 label 的（如把 "xxx.m4a" 改成 "今天会议录音"）保留不动尊重写作意图。
 - **markdown 文本无法 100% 区分"系统插入 label" vs "用户故意写了一样的 label"** —— 当前用 historyNames 做近似（label 在历史名集合内就同步），边界 case（用户故意写了跟文件名一样的 label）无法消除，接受。
+
+## 群组共享编辑锁 (PR #5)
+
+仅 `visibility='shared'` 笔记走锁逻辑, `private` 笔记不走 (单人直接编辑, 无需协作). 锁本质: 抢占式 + 自动释放 + 乐观锁兜底.
+
+- **DB schema 4 列** (`notes` 表加): `edit_lock_by` (持锁用户 id) + `edit_lock_token` (nanoid 16, PATCH 时校验, 防同用户多设备脏写) + `edit_lock_expires_at` (ISO datetime, 5min TTL) + `version` (乐观锁, 默认 1, 每次 PATCH 成功自增, server 重启等极端 case 锁失效时拒绝旧版本提交)
+- **4 个 API** (`routes/notes.ts`):
+  - `POST /:id/lock` —— 申请: 别人持锁未过期 → 409 + `{lockByNickname, expiresAt}`; 拿到 → 返回 `{lockToken, expiresAt}`. 自己续锁 / 抢空闲锁 / 抢过期锁都重发新 token (旧 token 自动失效)
+  - `POST /:id/lock/heartbeat` —— 续约: 前端 setInterval 30s 调, body 带 `lockToken`. 失败 (lock_invalid / lock_expired) 返 409 让前端提示用户重新打开
+  - `DELETE /:id/lock` —— 释放: 前端 onBeforeUnmount + `fetch keepalive` 调. 非持锁人调静默 OK (不报错避免页面卸载时控制台噪音)
+  - `PATCH /:id` —— shared 笔记必须带 `lockToken` + `version` 校验, 成功后 `version++` + 自动清锁 (PATCH = 提交完成, 锁释放给下一位); private 保持原行为 (作者直接改无需锁)
+- **`getNoteForAccess(userId, noteId)` helper**: 校验 userId 能否访问 noteId. 作者本人放行; 否则 visibility='shared' + 我是 `note_shares ∩ my_active_groups` 才放行. 所有 lock API + PATCH 都用这函数 (后续 GET `/:id` 重构时也会切到这个 helper)
+- **权限模型**: 所有群 active member 都能编辑共享笔记 (作者/admin/member 平权, 但 visibility / sharedGroupIds 改分享设置仅作者控). chat 工具 `update_note` 同款扩 (`packages/server/src/ai/tools.ts`)
+- **fetch keepalive 替代 sendBeacon**: roadmap 原本写 `sendBeacon`, 但 sendBeacon 只支持 POST 不支持 DELETE. 改用 `fetch(url, { method: 'DELETE', keepalive: true })`, 现代浏览器同款语义 (页面 unload 也能发出), 还能用 DELETE 方法. 见 `NoteEditModal.vue:releaseLockOnUnmount`
+- **Cron 60s 清过期锁**: `startEditLockCleanup()` setInterval(60s) 扫 `expires_at < now AND lock_by IS NOT NULL` 的笔记清锁. 兜底 case: 用户没 fetch keepalive (浏览器异常关 / 断电) → 锁自然过期 server 自清. 跟 `startReminderScheduler()` 同款 setInterval 模式. `index.ts` 启动时调一次, tsx 进程重启自然重计时
+- **chat 工具 `update_note` 跟 PATCH HTTP 行为分歧**: HTTP PATCH 要求 lockToken (持锁后才能写); chat 工具不走 lock (AI 是单次操作不持锁), 但检查"别人正在持锁" → 拒绝告知用户. version 仍维护 (`+= 1`). 见 `tools.ts:update_note` PR #5 段

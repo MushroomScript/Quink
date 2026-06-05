@@ -17,6 +17,7 @@ import reminderChannelsRoutes from './routes/reminder-channels.js';
 import sseRoutes from './routes/sse.js';
 import groupsRoutes, { inviteApp } from './routes/groups.js';
 import { startReminderScheduler } from './reminder/scheduler.js';
+import { startEditLockCleanup } from './routes/notes.js';
 
 const app = new Hono();
 
@@ -187,3 +188,6 @@ setInterval(cleanAllTrash, 6 * 60 * 60 * 1000);
 
 // 待办提醒 scheduler: 每分钟扫表, 命中 todoDue <= now 的待办 -> 发到所有 enabled channels
 startReminderScheduler();
+
+// PR #5 编辑锁过期清理: 60s 扫一次, 兜底 sendBeacon 未触发的孤儿锁
+startEditLockCleanup();

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue';
 import { useNotesStore } from '@/stores/notes';
+import { useToast } from '@/composables/useToast';
 import RichEditor from './RichEditor.vue';
 import type { Note } from '@/api';
 import { PhXCircle } from '@phosphor-icons/vue';
@@ -9,29 +10,131 @@ const props = defineProps<{ note: Note; initialFullscreen?: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const store = useNotesStore();
+const toast = useToast();
 const saving = ref(false);
 const editorRef = ref<InstanceType<typeof RichEditor>>();
 const modalCardRef = ref<HTMLElement>();
 const showConfirm = ref(false);
 
-// 内部 v-if，配合 Transition 实现 enter/leave 动画。
-// mount 后下一帧设 true 触发 enter；关闭时先设 false 触发 leave，等 @after-leave 再真 emit close
+// PR #5 编辑锁: 仅 shared 笔记走 (private 不需要协作锁, 直接编辑).
+// onMounted 先 try acquire, 失败 → 不打开 modal 直接 emit close;
+// 成功 → showInner = true 启动 enter 动画 + 30s 心跳续约.
+// onBeforeUnmount → fetch keepalive DELETE 释放锁 (兼容页面 unload + Vue unmount 两种 case).
+const isSharedNote = computed(() => props.note.visibility === 'shared');
+const lockToken = ref<string | null>(null);
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 const showInner = ref(false);
-onMounted(() => { nextTick(() => { showInner.value = true; }); });
+
+async function acquireLock(): Promise<boolean> {
+  if (!isSharedNote.value) return true;
+  const tok = localStorage.getItem('quink_token');
+  try {
+    const res = await fetch(`/api/notes/${props.note.id}/lock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({} as any));
+      if (res.status === 409 && body.error === 'locked') {
+        toast.show(`「${body.lockByNickname}」正在编辑此笔记，稍后再试`, 'error', 3500);
+      } else {
+        toast.show('无法获取编辑锁：' + (body.error || res.statusText), 'error', 3000);
+      }
+      return false;
+    }
+    const data = await res.json();
+    lockToken.value = data.data.lockToken;
+    startHeartbeat();
+    return true;
+  } catch (e: any) {
+    toast.show('编辑锁请求失败：' + (e.message || '未知错误'), 'error', 3000);
+    return false;
+  }
+}
+
+function startHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  // 30s 一次, server TTL 5min, 4-5 次心跳过期; 心跳失败 = 锁丢, 提示用户重新打开
+  heartbeatTimer = setInterval(async () => {
+    if (!lockToken.value) return;
+    const tok = localStorage.getItem('quink_token');
+    try {
+      const res = await fetch(`/api/notes/${props.note.id}/lock/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+        body: JSON.stringify({ lockToken: lockToken.value }),
+      });
+      if (!res.ok) {
+        toast.show('编辑锁已失效，请关闭后重新打开笔记', 'error', 3000);
+        stopHeartbeat();
+        lockToken.value = null;
+      }
+    } catch (e) { /* 网络抖动忽略, 下次心跳重试 */ }
+  }, 30 * 1000);
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+// fetch keepalive: 页面 unload 时也能完成发送 (跟 sendBeacon 同语义但支持 DELETE method).
+// 兼容 Vue component unmount + 浏览器关 tab 两种场景, 不用区分.
+function releaseLockOnUnmount() {
+  if (!lockToken.value) return;
+  const tok = localStorage.getItem('quink_token');
+  fetch(`/api/notes/${props.note.id}/lock`, {
+    method: 'DELETE',
+    keepalive: true,
+    headers: { Authorization: `Bearer ${tok}` },
+  }).catch(() => {});
+  lockToken.value = null;
+  stopHeartbeat();
+}
+
+onMounted(async () => {
+  const ok = await acquireLock();
+  if (!ok) {
+    // 拿不到锁直接 emit close, 不走 enter 动画
+    emit('close');
+    return;
+  }
+  nextTick(() => { showInner.value = true; });
+});
 
 async function onSubmit(data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[] }) {
   if (saving.value) return;
   saving.value = true;
   try {
-    await store.updateNote(props.note.id, {
+    const patchData: any = {
       content: data.html,
       type: data.type as any,
       tags: data.tags,
       // PR #2: 传 visibility / sharedGroupIds 让 server 重建 note_shares (整批替换)
       visibility: data.visibility,
       sharedGroupIds: data.sharedGroupIds,
-    });
+    };
+    // PR #5: shared 笔记必须带 lockToken + version (server 校验 + 自增清锁)
+    if (isSharedNote.value && lockToken.value) {
+      patchData.lockToken = lockToken.value;
+      patchData.version = props.note.version || 1;
+    }
+    await store.updateNote(props.note.id, patchData);
+    // 提交成功 server 自动清锁, lockToken 失效, 心跳无效 → 停掉
+    lockToken.value = null;
+    stopHeartbeat();
     showInner.value = false;
+  } catch (e: any) {
+    const msg = e.message || '';
+    if (msg.includes('version_conflict')) {
+      toast.show('笔记已被其他人修改，请关闭后重新打开看最新版', 'error', 3500);
+    } else if (msg.includes('lock_')) {
+      toast.show('编辑锁已失效，请关闭后重新打开笔记', 'error', 3000);
+    } else {
+      toast.show('保存失败：' + (msg || '未知错误'), 'error', 3000);
+    }
   } finally { saving.value = false; }
 }
 
@@ -92,7 +195,11 @@ function onKeydown(e: KeyboardEvent) {
 // document level + capture 阶段挂载: 比 NoteDetail.onKeydown 的 bubble 阶段更早执行,
 // 而且不依赖 focus 在 modal 内(focus 在 body 时事件也能被拦截)
 onMounted(() => { document.addEventListener('keydown', onKeydown, true); });
-onBeforeUnmount(() => { document.removeEventListener('keydown', onKeydown, true); });
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown, true);
+  // PR #5: 关 modal 同时释放编辑锁 (fetch keepalive 保证 page unload 也能发出)
+  releaseLockOnUnmount();
+});
 </script>
 
 <template>

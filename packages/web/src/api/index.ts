@@ -96,6 +96,10 @@ export interface Note {
   sharedAt?: string;
   authorNickname?: string;
   authorAvatar?: string | null;
+  // PR #5 编辑锁 + 乐观锁版本. shared 笔记 PATCH 时必须带 version, 失败 409 让客户端重拉重试
+  version?: number;
+  editLockBy?: string | null;
+  editLockExpiresAt?: string | null;
 }
 
 // PR #2 scope: 笔记列表过滤. mine (只看我自己) / shared (群里别人共享给我的) / group:<id> (某群可见)
@@ -272,7 +276,7 @@ export const api = {
     });
   },
 
-  updateNote(id: string, data: Partial<Note>) {
+  updateNote(id: string, data: Partial<Note> & { lockToken?: string }) {
     return request<{ data: Note }>(`/notes/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -281,6 +285,26 @@ export const api = {
 
   deleteNote(id: string) {
     return request<{ message: string }>(`/notes/${id}`, { method: 'DELETE' });
+  },
+
+  // PR #5 编辑锁: 仅 shared 笔记走. 返回 lockToken + expiresAt; 409 已被别人锁返回 lockByNickname
+  acquireNoteLock(id: string) {
+    return request<{ data: { lockToken: string; expiresAt: string } }>(`/notes/${id}/lock`, {
+      method: 'POST',
+    });
+  },
+
+  heartbeatNoteLock(id: string, lockToken: string) {
+    return request<{ data: { expiresAt: string } }>(`/notes/${id}/lock/heartbeat`, {
+      method: 'POST',
+      body: JSON.stringify({ lockToken }),
+    });
+  },
+
+  // 注意: NoteEditModal 真实释放走 navigator.sendBeacon (页面卸载时同步发出, fetch 异步会被取消),
+  // 这里的 fetch 版只给"主动取消编辑"场景, sendBeacon 路径直接拼 URL + token query, 见 NoteEditModal
+  releaseNoteLock(id: string) {
+    return request<{ data: { released: boolean } }>(`/notes/${id}/lock`, { method: 'DELETE' });
   },
 
   // Categories

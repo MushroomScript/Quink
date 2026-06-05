@@ -31,6 +31,13 @@ export const notes = sqliteTable('notes', {
   deletedAt: text('deleted_at'), // 软删除时间，null 表示未删除
   // PR #2 群组共享: 'private' 仅作者可见; 'shared' 走 note_shares 表关联到指定群
   visibility: text('visibility', { enum: ['private', 'shared'] }).notNull().default('private'),
+  // PR #5 编辑锁: 仅 shared 笔记走锁逻辑 (private 不需要协作所以不锁). 4 列联动:
+  // editLockBy 当前持锁用户 id, null = 无锁; editLockToken 申请时 nanoid 生成, PATCH 必须匹配 (防同用户多设备冲突);
+  // editLockExpiresAt ISO datetime 5 分钟过期, cron 60s 扫清; version 乐观锁兜底, server 重启等极端 case 锁失效时拒绝旧版本提交
+  editLockBy: text('edit_lock_by').references(() => users.id),
+  editLockToken: text('edit_lock_token'),
+  editLockExpiresAt: text('edit_lock_expires_at'),
+  version: integer('version').notNull().default(1),
 });
 
 // PR #2 群组共享: 笔记 → 群组多对多. 一条笔记可分享到多个群, 删 group_members 不影响共享

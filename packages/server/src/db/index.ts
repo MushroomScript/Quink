@@ -227,6 +227,12 @@ try { sqlite.exec(`UPDATE users SET preferences = json_set(json_remove(preferenc
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN content_pinyin TEXT'); } catch {}
 // Migrate: notes.visibility (PR #2 群组共享: private | shared, 默认 private 让现有笔记无侵入)
 try { sqlite.exec("ALTER TABLE notes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'"); } catch {}
+// Migrate: PR #5 编辑锁 4 列 (仅 shared 笔记走锁逻辑, private 不需要协作). edit_lock_by/token/expires_at 联动表示当前持锁状态;
+// version 乐观锁兜底, 默认 1, PATCH 时 server 校验 version === DB 版本 + version++.
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN edit_lock_by TEXT REFERENCES users(id)'); } catch {}
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN edit_lock_token TEXT'); } catch {}
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN edit_lock_expires_at TEXT'); } catch {}
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN version INTEGER NOT NULL DEFAULT 1'); } catch {}
 // 一次性回填 + 升级重算: PINYIN_SCHEMA_VERSION 每次 toPinyinSearchable 算法升级时 +1,
 // 启动检测 config 表里存的版本号,低于当前版本就把所有 content_pinyin 清空让下面回填重算。
 // v1: 全拼 + 单读音首字母. v2: 多音字首字母穷举. v3: 多音字只取前 2 读音. v4: 加罕用读音黑名单.

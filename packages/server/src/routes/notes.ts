@@ -39,6 +39,9 @@ const updateNoteSchema = z.object({
   // PR #2: 改可见性 / 重写分享群列表. sharedGroupIds 传值时整批替换 (delete all + insert new)
   visibility: z.enum(['private', 'shared']).optional(),
   sharedGroupIds: z.array(z.string()).optional(),
+  // PR #5: 编辑共享笔记必须带 lockToken (POST /lock 拿) + version (乐观锁). 私有笔记不需要.
+  lockToken: z.string().optional(),
+  version: z.number().int().positive().optional(),
 });
 
 // PR #2 阶段 5c: 广播 'group-notes-changed' 给目标群所有 active 成员 (除操作者).
@@ -294,6 +297,125 @@ app.get('/tags', async (c) => {
   return c.json({ data: [...tagSet].sort(new Intl.Collator('zh-Hans-CN').compare) });
 });
 
+// PR #5 helper: 校验 userId 能否访问 noteId. 作者本人放行; 否则必须 visibility='shared' + 我是 note_shares 关联群的 active member.
+// 返回 note 或 null. lock API + 后续 PATCH 重构都复用这函数. (GET /:id 暂保持原 inline 实现, 等 PATCH 重构时一起改)
+async function getNoteForAccess(userId: string, noteId: string): Promise<typeof schema.notes.$inferSelect | null> {
+  const note = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId)).get();
+  if (!note) return null;
+  if (note.userId === userId) return note;
+  if (note.visibility !== 'shared') return null;
+  const shared = await db.select({ groupId: schema.noteShares.groupId })
+    .from(schema.noteShares).where(eq(schema.noteShares.noteId, noteId)).all();
+  if (shared.length === 0) return null;
+  const myGroup = await db.select({ groupId: schema.groupMembers.groupId })
+    .from(schema.groupMembers)
+    .where(and(
+      eq(schema.groupMembers.userId, userId),
+      eq(schema.groupMembers.status, 'active'),
+      inArray(schema.groupMembers.groupId, shared.map(s => s.groupId)),
+    )).get();
+  return myGroup ? note : null;
+}
+
+// PR #5 编辑锁: 5 分钟 TTL + 30s 前端心跳续约 + sendBeacon 离开释放 + cron 60s 兜底清过期.
+// 仅 shared 笔记走锁逻辑 (private 笔记不需协作, lock API 调用会 400).
+const LOCK_TTL_MS = 5 * 60 * 1000;
+
+// POST /api/notes/:id/lock — 申请编辑锁. 别人持锁未过期 → 409 带 lockByNickname + expiresAt
+app.post('/:id/lock', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const note = await getNoteForAccess(userId, id);
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  if (note.visibility !== 'shared') return c.json({ error: 'private 笔记不需要编辑锁' }, 400);
+
+  const now = dayjs();
+  const expired = !note.editLockExpiresAt || dayjs(note.editLockExpiresAt).isBefore(now);
+  if (note.editLockBy && !expired && note.editLockBy !== userId) {
+    const lockUser = await db.select({ nickname: schema.users.nickname })
+      .from(schema.users).where(eq(schema.users.id, note.editLockBy)).get();
+    return c.json({
+      error: 'locked',
+      lockByNickname: lockUser?.nickname || '其他用户',
+      expiresAt: note.editLockExpiresAt,
+    }, 409);
+  }
+
+  // 我自己续锁 / 拿空闲锁 / 抢过期锁 都重发 token + expires_at (旧 token 自动失效, 防同用户多设备脏写)
+  const token = nanoid(16);
+  const expiresAt = now.add(LOCK_TTL_MS, 'ms').toISOString();
+  await db.update(schema.notes).set({
+    editLockBy: userId,
+    editLockToken: token,
+    editLockExpiresAt: expiresAt,
+  }).where(eq(schema.notes.id, id));
+  return c.json({ data: { lockToken: token, expiresAt } });
+});
+
+// POST /api/notes/:id/lock/heartbeat — 续约 (前端 setInterval 30s 调)
+app.post('/:id/lock/heartbeat', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const body = await c.req.json().catch(() => ({}));
+  const lockToken = body?.lockToken;
+  if (!lockToken) return c.json({ error: '缺少 lockToken' }, 400);
+
+  const note = await getNoteForAccess(userId, id);
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+
+  if (note.editLockBy !== userId || note.editLockToken !== lockToken) {
+    return c.json({ error: 'lock_invalid' }, 409);
+  }
+  const now = dayjs();
+  if (note.editLockExpiresAt && dayjs(note.editLockExpiresAt).isBefore(now)) {
+    return c.json({ error: 'lock_expired' }, 409);
+  }
+
+  const expiresAt = now.add(LOCK_TTL_MS, 'ms').toISOString();
+  await db.update(schema.notes).set({ editLockExpiresAt: expiresAt })
+    .where(eq(schema.notes.id, id));
+  return c.json({ data: { expiresAt } });
+});
+
+// DELETE /api/notes/:id/lock — 释放 (前端 onBeforeUnmount + sendBeacon 调). sendBeacon 无 body 也兼容, 看 lock_by 是否我.
+app.delete('/:id/lock', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const note = await getNoteForAccess(userId, id);
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+
+  // sendBeacon 不带 body 是常态, 容错: 只看 lock_by == me 就放行清锁 (跟别人没关, 别人持锁我也不会调 release)
+  if (note.editLockBy !== userId) return c.json({ data: { released: false } });
+
+  await db.update(schema.notes).set({
+    editLockBy: null,
+    editLockToken: null,
+    editLockExpiresAt: null,
+  }).where(eq(schema.notes.id, id));
+  return c.json({ data: { released: true } });
+});
+
+// PR #5 cron: 60s 扫一次清过期锁. 兜底 case: 用户没 sendBeacon (浏览器异常关 / 断电), 锁自然过期但 lock_by 留着.
+// scheduler.ts 同款 setInterval 模式, 启动一次, tsx 进程重启自然重新计时.
+export function startEditLockCleanup() {
+  setInterval(async () => {
+    try {
+      const now = dayjs().toISOString();
+      await db.update(schema.notes).set({
+        editLockBy: null,
+        editLockToken: null,
+        editLockExpiresAt: null,
+      }).where(and(
+        sql`${schema.notes.editLockBy} IS NOT NULL`,
+        sql`${schema.notes.editLockExpiresAt} < ${now}`,
+      ));
+    } catch (e) {
+      console.error('[edit-lock cleanup] failed:', e);
+    }
+  }, 60 * 1000);
+  console.log('[edit-lock cleanup] started, 60s interval');
+}
+
 // GET /api/notes/:id
 // 作者拿自己的笔记 → 直接返回 (含 sharedGroupIds 给编辑器恢复)
 // 群成员拿别人共享笔记 → 校验 note_shares 跟我所在群有交集才放行
@@ -391,13 +513,39 @@ app.patch('/:id', async (c) => {
   const parsed = updateNoteSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
 
-  const existing = await db.select().from(schema.notes)
-    .where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId)))
-    .get();
+  // PR #5: 鉴权扩到 shared 笔记的群成员 (作者本人或 active 群成员都能改 content/tags/category 等)
+  const existing = await getNoteForAccess(userId, id);
   if (!existing) return c.json({ error: '笔记不存在' }, 404);
 
-  const updates: Record<string, any> = { updatedAt: dayjs().toISOString() };
+  const isAuthor = existing.userId === userId;
   const data = parsed.data;
+
+  // PR #5: 非作者编辑共享笔记 → 禁止改 visibility / sharedGroupIds (这俩是分享设置, 仅作者控)
+  if (!isAuthor && (data.visibility !== undefined || data.sharedGroupIds !== undefined)) {
+    return c.json({ error: '只有作者可以修改共享设置' }, 403);
+  }
+
+  const updates: Record<string, any> = { updatedAt: dayjs().toISOString() };
+
+  // PR #5: shared 笔记必须持锁 + version 校验. private 笔记保持原行为 (作者直接改, 不需锁)
+  if (existing.visibility === 'shared') {
+    if (!data.lockToken) return c.json({ error: '编辑共享笔记需先申请锁 (POST /:id/lock)' }, 400);
+    if (existing.editLockBy !== userId || existing.editLockToken !== data.lockToken) {
+      return c.json({ error: 'lock_invalid' }, 409);
+    }
+    if (existing.editLockExpiresAt && dayjs(existing.editLockExpiresAt).isBefore(dayjs())) {
+      return c.json({ error: 'lock_expired' }, 409);
+    }
+    if (typeof data.version !== 'number') return c.json({ error: '编辑共享笔记需带 version' }, 400);
+    if (data.version !== existing.version) {
+      return c.json({ error: 'version_conflict', currentVersion: existing.version }, 409);
+    }
+    // 成功通过校验: version++ + 自动清锁 (PATCH 即提交完成, 锁就释放给下一位)
+    updates.version = existing.version + 1;
+    updates.editLockBy = null;
+    updates.editLockToken = null;
+    updates.editLockExpiresAt = null;
+  }
   if (data.content !== undefined) {
     updates.content = data.content;
     updates.contentPinyin = toPinyinSearchable(data.content);

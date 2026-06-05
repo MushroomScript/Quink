@@ -404,9 +404,35 @@ export async function executeTool(userId: string, name: string, args: any): Prom
     }
 
     case 'update_note': {
+      // PR #5: 扩到群成员可编辑共享笔记 (跟 PATCH HTTP 同款扩). chat 工具不走 lock 流程
+      // (AI 是单次 update 不持锁), 但别人正在持锁编辑时拒绝, 避免抢锁打断协作.
       const note = await db.select().from(schema.notes)
-        .where(and(eq(schema.notes.id, args.id), eq(schema.notes.userId, userId))).get();
+        .where(eq(schema.notes.id, args.id)).get();
       if (!note) return { result: '笔记不存在。', noteIds };
+      if (note.userId !== userId) {
+        if (note.visibility !== 'shared') return { result: '笔记不存在。', noteIds };
+        const shared = await db.select({ groupId: schema.noteShares.groupId })
+          .from(schema.noteShares).where(eq(schema.noteShares.noteId, args.id)).all();
+        if (shared.length === 0) return { result: '笔记不存在。', noteIds };
+        const myGroup = await db.select({ groupId: schema.groupMembers.groupId })
+          .from(schema.groupMembers)
+          .where(and(
+            eq(schema.groupMembers.userId, userId),
+            eq(schema.groupMembers.status, 'active'),
+            inArray(schema.groupMembers.groupId, shared.map(s => s.groupId)),
+          )).get();
+        if (!myGroup) return { result: '笔记不存在。', noteIds };
+      }
+
+      // PR #5: shared 笔记别人持锁未过期 → 拒绝, AI 告知用户稍后再试
+      if (note.visibility === 'shared' && note.editLockBy && note.editLockBy !== userId) {
+        const now = dayjs();
+        if (!note.editLockExpiresAt || dayjs(note.editLockExpiresAt).isAfter(now)) {
+          const lockUser = await db.select({ nickname: schema.users.nickname })
+            .from(schema.users).where(eq(schema.users.id, note.editLockBy)).get();
+          return { result: `这条笔记正被「${lockUser?.nickname || '其他用户'}」编辑中, 暂不能修改, 请稍后再试。`, noteIds };
+        }
+      }
 
       const updates: Record<string, any> = { updatedAt: dayjs().toISOString() };
       if (args.content !== undefined) updates.content = args.content;
@@ -414,6 +440,8 @@ export async function executeTool(userId: string, name: string, args: any): Prom
       if (args.tags !== undefined) updates.tags = args.tags;
       if (args.todoStatus !== undefined) updates.todoStatus = args.todoStatus;
       if (args.pinned !== undefined) updates.pinned = args.pinned;
+      // PR #5: shared 笔记 version++, 跟 PATCH HTTP 同款维护乐观锁
+      if (note.visibility === 'shared') updates.version = note.version + 1;
 
       await db.update(schema.notes).set(updates).where(eq(schema.notes.id, args.id));
       noteIds.push(args.id);

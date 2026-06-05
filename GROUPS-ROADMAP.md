@@ -21,7 +21,9 @@
 | **#2 笔记可见性** | notes.visibility + note_shares + 编辑器底栏 "选可见群组" chip + 列表过滤 + 群组 feed 页 + SSE note-shared 群播 | ✅ done (de8a827 + d3bf481) | ~810 行 |
 | **#3 文件授权** | `/api/uploads/*` 加访问中间件按 noteShares 判 + 缩略图同套逻辑 | ✅ done | ~90 行 (实际比估算少, files 表 + LIKE notes content 即可, avatar 不在 files 表自动公开) |
 | **#4 SSE 拓展 + AI 共享上下文** | AI chat 10 工具加 scope/author + 群共享可见性 helper + voice_transcription 共享授权链 | ✅ done | ~145 行 (含 author 字段 + groups.ts:90 TS 修 + context.ts 死代码清 -200) |
-| **#5 编辑锁（极简）** | lock/heartbeat/release API + 心跳 + sendBeacon + 提示 toast + version 校验 | pending | ~350 行 |
+| **#5 编辑锁（极简）** | 4 lock API + cron 60s 清锁 + version 乐观锁 + NoteEditModal 锁交互 + chat update_note 扩到群成员 | ✅ done | ~470 行 (含 chat update_note 同步扩 + getNoteForAccess helper) |
+| **#5b 编辑权限分级 + 申请流程** | 笔记加 edit_permission (admin/all 两档, 默认 admin) + 申请编辑权 API + admin 可删共享笔记 + 群组界面改权限 | pending | ~350 行 |
+| **#5c scope preferences** | preferences.showSharedInMain 全局开关 (默认 false, 开后 3 主 view 显示共享笔记) + scope='all' 子查询 | pending | ~150 行 |
 | **#6 表情 reaction + 评论** | note_reactions + note_comments thread + UI | pending | ~500 行 |
 
 总量预估 ~3550 行。每个 PR 独立 ship 不破坏现有功能。
@@ -160,47 +162,148 @@ PR #2 阶段 5c 已带（`broadcastNoteShared` helper + `routes/notes.ts` POST/P
 
 ---
 
-## PR #5 编辑锁（极简版，蘑菇否决申请编辑权后简化）
+## PR #5 编辑锁（已完成 ✅）
 
-### Schema 改动
+### Schema 改动 (实际 4 列, roadmap 原写 3 列)
 
 ```sql
 ALTER TABLE notes ADD COLUMN edit_lock_by TEXT REFERENCES users(id);
+ALTER TABLE notes ADD COLUMN edit_lock_token TEXT;  -- 实际加: nanoid 16, 防同用户多设备脏写
 ALTER TABLE notes ADD COLUMN edit_lock_expires_at TEXT;
 ALTER TABLE notes ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
 ```
 
-### 锁参数（蘑菇拍板）
+### 锁参数
 
-- **5 分钟过期** + **30s 心跳** 续约
-- 离开页面 → `navigator.sendBeacon('DELETE /lock')` 立即释放
-- 5 分钟不续约 → server 定时清锁兜底
+- **5 分钟 TTL** + **30s 前端心跳** 续约
+- 离开页面 → `fetch(url, { method: 'DELETE', keepalive: true })` (替代 sendBeacon, 后者只支持 POST)
+- 5 分钟不续约 → server cron 60s 扫清
 
-### API
+### 4 个 API (`routes/notes.ts`)
 
 ```
-POST   /notes/:id/lock          申请 → 返回 lockToken + expiresAt (5min)
-POST   /notes/:id/lock/heartbeat  续约 (30s 一次)
-DELETE /notes/:id/lock          释放 (sendBeacon)
-PATCH  /notes/:id               提交时带 lockToken + version, server 校验 + version++ + 自动清锁
+POST   /notes/:id/lock              申请 → {lockToken, expiresAt} 或 409 {lockByNickname, expiresAt}
+POST   /notes/:id/lock/heartbeat    续约 (前端 setInterval 30s, body {lockToken})
+DELETE /notes/:id/lock              释放 (fetch keepalive on unmount)
+PATCH  /notes/:id                   shared 笔记必须带 lockToken + version, 成功后 version++ + 自动清锁
 ```
 
-### 前端
+### 权限模型
 
-- `NoteEditModal` / `RichEditor` 进入时调 POST /lock
-  - 拿不到（409 别人持锁）→ 弹 toast「@A 正在编辑, 预计还有 N 分钟, 刷新后再试」, 编辑器不打开
-  - 拿到 → 启心跳 setInterval(30s) + onBeforeUnmount sendBeacon
-- 提交时带 lockToken + version → 409 (已过期/被抢) → toast 提示
+- **所有群 active member 都能编辑共享笔记** (作者/admin/member 平权改 content/tags/category)
+- visibility / sharedGroupIds 改分享设置仅作者控 (非作者改返回 403)
+- chat 工具 `update_note` 同款扩 (跟 PATCH HTTP 同款鉴权, 但不走 lock - 单次操作不持锁, 检查"别人持锁中"则拒绝)
+- `getNoteForAccess(userId, noteId)` helper 集中校验逻辑, 所有 lock API + PATCH 都用
+
+### 前端 (`NoteEditModal.vue`)
+
+- onMounted → 先 acquireLock, 失败直接 emit close 不走 enter 动画
+- 拿到锁 → showInner=true 启动 enter 动画 + 启 30s 心跳
+- onSubmit → 带 lockToken + version, 409 (version_conflict / lock_invalid) toast 提示
+- onBeforeUnmount → fetch keepalive DELETE 释放锁
 
 ### 冲突防御
 
 - **同时刻只能一人持锁** → 串行化写入, 没有"覆盖"问题
-- **乐观锁兜底**: 万一锁机制失效（server 重启清锁等极端 case）, version 校验拒绝旧版本提交
+- **乐观锁兜底** (version): 万一锁机制失效（server 重启清锁等极端 case）, version 校验拒绝旧版本提交
+
+### Cron 清锁
+
+`startEditLockCleanup()` setInterval(60s) 扫 `expires_at < now AND lock_by IS NOT NULL` → 清锁三列. 兜底 case: 浏览器异常关闭 / 断电 / fetch keepalive 也没发出去时, 5 分钟后 cron 兜底释放. 跟 `startReminderScheduler` 同款模式.
 
 ### 蘑菇明确否决的方案
 
 - ❌ **申请编辑权 + owner 同意** 流程: 编辑频率太高干扰
 - ❌ **协同编辑（CRDT/OT）**: Vditor 集成 yjs 工程量极大, 不做第一版
+
+### 已知未做 (PR #5 范围外)
+
+- **GET `/api/notes/:id` 鉴权未切到 `getNoteForAccess`**: 保持 PR #2 原 inline 实现, 跟 PR #5 helper 重复. 想清理可下个 PR 一起做
+- **lock 状态 SSE 推送**: 当前别人编辑时 UI 不会自动提示"@张三 正在编", 必须用户点击进 modal 才发现 lock 失败. 未来想做实时编辑感知可加 `note-lock-acquired` / `note-lock-released` SSE 事件
+- **冲突时拉新内容功能**: 当前 version_conflict 只 toast 让用户"关闭重新打开看最新", 没自动 reload 笔记到编辑器. 实现复杂 (要处理用户已编辑的本地草稿), 留给协同编辑 PR 一起做
+
+---
+
+## PR #5b 编辑权限分级 + 申请流程（蘑菇决策已锁定）
+
+PR #5 ship 后的延伸. 当前 PR #5 行为 = 所有群 active member 都能改共享笔记, 蘑菇要加权限分级 + 申请流程让作者能收紧.
+
+### 权限两档（作者本人一直能改, 不算独立档）
+
+- `admin`（默认） = 群 owner + admin 能改
+- `all` = 所有 active member 能改
+
+**注意 PR #5 默认是 `all`, PR #5b 把默认改为 `admin`**. 这是行为破坏式更新, dev 环境蘑菇自测, 不存在用户预期问题.
+
+### Schema 改动
+
+- `notes` 加 `edit_permission TEXT NOT NULL DEFAULT 'admin'`（enum: admin / all）
+- 新表 `note_edit_grants`: (`note_id`, `user_id`, `granted_at`, `granted_by`)—— 申请通过后永久白名单
+- 新表 `note_edit_requests`: (`id`, `note_id`, `user_id`, `status`, `created_at`, `handled_at`, `handled_by`)
+
+### 鉴权扩展
+
+`getNoteForAccess` 加 `mode='read'|'write'` 参数. write 模式额外校验 `edit_permission`:
+- author_id = me → 永远放行
+- `admin` + 我是该群 owner/admin → 放行
+- `all` → 任何 active member 放行
+- 在 `note_edit_grants` 白名单内 → 放行
+- 否则 → 403（前端弹"申请编辑权"按钮）
+
+PATCH /:id + chat `update_note` + DELETE /:id 都用扩展后的 helper.
+
+### 申请流程 API
+
+- `POST /api/notes/:id/edit-request` —— 申请编辑权（创建 pending request + SSE 推作者 + 群 admin）
+- `POST /api/notes/:id/edit-request/:reqId/approve` —— 同意（作者 + 群 admin 都能批, 通过后写入 note_edit_grants + 删 request）
+- `POST /api/notes/:id/edit-request/:reqId/reject` —— 拒绝
+- `GET /api/notes/:id/edit-requests` —— 列待审申请（作者 + admin 看）
+
+### admin 可删共享笔记
+
+DELETE /api/notes/:id 当前限作者. 扩到 admin: getNoteForAccess(write mode) + visibility='shared'. admin 删别人的笔记弹"确认是否删除 @张三 的笔记"对话.
+
+### 前端
+
+- **编辑器界面不加权限 chip**（蘑菇明确: 保持编辑界面干净）
+- 群组详情页笔记卡片右键 / 长按弹"修改编辑权限"（作者 + admin 能调）→ 弹 popover 选 admin/all
+- 锁失败 toast 加"申请编辑权"按钮 → 调 POST .../edit-request → 提示"已发送"
+- SSE `note-edit-request` 事件 → 作者 + admin 收实时提示 + desktop notification（跟 group-join-request 同款）
+- 笔记设置入口（作者 + admin 看到）显示待审申请 + 已授权用户列表（能撤销）
+
+### 决策锁定 ✓
+
+- ✓ **申请通过后永久授权**（note_edit_grants）, 不是单次. 之前蘑菇否决"每次编辑都申请"是这意思
+- ✓ **admin 跟 author 在权限上几乎等同**（改/删/批申请都行）, 唯一差异: admin 不能改 visibility / sharedGroupIds（仅作者控分享设置）
+- ✓ **申请审批"作者 + admin 都能批"** 跟 PR #1 admin 能"群申请审批"行为一致
+- ✓ **不在编辑器界面选权限**（保持编辑界面干净, 在群组界面 / 笔记设置入口改）
+
+---
+
+## PR #5c scope preferences（蘑菇决策已锁定）
+
+PR #2 注释里说"TopBar 加 scope chip 让用户主动求看共享"实际**没实现**, 当前共享笔记只能从群组详情页看到. 蘑菇决定加 preferences 全局开关而不是 TopBar chip.
+
+### Schema 改动
+
+- 复用 `users.preferences` JSON 字段, 加 key `showSharedInMain: boolean` 默认 false
+- 后端 API 已支持 `scope` query 参数（PR #2 实现）, 新加 `scope='all'` 子查询（mine + shared 并集, 跟 PR #4 `getVisibilityCondition('all')` 同款 SQL）
+
+### 后端
+
+- `routes/notes.ts` GET / 加 scope='all' 分支: `userId = me OR id IN (note_shares where my groups)`
+- `NotesScope` type 加 'all'（当前只有 mine/shared/group:xxx）
+
+### 前端
+
+- Settings.vue 加 toggle: "主页面显示群组共享笔记"（默认关）
+- 3 主 view（Inspiration / Notes / Todos）onActivated 根据 `preferences.showSharedInMain` 设 `vs.scope`（true='all', false='mine'）
+- **不加 TopBar scope chip**（蘑菇决策: preferences 决定一切, 简化 UX）
+
+### 影响
+
+- 共享笔记 NoteCard 主页显示时, 复用 PR #2 GroupDetail feed 用的 author 头像 + 群组 chip 字段
+- AI 默认上下文（PR #4 `scope='all'`）不受 preferences 影响, AI 总能拉群共享（跟主页显示开关解耦）
 
 ---
 
