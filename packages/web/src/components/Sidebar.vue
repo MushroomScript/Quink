@@ -309,21 +309,21 @@ onUnmounted(() => {
     class="relative bg-sidebar flex flex-col min-h-full max-h-full shrink-0 overflow-visible transition-[width] duration-200"
     :class="sidebarCollapsed ? 'w-14' : 'w-60'"
     style="border-right: 1px solid var(--sb-border); box-shadow: 1px 0 4px rgba(0,0,0,0.04)">
-    <!-- 收起按钮: hover trigger zone 完全在 sidebar 内 (right-0 不 translate, 不浮出 border), 防 click 落空挡到 Groups.vue 左列表.
-         按钮独立 absolute 浮出半个宽度, 按钮自己也接 hover 让鼠标移到浮出部分不消失 -->
-    <div class="absolute right-0 top-1/2 -translate-y-1/2 z-20 w-4 h-32"
+    <!-- 收起按钮: wrapper 包 button 接所有 hover (避免 sibling 间 mouseenter/mouseleave race 导致闪烁 / 200ms timer 被 clear 后不显示).
+         wrapper -right-1.5 + w-7 = 28px hit area, 浮出 sidebar 右边 6px 把 button 浮出部分也包进去.
+         button 自己不再接 hover, mouseenter/leave 不冒泡, sibling-race 不存在. -->
+    <div class="absolute -right-1.5 top-1/2 -translate-y-1/2 z-20 w-7 h-32"
       @mouseenter="onCollapseEnter"
-      @mouseleave="onCollapseLeave" />
-    <button @click="sidebarCollapsed = !sidebarCollapsed"
-      class="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-20 w-2.5 h-24 rounded-full flex items-center justify-center transition-opacity duration-150"
-      :class="collapseBtnShow ? 'opacity-100' : 'opacity-0 pointer-events-none'"
-      style="background: var(--sb-dim); color: var(--c-sidebar)"
-      @mouseenter="onCollapseEnter"
-      @mouseleave="onCollapseLeave"
-      :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'">
-      <PhCaretLeft v-if="!sidebarCollapsed" size="0.5rem" weight="bold" />
-      <PhCaretRight v-else size="0.5rem" weight="bold" />
-    </button>
+      @mouseleave="onCollapseLeave">
+      <button @click="sidebarCollapsed = !sidebarCollapsed"
+        class="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-24 rounded-full flex items-center justify-center transition-opacity duration-150"
+        :class="collapseBtnShow ? 'opacity-100' : 'opacity-0 pointer-events-none'"
+        style="background: var(--sb-dim); color: var(--c-sidebar)"
+        :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'">
+        <PhCaretLeft v-if="!sidebarCollapsed" size="0.5rem" weight="bold" />
+        <PhCaretRight v-else size="0.5rem" weight="bold" />
+      </button>
+    </div>
     <!-- User: 展开态正常布局, 折叠态头像居中. 头像 28px (w-7), 折叠态 padding 必须给头像留够空间
          (sidebar w-14=56, 头像 28, 不能让 user block + button padding 累计 >= 28). 折叠态 px-1.5/p-1 -->
     <div ref="userBlockEl" class="relative py-3"

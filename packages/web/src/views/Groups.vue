@@ -24,6 +24,18 @@ const COLLAPSED_KEY = 'quink_groups_sidebar_collapsed';
 const collapsed = ref(localStorage.getItem(COLLAPSED_KEY) === '1');
 watch(collapsed, (v) => { localStorage.setItem(COLLAPSED_KEY, v ? '1' : '0'); });
 
+// 收起按钮: 复用主 Sidebar 模式 - hover 触发器 + 200ms 延迟浮出椭圆按钮. 替代旧的明显"收起"行按钮, 让群列表顶部多一行空间.
+const collapseBtnShow = ref(false);
+let collapseHoverTimer: ReturnType<typeof setTimeout> | null = null;
+function onCollapseEnter() {
+  if (collapseHoverTimer) clearTimeout(collapseHoverTimer);
+  collapseHoverTimer = setTimeout(() => { collapseBtnShow.value = true; }, 200);
+}
+function onCollapseLeave() {
+  if (collapseHoverTimer) { clearTimeout(collapseHoverTimer); collapseHoverTimer = null; }
+  collapseBtnShow.value = false;
+}
+
 // 上次打开的群 id (持久化, 进 /groups 时自动恢复)
 const LAST_GROUP_KEY = 'quink_groups_last_id';
 
@@ -83,30 +95,34 @@ function selectGroup(id: string) {
 <template>
   <!-- 占满 main viewport. absolute 跟 AI.vue 同模式, 防 batch-bar-portal content-based 高度 race -->
   <div class="absolute inset-0 flex overflow-hidden">
-    <!-- 左侧群列表 (桌面端). collapsed 56px 容纳 32px 头像 + 群项 padding + 红点不裁切; 展开 224px -->
-    <div class="shrink-0 border-r border-gray-100 flex flex-col bg-gray-50/50 hidden md:flex transition-all duration-200"
+    <!-- 左侧群列表 (桌面端). collapsed 56px 容纳 32px 头像 + 群项 padding + 红点不裁切; 展开 224px.
+         relative + overflow-visible: 让 hover 触发椭圆按钮能 absolute 浮出右边缘 (跟主 Sidebar 一致). -->
+    <div class="shrink-0 border-r border-gray-100 flex flex-col bg-gray-50/50 hidden md:flex transition-all duration-200 relative overflow-visible"
       :class="collapsed ? 'w-14' : 'w-56'">
-      <!-- 顶部: 新建按钮 + 折叠切换 -->
-      <div class="p-3 space-y-2">
-        <div class="flex items-center gap-1">
-          <button v-if="!collapsed" @click="showCreateGroup = true"
-            class="flex-1 px-3 py-2 text-xs font-medium rounded-lg transition-colors text-white inline-flex items-center justify-center gap-1"
-            style="background: rgb(var(--c-accent))">
-            <PhPlus size="0.75rem" weight="bold" /> 新建群组
-          </button>
-          <!-- 折叠后只有 + 按钮和展开按钮 (vertical stack) -->
-          <button v-else @click="showCreateGroup = true"
-            class="w-full p-2 text-white rounded-lg flex items-center justify-center"
-            style="background: rgb(var(--c-accent))" title="新建群组">
-            <PhPlus size="0.875rem" weight="bold" />
-          </button>
-        </div>
+      <!-- 收起按钮: wrapper 包 button 接所有 hover (避免 sibling 间 mouseenter/mouseleave race 导致闪烁 / 200ms timer 被 clear 后不显示).
+           wrapper -right-1.5 + w-7 = 28px hit area, 浮出右边 6px 把 button 浮出部分也包进去. button 自己不再接 hover. -->
+      <div class="absolute -right-1.5 top-1/2 -translate-y-1/2 z-20 w-7 h-32"
+        @mouseenter="onCollapseEnter"
+        @mouseleave="onCollapseLeave">
         <button @click="collapsed = !collapsed"
-          class="w-full p-1.5 text-xs text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors inline-flex items-center justify-center gap-1"
-          :title="collapsed ? '展开' : '收起'">
-          <PhCaretLeft v-if="!collapsed" size="0.75rem" weight="bold" />
-          <PhCaretRight v-else size="0.75rem" weight="bold" />
-          <span v-if="!collapsed">收起</span>
+          class="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-24 rounded-full flex items-center justify-center transition-opacity duration-150 bg-gray-400/60 text-white hover:bg-gray-500/70"
+          :class="collapseBtnShow ? 'opacity-100' : 'opacity-0 pointer-events-none'"
+          :title="collapsed ? '展开群组列表' : '收起群组列表'">
+          <PhCaretLeft v-if="!collapsed" size="0.5rem" weight="bold" />
+          <PhCaretRight v-else size="0.5rem" weight="bold" />
+        </button>
+      </div>
+      <!-- 顶部: 新建按钮 (旧的"收起"行按钮已删, 改走右边缘 hover 椭圆) -->
+      <div class="p-3">
+        <button v-if="!collapsed" @click="showCreateGroup = true"
+          class="w-full px-3 py-2 text-xs font-medium rounded-lg transition-colors text-white inline-flex items-center justify-center gap-1"
+          style="background: rgb(var(--c-accent))">
+          <PhPlus size="0.75rem" weight="bold" /> 新建群组
+        </button>
+        <button v-else @click="showCreateGroup = true"
+          class="w-full p-2 text-white rounded-lg flex items-center justify-center"
+          style="background: rgb(var(--c-accent))" title="新建群组">
+          <PhPlus size="0.875rem" weight="bold" />
         </button>
       </div>
 
