@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, inject, watchEffect } from 'vue';
 import { useEscToClose } from '@/composables/useEscToClose';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
@@ -10,7 +10,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import type { Note } from '@/api';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
-import { PhUsersThree } from '@phosphor-icons/vue';
+import { PhUsersThree, PhArrowsClockwise } from '@phosphor-icons/vue';
 import {
   PhCheck,
   PhCheckSquare,
@@ -41,6 +41,23 @@ const auth = useAuthStore();
 const isMyNote = computed(() => !props.note.userId || props.note.userId === auth.user?.id);
 const isShared = computed(() => props.note.visibility === 'shared');
 const sharedCount = computed(() => props.note.sharedGroupIds?.length ?? 0);
+
+// PR #5b: 编辑权限胶囊只在群组上下文显示 (/groups/:id 路径), 避免污染灵感/笔记/待办主 view
+const route = useRoute();
+const inGroupContext = computed(() => route.path.startsWith('/groups/'));
+
+// 作者本人可在卡片直接切换 editPermission. store.updateNote 只同步主 view 的 vs.notes,
+// GroupDetail.groupNotes 是组件本地 ref → 必须 mutate props.note 让 reactive UI 立刻反映
+async function setEditPermission(perm: 'admin' | 'all') {
+  if ((props.note.editPermission || 'admin') === perm) return;
+  try {
+    const res = await store.updateNote(props.note.id, { editPermission: perm } as any);
+    (props.note as any).editPermission = res.editPermission ?? perm;
+    toast.show(perm === 'admin' ? '已设为仅管理员可编辑' : '已设为所有人可编辑', 'success');
+  } catch (e: any) {
+    toast.show(e?.message || '操作失败', 'error');
+  }
+}
 const router = useRouter();
 const toast = useToast();
 const openEditModal = inject<(note: Note) => void>('openEditModal');
@@ -353,13 +370,21 @@ const typeColor: Record<string, string> = {
           @pointerdown.stop="!store.selectMode ? onPointerDown($event) : undefined">
           {{ typeLabels[note.type] }}
         </span>
-        <!-- PR #2: 我自己发的共享笔记加 "已选择 N 个群" chip 提醒已分享; 别人发的显示作者头像 + nickname -->
+        <!-- PR #2 / PR #5b: 我自己发的共享笔记加 "已分享" chip; 数量在详情页/title hover 看. 字号 padding 跟 type chip 一致.
+             别人发的显示作者头像 + nickname -->
         <span v-if="isMyNote && isShared && sharedCount > 0"
-          class="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark select-none whitespace-nowrap"
-          :title="`已选择 ${sharedCount} 个群`">
-          <PhUsersThree size="0.625rem" weight="fill" />
-          <span>已选择 {{ sharedCount }} 个群</span>
+          class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark select-none whitespace-nowrap"
+          :title="`已分享到 ${sharedCount} 个群`">
+          <PhUsersThree size="0.75rem" weight="fill" />
+          <span>已分享</span>
         </span>
+        <!-- PR #5b: 编辑权限胶囊 (仅作者本人 + shared 笔记 + 群组上下文). 单胶囊点击在 admin/all 间切换, 后跟切换图标 -->
+        <button v-if="isMyNote && isShared && inGroupContext"
+          @click.stop="setEditPermission((note.editPermission || 'admin') === 'admin' ? 'all' : 'admin')"
+          class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark hover:bg-primary/20 transition-colors select-none whitespace-nowrap">
+          {{ (note.editPermission || 'admin') === 'admin' ? '管理员可编辑' : '所有人可编辑' }}
+          <PhArrowsClockwise size="0.625rem" weight="bold" />
+        </button>
         <span v-else-if="!isMyNote && (note as any).authorNickname"
           class="inline-flex items-center gap-1 text-[10px] text-gray-500 select-none"
           :title="`@${(note as any).authorNickname}`">

@@ -100,6 +100,60 @@ export interface Note {
   version?: number;
   editLockBy?: string | null;
   editLockExpiresAt?: string | null;
+  // PR #5b 编辑权限分级 (仅 shared 笔记用): admin (默认, 仅作者+群 owner/admin 能改) / all (所有 active member 能改)
+  // 作者本人永远能改 (不在 enum 里). 没权限的可通过 POST /:id/edit-request 申请永久授权.
+  editPermission?: 'admin' | 'all';
+}
+
+// PR #5b 编辑权限申请记录
+export interface NoteEditRequest {
+  id: string;
+  noteId?: string;
+  userId: string;
+  status: 'pending' | 'approved' | 'rejected' | 'canceled';
+  message: string | null;
+  createdAt: string;
+  handledAt: string | null;
+  handledBy: string | null;
+  // 列接口 join users 返回的辅助字段
+  nickname?: string | null;
+  avatar?: string | null;
+}
+
+// PR #5b 编辑权限白名单 (永久授权)
+export interface NoteEditGrant {
+  userId: string;
+  grantedAt: string;
+  grantedBy: string;
+  nickname?: string | null;
+  avatar?: string | null;
+}
+
+// PR #5b 群级汇总: 该群所有共享笔记的 pending 编辑申请 / 已授权 (含笔记 preview + 申请人 + 作者信息)
+export interface GroupNoteEditRequestRow {
+  id: string;
+  noteId: string;
+  userId: string;
+  status: 'pending' | 'approved' | 'rejected' | 'canceled';
+  message: string | null;
+  createdAt: string;
+  requesterNickname: string | null;
+  requesterAvatar: string | null;
+  notePreview: string;
+  noteAuthorId: string;
+  authorNickname: string | null;
+}
+
+export interface GroupNoteEditGrantRow {
+  noteId: string;
+  userId: string;
+  grantedAt: string;
+  grantedBy: string;
+  nickname: string | null;
+  avatar: string | null;
+  notePreview: string;
+  noteAuthorId: string;
+  authorNickname: string | null;
 }
 
 // PR #2 scope: 笔记列表过滤. mine (只看我自己) / shared (群里别人共享给我的) / group:<id> (某群可见)
@@ -305,6 +359,49 @@ export const api = {
   // 这里的 fetch 版只给"主动取消编辑"场景, sendBeacon 路径直接拼 URL + token query, 见 NoteEditModal
   releaseNoteLock(id: string) {
     return request<{ data: { released: boolean } }>(`/notes/${id}/lock`, { method: 'DELETE' });
+  },
+
+  // PR #5b 编辑权限分级: 申请编辑权 / 审批 / 撤销 (改 editPermission 走 updateNote 的 editPermission 字段)
+  requestNoteEditPermission(id: string, message?: string) {
+    return request<{ data: NoteEditRequest }>(`/notes/${id}/edit-request`, {
+      method: 'POST',
+      body: JSON.stringify({ message: message || null }),
+    });
+  },
+
+  approveNoteEditRequest(noteId: string, requestId: string) {
+    return request<{ data: { message: string } }>(`/notes/${noteId}/edit-requests/${requestId}/approve`, {
+      method: 'POST',
+    });
+  },
+
+  rejectNoteEditRequest(noteId: string, requestId: string) {
+    return request<{ data: { message: string } }>(`/notes/${noteId}/edit-requests/${requestId}/reject`, {
+      method: 'POST',
+    });
+  },
+
+  listNoteEditRequests(id: string) {
+    return request<{ data: NoteEditRequest[] }>(`/notes/${id}/edit-requests`);
+  },
+
+  listNoteEditGrants(id: string) {
+    return request<{ data: NoteEditGrant[] }>(`/notes/${id}/edit-grants`);
+  },
+
+  revokeNoteEditGrant(noteId: string, userId: string) {
+    return request<{ data: { message: string } }>(`/notes/${noteId}/edit-grants/${userId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // PR #5b: 群级汇总 (作者+admin 看), 给群组详情页"编辑申请管理"面板用
+  listGroupEditRequests(groupId: string) {
+    return request<{ data: GroupNoteEditRequestRow[] }>(`/groups/${groupId}/note-edit-requests`);
+  },
+
+  listGroupEditGrants(groupId: string) {
+    return request<{ data: GroupNoteEditGrantRow[] }>(`/groups/${groupId}/note-edit-grants`);
   },
 
   // Categories

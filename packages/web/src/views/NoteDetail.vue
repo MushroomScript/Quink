@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, inject, watch, type Ref } from 'vue';
+import { ref, computed, onMounted, onUnmounted, inject, watch, type Ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
+import { useAuthStore } from '@/stores/auth';
+import { useGroupsStore } from '@/stores/groups';
 import { useToast } from '@/composables/useToast';
-import { api, type Note } from '@/api';
+import { useEscToClose } from '@/composables/useEscToClose';
+import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
+import { api, type Note, type NoteEditGrant } from '@/api';
 import Vditor from 'vditor';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -21,6 +25,9 @@ import {
   PhLightbulb,
   PhCheckSquare,
   PhBell,
+  PhUsersThree,
+  PhCaretRight,
+  PhArrowsClockwise,
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
@@ -32,10 +39,65 @@ dayjs.locale('zh-cn');
 const route = useRoute();
 const router = useRouter();
 const store = useNotesStore();
+const auth = useAuthStore();
+const groupsStore = useGroupsStore();
 const toast = useToast();
 const note = ref<Note | null>(null);
 const rendered = ref('');
 const loading = ref(true);
+
+// PR #5b 详情页分享设置
+const isMyNote = computed(() => note.value && (!note.value.userId || note.value.userId === auth.user?.id));
+const isShared = computed(() => note.value?.visibility === 'shared');
+const sharedGroupIds = computed(() => note.value?.sharedGroupIds ?? []);
+const sharedGroupNames = computed(() =>
+  sharedGroupIds.value.map(id => groupsStore.groups.find(g => g.id === id)?.name).filter(Boolean) as string[]
+);
+const editGrants = ref<NoteEditGrant[]>([]);
+async function loadEditGrants() {
+  if (!note.value || !isShared.value || !isMyNote.value) {
+    editGrants.value = [];
+    return;
+  }
+  try {
+    const res = await api.listNoteEditGrants(note.value.id);
+    editGrants.value = res.data;
+  } catch { editGrants.value = []; }
+}
+async function setEditPermission(perm: 'admin' | 'all') {
+  if (!note.value) return;
+  if ((note.value.editPermission || 'admin') === perm) return;
+  try {
+    const res = await store.updateNote(note.value.id, { editPermission: perm } as any);
+    // store.updateNote 不一定同步 note.value (本地 ref 来自 api.getNote, 不在 store.notes 里时 watch 失效)
+    // 直接 mutate 字段保证 reactive UI 立刻反映
+    note.value.editPermission = res.editPermission ?? perm;
+    toast.show(perm === 'admin' ? '已设为仅管理员可编辑' : '已设为所有人可编辑', 'success');
+  } catch (e: any) {
+    toast.show(e?.message || '操作失败', 'error');
+  }
+}
+const confirmRevokeGrant = ref<{ userId: string; nickname: string } | null>(null);
+useEscToClose(confirmRevokeGrant, null);
+function askRevokeGrant(userId: string, nickname: string) {
+  confirmRevokeGrant.value = { userId, nickname };
+}
+async function doRevokeGrant() {
+  if (!confirmRevokeGrant.value || !note.value) return;
+  const targetUserId = confirmRevokeGrant.value.userId;
+  confirmRevokeGrant.value = null;
+  try {
+    await api.revokeNoteEditGrant(note.value.id, targetUserId);
+    editGrants.value = editGrants.value.filter(g => g.userId !== targetUserId);
+    toast.show('已撤销编辑权限', 'success');
+  } catch (e: any) {
+    toast.show(e?.message || '操作失败', 'error');
+  }
+}
+// 群名展开 popover
+const showSharedGroupsPopup = ref(false);
+// 已授权 popover: 收到胶囊里, 点击展开 (不常用功能不独占一行)
+const showGrantsPopup = ref(false);
 const openEditModal = inject<(note: Note, fullscreen?: boolean) => void>('openEditModal');
 const detailTitle = inject<Ref<string>>('detailTitle');
 const hasRefPreviewPending = inject<Ref<boolean>>('hasRefPreviewPending');
@@ -71,6 +133,11 @@ async function loadNote() {
     note.value = res.data;
     if (detailTitle) detailTitle.value = typeLabels[res.data.type] + '详情';
     // 不直接渲染,let watch(note.value.content) 自动触发 renderContent(避免双重渲染)
+    // PR #5b: shared 笔记并发拉群名 + 已授权列表
+    if (res.data.visibility === 'shared') {
+      if (groupsStore.groups.length === 0) groupsStore.loadGroups().catch(() => {});
+      loadEditGrants();
+    }
   } catch (e) {
     console.error('[NoteDetail] load note failed:', e);
     note.value = null;
@@ -363,6 +430,86 @@ onUnmounted(() => {
       <div v-if="note.tags?.length" class="flex flex-wrap gap-1.5 mb-4">
         <span v-for="tag in note.tags" :key="tag" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">#{{ tag }}</span>
       </div>
+
+      <!-- PR #5b: 分享设置 (仅 shared 笔记 + 作者本人能看到管理). 整行内嵌, 不再独立卡片 -->
+      <div v-if="isShared && isMyNote" class="mb-4 flex items-center gap-2 text-xs relative flex-wrap">
+        <button @click.stop="showSharedGroupsPopup = !showSharedGroupsPopup; showGrantsPopup = false"
+          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
+          <PhUsersThree size="0.75rem" weight="fill" />
+          已分享到 {{ sharedGroupIds.length }} 个群
+        </button>
+        <!-- 编辑权限胶囊 (单胶囊点击切换 admin/all, 后跟切换图标) -->
+        <button @click="setEditPermission((note.editPermission || 'admin') === 'admin' ? 'all' : 'admin')"
+          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
+          {{ (note.editPermission || 'admin') === 'admin' ? '管理员可编辑' : '所有人可编辑' }}
+          <PhArrowsClockwise size="0.75rem" weight="bold" />
+        </button>
+        <!-- PR #5b: 已授权小胶囊 (仅 editPermission=admin 时有意义: 'all' 时所有人都能改, 白名单无用; >0 条才显示).
+             包独立 relative 容器让 popover 锚定到按钮下方而非整行右边 -->
+        <span v-if="(note.editPermission || 'admin') === 'admin' && editGrants.length > 0" class="relative inline-block">
+          <button @click.stop="showGrantsPopup = !showGrantsPopup; showSharedGroupsPopup = false"
+            class="px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
+            额外授权 {{ editGrants.length }} 人
+          </button>
+          <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
+            leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
+            <div v-if="showGrantsPopup"
+              class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[var(--z-overlay)] w-[260px] max-h-[280px] overflow-y-auto space-y-1">
+              <div v-for="g in editGrants" :key="g.userId"
+                class="flex items-center gap-2 hover:bg-gray-50 rounded-lg p-1.5">
+                <img v-if="g.avatar" :src="resolveFileThumbUrl(g.avatar)"
+                  @error="thumbErrorFallback($event, resolveFileUrl(g.avatar))"
+                  class="w-6 h-6 rounded-full object-cover shrink-0" alt="" />
+                <div v-else class="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
+                  {{ (g.nickname || '?').charAt(0).toUpperCase() }}
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-medium truncate">{{ g.nickname || '?' }}</div>
+                  <div class="text-[10px] text-gray-400">{{ dayjs(g.grantedAt).format('MM-DD HH:mm') }}</div>
+                </div>
+                <button @click="askRevokeGrant(g.userId, g.nickname || '?')"
+                  class="px-2 py-1 text-[11px] rounded-lg bg-red-50 text-red-500 hover:bg-red-100 inline-flex items-center gap-1">
+                  <PhTrash size="0.75rem" weight="bold" /> 撤销
+                </button>
+              </div>
+            </div>
+          </Transition>
+        </span>
+
+        <!-- 群名 popover (锚定到整行 left, 因为分享胶囊在最左) -->
+        <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
+          leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
+          <div v-if="showSharedGroupsPopup && sharedGroupNames.length > 0"
+            class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[var(--z-overlay)] min-w-[160px] max-w-[280px]">
+            <div v-for="name in sharedGroupNames" :key="name" class="text-xs text-gray-600 py-1 px-2 truncate">{{ name }}</div>
+          </div>
+        </Transition>
+
+        <!-- 共用 backdrop 关两个 popover -->
+        <div v-if="showSharedGroupsPopup || showGrantsPopup" class="fixed inset-0 z-[var(--z-overlay-backdrop)]"
+          @click="showSharedGroupsPopup = false; showGrantsPopup = false" />
+      </div>
+
+      <!-- PR #5b 撤销授权确认 modal -->
+      <Teleport to="body">
+        <Transition name="modal">
+          <div v-if="confirmRevokeGrant" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+            <div class="absolute inset-0 bg-black/30" @click="confirmRevokeGrant = null" />
+            <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 text-center">
+              <p class="text-sm text-gray-700 mb-1">撤销编辑权限</p>
+              <p class="text-xs text-gray-400 mb-4">
+                「{{ confirmRevokeGrant?.nickname }}」将失去编辑此笔记的权限，再次编辑需重新申请
+              </p>
+              <div class="flex gap-2 justify-center">
+                <button @click="confirmRevokeGrant = null"
+                  class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+                <button @click="doRevokeGrant"
+                  class="px-4 py-1.5 text-xs rounded-lg bg-red-500 text-white hover:bg-red-600 font-medium">撤销</button>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </Teleport>
 
       <!-- Content; @click 上拦截 task list checkbox 点击实现状态切换 -->
       <div class="bg-white rounded-2xl shadow-sm p-6 md:p-8 note-content note-detail-content" @click="onContentClick">

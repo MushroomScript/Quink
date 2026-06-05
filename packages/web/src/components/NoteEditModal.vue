@@ -3,7 +3,7 @@ import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue';
 import { useNotesStore } from '@/stores/notes';
 import { useToast } from '@/composables/useToast';
 import RichEditor from './RichEditor.vue';
-import type { Note } from '@/api';
+import { api, type Note } from '@/api';
 import { PhXCircle } from '@phosphor-icons/vue';
 
 const props = defineProps<{ note: Note; initialFullscreen?: boolean }>();
@@ -37,6 +37,24 @@ async function acquireLock(): Promise<boolean> {
       const body = await res.json().catch(() => ({} as any));
       if (res.status === 409 && body.error === 'locked') {
         toast.show(`「${body.lockByNickname}」正在编辑此笔记，稍后再试`, 'error', 3500);
+      } else if (res.status === 403 && body.error === 'no_write_permission') {
+        // PR #5b: 没编辑权 → 弹"申请编辑权"按钮
+        const permLabel = body.editPermission === 'admin' ? '仅管理员可改' : '所有人可改';
+        toast.show(`你没有编辑权限（${permLabel}）`, {
+          kind: 'error',
+          duration: 4000,
+          action: {
+            label: '申请编辑权限',
+            onClick: async () => {
+              try {
+                await api.requestNoteEditPermission(props.note.id);
+                toast.show('已提交申请，等待作者或管理员审批', 'success', 3000);
+              } catch (e: any) {
+                toast.show('申请失败：' + (e.message || '未知错误'), 'error', 3000);
+              }
+            },
+          },
+        });
       } else {
         toast.show('无法获取编辑锁：' + (body.error || res.statusText), 'error', 3000);
       }
@@ -132,6 +150,9 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
       toast.show('笔记已被其他人修改，请关闭后重新打开看最新版', 'error', 3500);
     } else if (msg.includes('lock_')) {
       toast.show('编辑锁已失效，请关闭后重新打开笔记', 'error', 3000);
+    } else if (msg.includes('no_write_permission')) {
+      // PR #5b: PATCH 时校验失败 (理论上 acquireLock 已拒, 但权限中途被撤等罕见 case 走到这)
+      toast.show('编辑权限已被收回，请关闭后重新打开笔记', 'error', 3500);
     } else {
       toast.show('保存失败：' + (msg || '未知错误'), 'error', 3000);
     }

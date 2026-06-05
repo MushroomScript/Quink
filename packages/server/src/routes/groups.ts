@@ -266,6 +266,20 @@ app.get('/:id/notes', async (c) => {
     WHERE ns.group_id = ${groupId} AND n.deleted_at IS NULL
   `) as { count: number } | undefined;
 
+  // PR #5b: 批量拉每条笔记的 sharedGroupIds + editPermission, 给 NoteCard 显示"已分享"chip + 群组列表里切换编辑权限
+  const noteIds = rows.map(r => r.id as string);
+  const sharesMap = new Map<string, string[]>();
+  if (noteIds.length > 0) {
+    const shareRows = db.all(sql`
+      SELECT note_id, group_id FROM note_shares WHERE note_id IN (${sql.join(noteIds.map(id => sql`${id}`), sql.raw(','))})
+    `) as Array<{ note_id: string; group_id: string }>;
+    for (const s of shareRows) {
+      const arr = sharesMap.get(s.note_id) || [];
+      arr.push(s.group_id);
+      sharesMap.set(s.note_id, arr);
+    }
+  }
+
   // raw SQL 返回 snake_case, 手动映射成 camelCase (跟其他 endpoint 返回格式一致)
   const data = rows.map(r => ({
     id: r.id,
@@ -285,6 +299,8 @@ app.get('/:id/notes', async (c) => {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     visibility: r.visibility,
+    editPermission: r.edit_permission,
+    sharedGroupIds: sharesMap.get(r.id) || [],
     sharedAt: r.sharedAt,
     authorNickname: r.authorNickname,
     authorAvatar: r.authorAvatar,
@@ -293,6 +309,55 @@ app.get('/:id/notes', async (c) => {
     data,
     pagination: { page: parseInt(page), limit: parseInt(limit), total: totalRow?.count ?? 0 },
   });
+});
+
+// PR #5b 群级汇总: 该群所有 shared 笔记的 pending 编辑权申请 (作者+admin 看)
+// 给群组详情页"编辑申请管理"面板用. 不分页, 假设每群 pending 量不大.
+app.get('/:id/note-edit-requests', async (c) => {
+  const userId = c.get('userId');
+  const groupId = c.req.param('id');
+  const me = await getActiveMember(groupId, userId);
+  if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
+    return c.json({ error: '只有群管理员可以查看编辑申请' }, 403);
+  }
+  const rows = db.all(sql`
+    SELECT r.id, r.note_id as noteId, r.user_id as userId, r.status, r.message, r.created_at as createdAt,
+           u.nickname as requesterNickname, u.avatar as requesterAvatar,
+           SUBSTR(n.content, 1, 80) as notePreview, n.user_id as noteAuthorId,
+           au.nickname as authorNickname
+    FROM note_edit_requests r
+    INNER JOIN note_shares ns ON ns.note_id = r.note_id
+    INNER JOIN notes n ON n.id = r.note_id
+    LEFT JOIN users u ON u.id = r.user_id
+    LEFT JOIN users au ON au.id = n.user_id
+    WHERE ns.group_id = ${groupId} AND r.status = 'pending' AND n.deleted_at IS NULL
+    ORDER BY r.created_at DESC
+  `) as Array<any>;
+  return c.json({ data: rows });
+});
+
+// PR #5b 群级汇总: 该群所有 shared 笔记的已授权用户 (作者+admin 看, 可撤销)
+app.get('/:id/note-edit-grants', async (c) => {
+  const userId = c.get('userId');
+  const groupId = c.req.param('id');
+  const me = await getActiveMember(groupId, userId);
+  if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
+    return c.json({ error: '只有群管理员可以查看授权列表' }, 403);
+  }
+  const rows = db.all(sql`
+    SELECT g.note_id as noteId, g.user_id as userId, g.granted_at as grantedAt, g.granted_by as grantedBy,
+           u.nickname, u.avatar,
+           SUBSTR(n.content, 1, 80) as notePreview, n.user_id as noteAuthorId,
+           au.nickname as authorNickname
+    FROM note_edit_grants g
+    INNER JOIN note_shares ns ON ns.note_id = g.note_id
+    INNER JOIN notes n ON n.id = g.note_id
+    LEFT JOIN users u ON u.id = g.user_id
+    LEFT JOIN users au ON au.id = n.user_id
+    WHERE ns.group_id = ${groupId} AND n.deleted_at IS NULL
+    ORDER BY g.granted_at DESC
+  `) as Array<any>;
+  return c.json({ data: rows });
 });
 
 app.patch('/:id', async (c) => {

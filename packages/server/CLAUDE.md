@@ -63,3 +63,43 @@ AI 系统专属指引（多配置 / 按功能绑定 / FC v2 / 自动处理 / 自
 - **fetch keepalive 替代 sendBeacon**: roadmap 原本写 `sendBeacon`, 但 sendBeacon 只支持 POST 不支持 DELETE. 改用 `fetch(url, { method: 'DELETE', keepalive: true })`, 现代浏览器同款语义 (页面 unload 也能发出), 还能用 DELETE 方法. 见 `NoteEditModal.vue:releaseLockOnUnmount`
 - **Cron 60s 清过期锁**: `startEditLockCleanup()` setInterval(60s) 扫 `expires_at < now AND lock_by IS NOT NULL` 的笔记清锁. 兜底 case: 用户没 fetch keepalive (浏览器异常关 / 断电) → 锁自然过期 server 自清. 跟 `startReminderScheduler()` 同款 setInterval 模式. `index.ts` 启动时调一次, tsx 进程重启自然重计时
 - **chat 工具 `update_note` 跟 PATCH HTTP 行为分歧**: HTTP PATCH 要求 lockToken (持锁后才能写); chat 工具不走 lock (AI 是单次操作不持锁), 但检查"别人正在持锁" → 拒绝告知用户. version 仍维护 (`+= 1`). 见 `tools.ts:update_note` PR #5 段
+
+## 群组共享编辑权限分级 (PR #5b)
+
+PR #5 默认所有群 active member 都能改共享笔记, PR #5b 把默认收紧到"管理员可改" + 加申请编辑权流程. 作者本人永远能改, 不算独立档.
+
+- **DB schema 1 列 + 2 新表**:
+  - `notes.edit_permission` (enum: `admin` / `all`, 默认 `admin`) - shared 笔记用, private 忽略
+  - `note_edit_grants` (note_id, user_id, granted_at, granted_by) - **永久白名单** (申请通过后写入, 作者/admin 可撤销)
+  - `note_edit_requests` (id, note_id, user_id, status, message, created_at, handled_at, handled_by) - 申请记录 4 状态 (pending/approved/rejected/canceled)
+- **`getNoteForAccess` 扩 `mode='read'|'write'` 参数**:
+  - read: 作者 OR shared + 我是 active 群成员 (PR #5 行为)
+  - write: 作者放行; 否则 `editPermission='all'` 任何 active member / `editPermission='admin'` 我在群里是 owner/admin / 在 `note_edit_grants` 白名单内 → 放行
+- **`isAdminOfSharedNote(userId, noteId)` helper**: 给"管理操作"用 (DELETE / 审批 / 撤销授权), 比 write 更严格 - 普通成员有 write 权限也不能管. 校验我在共享群里是 owner/admin
+- **PATCH / DELETE / lock API / chat update_note 全部用 write mode**:
+  - PATCH 没 write 权返 `403 { error: 'no_write_permission', editPermission }` 让前端弹"申请编辑权"按钮
+  - DELETE 扩到 admin 可删 (admin 删别人的笔记前端要弹"确认删 @张三 的笔记"对话)
+  - lock API 加 write 校验 (没编辑权连锁都拿不到, 避免编辑到一半提交才发现没权)
+  - chat update_note 没 write 权返"这条笔记的编辑权限为「仅管理员」, 你没有编辑权" 让 AI 告知用户
+- **6 个权限管理 API** (`routes/notes.ts`):
+  - `POST /:id/edit-request` 申请 (没 write 权才能调; 已有 pending 申请返原 request, idempotent; SSE 推作者 + 群 admin)
+  - `POST /:id/edit-requests/:reqId/approve` 同意 (作者 + 群 admin 都能批; 事务写 `note_edit_grants` + 更新 request 状态)
+  - `POST /:id/edit-requests/:reqId/reject` 拒绝
+  - `GET /:id/edit-requests` 列所有申请 (含 join users 拿 nickname/avatar)
+  - `GET /:id/edit-grants` 列已授权用户
+  - `DELETE /:id/edit-grants/:userId` 撤销授权
+  - **改 editPermission 走 PATCH /:id 的 `editPermission` 字段** (仅作者改, 跟 visibility / sharedGroupIds 同款约定), 不另加 API
+- **SSE 事件**:
+  - `note-edit-request` 推作者 + 群 admin (申请人提交时), payload 含 requesterNickname / message
+  - `note-edit-request-resolved` 推申请人 (审批后), payload 含 status (approved/rejected)
+- **前端 UI 完整**:
+  - `NoteCard` 类型 chip 后面加 "已分享" + "管理员可编辑 ⟳"（PhArrowsClockwise 切换图标）单胶囊（点击 toggle admin/all）, **仅作者本人 + shared 笔记 + `route.path.startsWith('/groups/')` 群组上下文**才显示（主 view 不污染）
+  - `NoteDetail` 加分享设置行: 「已分享到 X 个群」(popover 展群名) + 「管理员可编辑 ⟳」(同款胶囊) + 「额外授权 X 人」(popover 列已授权用户 + 撤销按钮). `editPermission='all'` 时"额外授权"自动隐藏 (白名单无意义)
+  - `GroupDetail` 加"待审编辑申请"section (跨笔记汇总, 折叠 >3 条), 同意按钮直接审批; 申请发起方收 SSE → toast "申请编辑权限" 按钮一键发起
+  - `NoteEditModal` 锁失败 toast 区分 409 locked / 403 no_write_permission, 后者 toast action 按钮一键申请
+  - `GlobalToast` button 在 error kind 用白字 (避免原 toast-undo-btn 的红字 #FF3B3B 撞红底 bg-red-500)
+- **store.updateNote 不同步组件本地 ref**: `groupNotes` (GroupDetail) / `note.value` (NoteDetail) 是组件本地 ref, store 内 vs.notes 同步不到. NoteCard / NoteDetail 切 editPermission 后必须**直接 mutate** `props.note.editPermission` 或 `note.value.editPermission` 让 reactive UI 立刻反映. 否则按钮点击后 toast 提示成功但颜色不切 (经典 bug)
+- **作者改自己共享笔记免锁** (PR #5 微调): `PATCH /:id` 内 `if (existing.visibility === 'shared' && !isAuthor)` 才走 lock + version 强制. 锁本意防"群成员协作时撞改", 作者多设备靠 version 乐观锁兜底. 让作者改 editPermission / visibility / sharedGroupIds 等"管理操作"不卡 lock 流程
+- **`GET /api/groups/:id/notes` 必须返回 sharedGroupIds + editPermission**: 群内 NoteCard 显示"已分享" chip + "管理员可编辑 ⟳" 胶囊都依赖这两个字段. 原始 SQL 手动 camelCase 映射时不要漏 (bug 实测: 漏了字段后整张胶囊视觉消失)
+- **群级汇总 API** (`routes/groups.ts`): `GET /:id/note-edit-requests` 拉该群所有 shared 笔记 pending 申请 (含 noteId + 申请人 + 笔记 preview + 作者 nickname); `GET /:id/note-edit-grants` 拉所有已授权用户. 给群组详情页"编辑申请管理"面板用 (不分页, 假设每群 pending 量不大)
+- **Electron 通知 click Win32 SetForegroundWindow lock 防御** (`packages/desktop/src/main.ts`): notification click 不仅 `mainWindow.focus()`, 还要 `setAlwaysOnTop(true)` 临时拉前 + 100ms 后 `setAlwaysOnTop(false)`. 单纯 focus() 在 Win11 上经常被 SetForegroundWindow lock 静默拒绝 (任务栏闪一下但窗口不上前). 跟主窗口持久窗口 hide→show 的 window-shown IPC 模式同根因, 但通知是外部应用唤醒, 不走 IPC, 直接 setAlwaysOnTop 救场更稳

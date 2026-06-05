@@ -42,6 +42,8 @@ const updateNoteSchema = z.object({
   // PR #5: 编辑共享笔记必须带 lockToken (POST /lock 拿) + version (乐观锁). 私有笔记不需要.
   lockToken: z.string().optional(),
   version: z.number().int().positive().optional(),
+  // PR #5b: 改编辑权限, 仅作者能改 (非作者传 → 403)
+  editPermission: z.enum(['admin', 'all']).optional(),
 });
 
 // PR #2 阶段 5c: 广播 'group-notes-changed' 给目标群所有 active 成员 (除操作者).
@@ -297,24 +299,62 @@ app.get('/tags', async (c) => {
   return c.json({ data: [...tagSet].sort(new Intl.Collator('zh-Hans-CN').compare) });
 });
 
-// PR #5 helper: 校验 userId 能否访问 noteId. 作者本人放行; 否则必须 visibility='shared' + 我是 note_shares 关联群的 active member.
-// 返回 note 或 null. lock API + 后续 PATCH 重构都复用这函数. (GET /:id 暂保持原 inline 实现, 等 PATCH 重构时一起改)
-async function getNoteForAccess(userId: string, noteId: string): Promise<typeof schema.notes.$inferSelect | null> {
+// PR #5 / 5b helper: 校验 userId 能否访问 noteId. 作者本人永远放行; 否则必须 visibility='shared' + 我是 note_shares 关联群 active member.
+// mode='read' (默认) 只校验可见; mode='write' 加 PR #5b editPermission 校验:
+//   editPermission='all' → 所有 active member 都能改
+//   editPermission='admin' → 必须我在共享群里是 owner/admin
+//   都不满足 → 查 note_edit_grants 白名单, 在内则放行 (申请编辑权通过后写入)
+// 返回 note 或 null. lock API + PATCH + DELETE + chat update_note 都用这函数.
+type AccessMode = 'read' | 'write';
+async function getNoteForAccess(userId: string, noteId: string, mode: AccessMode = 'read'): Promise<typeof schema.notes.$inferSelect | null> {
   const note = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId)).get();
   if (!note) return null;
+  // 作者本人无视所有限制 (read + write)
   if (note.userId === userId) return note;
+  // 不是作者: 必须 shared 笔记
   if (note.visibility !== 'shared') return null;
+  // 必须我是某共享群 active member (read 走到这一步就够了)
   const shared = await db.select({ groupId: schema.noteShares.groupId })
     .from(schema.noteShares).where(eq(schema.noteShares.noteId, noteId)).all();
   if (shared.length === 0) return null;
-  const myGroup = await db.select({ groupId: schema.groupMembers.groupId })
+  const myMemberships = await db.select({ groupId: schema.groupMembers.groupId, role: schema.groupMembers.role })
     .from(schema.groupMembers)
     .where(and(
       eq(schema.groupMembers.userId, userId),
       eq(schema.groupMembers.status, 'active'),
       inArray(schema.groupMembers.groupId, shared.map(s => s.groupId)),
+    )).all();
+  if (myMemberships.length === 0) return null;
+  if (mode === 'read') return note;
+  // write 模式: PR #5b editPermission 三档校验
+  if (note.editPermission === 'all') return note;
+  // editPermission='admin': 在任一共享群是 owner/admin 即可
+  if (myMemberships.some(m => m.role === 'owner' || m.role === 'admin')) return note;
+  // 都不满足 → 查白名单 (note_edit_grants 申请通过后永久授权)
+  const grant = await db.select({ noteId: schema.noteEditGrants.noteId })
+    .from(schema.noteEditGrants)
+    .where(and(
+      eq(schema.noteEditGrants.noteId, noteId),
+      eq(schema.noteEditGrants.userId, userId),
     )).get();
-  return myGroup ? note : null;
+  return grant ? note : null;
+}
+
+// PR #5b helper: 校验 userId 在某 shared 笔记关联的群里是 owner/admin. 给 DELETE / 审批申请等
+// "管理操作"用 (普通成员有 write 权限也不应能删 / 批申请). 笔记不存在 / 不是 shared / 无 admin 角色 → false
+async function isAdminOfSharedNote(userId: string, noteId: string): Promise<boolean> {
+  const shared = await db.select({ groupId: schema.noteShares.groupId })
+    .from(schema.noteShares).where(eq(schema.noteShares.noteId, noteId)).all();
+  if (shared.length === 0) return false;
+  const myAdmin = await db.select({ role: schema.groupMembers.role })
+    .from(schema.groupMembers)
+    .where(and(
+      eq(schema.groupMembers.userId, userId),
+      eq(schema.groupMembers.status, 'active'),
+      inArray(schema.groupMembers.groupId, shared.map(s => s.groupId)),
+      or(eq(schema.groupMembers.role, 'owner'), eq(schema.groupMembers.role, 'admin')),
+    )).get();
+  return !!myAdmin;
 }
 
 // PR #5 编辑锁: 5 分钟 TTL + 30s 前端心跳续约 + sendBeacon 离开释放 + cron 60s 兜底清过期.
@@ -325,9 +365,19 @@ const LOCK_TTL_MS = 5 * 60 * 1000;
 app.post('/:id/lock', async (c) => {
   const userId = c.get('userId');
   const { id } = c.req.param();
-  const note = await getNoteForAccess(userId, id);
+  // PR #5b: 用 write mode 校验 - 没编辑权连锁都拿不到, 避免编辑到一半提交才发现没权 (体验差)
+  const note = await getNoteForAccess(userId, id, 'read');
   if (!note) return c.json({ error: '笔记不存在' }, 404);
   if (note.visibility !== 'shared') return c.json({ error: 'private 笔记不需要编辑锁' }, 400);
+  if (note.userId !== userId) {
+    const writable = await getNoteForAccess(userId, id, 'write');
+    if (!writable) {
+      return c.json({
+        error: 'no_write_permission',
+        editPermission: note.editPermission,
+      }, 403);
+    }
+  }
 
   const now = dayjs();
   const expired = !note.editLockExpiresAt || dayjs(note.editLockExpiresAt).isBefore(now);
@@ -415,6 +465,207 @@ export function startEditLockCleanup() {
   }, 60 * 1000);
   console.log('[edit-lock cleanup] started, 60s interval');
 }
+
+// PR #5b helper: 给某笔记的"权限审批 / SSE 通知"收件人 = 作者 + 所有共享群的 owner/admin user ids (dedup)
+async function getNoteAuthorityRecipients(noteId: string): Promise<string[]> {
+  const note = await db.select({ userId: schema.notes.userId }).from(schema.notes)
+    .where(eq(schema.notes.id, noteId)).get();
+  if (!note) return [];
+  const shared = await db.select({ groupId: schema.noteShares.groupId })
+    .from(schema.noteShares).where(eq(schema.noteShares.noteId, noteId)).all();
+  if (shared.length === 0) return [note.userId];
+  const admins = await db.select({ userId: schema.groupMembers.userId })
+    .from(schema.groupMembers)
+    .where(and(
+      inArray(schema.groupMembers.groupId, shared.map(s => s.groupId)),
+      eq(schema.groupMembers.status, 'active'),
+      or(eq(schema.groupMembers.role, 'owner'), eq(schema.groupMembers.role, 'admin')),
+    )).all();
+  return [...new Set([note.userId, ...admins.map(a => a.userId)])];
+}
+
+// PR #5b 编辑权限申请 API (5 个): 申请 / 同意 / 拒绝 / 列待审申请 / 撤销已授权
+// 改 editPermission 走 PATCH /:id 的 editPermission 字段, 不另外加 API. 跟 visibility / sharedGroupIds 同款约定 (仅作者改).
+
+// POST /api/notes/:id/edit-request - 申请编辑权 (没 write 权的群成员调). 已 pending 返原 request (idempotent).
+app.post('/:id/edit-request', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const body = await c.req.json().catch(() => ({} as any));
+  const message: string | null = typeof body?.message === 'string' ? body.message.slice(0, 500) : null;
+
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  if (note.visibility !== 'shared') return c.json({ error: '私有笔记不支持申请编辑权限' }, 400);
+  if (note.userId === userId) return c.json({ error: '你是作者, 不需要申请' }, 400);
+  // 已有 write 权限的不应该再申请 (前端按钮也不该显示, 这里兜底)
+  const writable = await getNoteForAccess(userId, id, 'write');
+  if (writable) return c.json({ error: '你已有编辑权限, 不需要申请' }, 400);
+
+  const existing = await db.select().from(schema.noteEditRequests)
+    .where(and(
+      eq(schema.noteEditRequests.noteId, id),
+      eq(schema.noteEditRequests.userId, userId),
+      eq(schema.noteEditRequests.status, 'pending'),
+    )).get();
+  if (existing) return c.json({ data: existing });
+
+  const reqId = nanoid(12);
+  const now = dayjs().toISOString();
+  const newReq: schema.NewNoteEditRequest = {
+    id: reqId, noteId: id, userId, status: 'pending', message,
+    createdAt: now, handledAt: null, handledBy: null,
+  };
+  await db.insert(schema.noteEditRequests).values(newReq);
+
+  // SSE 推作者 + 群 admin (除申请人自己)
+  const requester = await db.select({ nickname: schema.users.nickname })
+    .from(schema.users).where(eq(schema.users.id, userId)).get();
+  const recipients = await getNoteAuthorityRecipients(id);
+  for (const rid of recipients) {
+    if (rid === userId) continue;
+    publish(rid, 'note-edit-request', {
+      requestId: reqId, noteId: id, noteUserId: note.userId,
+      requesterId: userId, requesterNickname: requester?.nickname || '群成员', message,
+    });
+  }
+  return c.json({ data: newReq }, 201);
+});
+
+// POST /api/notes/:id/edit-requests/:reqId/approve - 同意 (作者+群 admin), 永久授权 (写 note_edit_grants)
+app.post('/:id/edit-requests/:reqId/approve', async (c) => {
+  const userId = c.get('userId');
+  const { id, reqId } = c.req.param();
+
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  const isAuthor = note.userId === userId;
+  if (!isAuthor && !(await isAdminOfSharedNote(userId, id))) {
+    return c.json({ error: '只有作者或群管理员可以审批' }, 403);
+  }
+  const req = await db.select().from(schema.noteEditRequests)
+    .where(and(eq(schema.noteEditRequests.id, reqId), eq(schema.noteEditRequests.noteId, id))).get();
+  if (!req) return c.json({ error: '申请不存在' }, 404);
+  if (req.status !== 'pending') return c.json({ error: '该申请已处理' }, 400);
+
+  const now = dayjs().toISOString();
+  db.transaction((tx) => {
+    tx.update(schema.noteEditRequests).set({
+      status: 'approved', handledAt: now, handledBy: userId,
+    }).where(eq(schema.noteEditRequests.id, reqId)).run();
+    // INSERT OR IGNORE 防重复 (PRIMARY KEY note_id+user_id 已存在则静默)
+    tx.insert(schema.noteEditGrants).values({
+      noteId: id, userId: req.userId, grantedAt: now, grantedBy: userId,
+    }).onConflictDoNothing().run();
+  });
+
+  publish(req.userId, 'note-edit-request-resolved', {
+    requestId: reqId, noteId: id, status: 'approved', handledBy: userId,
+  });
+  return c.json({ data: { message: '已同意, 申请人已获得永久编辑权' } });
+});
+
+// POST /api/notes/:id/edit-requests/:reqId/reject - 拒绝 (作者+群 admin)
+app.post('/:id/edit-requests/:reqId/reject', async (c) => {
+  const userId = c.get('userId');
+  const { id, reqId } = c.req.param();
+
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  const isAuthor = note.userId === userId;
+  if (!isAuthor && !(await isAdminOfSharedNote(userId, id))) {
+    return c.json({ error: '只有作者或群管理员可以审批' }, 403);
+  }
+  const req = await db.select().from(schema.noteEditRequests)
+    .where(and(eq(schema.noteEditRequests.id, reqId), eq(schema.noteEditRequests.noteId, id))).get();
+  if (!req) return c.json({ error: '申请不存在' }, 404);
+  if (req.status !== 'pending') return c.json({ error: '该申请已处理' }, 400);
+
+  const now = dayjs().toISOString();
+  await db.update(schema.noteEditRequests).set({
+    status: 'rejected', handledAt: now, handledBy: userId,
+  }).where(eq(schema.noteEditRequests.id, reqId));
+
+  publish(req.userId, 'note-edit-request-resolved', {
+    requestId: reqId, noteId: id, status: 'rejected', handledBy: userId,
+  });
+  return c.json({ data: { message: '已拒绝' } });
+});
+
+// GET /api/notes/:id/edit-requests - 列出该笔记所有申请 (按时间倒序, 含申请人 nickname/avatar)
+app.get('/:id/edit-requests', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  const isAuthor = note.userId === userId;
+  if (!isAuthor && !(await isAdminOfSharedNote(userId, id))) {
+    return c.json({ error: '只有作者或群管理员可以查看申请' }, 403);
+  }
+
+  const reqs = await db.select({
+    id: schema.noteEditRequests.id,
+    userId: schema.noteEditRequests.userId,
+    status: schema.noteEditRequests.status,
+    message: schema.noteEditRequests.message,
+    createdAt: schema.noteEditRequests.createdAt,
+    handledAt: schema.noteEditRequests.handledAt,
+    handledBy: schema.noteEditRequests.handledBy,
+    nickname: schema.users.nickname,
+    avatar: schema.users.avatar,
+  }).from(schema.noteEditRequests)
+    .leftJoin(schema.users, eq(schema.users.id, schema.noteEditRequests.userId))
+    .where(eq(schema.noteEditRequests.noteId, id))
+    .orderBy(desc(schema.noteEditRequests.createdAt))
+    .all();
+  return c.json({ data: reqs });
+});
+
+// GET /api/notes/:id/edit-grants - 列已授权用户 (作者+群 admin 看)
+app.get('/:id/edit-grants', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  const isAuthor = note.userId === userId;
+  if (!isAuthor && !(await isAdminOfSharedNote(userId, id))) {
+    return c.json({ error: '只有作者或群管理员可以查看' }, 403);
+  }
+
+  const grants = await db.select({
+    userId: schema.noteEditGrants.userId,
+    grantedAt: schema.noteEditGrants.grantedAt,
+    grantedBy: schema.noteEditGrants.grantedBy,
+    nickname: schema.users.nickname,
+    avatar: schema.users.avatar,
+  }).from(schema.noteEditGrants)
+    .leftJoin(schema.users, eq(schema.users.id, schema.noteEditGrants.userId))
+    .where(eq(schema.noteEditGrants.noteId, id))
+    .all();
+  return c.json({ data: grants });
+});
+
+// DELETE /api/notes/:id/edit-grants/:userId - 撤销某用户的编辑权 (作者+群 admin)
+app.delete('/:id/edit-grants/:userId', async (c) => {
+  const me = c.get('userId');
+  const { id } = c.req.param();
+  const targetUserId = c.req.param('userId');
+
+  const note = await getNoteForAccess(me, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  const isAuthor = note.userId === me;
+  if (!isAuthor && !(await isAdminOfSharedNote(me, id))) {
+    return c.json({ error: '只有作者或群管理员可以撤销授权' }, 403);
+  }
+
+  await db.delete(schema.noteEditGrants).where(and(
+    eq(schema.noteEditGrants.noteId, id),
+    eq(schema.noteEditGrants.userId, targetUserId),
+  ));
+  return c.json({ data: { message: '已撤销编辑权' } });
+});
 
 // GET /api/notes/:id
 // 作者拿自己的笔记 → 直接返回 (含 sharedGroupIds 给编辑器恢复)
@@ -513,22 +764,35 @@ app.patch('/:id', async (c) => {
   const parsed = updateNoteSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
 
-  // PR #5: 鉴权扩到 shared 笔记的群成员 (作者本人或 active 群成员都能改 content/tags/category 等)
-  const existing = await getNoteForAccess(userId, id);
+  // PR #5: 鉴权扩到 shared 笔记的群成员; PR #5b: 加 write mode 校验 editPermission
+  const existing = await getNoteForAccess(userId, id, 'read');
   if (!existing) return c.json({ error: '笔记不存在' }, 404);
 
   const isAuthor = existing.userId === userId;
   const data = parsed.data;
 
-  // PR #5: 非作者编辑共享笔记 → 禁止改 visibility / sharedGroupIds (这俩是分享设置, 仅作者控)
-  if (!isAuthor && (data.visibility !== undefined || data.sharedGroupIds !== undefined)) {
+  // PR #5b: 非作者 + shared 笔记 → 检查 write 权限 (editPermission + grants 白名单)
+  if (!isAuthor && existing.visibility === 'shared') {
+    const writable = await getNoteForAccess(userId, id, 'write');
+    if (!writable) {
+      return c.json({
+        error: 'no_write_permission',
+        editPermission: existing.editPermission,
+      }, 403);
+    }
+  }
+
+  // PR #5: 非作者编辑共享笔记 → 禁止改 visibility / sharedGroupIds / editPermission (这些是分享设置, 仅作者控)
+  if (!isAuthor && (data.visibility !== undefined || data.sharedGroupIds !== undefined || data.editPermission !== undefined)) {
     return c.json({ error: '只有作者可以修改共享设置' }, 403);
   }
 
   const updates: Record<string, any> = { updatedAt: dayjs().toISOString() };
 
   // PR #5: shared 笔记必须持锁 + version 校验. private 笔记保持原行为 (作者直接改, 不需锁)
-  if (existing.visibility === 'shared') {
+  // PR #5b: 作者本人改自己的共享笔记也不需要锁 (改 editPermission / visibility / 内容都是"管理自己东西", 无冲突).
+  // 锁主要防"群成员协作时撞改". 作者多设备同步靠 version 乐观锁兜底
+  if (existing.visibility === 'shared' && !isAuthor) {
     if (!data.lockToken) return c.json({ error: '编辑共享笔记需先申请锁 (POST /:id/lock)' }, 400);
     if (existing.editLockBy !== userId || existing.editLockToken !== data.lockToken) {
       return c.json({ error: 'lock_invalid' }, 409);
@@ -567,6 +831,8 @@ app.patch('/:id', async (c) => {
   }
   if (data.todoRemindRrule !== undefined) updates.todoRemindRrule = data.todoRemindRrule;
   if (data.pinned !== undefined) updates.pinned = data.pinned;
+  // PR #5b: 改编辑权限. 仅作者能改 (上面已校验非作者传过来直接 403)
+  if (data.editPermission !== undefined) updates.editPermission = data.editPermission;
   // PR #2 改 visibility / sharedGroupIds: 校验后整批替换 note_shares (delete all + insert new)
   // 客户端可以三种方式调: 仅传 visibility (改私密性) / 仅传 sharedGroupIds (改群列表) / 两个一起
   const willUpdateShares = data.visibility !== undefined || data.sharedGroupIds !== undefined;
@@ -632,10 +898,15 @@ app.delete('/:id', async (c) => {
   const userId = c.get('userId');
   const { id } = c.req.param();
 
-  const existing = await db.select().from(schema.notes)
-    .where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId)))
-    .get();
+  // PR #5b: 扩到群 admin 可删共享笔记 (普通成员有 write 权限也不能删, 删除是管理操作)
+  const existing = await getNoteForAccess(userId, id, 'read');
   if (!existing) return c.json({ error: '笔记不存在' }, 404);
+  const isAuthor = existing.userId === userId;
+  if (!isAuthor) {
+    if (existing.visibility !== 'shared' || !(await isAdminOfSharedNote(userId, id))) {
+      return c.json({ error: '只有作者或群管理员可以删除' }, 403);
+    }
+  }
 
   await db.update(schema.notes)
     .set({ deletedAt: dayjs().toISOString() })

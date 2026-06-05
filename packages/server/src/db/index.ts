@@ -172,6 +172,32 @@ sqlite.exec(`
   -- 删笔记 / 取消分享: DELETE FROM note_shares WHERE note_id=?
   CREATE INDEX IF NOT EXISTS idx_note_shares_note ON note_shares(note_id);
 
+  -- PR #5b 编辑权限白名单 (申请通过后永久授权, 作者/admin 可撤销)
+  CREATE TABLE IF NOT EXISTS note_edit_grants (
+    note_id TEXT NOT NULL REFERENCES notes(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    granted_at TEXT NOT NULL,
+    granted_by TEXT NOT NULL REFERENCES users(id),
+    PRIMARY KEY (note_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_note_edit_grants_user ON note_edit_grants(user_id);
+
+  -- PR #5b 编辑权限申请记录 (status 保留历史: pending / approved / rejected / canceled)
+  CREATE TABLE IF NOT EXISTS note_edit_requests (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL REFERENCES notes(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'pending',
+    message TEXT,
+    created_at TEXT NOT NULL,
+    handled_at TEXT,
+    handled_by TEXT REFERENCES users(id)
+  );
+  -- 作者/admin 看某笔记的 pending 申请: WHERE note_id=? AND status='pending'
+  CREATE INDEX IF NOT EXISTS idx_note_edit_requests_note_status ON note_edit_requests(note_id, status);
+  -- 申请人查自己所有申请: WHERE user_id=? ORDER BY created_at DESC
+  CREATE INDEX IF NOT EXISTS idx_note_edit_requests_user ON note_edit_requests(user_id, created_at DESC);
+
   CREATE TABLE IF NOT EXISTS reminder_pending (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
@@ -233,6 +259,9 @@ try { sqlite.exec('ALTER TABLE notes ADD COLUMN edit_lock_by TEXT REFERENCES use
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN edit_lock_token TEXT'); } catch {}
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN edit_lock_expires_at TEXT'); } catch {}
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN version INTEGER NOT NULL DEFAULT 1'); } catch {}
+// Migrate: PR #5b notes.edit_permission (admin/all). 老 shared 笔记自动归 'admin' (PR #5b 默认), 收紧权限.
+// 这是行为破坏更新 (PR #5 默认 all, PR #5b 默认 admin), dev 环境 OK
+try { sqlite.exec("ALTER TABLE notes ADD COLUMN edit_permission TEXT NOT NULL DEFAULT 'admin'"); } catch {}
 // 一次性回填 + 升级重算: PINYIN_SCHEMA_VERSION 每次 toPinyinSearchable 算法升级时 +1,
 // 启动检测 config 表里存的版本号,低于当前版本就把所有 content_pinyin 清空让下面回填重算。
 // v1: 全拼 + 单读音首字母. v2: 多音字首字母穷举. v3: 多音字只取前 2 读音. v4: 加罕用读音黑名单.

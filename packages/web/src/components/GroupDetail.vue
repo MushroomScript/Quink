@@ -13,7 +13,7 @@ import {
   PhCaretRight, PhPencilSimple, PhCamera, PhNote,
 } from '@phosphor-icons/vue';
 import NoteCard from './NoteCard.vue';
-import type { Note } from '@/api';
+import type { Note, GroupNoteEditRequestRow } from '@/api';
 
 const props = defineProps<{ groupId: string }>();
 
@@ -42,6 +42,8 @@ async function load() {
     }
     // PR #2 阶段 5a: 拉群内笔记 (跟群详情并发)
     loadGroupNotes(true);
+    // PR #5b: 拉编辑申请 (owner/admin 才有数据). 已授权列表搬到 NoteDetail 单笔记管理
+    loadEditRequests();
   } catch (e: any) {
     errorMsg.value = e?.message || '加载失败';
   } finally {
@@ -88,17 +90,56 @@ watch(groupId, load);
 onMounted(() => {
   load();
   window.addEventListener('quink-group-notes-changed', onGroupNotesChanged);
+  window.addEventListener('quink-edit-request-changed', onEditRequestChanged);
 });
 onUnmounted(() => {
   store.currentDetail = null;
   store.currentJoinRequests = [];
   window.removeEventListener('quink-group-notes-changed', onGroupNotesChanged);
+  window.removeEventListener('quink-edit-request-changed', onEditRequestChanged);
 });
+
+function onEditRequestChanged() {
+  // SSE 收到 note-edit-request 时触发, 只在当前是 owner/admin 才重拉
+  loadEditRequests();
+}
 
 // PR #2 阶段 5c: 收到 sse group-notes-changed (别人加/改/删了共享笔记) → 当前打开的就是这个群时 reload
 function onGroupNotesChanged(e: Event) {
   const detail = (e as CustomEvent).detail;
   if (detail?.groupId === groupId.value) loadGroupNotes(true);
+}
+
+// PR #5b 待审编辑申请: 群级跨笔记汇总 (admin 一眼看 pending). 已授权列表 + editPermission 切换都搬到 NoteDetail 了
+const editRequests = ref<GroupNoteEditRequestRow[]>([]);
+const editRequestsExpanded = ref(false);
+const COLLAPSE_LIMIT = 3;
+const visibleEditRequests = computed(() =>
+  editRequestsExpanded.value ? editRequests.value : editRequests.value.slice(0, COLLAPSE_LIMIT)
+);
+
+async function loadEditRequests() {
+  if (!groupId.value || !isOwnerOrAdmin.value) return;
+  try {
+    const res = await api.listGroupEditRequests(groupId.value);
+    editRequests.value = res.data;
+  } catch {}
+}
+
+async function approveEditRequest(reqId: string, noteId: string) {
+  try {
+    await api.approveNoteEditRequest(noteId, reqId);
+    toast.show('已同意', 'success');
+    editRequests.value = editRequests.value.filter(r => r.id !== reqId);
+  } catch (e: any) { toast.show(e?.message || '操作失败', 'error'); }
+}
+
+async function rejectEditRequest(reqId: string, noteId: string) {
+  try {
+    await api.rejectNoteEditRequest(noteId, reqId);
+    toast.show('已拒绝', 'success');
+    editRequests.value = editRequests.value.filter(r => r.id !== reqId);
+  } catch (e: any) { toast.show(e?.message || '操作失败', 'error'); }
 }
 
 // ── 邀请链接管理 ──
@@ -392,6 +433,47 @@ async function toggleAutoJoin() {
           <span class="text-xs text-gray-400">邀请已关闭, 当前没人能加入</span>
           <button @click="resetInvite" class="px-3 py-1.5 text-xs rounded-lg bg-primary text-white hover:bg-primary-dark">
             重新生成
+          </button>
+        </div>
+      </section>
+
+      <!-- PR #5b: 待审编辑申请 (owner/admin) -->
+      <section v-if="isOwnerOrAdmin && editRequests.length > 0" class="bg-gray-50 rounded-xl p-4">
+        <h3 class="text-sm font-medium mb-3">待审编辑申请 ({{ editRequests.length }})</h3>
+        <div class="space-y-2">
+          <div v-for="req in visibleEditRequests" :key="req.id"
+            class="bg-white rounded-lg p-3 space-y-2">
+            <div class="flex items-center gap-2">
+              <img v-if="req.requesterAvatar" :src="resolveFileThumbUrl(req.requesterAvatar)"
+                @error="thumbErrorFallback($event, resolveFileUrl(req.requesterAvatar))"
+                alt="" class="w-7 h-7 rounded-full object-cover shrink-0" />
+              <div v-else class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold shrink-0">
+                {{ (req.requesterNickname || '?').charAt(0).toUpperCase() }}
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm">
+                  <span class="font-medium">{{ req.requesterNickname || '群成员' }}</span>
+                  <span class="text-gray-400 text-xs ml-2">{{ dayjs(req.createdAt).format('MM-DD HH:mm') }}</span>
+                </div>
+                <div class="text-[11px] text-gray-500 truncate">申请编辑 {{ req.authorNickname || '?' }} 的笔记</div>
+              </div>
+              <button @click="approveEditRequest(req.id, req.noteId)"
+                class="px-2 py-1 text-xs rounded-lg bg-primary-light text-primary-dark hover:bg-primary/20 inline-flex items-center gap-1">
+                <PhCheck size="0.75rem" weight="bold" /> 同意
+              </button>
+              <button @click="rejectEditRequest(req.id, req.noteId)"
+                class="px-2 py-1 text-xs rounded-lg bg-gray-200 text-gray-600 hover:bg-gray-300 inline-flex items-center gap-1">
+                <PhX size="0.75rem" weight="bold" /> 拒绝
+              </button>
+            </div>
+            <div class="text-xs text-gray-600 pl-9 line-clamp-2">{{ req.notePreview }}</div>
+            <div v-if="req.message" class="text-xs text-gray-500 pl-9 italic">"{{ req.message }}"</div>
+          </div>
+          <button v-if="editRequests.length > COLLAPSE_LIMIT"
+            @click="editRequestsExpanded = !editRequestsExpanded"
+            class="w-full text-xs text-gray-500 hover:text-gray-700 py-1.5 inline-flex items-center justify-center gap-1 transition-colors">
+            {{ editRequestsExpanded ? '收起' : `展开剩余 ${editRequests.length - COLLAPSE_LIMIT} 条` }}
+            <PhCaretRight size="0.625rem" weight="bold" :class="['transition-transform', editRequestsExpanded ? 'rotate-90' : '']" />
           </button>
         </div>
       </section>

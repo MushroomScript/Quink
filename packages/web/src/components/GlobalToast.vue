@@ -109,9 +109,14 @@ function onHoverLeave(id: number, hasAction: boolean) {
            (上方 leading 4px > 下方 leading 2px → 字符视觉居中需要往上 1px). 用 relative top 而非 toast padding 调整,
            让按钮按 flex items-center 自然在 box 几何中心, 不受字符补偿影响. -->
       <span class="whitespace-nowrap relative -top-px">{{ t.message }}</span>
+      <!-- PR #5b: error kind 用白字 (避免 toast-undo-btn 的红字 #FF3B3B 撞 bg-red-500 红底);
+           default kind 保留 toast-undo-btn 原红字 (主题色背景 + 红字撤销风格) -->
       <button v-if="t.action"
         @click="onAction(t.id, t.action.onClick)"
-        class="toast-undo-btn text-sm underline underline-offset-2 cursor-pointer whitespace-nowrap transition-colors relative -top-px"
+        :class="[
+          'text-sm underline underline-offset-2 cursor-pointer whitespace-nowrap transition-colors relative -top-px',
+          t.kind === 'error' ? 'text-white opacity-90 hover:opacity-100' : 'toast-undo-btn',
+        ]"
       >
         {{ t.action.label }}
       </button>

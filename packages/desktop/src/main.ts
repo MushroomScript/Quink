@@ -752,7 +752,10 @@ ipcMain.on('show-notification', (_e, payload: { title: string; body: string; not
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       if (!mainWindow.isVisible()) mainWindow.show();
+      // Win32 SetForegroundWindow lock 防御: setAlwaysOnTop 临时拉到顶 + 100ms 后取消, 让 OS 接受 focus
+      mainWindow.setAlwaysOnTop(true);
       mainWindow.focus();
+      setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false); }, 100);
       if (payload.path) {
         mainWindow.webContents.send('open-path', payload.path);
       } else if (payload.noteId) {

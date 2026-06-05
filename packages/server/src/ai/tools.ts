@@ -404,8 +404,8 @@ export async function executeTool(userId: string, name: string, args: any): Prom
     }
 
     case 'update_note': {
-      // PR #5: 扩到群成员可编辑共享笔记 (跟 PATCH HTTP 同款扩). chat 工具不走 lock 流程
-      // (AI 是单次 update 不持锁), 但别人正在持锁编辑时拒绝, 避免抢锁打断协作.
+      // PR #5: 扩到群成员可编辑共享笔记; PR #5b: 加 editPermission write 校验.
+      // chat 工具不走 lock 流程 (AI 是单次 update 不持锁), 但别人持锁未过期 / 没编辑权 → 拒绝.
       const note = await db.select().from(schema.notes)
         .where(eq(schema.notes.id, args.id)).get();
       if (!note) return { result: '笔记不存在。', noteIds };
@@ -414,14 +414,30 @@ export async function executeTool(userId: string, name: string, args: any): Prom
         const shared = await db.select({ groupId: schema.noteShares.groupId })
           .from(schema.noteShares).where(eq(schema.noteShares.noteId, args.id)).all();
         if (shared.length === 0) return { result: '笔记不存在。', noteIds };
-        const myGroup = await db.select({ groupId: schema.groupMembers.groupId })
+        const myMemberships = await db.select({ groupId: schema.groupMembers.groupId, role: schema.groupMembers.role })
           .from(schema.groupMembers)
           .where(and(
             eq(schema.groupMembers.userId, userId),
             eq(schema.groupMembers.status, 'active'),
             inArray(schema.groupMembers.groupId, shared.map(s => s.groupId)),
-          )).get();
-        if (!myGroup) return { result: '笔记不存在。', noteIds };
+          )).all();
+        if (myMemberships.length === 0) return { result: '笔记不存在。', noteIds };
+        // PR #5b write 校验: editPermission + grants 白名单
+        let writable = note.editPermission === 'all';
+        if (!writable && myMemberships.some(m => m.role === 'owner' || m.role === 'admin')) writable = true;
+        if (!writable) {
+          const grant = await db.select({ noteId: schema.noteEditGrants.noteId })
+            .from(schema.noteEditGrants)
+            .where(and(
+              eq(schema.noteEditGrants.noteId, args.id),
+              eq(schema.noteEditGrants.userId, userId),
+            )).get();
+          writable = !!grant;
+        }
+        if (!writable) {
+          const permLabel = note.editPermission === 'admin' ? '仅管理员' : '所有人';
+          return { result: `这条笔记的编辑权限为「${permLabel}」, 你没有编辑权限。请通过笔记设置申请编辑权限后再试。`, noteIds };
+        }
       }
 
       // PR #5: shared 笔记别人持锁未过期 → 拒绝, AI 告知用户稍后再试

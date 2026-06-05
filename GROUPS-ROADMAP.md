@@ -22,7 +22,7 @@
 | **#3 文件授权** | `/api/uploads/*` 加访问中间件按 noteShares 判 + 缩略图同套逻辑 | ✅ done | ~90 行 (实际比估算少, files 表 + LIKE notes content 即可, avatar 不在 files 表自动公开) |
 | **#4 SSE 拓展 + AI 共享上下文** | AI chat 10 工具加 scope/author + 群共享可见性 helper + voice_transcription 共享授权链 | ✅ done | ~145 行 (含 author 字段 + groups.ts:90 TS 修 + context.ts 死代码清 -200) |
 | **#5 编辑锁（极简）** | 4 lock API + cron 60s 清锁 + version 乐观锁 + NoteEditModal 锁交互 + chat update_note 扩到群成员 | ✅ done | ~470 行 (含 chat update_note 同步扩 + getNoteForAccess helper) |
-| **#5b 编辑权限分级 + 申请流程** | 笔记加 edit_permission (admin/all 两档, 默认 admin) + 申请编辑权 API + admin 可删共享笔记 + 群组界面改权限 | pending | ~350 行 |
+| **#5b 编辑权限分级 + 申请流程** | 笔记加 edit_permission (admin/all 两档, 默认 admin) + 申请编辑权 6 API + admin 可删 + SSE + GroupDetail 申请管理面板 + NoteCard/NoteDetail 切换胶囊 + 额外授权 popover + Electron 通知唤窗修 + 各种 UX | ✅ done (完整) | ~1500 行 (后端 + 完整前端 UI + 文档) |
 | **#5c scope preferences** | preferences.showSharedInMain 全局开关 (默认 false, 开后 3 主 view 显示共享笔记) + scope='all' 子查询 | pending | ~150 行 |
 | **#6 表情 reaction + 评论** | note_reactions + note_comments thread + UI | pending | ~500 行 |
 
@@ -224,22 +224,20 @@ PATCH  /notes/:id                   shared 笔记必须带 lockToken + version, 
 
 ---
 
-## PR #5b 编辑权限分级 + 申请流程（蘑菇决策已锁定）
+## PR #5b 编辑权限分级 + 申请流程（已完成 ✅, 后端 + 最小前端）
 
-PR #5 ship 后的延伸. 当前 PR #5 行为 = 所有群 active member 都能改共享笔记, 蘑菇要加权限分级 + 申请流程让作者能收紧.
+PR #5 默认所有群 active member 都能改共享笔记, PR #5b 默认收紧到"管理员可改" + 加申请流程.
 
 ### 权限两档（作者本人一直能改, 不算独立档）
 
-- `admin`（默认） = 群 owner + admin 能改
+- `admin`（默认, **PR #5b 行为破坏式从 PR #5 的 `all` 改过来**）= 群 owner + admin 能改
 - `all` = 所有 active member 能改
-
-**注意 PR #5 默认是 `all`, PR #5b 把默认改为 `admin`**. 这是行为破坏式更新, dev 环境蘑菇自测, 不存在用户预期问题.
 
 ### Schema 改动
 
 - `notes` 加 `edit_permission TEXT NOT NULL DEFAULT 'admin'`（enum: admin / all）
 - 新表 `note_edit_grants`: (`note_id`, `user_id`, `granted_at`, `granted_by`)—— 申请通过后永久白名单
-- 新表 `note_edit_requests`: (`id`, `note_id`, `user_id`, `status`, `created_at`, `handled_at`, `handled_by`)
+- 新表 `note_edit_requests`: (`id`, `note_id`, `user_id`, `status`, `message`, `created_at`, `handled_at`, `handled_by`)
 
 ### 鉴权扩展
 
@@ -250,31 +248,46 @@ PR #5 ship 后的延伸. 当前 PR #5 行为 = 所有群 active member 都能改
 - 在 `note_edit_grants` 白名单内 → 放行
 - 否则 → 403（前端弹"申请编辑权"按钮）
 
-PATCH /:id + chat `update_note` + DELETE /:id 都用扩展后的 helper.
+PATCH /:id + DELETE /:id + lock API + chat `update_note` 全部用 write mode. `isAdminOfSharedNote` helper 给"管理操作"（DELETE / 审批 / 撤销授权）单独校验, 比 write 更严格 - 普通成员有 write 也不能管.
 
-### 申请流程 API
+### 6 个权限管理 API
 
-- `POST /api/notes/:id/edit-request` —— 申请编辑权（创建 pending request + SSE 推作者 + 群 admin）
-- `POST /api/notes/:id/edit-request/:reqId/approve` —— 同意（作者 + 群 admin 都能批, 通过后写入 note_edit_grants + 删 request）
-- `POST /api/notes/:id/edit-request/:reqId/reject` —— 拒绝
-- `GET /api/notes/:id/edit-requests` —— 列待审申请（作者 + admin 看）
+- `POST /:id/edit-request` —— 申请（没 write 权才能调; 已有 pending 返原 request, idempotent; SSE 推作者 + 群 admin）
+- `POST /:id/edit-requests/:reqId/approve` —— 同意（作者 + 群 admin 都能批; 事务写 grants + 改 request status）
+- `POST /:id/edit-requests/:reqId/reject` —— 拒绝
+- `GET /:id/edit-requests` —— 列所有申请（含 join users 拿 nickname/avatar）
+- `GET /:id/edit-grants` —— 列已授权用户
+- `DELETE /:id/edit-grants/:userId` —— 撤销授权
 
-### admin 可删共享笔记
+**改 editPermission 走 PATCH /:id 的 `editPermission` 字段**（仅作者改, 跟 visibility / sharedGroupIds 同款约定）, 不另加 API.
 
-DELETE /api/notes/:id 当前限作者. 扩到 admin: getNoteForAccess(write mode) + visibility='shared'. admin 删别人的笔记弹"确认是否删除 @张三 的笔记"对话.
+### SSE 事件
 
-### 前端
+- `note-edit-request` 推作者 + 群 admin, payload 含 requesterNickname / message
+- `note-edit-request-resolved` 推申请人, payload 含 status (approved/rejected)
 
-- **编辑器界面不加权限 chip**（蘑菇明确: 保持编辑界面干净）
-- 群组详情页笔记卡片右键 / 长按弹"修改编辑权限"（作者 + admin 能调）→ 弹 popover 选 admin/all
-- 锁失败 toast 加"申请编辑权"按钮 → 调 POST .../edit-request → 提示"已发送"
-- SSE `note-edit-request` 事件 → 作者 + admin 收实时提示 + desktop notification（跟 group-join-request 同款）
-- 笔记设置入口（作者 + admin 看到）显示待审申请 + 已授权用户列表（能撤销）
+### 前端 (完整)
+
+- **编辑器界面不加权限 chip**（蘑菇明确: 保持编辑界面干净, 权限切换走 NoteCard / NoteDetail）
+- 锁失败 toast 区分 409 locked / 403 no_write_permission, 后者 action 按钮一键申请
+- SSE handler 收 note-edit-request 弹 toast (**含"同意" action 一键审批**) + 桌面通知
+- SSE handler 收 resolved 事件弹通知告知申请人结果
+- `NoteCard` 类型后加单胶囊"管理员可编辑 ⟳" / "已分享" 等 (仅作者本人 + shared + `/groups/` 上下文)
+- `NoteDetail` 一行三胶囊: 「已分享到 X 个群」+ 「权限切换 ⟳」+ 「额外授权 X 人」(popover 含撤销按钮; `editPermission='all'` 时自动隐藏)
+- `GroupDetail` 加"待审编辑申请"section (折叠 >3 条), 同意按钮一键审批
+- PATCH 时 403 no_write_permission catch (兜底, 编辑期间权限被撤的罕见 case)
+- 各种 UX 修: GlobalToast button error 用白字 (不撞红底), 通知文案"申请编辑权" → "申请编辑权限", Electron 通知 click Win32 lock 防御 (setAlwaysOnTop trick)
+
+### 后端补充
+
+- **作者改自己共享笔记免锁** (PR #5 微调): 锁本意防"群成员协作时撞改", 作者多设备靠 version 乐观锁兜底
+- **群级汇总 API**: `GET /:id/note-edit-requests` 拉该群所有 pending 申请, `GET /:id/note-edit-grants` 拉所有已授权用户
+- **GET /groups/:id/notes 必须返回 sharedGroupIds + editPermission**: NoteCard 在群组里显示胶囊依赖这两个字段
 
 ### 决策锁定 ✓
 
 - ✓ **申请通过后永久授权**（note_edit_grants）, 不是单次. 之前蘑菇否决"每次编辑都申请"是这意思
-- ✓ **admin 跟 author 在权限上几乎等同**（改/删/批申请都行）, 唯一差异: admin 不能改 visibility / sharedGroupIds（仅作者控分享设置）
+- ✓ **admin 跟 author 在权限上几乎等同**（改/删/批申请都行）, 唯一差异: admin 不能改 visibility / sharedGroupIds / editPermission（仅作者控分享设置）
 - ✓ **申请审批"作者 + admin 都能批"** 跟 PR #1 admin 能"群申请审批"行为一致
 - ✓ **不在编辑器界面选权限**（保持编辑界面干净, 在群组界面 / 笔记设置入口改）
 

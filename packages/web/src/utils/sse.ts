@@ -185,6 +185,63 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] group-notes-changed parse failed:', e); }
   });
 
+  // PR #5b 编辑权限申请: note-edit-request - 申请人提交申请, 作者+群 admin 收实时提示 + 桌面通知
+  // toast 加"同意"action 让收件人一键审批 (拒绝走默认: 不操作即 toast 消失, 后续 PR 加完整审批面板)
+  es.addEventListener('note-edit-request', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as {
+        requestId: string; noteId: string; requesterId: string; requesterNickname: string; message: string | null;
+      };
+      Promise.all([import('@/composables/useToast'), import('@/api')]).then(([{ useToast }, { api }]) => {
+        const toast = useToast();
+        toast.show(`${data.requesterNickname} 申请编辑你的笔记`, {
+          kind: 'success',
+          duration: 10000,
+          action: {
+            label: '同意',
+            onClick: async () => {
+              try {
+                await api.approveNoteEditRequest(data.noteId, data.requestId);
+                toast.show('已同意, 申请人获得编辑权限', 'success', 2500);
+              } catch (e: any) {
+                toast.show('同意失败: ' + (e.message || '未知错误'), 'error', 3000);
+              }
+            },
+          },
+        });
+      });
+      showNotification({
+        title: '笔记编辑权限申请',
+        body: `${data.requesterNickname} 申请编辑笔记${data.message ? '：' + data.message : ''}`,
+        tag: `note-edit-request-${data.requestId}`,
+        path: `/note/${data.noteId}`,
+      });
+      // 让 GroupDetail 自动刷新待审列表 (跟 group-notes-changed 同款 window event 模式)
+      window.dispatchEvent(new CustomEvent('quink-edit-request-changed'));
+    } catch (e) { console.error('[sse] note-edit-request parse failed:', e); }
+  });
+
+  // PR #5b: note-edit-request-resolved - 申请人收到处理结果 (approved/rejected)
+  es.addEventListener('note-edit-request-resolved', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; status: 'approved' | 'rejected' };
+      const approved = data.status === 'approved';
+      import('@/composables/useToast').then(({ useToast }) => {
+        useToast().show(
+          approved ? '你的编辑权限申请已通过' : '你的编辑权限申请被拒绝',
+          approved ? 'success' : 'error',
+          3500,
+        );
+      });
+      showNotification({
+        title: approved ? '编辑权限申请通过' : '编辑权限申请被拒',
+        body: approved ? '现在可以编辑这条笔记了' : '作者或管理员拒绝了你的申请',
+        tag: `note-edit-resolved-${data.noteId}`,
+        path: `/note/${data.noteId}`,
+      });
+    } catch (e) { console.error('[sse] note-edit-request-resolved parse failed:', e); }
+  });
+
   // group-changed: 任何群组写操作后 broadcast 给所有 active 成员 (排除操作者).
   // 触发场景: 成员变化 / 角色变更 / 群信息修改. 不弹 toast (避免噪音), 静默刷新当前打开的群 + 群列表
   es.addEventListener('group-changed', (ev) => {

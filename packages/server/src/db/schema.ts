@@ -38,6 +38,10 @@ export const notes = sqliteTable('notes', {
   editLockToken: text('edit_lock_token'),
   editLockExpiresAt: text('edit_lock_expires_at'),
   version: integer('version').notNull().default(1),
+  // PR #5b 编辑权限分级: shared 笔记加这字段控制谁能改, private 笔记忽略 (作者直接改).
+  // 'admin' (默认) = 群 owner + admin 能改; 'all' = 所有 active member 能改. 作者本人永远能改.
+  // 没权限的可申请加入 note_edit_grants 白名单 (永久授权)
+  editPermission: text('edit_permission', { enum: ['admin', 'all'] }).notNull().default('admin'),
 });
 
 // PR #2 群组共享: 笔记 → 群组多对多. 一条笔记可分享到多个群, 删 group_members 不影响共享
@@ -50,6 +54,30 @@ export const noteShares = sqliteTable('note_shares', {
 }, (table) => ({
   pk: primaryKey({ columns: [table.noteId, table.groupId] }),
 }));
+
+// PR #5b 编辑权限白名单: 申请编辑权通过后写一条, 永久授权 (跟 group_members 一样属于"成员关系"模型).
+// 作者 / admin 可撤销 (DELETE) 让该 user 回到没权限状态. 笔记被永久删除时 cascade 清.
+export const noteEditGrants = sqliteTable('note_edit_grants', {
+  noteId: text('note_id').notNull().references(() => notes.id),
+  userId: text('user_id').notNull().references(() => users.id),
+  grantedAt: text('granted_at').notNull(),
+  grantedBy: text('granted_by').notNull().references(() => users.id), // 批准人 (作者或群 admin)
+}, (table) => ({
+  pk: primaryKey({ columns: [table.noteId, table.userId] }),
+}));
+
+// PR #5b 编辑权限申请: 没 write 权限的群成员可申请, 作者+群 admin 都能批. 通过后写 noteEditGrants 表.
+// status 保留历史: 'pending' / 'approved' / 'rejected' / 'canceled' (申请人主动撤回)
+export const noteEditRequests = sqliteTable('note_edit_requests', {
+  id: text('id').primaryKey(), // nanoid
+  noteId: text('note_id').notNull().references(() => notes.id),
+  userId: text('user_id').notNull().references(() => users.id), // 申请人
+  status: text('status', { enum: ['pending', 'approved', 'rejected', 'canceled'] }).notNull().default('pending'),
+  message: text('message'), // 申请理由 (可选)
+  createdAt: text('created_at').notNull(),
+  handledAt: text('handled_at'),
+  handledBy: text('handled_by').references(() => users.id), // 处理人 (作者或群 admin)
+});
 
 export const categories = sqliteTable('categories', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -219,6 +247,10 @@ export type VoiceTranscription = typeof voiceTranscriptions.$inferSelect;
 export type ReminderPending = typeof reminderPending.$inferSelect;
 export type NewReminderPending = typeof reminderPending.$inferInsert;
 export type NoteShare = typeof noteShares.$inferSelect;
+export type NoteEditGrant = typeof noteEditGrants.$inferSelect;
+export type NewNoteEditGrant = typeof noteEditGrants.$inferInsert;
+export type NoteEditRequest = typeof noteEditRequests.$inferSelect;
+export type NewNoteEditRequest = typeof noteEditRequests.$inferInsert;
 export type NewNoteShare = typeof noteShares.$inferInsert;
 export type NoteVisibility = Note['visibility'];
 export type ReminderChannel = typeof reminderChannels.$inferSelect;
