@@ -233,7 +233,6 @@ defineExpose({ reload: load });
         @keydown.meta.enter.exact="send"
       />
       <div class="comment-input-footer">
-        <span class="text-[11px] text-gray-400">Ctrl+Enter 发送</span>
         <button
           class="send-btn"
           :disabled="!inputContent.trim() || sending"
@@ -426,7 +425,7 @@ defineExpose({ reload: load });
 .comment-input-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
 }
 .send-btn {
   display: inline-flex;
@@ -613,12 +612,14 @@ defineExpose({ reload: load });
   color: rgb(255 255 255 / 0.55);
   background-color: rgb(255 255 255 / 0.08);
 }
+/* dark 下发送按钮是评论区主 action, 背景需明显才看得清. 原 0.2 在 #1e1e2a 上跟主背景几乎齐平 */
 [data-theme="dark"] .send-btn {
-  background-color: rgb(var(--c-accent) / 0.2);
+  background-color: rgb(var(--c-accent) / 0.35);
   color: rgb(var(--c-accent-light));
+  border-color: rgb(var(--c-accent) / 0.5);
 }
 [data-theme="dark"] .send-btn:hover {
-  background-color: rgb(var(--c-accent) / 0.3);
+  background-color: rgb(var(--c-accent) / 0.5);
 }
 [data-theme="dark"] .relative.bg-white.rounded-xl {
   background-color: rgb(40 42 56);

@@ -24,7 +24,7 @@
 | **#5 编辑锁（极简）** | 4 lock API + cron 60s 清锁 + version 乐观锁 + NoteEditModal 锁交互 + chat update_note 扩到群成员 | ✅ done | ~470 行 (含 chat update_note 同步扩 + getNoteForAccess helper) |
 | **#5b 编辑权限分级 + 申请流程** | 笔记加 edit_permission (admin/all 两档, 默认 admin) + 申请编辑权 6 API + admin 可删 + SSE + GroupDetail 申请管理面板 + NoteCard/NoteDetail 切换胶囊 + 额外授权 popover + Electron 通知唤窗修 + 各种 UX | ✅ done (完整) | ~1500 行 (后端 + 完整前端 UI + 文档) |
 | **#5c scope preferences** | preferences.showSharedInMain 全局开关 (默认 false, 开后 3 主 view 显示共享笔记) + scope='all' 子查询 | pending | ~150 行 |
-| **#6 表情 reaction + 评论** | note_reactions + note_comments thread + ReactionBar/CommentThread 组件 + NoteCard summary + NoteDetail/NoteEditModal 集成 + SSE 4 事件 | ✅ done | ~1000 行 |
+| **#6 表情 reaction + 评论** | note_reactions + note_comments thread + ReactionBar/CommentThread 组件 + NoteCard summary + NoteDetail 集成 + SSE 4 事件 | ✅ done | ~1000 行 |
 
 总量预估 ~3550 行。每个 PR 独立 ship 不破坏现有功能。
 
@@ -326,7 +326,7 @@ PR #2 注释里说"TopBar 加 scope chip 让用户主动求看共享"实际**没
 
 - ✓ **emoji 固定 5 个白名单** (`👍 ❤️ 🤔 ✅ 😂`, 前后端共用同一份), 不让用户自选 (防垃圾 / 兼容性 / picker UI 复杂度)
 - ✓ **单层 thread**: 顶层评论 (parentId=null) + 一级回复 (parentId=顶层 id). 二级及以下后端 normalize 到根 parent. UI 顶多 2 层缩进
-- ✓ **NoteDetail + NoteEditModal 都加** 评论区. NoteCard 上只 readonly 显示 summary (`👍 1  💬 2`) 点 NoteCard 走详情
+- ✓ **只 NoteDetail 加** 评论区, 编辑器 modal 保持干净 (蘑菇明确: 编辑笔记时不被评论分心, 跟 PR #5b "编辑器不加权限 chip" 同款理念). NoteCard 上只 readonly 显示 summary (`👍 1  💬 2`) 点 NoteCard 走详情
 - ✓ **NoteCard 显示计数**: shared 笔记底部 visibleReactions (filter count>0) + commentCount > 0 才显示一行, private 不显示
 
 ### Schema 改动 (2 新表)
@@ -376,11 +376,11 @@ CREATE INDEX idx_note_comments_note_created ON note_comments(note_id, created_at
 
 ### 前端 (2 新组件 + 3 处集成)
 
-- **`components/ReactionBar.vue`** —— 5 个固定 emoji + count + mine 高亮. `mode='full'` (NoteDetail/NoteEditModal 永远渲染 5 个) / `mode='compact'` (只 count>0). 乐观更新 toggle + emit `update:summary`
+- **`components/ReactionBar.vue`** —— 5 个固定 emoji + count + mine 高亮. `mode='full'` (NoteDetail 永远渲染 5 个, 可 toggle) / `mode='compact'` (只 count>0, readonly). 乐观更新 toggle + emit `update:summary`
 - **`components/CommentThread.vue`** —— 单层 thread + 顶部输入框 + 编辑/删除/回复 + @xxx 引用. SSE 增量更新自管. props: `noteId` + `canDeleteAny` (作者+admin)
 - `NoteCard.vue`: shared 笔记 tags 行后加 inline summary 行 (👍 1  💬 2). 不用 ReactionBar 组件 (readonly inline 更省)
 - `NoteDetail.vue`: 三胶囊行下加 reaction section + comment section (本地 reactionSummary ref + SSE 监听)
-- `NoteEditModal.vue`: shared 笔记 modal 改 max-w-5xl + flex 横排 + 右侧 sidebar 320px 装 CommentThread; private 笔记保持 max-w-4xl 单栏
+- `NoteEditModal.vue`: **不集成评论区** (蘑菇决策, 保持编辑器干净, 评论走 NoteDetail)
 
 ### 已知未做 (PR #6 范围外)
 

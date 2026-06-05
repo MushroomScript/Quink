@@ -134,6 +134,9 @@ function applyToggleLocally(summary: NoteReactionSummaryItem[], emoji: string): 
 .emoji {
   font-size: 1rem;
   line-height: 1;
+  /* Segoe UI Emoji / Apple Color Emoji 的 glyph 在 em-box 内贴 baseline (偏底 ~1px),
+     span box 在胶囊中心但 emoji 字符本身视觉偏下. translateY 视觉补偿不影响 layout */
+  transform: translateY(-1px);
 }
 .is-compact .emoji {
   font-size: 0.9375rem;
@@ -143,17 +146,22 @@ function applyToggleLocally(summary: NoteReactionSummaryItem[], emoji: string): 
   font-weight: 500;
 }
 
-/* 暗色主题适配 */
+/* 暗色主题适配: 跟 style.css 项目约定 (bg-gray-100=0.05 / hover=0.14 / accent 高亮=0.22) 同档,
+   原 0.06/0.12/0.25 在深色主背景 (#1e1e2a) 上对比度太弱, 胶囊框几乎隐形 */
 [data-theme="dark"] .reaction-btn {
-  background-color: rgb(255 255 255 / 0.06);
-  color: rgb(255 255 255 / 0.7);
+  background-color: rgb(255 255 255 / 0.10);
+  color: rgb(255 255 255 / 0.8);
 }
 [data-theme="dark"] .reaction-btn:hover {
-  background-color: rgb(255 255 255 / 0.12);
+  background-color: rgb(255 255 255 / 0.18);
 }
 [data-theme="dark"] .reaction-btn.mine {
-  background-color: rgb(var(--c-accent) / 0.25);
+  background-color: rgb(var(--c-accent) / 0.35);
   color: rgb(var(--c-accent-light));
+  border-color: rgb(var(--c-accent) / 0.55);
+}
+[data-theme="dark"] .reaction-btn.mine:hover {
+  background-color: rgb(var(--c-accent) / 0.45);
 }
 [data-theme="dark"] .reaction-btn.is-compact {
   color: rgb(255 255 255 / 0.55);
