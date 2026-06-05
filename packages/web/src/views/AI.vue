@@ -5,6 +5,7 @@ import { api } from '@/api';
 import Vditor from 'vditor';
 import { useRouter, useRoute } from 'vue-router';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { backendBaseUrl } from '@/utils/backendUrl';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { dragState } from '@/utils/cardDnd';
 import {
@@ -393,7 +394,8 @@ async function sendMessage() {
 
   try {
     const token = localStorage.getItem('quink_token');
-    const res = await fetch(`/api/ai/chat/conversations/${targetConvId}/messages`, {
+    // AI chat 流式响应直连 backend 绕开 vite proxy (避免长流泄漏 socket 占满 :24888 池). 详见 utils/backendUrl.ts
+    const res = await fetch(`${backendBaseUrl()}/api/ai/chat/conversations/${targetConvId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ question: text }),

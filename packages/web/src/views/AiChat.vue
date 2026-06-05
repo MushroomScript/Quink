@@ -5,6 +5,7 @@ import { api, isLoggedIn } from '@/api';
 import Vditor from 'vditor';
 import { PhSparkle, PhStop, PhPaperPlaneTilt, PhXCircle } from '@phosphor-icons/vue';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { backendBaseUrl } from '@/utils/backendUrl';
 
 // setup 顶层同步设主题（在 Vue 第一次 render 前），让窗口 show 时就是正确主题色
 document.documentElement.setAttribute('data-theme', localStorage.getItem('quink_theme') || 'blueberry');
@@ -84,7 +85,8 @@ async function sendMessage() {
 
   try {
     const token = localStorage.getItem('quink_token');
-    const res = await fetch(`/api/ai/chat/conversations/${convId.value}/messages`, {
+    // AI chat 流式响应直连 backend 绕开 vite proxy. 详见 utils/backendUrl.ts
+    const res = await fetch(`${backendBaseUrl()}/api/ai/chat/conversations/${convId.value}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ question: text }),

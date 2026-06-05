@@ -120,6 +120,20 @@ cp -r node_modules/vditor/dist packages/web/public/vditor/dist
 - 小屏：侧边栏改抽屉，搜索折叠成图标，`MobileInput`（textarea）替换 Vditor。
 - `100dvh` + JS `--app-height` 处理 iOS Safari 视口。
 
+## 长连接走 backendBaseUrl helper（绕 vite proxy）
+
+`/api/sse` / AI Chat 流式 fetch / 未来要加的 WebSocket 等**长连接**, 必须通过 `utils/backendUrl.ts` 的 `backendBaseUrl()` helper 拼 URL, **不走 vite proxy**.
+
+根因: vite 的 http-proxy 转发 SSE / 流式 fetch 时, 在重连 / 上游异常场景会泄漏 socket. 浏览器对 :24888 的 HTTP/1.1 池 (默认 6 个并发) 被 active 状态的"僵尸 socket"占满 → 新 fetch "Initial connection: Stalled" 排队几分钟后被 cancel. 用户感受到的就是"整页 API 全 pending 后被取消", Chromium `chrome://net-internals/#sockets` 的 `Flush Socket Pools` 只清 idle socket 救不回, **必须关掉所有同 origin 标签**让网络栈清空 (无痕 tab 都得关).
+
+helper 行为:
+- **dev**: 根据 `window.location.hostname` 推断 backend URL (`http://{hostname}:38999`). 同时兼容 PC localhost 跟手机连 PC 局域网 IP (vite host:true 模式). 前置: PC 防火墙放行 38999 入站
+- **prod**: 返回空字符串, 调用方拼出来还是 `/api/xxx` 相对路径走同 origin (nginx 反代 / Docker 一体化容器 / K8s ingress 等). 同 origin 没 vite proxy 那种 bug
+
+加新长连接 endpoint 时套这个 helper, 不要写死 `/api/xxx`. 普通短 fetch (GET 一次性响应) 不需要套, 仍走 vite proxy 没问题. 跨 origin fetch 触发 OPTIONS preflight 但 hono cors() 默认放行常用 header, 长流场景多 ~50ms 可忽略.
+
+接入位置: `utils/sse.ts` (reminder SSE) / `views/AI.vue` (AI chat 流式) / `views/AiChat.vue` (快捷窗口 AI chat).
+
 ## 文件 url helper（裸名约定）
 
 DB `files.url` 字段 + 笔记 `content` 里 markdown link 的 url 都只存**裸文件名**（如 `xxx.png`），不带 `/api/uploads/` 前缀（后端约定，详见 `packages/server/CLAUDE.md`）。前端渲染层用 `src/utils/fileUrl.ts` 的 helper 拼/剥前缀：

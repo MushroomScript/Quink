@@ -4,6 +4,7 @@
 // EventSource 内置自动重连 (默认 3s), 但 401 后会无限重连. 我们手动检测 401 → 主动 close
 
 import { getAuthToken } from '@/api';
+import { backendBaseUrl } from './backendUrl';
 
 type ReminderEvent = {
   noteId: string;
@@ -49,7 +50,9 @@ export function startReminderSse() {
   const token = getAuthToken();
   if (!token) return;
 
-  const url = `/api/sse?token=${encodeURIComponent(token)}`;
+  // SSE 直连 backend 绕开 vite proxy 转发 (避免长连接占用 :24888 socket 池).
+  // 详见 utils/backendUrl.ts 的根因说明
+  const url = `${backendBaseUrl()}/api/sse?token=${encodeURIComponent(token)}`;
   es = new EventSource(url);
 
   es.addEventListener('ready', () => {
