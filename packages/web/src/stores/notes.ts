@@ -253,8 +253,21 @@ export const useNotesStore = defineStore('notes', () => {
     return res.data;
   }
 
-  async function updateNote(id: string, data: Partial<Note>) {
+  async function updateNote(id: string, data: Partial<Note> & { lockToken?: string; editContext?: { groupId?: string } }) {
     const res = await api.updateNote(id, data);
+    // PR #7b: COW fork 路径 (非作者改 shared / 作者从群组页改 root 多群 → 后端 fork 写入).
+    // 此时 res.data 是新 fork note (新 id), 老 note 仍存在 (note_shares 仅去掉 ctxGroupId, 其它群保留).
+    // in-place mutate 无法同步: 老 note 字段可能也变 (note_shares 少了一项), 新 fork 不在任一 view local cache 里.
+    // 解决: 当前 view 走 fetchNotes keepCount 拉权威数据, 跨 view 标 dirty 下次 onActivated 同步.
+    if (res.forked) {
+      if (activeView.value) {
+        await fetchNotes(undefined, { keepCount: true });
+      }
+      for (const k of Object.keys(_viewState) as ViewKey[]) {
+        if (k !== activeView.value) _viewState[k].dirty = true;
+      }
+      return res.data;
+    }
     // 改字段同步到所有 view 的本地 notes 副本. 4 种情境对称处理 (源 / 目标 × 当前 / 后台):
     //   源 view 当前 = 普通改 (Object.assign + 可能 splice 过滤 / sortBy 重排)
     //   源 view 后台 + 跨 view 搬走 (k !== targetViewKey) = 不动 vs.notes 只标 dirty

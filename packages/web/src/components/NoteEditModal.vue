@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue';
+import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import { useToast } from '@/composables/useToast';
 import RichEditor from './RichEditor.vue';
@@ -9,12 +10,33 @@ import { PhXCircle } from '@phosphor-icons/vue';
 const props = defineProps<{ note: Note; initialFullscreen?: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
+const route = useRoute();
 const store = useNotesStore();
 const toast = useToast();
 const saving = ref(false);
 const editorRef = ref<InstanceType<typeof RichEditor>>();
 const modalCardRef = ref<HTMLElement>();
 const showConfirm = ref(false);
+
+// PR #7b: 从 router path 自动识别群上下文. /groups/:gid 形式 → editContext.groupId, 否则 undefined (主视图改).
+// 后端用这字段决定是否 fork: 非作者必 fork; 作者改 root 多群也 fork (避免误改影响多群).
+const editGroupId = computed<string | undefined>(() => {
+  const m = route.path.match(/^\/groups\/([^/]+)/);
+  return m ? m[1] : undefined;
+});
+
+// PR #7b 版本标 chip 文案. 仅 shared 笔记显示, 提醒用户"改这条会影响什么":
+//   fork (parentNoteId 非空) = "本群独占版" — 该群专属, 只影响该群
+//   root + 多群 = "N 群共享版" — 改会同步多群 (作者从灵感页改) / 触发 fork (作者从群组页改 / 非作者改)
+//   root + 单群 = "群共享版" — 改会同步该群 (无歧义不强调)
+const versionBadge = computed<{ text: string; tone: 'fork' | 'root' } | null>(() => {
+  if (props.note.visibility !== 'shared') return null;
+  if (props.note.parentNoteId) return { text: '本群独占版', tone: 'fork' };
+  const n = props.note.sharedGroupIds?.length ?? 0;
+  if (n > 1) return { text: `${n} 群共享版`, tone: 'root' };
+  if (n === 1) return { text: '群共享版', tone: 'root' };
+  return null;
+});
 
 // PR #5 编辑锁: 仅 shared 笔记走 (private 不需要协作锁, 直接编辑).
 // onMounted 先 try acquire, 失败 → 不打开 modal 直接 emit close;
@@ -139,6 +161,10 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
       patchData.lockToken = lockToken.value;
       patchData.version = props.note.version || 1;
     }
+    // PR #7b: 透传群上下文给后端 fork 决策. editGroupId 为空 (主视图改) 时不传, 后端走"作者改 root 多群同步"语义.
+    if (editGroupId.value) {
+      patchData.editContext = { groupId: editGroupId.value };
+    }
     await store.updateNote(props.note.id, patchData);
     // 提交成功 server 自动清锁, lockToken 失效, 心跳无效 → 停掉
     lockToken.value = null;
@@ -153,6 +179,13 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
     } else if (msg.includes('no_write_permission')) {
       // PR #5b: PATCH 时校验失败 (理论上 acquireLock 已拒, 但权限中途被撤等罕见 case 走到这)
       toast.show('编辑权限已被收回，请关闭后重新打开笔记', 'error', 3500);
+    } else if (msg.includes('editContext_ambiguous')) {
+      // PR #7b: 罕见歧义 case — 用户在多群里都能看到这条笔记, 主视图改没法判断 fork 到哪个群.
+      // 引导用户从群组页面打开 (那条路径 editGroupId 自动取到, 无歧义)
+      toast.show('这条笔记你在多个群里都能看到，请从某个群组页面打开编辑', 'error', 4500);
+    } else if (msg.includes('note_not_in_group')) {
+      // PR #7b: 笔记跟当前群上下文不匹配 (并发 case: 进入编辑时还在群里, 提交时该笔记已从群里撤下)
+      toast.show('该笔记已不在当前群组，请关闭后重新打开', 'error', 4000);
     } else {
       toast.show('保存失败：' + (msg || '未知错误'), 'error', 3000);
     }
@@ -237,7 +270,15 @@ onBeforeUnmount(() => {
       <div ref="modalCardRef" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[80vh] flex flex-col overflow-hidden ring-1 ring-black/5">
         <!-- Header -->
         <div class="flex items-center justify-between px-5 py-3 bg-gray-50/80">
-          <span class="text-xs font-medium text-gray-500">编辑笔记</span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-medium text-gray-500">编辑笔记</span>
+            <!-- PR #7b: 版本标. fork = 黄琥珀提醒"只影响该群"; root 多群 = 蓝提示"会同步多群" -->
+            <span
+              v-if="versionBadge"
+              class="text-[10px] px-1.5 py-0.5 rounded-md"
+              :class="versionBadge.tone === 'fork' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'"
+            >{{ versionBadge.text }}</span>
+          </div>
           <div class="flex items-center gap-3">
             <span class="text-[11px] text-gray-400 hidden sm:inline">
               <kbd class="px-1.5 py-0.5 bg-gray-200/60 rounded text-[10px]">Esc</kbd> 关闭

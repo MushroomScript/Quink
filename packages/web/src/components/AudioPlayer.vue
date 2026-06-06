@@ -4,6 +4,7 @@
 // 音量 popover Teleport 到 body, 避免被祖先 overflow-hidden 截断.
 import { ref, computed, markRaw } from 'vue';
 import { PhPlay, PhPause, PhSpeakerHigh, PhSpeakerLow, PhSpeakerSlash } from '@phosphor-icons/vue';
+import { unzoomRect } from '@/utils/zoom';
 
 const props = defineProps<{ src: string; hideBars?: boolean }>();
 
@@ -38,7 +39,8 @@ function onVolumeMouseEnter() {
   if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
   if (showVolumePopover.value) return;
   if (volumeBtn.value) {
-    const r = volumeBtn.value.getBoundingClientRect();
+    // unzoomRect: CSS zoom 下 rect 是 zoomed 坐标, inline px 渲染时又被 zoom 一次 → 飞错位置. 除以 zoom 归一.
+    const r = unzoomRect(volumeBtn.value);
     // popover 宽 ~40px (w-10), 高 ~120px (h-28 + p-2 = 112 + 16); 向上弹, 中心对齐按钮中心
     volumePopoverPos.value = {
       top: (r.top - 8 - 120) + 'px',

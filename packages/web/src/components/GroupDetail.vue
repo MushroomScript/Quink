@@ -626,8 +626,8 @@ async function saveAnnouncement() {
               <div class="mb-3 flex justify-center text-gray-300">
                 <PhNote size="2.5rem" weight="fill" />
               </div>
-              <p class="text-gray-500 text-sm">还没有共享笔记</p>
-              <p class="text-gray-400 text-xs mt-1">在编辑器底栏选择本群可见性, 笔记会出现在这里</p>
+              <p class="text-gray-500 text-sm">还没有共享内容</p>
+              <p class="text-gray-400 text-xs mt-1">在编辑器底栏选择本群可见性, 内容会出现在这里</p>
             </div>
             <div v-else class="space-y-3">
               <NoteCard v-for="n in groupNotes" :key="n.id" :note="n" />

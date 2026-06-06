@@ -8,6 +8,7 @@ import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLi
 import { pinyinMatch } from '@/utils/pinyin';
 import { useToast } from '@/composables/useToast';
 import DatePicker from '@/components/DatePicker.vue';
+import { unzoomRect, unzoomViewport } from '@/utils/zoom';
 
 const toggleMobileSidebar = inject<() => void>('toggleMobileSidebar');
 
@@ -24,7 +25,7 @@ function toggleBatchMove() {
   if (showBatchMove.value) {
     if (categories.value.length === 0) loadCategories();
     if (batchMoveBtn.value) {
-      const r = batchMoveBtn.value.getBoundingClientRect();
+      const r = unzoomRect(batchMoveBtn.value);
       const top = r.bottom + 4;
       const left = r.right - 160;
       batchMovePos.value = { top: top + 'px', left: left + 'px' };
@@ -40,7 +41,7 @@ const batchTypePos = ref({ top: '0px', left: '0px' });
 function toggleBatchType() {
   showBatchType.value = !showBatchType.value;
   if (showBatchType.value && batchTypeBtn.value) {
-    const r = batchTypeBtn.value.getBoundingClientRect();
+    const r = unzoomRect(batchTypeBtn.value);
     batchTypePos.value = { top: (r.bottom + 4) + 'px', left: (r.right - 140) + 'px' };
   }
 }
@@ -75,7 +76,7 @@ async function toggleBatchTags() {
       try { const res = await api.getTags(); allTags.value = res.data; } catch (e) { console.error('[toggleBatchTags] getTags failed:', e); }
     }
     if (batchTagsBtn.value) {
-      const r = batchTagsBtn.value.getBoundingClientRect();
+      const r = unzoomRect(batchTagsBtn.value);
       batchTagsPos.value = { top: (r.bottom + 4) + 'px', left: (r.right - 240) + 'px' };
     }
   } else {
@@ -216,10 +217,11 @@ const dateFilterPos = ref({ top: '0px', right: '0px' });
 function openDateFilter() {
   if (dateFilterOpen.value) { dateFilterOpen.value = false; return; }
   if (dateFilterBtn.value) {
-    const r = dateFilterBtn.value.getBoundingClientRect();
+    const r = unzoomRect(dateFilterBtn.value);
+    const { vw } = unzoomViewport();
     dateFilterPos.value = {
       top: `${r.bottom + 4}px`,
-      right: `${window.innerWidth - r.right}px`,
+      right: `${vw - r.right}px`,
     };
   }
   dateFilterOpen.value = true;
@@ -281,7 +283,7 @@ function doSearch(immediate = false) {
 
 function updateTagSuggestPos() {
   if (!searchBoxEl.value) return;
-  const r = searchBoxEl.value.getBoundingClientRect();
+  const r = unzoomRect(searchBoxEl.value);
   tagSuggestPos.value = {
     top: `${r.bottom + 4}px`,
     left: `${r.left}px`,

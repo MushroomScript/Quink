@@ -2,6 +2,64 @@
 
 Quink 前端专属指引（Vue 3 + Vite + TailwindCSS + Vditor + ECharts）。
 
+## CSS zoom 显示比例（网页端独有坑，加 fixed/absolute popover 必读）
+
+Quink 的"显示比例"功能两条实现路径：
+
+- **Electron 端**走 `webContents.setZoomFactor()` (Chromium 内置 page zoom, 跟用户按 Ctrl+滚轮一模一样)。全栈坐标系自动一致 —— rect / innerWidth / inline style px / 鼠标事件 / hit-test 都用同一 zoom 因子, 开发者完全感知不到 zoom 存在, 当 zoom=1 写代码即可。
+- **网页/PWA 端**走 CSS `zoom: 1.x` 在 `<html>` 上 (`App.vue applyZoomLevel`). CSS zoom 是非标准属性, chrome 内部实现满是坑:
+  - `getBoundingClientRect()` 返回 zoomed 坐标 (screen px)
+  - `window.innerWidth/innerHeight` 返回 zoomed
+  - **但 `inline style.top/left/right/bottom = 'Xpx'` 设到 fixed element 时, 渲染会被 zoom 再乘一次** ← 这是最大的坑
+  - 鼠标 event clientX/Y 是 zoomed
+  - `clientWidth/scrollLeft` 单位看 element 自己有没 zoom (body 上没 zoom 就是 unzoomed)
+
+如果在 JS 里**用 rect 算位置 + 设 inline style px**（典型 popover/menu/tooltip 的 `Teleport to="body" + fixed + JS positioning` 模式）, 网页端 zoom=1.5 时 popover 会飞出视口 1.5x. Electron 端没事但是网页端必坏。
+
+**必须用 `utils/zoom.ts` 的 helper**:
+
+```ts
+import { unzoomRect, unzoomViewport } from '@/utils/zoom';
+
+function showMyPopover() {
+  const r = unzoomRect(triggerEl.value);       // 把 zoomed rect 除以 zoom → unzoomed CSS px
+  const { vw, vh } = unzoomViewport();         // 把 zoomed innerWidth/Height 除以 zoom
+  popoverPos.value = {
+    top: `${r.bottom + 4}px`,
+    left: `${r.left}px`,
+    right: `${vw - r.right}px`,
+  };
+}
+```
+
+helper 内部 Electron 端 zoom 返回 1, 行为不变 (跟直接用 r.bottom 一样). 网页端 zoom 因子非 1 时除掉. 设的 inline px 是 unzoomed CSS px, 浏览器渲染时 *zoom 自然回到目标视觉位置。
+
+**已修的 11 处** (按 helper 重写过):
+- `NoteCard.vue` toggleMenu (三点菜单)
+- `NoteDetail.vue` toggleMenu (三点菜单)
+- `VisibilityChip.vue` recalcPosition (编辑器底栏可见性 chip popover)
+- `AudioPlayer.vue` 音量 popover
+- `TopBar.vue` 5 处 (batchMove / batchType / batchTags / dateFilter / tagSuggest)
+- `DatePicker.vue` positionPopup (日期/时间选择器)
+- `Stats.vue` cell tooltip (热力图悬浮)
+- `GlobalToast.vue` measureOffset (toast 顶部对齐)
+- `RichEditor.vue` 工具栏 tooltip
+- `useMasonry.ts` 列数自适应 fallback path
+
+**仍可能踩坑的地方**（未来加 popover 前先检查）:
+- 加新 popover/menu/tooltip 用 `<Teleport to="body">` + `position: fixed` + JS 算 top/left/right/bottom: **必须用 helper**
+- 加新 dropdown trigger + inline positioning: **必须用 helper**
+- 浮动菜单 / context menu / floating window: **必须用 helper**
+
+**不需要 helper 的场景**:
+- 算相对比例 (`(e.clientX - rect.left) / rect.width` 这类) — 单位相消, OK
+- 用 CSS `position: absolute` + Tailwind class 定位 (`top-full left-0`) — 不走 JS, OK
+- 用 `<Transition name="modal">` 全屏覆盖 (`fixed inset-0`) — 不算位置, OK
+
+如果未来 CSS zoom 替换成 `transform: scale()` 实现"显示比例" (long-term plan), helper 可以一行改成 `getCssZoom() → 1` 全部回退. 当前架构兼容这条退路。
+
+**密码框光标偏移 corner case**: 跟 zoom 无关但同源 ("`mirror` 里字符宽度跟 input 视觉宽度不一致"). `useCustomCaret.ts` 已用 `-webkit-text-security: disc` + `CSS.supports` fallback `'•'.repeat(n)` 跨浏览器修. 详见该文件注释.
+
 ## 主题系统
 
 `src/style.css` 中的 CSS 变量定义了 7 套主题（blueberry、lavender、mint、peach、lemon、cloud、dark）。通过 `<html>` 上的 `data-theme` 属性切换。Tailwind 颜色引用这些变量：

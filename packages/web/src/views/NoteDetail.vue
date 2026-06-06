@@ -7,7 +7,8 @@ import { useGroupsStore } from '@/stores/groups';
 import { useToast } from '@/composables/useToast';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
-import { api, type Note, type NoteEditGrant } from '@/api';
+import { unzoomRect, unzoomViewport } from '@/utils/zoom';
+import { api, type Note, type NoteEditGrant, type NoteEditHistoryRow } from '@/api';
 import Vditor from 'vditor';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -101,6 +102,32 @@ async function doRevokeGrant() {
 const showSharedGroupsPopup = ref(false);
 // 已授权 popover: 收到胶囊里, 点击展开 (不常用功能不独占一行)
 const showGrantsPopup = ref(false);
+
+// PR #7b: 编辑历史 popover (作者 + 群成员都能看, 仅 shared + editorCount > 0 显示). lazy load 不预拉.
+const editorCount = computed(() => note.value?.editorCount ?? 0);
+const editHistory = ref<NoteEditHistoryRow[]>([]);
+const showEditHistoryPopup = ref(false);
+async function toggleEditHistory() {
+  showEditHistoryPopup.value = !showEditHistoryPopup.value;
+  showSharedGroupsPopup.value = false;
+  showGrantsPopup.value = false;
+  if (showEditHistoryPopup.value && editHistory.value.length === 0 && note.value) {
+    try {
+      const res = await api.getNoteEditHistory(note.value.id);
+      editHistory.value = res.data;
+    } catch (e: any) {
+      toast.show(e?.message || '加载编辑历史失败', 'error');
+    }
+  }
+}
+// PR #7b 版本标 chip 文案 (跟 NoteEditModal / NoteCard 同 3 档逻辑保口径一致)
+const versionBadge = computed<{ text: string; tone: 'fork' | 'root' } | null>(() => {
+  if (!note.value || note.value.visibility !== 'shared') return null;
+  if (note.value.parentNoteId) return { text: '群独占版', tone: 'fork' };
+  const n = sharedGroupIds.value.length;
+  if (n > 1) return { text: `${n} 群共享版`, tone: 'root' };
+  return null;
+});
 const openEditModal = inject<(note: Note, fullscreen?: boolean) => void>('openEditModal');
 const detailTitle = inject<Ref<string>>('detailTitle');
 const hasRefPreviewPending = inject<Ref<boolean>>('hasRefPreviewPending');
@@ -215,10 +242,11 @@ const menuPos = ref<{ top: string; right: string }>({ top: '0px', right: '0px' }
 function toggleMenu() {
   if (showMenu.value) { showMenu.value = false; return; }
   if (menuBtn.value) {
-    const r = menuBtn.value.getBoundingClientRect();
+    const r = unzoomRect(menuBtn.value);
+    const { vw } = unzoomViewport();
     menuPos.value = {
       top: (r.bottom + 4) + 'px',
-      right: (window.innerWidth - r.right) + 'px',
+      right: (vw - r.right) + 'px',
     };
   }
   showMenu.value = true;
@@ -513,6 +541,44 @@ onUnmounted(() => {
         <!-- 共用 backdrop 关两个 popover -->
         <div v-if="showSharedGroupsPopup || showGrantsPopup" class="fixed inset-0 z-[var(--z-overlay-backdrop)]"
           @click="showSharedGroupsPopup = false; showGrantsPopup = false" />
+      </div>
+
+      <!-- PR #7b: 版本标 + 编辑历史行 (所有 shared 笔记可见, 含群成员看作者笔记). 跟分享设置行分开避免破坏 isMyNote 条件. -->
+      <div v-if="isShared && (versionBadge || editorCount > 0)" class="mb-4 flex items-center gap-2 text-xs relative flex-wrap">
+        <span v-if="versionBadge"
+          class="px-2 py-0.5 rounded-full font-medium"
+          :class="versionBadge.tone === 'fork' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'">
+          {{ versionBadge.text }}
+        </span>
+        <span v-if="editorCount > 0" class="relative inline-block">
+          <button @click.stop="toggleEditHistory"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
+            <PhPencilSimple size="0.75rem" weight="fill" />
+            {{ editorCount }} 人编辑过
+          </button>
+          <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
+            leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
+            <div v-if="showEditHistoryPopup"
+              class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[var(--z-overlay)] w-[280px] max-h-[320px] overflow-y-auto space-y-1">
+              <div v-if="editHistory.length === 0" class="text-xs text-gray-400 px-2 py-3 text-center">暂无编辑记录</div>
+              <div v-for="h in editHistory" :key="h.id"
+                class="flex items-center gap-2 hover:bg-gray-50 rounded-lg p-1.5">
+                <img v-if="h.avatar" :src="resolveFileThumbUrl(h.avatar)"
+                  @error="thumbErrorFallback($event, resolveFileUrl(h.avatar))"
+                  class="w-6 h-6 rounded-full object-cover shrink-0" alt="" />
+                <div v-else class="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
+                  {{ (h.nickname || '?').charAt(0).toUpperCase() }}
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-medium truncate">{{ h.nickname || '?' }}</div>
+                  <div class="text-[10px] text-gray-400">{{ dayjs(h.editedAt).format('MM-DD HH:mm') }}</div>
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </span>
+        <div v-if="showEditHistoryPopup" class="fixed inset-0 z-[var(--z-overlay-backdrop)]"
+          @click="showEditHistoryPopup = false" />
       </div>
 
       <!-- PR #5b 撤销授权确认 modal -->

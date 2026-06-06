@@ -29,6 +29,7 @@ import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLi
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import { highlightTextByPinyin } from '@/utils/pinyin';
 import { startCardDrag, dragState } from '@/utils/cardDnd';
+import { unzoomRect, unzoomViewport } from '@/utils/zoom';
 import ReminderPicker from '@/components/ReminderPicker.vue';
 import { useNow } from '@/composables/useNow';
 
@@ -43,12 +44,25 @@ const auth = useAuthStore();
 const isMyNote = computed(() => !props.note.userId || props.note.userId === auth.user?.id);
 const isShared = computed(() => props.note.visibility === 'shared');
 const sharedCount = computed(() => props.note.sharedGroupIds?.length ?? 0);
+const editorCount = computed(() => props.note.editorCount ?? 0);
+
+// PR #7b 版本标 chip: 只在 fork case 显示 ("群独占版"是关键警告 — 编辑只影响该群).
+// root + 多群 case 不显示在 NoteCard (会跟现有 "已分享" / "管理员可编辑" / "@作者" chip 一起撑爆 header,
+// 实测 5个 chip 同行宽 ~280px > 多数 NoteCard 宽度 → "灵感"两字纵向挤压, "几秒前"竖排, 三点按钮出卡片
+// 外点不到). 多群信息已经在 "已分享" chip 的 title hover 里, 用户能看. fork 标改到 NoteDetail 全幅视图
+// + NoteEditModal header 显示, 那两处空间够.
+const versionBadge = computed<{ text: string; tone: 'fork' } | null>(() => {
+  if (!isShared.value) return null;
+  if (props.note.parentNoteId) return { text: '群独占版', tone: 'fork' };
+  return null;
+});
 
 // PR #6: shared 笔记底部 reaction summary + 评论计数 (readonly 展示, 点 NoteCard 走详情交互).
 // 只显示 count>0 的 emoji 避免 5 个胶囊占满, 0 评论时整行不显示
 const visibleReactions = computed(() => (props.note.reactionSummary || []).filter(r => r.count > 0));
 const commentCount = computed(() => props.note.commentCount || 0);
-const showSocialMeta = computed(() => isShared.value && (visibleReactions.value.length > 0 || commentCount.value > 0));
+// PR #7b: editorCount > 0 也触发底部 meta 行显示 ("N 人编辑过")
+const showSocialMeta = computed(() => isShared.value && (visibleReactions.value.length > 0 || commentCount.value > 0 || editorCount.value > 0));
 
 // PR #5b: 编辑权限胶囊只在群组上下文显示 (/groups/:id 路径), 避免污染灵感/笔记/待办主 view
 const route = useRoute();
@@ -246,16 +260,19 @@ const menuBtn = ref<HTMLElement>();
 const menuPos = ref<{ top: string; right: string }>({ top: '0px', right: '0px' });
 
 // Teleport+fixed 可跨 main 的 overflow，但不能跨 viewport 物理边界（窗口外不能渲染）；
-// 下方空间不够菜单（估 ~160px）就向按钮上方弹
+// 下方空间不够菜单（估 ~160px）就向按钮上方弹.
+// unzoomRect + unzoomViewport: 蘑菇汇报"网页版缩放后菜单错位偏很远" — CSS zoom 下 rect 是 zoomed,
+// inline px 渲染又被 zoom 一次, 必须归一到 unzoomed. 详见 utils/zoom.ts.
 function toggleMenu() {
   if (showMenu.value) { showMenu.value = false; return; }
   if (menuBtn.value) {
-    const r = menuBtn.value.getBoundingClientRect();
+    const r = unzoomRect(menuBtn.value);
+    const { vw, vh } = unzoomViewport();
     const estMenuH = 160;
-    const flipUp = r.bottom + 4 + estMenuH > window.innerHeight;
+    const flipUp = r.bottom + 4 + estMenuH > vh;
     menuPos.value = {
       top: flipUp ? `${r.top - estMenuH - 4}px` : `${r.bottom + 4}px`,
-      right: `${window.innerWidth - r.right}px`,
+      right: `${vw - r.right}px`,
     };
   }
   showMenu.value = true;
@@ -399,10 +416,16 @@ const typeColor: Record<string, string> = {
           </svg>
         </div>
         <!-- type chip 在非 selectMode 时充当拖动 handle (整卡片不 draggable, 让正文可选文字); selectMode 时不需要它单独拖, 整卡片接管 -->
-        <span class="text-[11px] px-2 py-0.5 rounded-full font-medium select-none touch-none"
+        <!-- shrink-0 whitespace-nowrap: 防 chip 行内容溢出时 type chip 被压扁让"灵感"两字纵向挤压 (实测 case) -->
+        <span class="text-[11px] px-2 py-0.5 rounded-full font-medium select-none touch-none shrink-0 whitespace-nowrap"
           :class="[typeColor[note.type], !store.selectMode ? 'cursor-grab active:cursor-grabbing' : '']"
           @pointerdown.stop="!store.selectMode ? onPointerDown($event) : undefined">
           {{ typeLabels[note.type] }}
+        </span>
+        <!-- PR #7b 版本标: 仅 fork case 显示 "群独占版" (黄琥珀). root + 多群 不在 NoteCard 紧凑视图标 -->
+        <span v-if="versionBadge"
+          class="text-[11px] px-2 py-0.5 rounded-full font-medium select-none whitespace-nowrap bg-amber-50 text-amber-700">
+          {{ versionBadge.text }}
         </span>
         <!-- PR #2 / PR #5b: 我自己发的共享笔记加 "已分享" chip; 数量在详情页/title hover 看. 字号 padding 跟 type chip 一致.
              别人发的显示作者头像 + nickname -->
@@ -419,21 +442,24 @@ const typeColor: Record<string, string> = {
           {{ (note.editPermission || 'admin') === 'admin' ? '管理员可编辑' : '所有人可编辑' }}
           <PhArrowsClockwise size="0.625rem" weight="bold" />
         </button>
+        <!-- 作者头像 + nickname: 头像 shrink-0 保留, nickname min-w-0+truncate 让它跟 category 一起做"可压缩担当".
+             不让整 span shrink-0, 否则 nickname 强占空间挤爆 NoteCard 右边把三点推出卡片外 (蘑菇汇报: 三点出卡片点不到) -->
         <span v-else-if="!isMyNote && (note as any).authorNickname"
-          class="inline-flex items-center gap-1 text-[10px] text-gray-500 select-none"
+          class="inline-flex items-center gap-1 text-[10px] text-gray-500 select-none min-w-0"
           :title="`@${(note as any).authorNickname}`">
           <img v-if="(note as any).authorAvatar" :src="resolveFileThumbUrl((note as any).authorAvatar)"
             @error="thumbErrorFallback($event, resolveFileUrl((note as any).authorAvatar))"
-            class="w-4 h-4 rounded-full object-cover" alt="" />
-          <div v-else class="w-4 h-4 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[8px] font-bold">
+            class="w-4 h-4 rounded-full object-cover shrink-0" alt="" />
+          <div v-else class="w-4 h-4 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[8px] font-bold shrink-0">
             {{ ((note as any).authorNickname || '?').charAt(0).toUpperCase() }}
           </div>
-          <span class="truncate max-w-[60px]">{{ (note as any).authorNickname }}</span>
+          <span class="truncate min-w-0">{{ (note as any).authorNickname }}</span>
         </span>
-        <span v-if="note.category" class="text-xs text-gray-400">{{ note.category }}</span>
+        <!-- category 跟 nickname 同 "可压缩担当": min-w-0 + truncate 让长 category 自己缩 (而非把三点推出卡片外) -->
+        <span v-if="note.category" class="text-xs text-gray-400 truncate min-w-0">{{ note.category }}</span>
         <!-- 提醒铃铛: 仅 todo 且已设 todoDue 时显示, 点击改提醒. 暗色用 amber, 已过用 gray -->
         <span v-if="note.type === 'todo' && note.todoDue"
-          class="ml-auto flex items-center gap-1 text-[11px] cursor-pointer hover:opacity-70"
+          class="ml-auto flex items-center gap-1 text-[11px] cursor-pointer hover:opacity-70 shrink-0 whitespace-nowrap"
           :class="reminderText === '已过' ? 'text-gray-400' : 'text-amber-600'"
           :title="reminderFullText"
           @click.stop="openReminderPicker">
@@ -441,12 +467,13 @@ const typeColor: Record<string, string> = {
           <PhBell v-else size="0.875rem" weight="fill" />
           <span class="tabular-nums">{{ reminderText }}</span>
         </span>
-        <span class="text-[11px] text-gray-400"
+        <span class="text-[11px] text-gray-400 shrink-0 whitespace-nowrap"
           :class="{ 'ml-auto': !(note.type === 'todo' && note.todoDue) }"
           :title="fullTime">{{ timeAgo }}</span>
-        <!-- 三点菜单 -->
+        <!-- 三点菜单: shrink-0 关键 — 无之前 chip 撑爆时 button 被压到 width 0, svg overflow 出 button 外
+             视觉上"出卡片"但 click 区域为 0, 蘑菇汇报"点了没反应"就是这个 -->
         <button ref="menuBtn" @click.stop="toggleMenu"
-          class="p-0.5 rounded-md text-gray-300 hover:text-gray-500 hover:bg-gray-100 transition-colors">
+          class="p-0.5 rounded-md text-gray-300 hover:text-gray-500 hover:bg-gray-100 transition-colors shrink-0">
           <PhDotsThreeVertical size="1.375rem" weight="bold" />
         </button>
       </div>
@@ -462,7 +489,7 @@ const typeColor: Record<string, string> = {
         </span>
       </div>
 
-      <!-- PR #6: 共享笔记底部 reaction + 评论计数 (readonly 展示, 点 NoteCard 走 NoteDetail 交互) -->
+      <!-- PR #6: 共享笔记底部 reaction + 评论计数 + PR #7b 编辑人数 (readonly 展示, 点 NoteCard 走 NoteDetail 交互) -->
       <div v-if="showSocialMeta" class="flex items-center gap-3 mt-2 text-[11px] text-gray-500">
         <span v-for="r in visibleReactions" :key="r.emoji" class="inline-flex items-center gap-0.5">
           <span class="text-[13px] leading-none">{{ r.emoji }}</span>
@@ -471,6 +498,11 @@ const typeColor: Record<string, string> = {
         <span v-if="commentCount > 0" class="inline-flex items-center gap-1">
           <PhChatCircleDots size="0.875rem" weight="fill" />
           <span class="tabular-nums">{{ commentCount }}</span>
+        </span>
+        <!-- PR #7b: 非作者编辑次数 (作者改不计). NoteDetail 点开看完整列表 -->
+        <span v-if="editorCount > 0" class="inline-flex items-center gap-1" :title="`${editorCount} 人编辑过`">
+          <PhPencilSimple size="0.875rem" weight="fill" />
+          <span class="tabular-nums">{{ editorCount }}</span>
         </span>
       </div>
     </div>

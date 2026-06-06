@@ -279,7 +279,27 @@ function updateCaret() {
 
   // 清空 mirror + 塞内容 + 末尾 marker span
   // 用 textContent 设置 before, 然后 appendChild marker（避免 innerHTML 注入风险 + 性能）
-  mirror.textContent = before;
+  // password input 关键修正: 真实 value 是明文 "abc", 但 input 视觉显示是 mask 字符 (mac • / win ● / linux •).
+  // mirror 用明文算字符宽度 → caret 落在明文末尾位置, input 视觉 caret 应在 mask 字符末尾 → 错位 (越多字越偏).
+  //
+  // 跨平台通用方案 (开源用户在任何 OS + 任何浏览器):
+  //   chrome/edge/safari (~85% 市场): CSS -webkit-text-security: disc 让 mirror 自己 mask, 跟 input 同 mask 字符
+  //   firefox (~5%): 不支持 webkit-text-security, 用 • repeat (firefox 默认 mask 字符就是 U+2022)
+  // CSS.supports() 标准 API 探测, 不依赖 user-agent 嗅探.
+  const isPassword = el instanceof HTMLInputElement && el.type === 'password';
+  if (isPassword) {
+    const useNativeMask = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('-webkit-text-security', 'disc');
+    if (useNativeMask) {
+      mirror.style.setProperty('-webkit-text-security', 'disc');
+      mirror.textContent = before; // 浏览器自己 mask, 用明文 textContent
+    } else {
+      mirror.style.removeProperty('-webkit-text-security');
+      mirror.textContent = '•'.repeat(before.length); // firefox fallback
+    }
+  } else {
+    mirror.style.removeProperty('-webkit-text-security');
+    mirror.textContent = before;
+  }
   const marker = document.createElement('span');
   marker.textContent = '​'; // ZWSP，零宽空格只为拿到位置
   mirror.appendChild(marker);

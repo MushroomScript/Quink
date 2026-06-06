@@ -15,13 +15,26 @@ import { ref, watch, onMounted, onBeforeUnmount, nextTick, type Ref } from 'vue'
 //
 // 老版本(纯 estimateHeight) bug: 含图片/markdown 卡片估算极低 → pickShortest 把"真实最高列"
 // 当成"最矮列" → 新卡片继续往该列倒 → 列高越扯越歪. 真实测量解决这个反馈循环.
-function getColumnCount(): number {
-  const w = window.innerWidth;
-  if (w >= 1800) return 5;
-  if (w >= 1400) return 4;
-  if (w >= 900) return 3;
-  if (w >= 600) return 2;
-  return 1;
+// 列数自适应: 用 masonry 容器实际宽度 (rootRef.clientWidth) 算, 不靠 viewport 推算.
+// 之前 `viewport - sidebarW` 算法在 768px 临界点 sidebar 突然消失 (+240px 给主区) → 列数反弹
+// (1100→3列, 770→1列, 760→2列, 559→1列) 蘑菇汇报"缩小过程中 2→1→2→1 反复跳".
+// 直接读容器宽度天然避开这坑: sidebar 占不占位, masonry 容器宽度自动反映.
+// 目标列宽 280px (保证 NoteCard chip 行能放下三点不被推出卡片外).
+import { unzoomViewport } from '@/utils/zoom';
+
+function getColumnCount(rootW?: number): number {
+  const targetColW = 280;
+  let main: number;
+  if (rootW && rootW > 0) {
+    main = rootW;
+  } else {
+    // fallback: rootRef 还没 attach 时 (onMounted 之前的初值), 用 viewport 粗估.
+    // 这只在首次 setup 那帧用一次, onMounted 后立刻被真实 rootW 替代.
+    const { vw } = unzoomViewport();
+    main = vw >= 768 ? vw - 240 : vw;
+  }
+  const cols = Math.max(1, Math.floor(main / targetColW));
+  return Math.min(cols, 5);
 }
 
 // 估算 NoteCard 渲染高度. line-clamp-4 限制文字 4 行, 但 block 元素(图片/代码块/附件)
@@ -151,18 +164,31 @@ export function useMasonry<T extends { id: string }>(
   }
 
   function onResize() {
-    const c = getColumnCount();
+    const c = getColumnCount(rootRef?.value?.clientWidth);
     if (c !== columnCount.value) {
       columnCount.value = c;
       rebuild();
     }
   }
 
+  // ResizeObserver 监听 masonry root 容器宽度变化: 比 window.resize 更准
+  // (sidebar 折叠 / collapsed toggle / drawer 等不触发 window resize, 但 main 宽度变了 → ResizeObserver 抓到)
+  let ro: ResizeObserver | null = null;
+
   onMounted(() => {
+    // mount 后初值用真实 rootW 重算一次 (setup 那帧 rootRef 还没 attach 用 fallback)
+    onResize();
     window.addEventListener('resize', onResize);
+    if (rootRef?.value && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(onResize);
+      ro.observe(rootRef.value);
+    }
     rebuild();
   });
-  onBeforeUnmount(() => window.removeEventListener('resize', onResize));
+  onBeforeUnmount(() => {
+    window.removeEventListener('resize', onResize);
+    ro?.disconnect();
+  });
 
   let lastLength = 0;
   let lastFirstId: string | undefined;

@@ -4,6 +4,7 @@ import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import { api } from '@/api';
 import { resolveFileUrl, resolveMarkdownFileUrls, stripMarkdownFileUrls } from '@/utils/fileUrl';
+import { unzoomRect, unzoomViewport } from '@/utils/zoom';
 import {
   addUploadTask,
   updateProgressById,
@@ -240,7 +241,9 @@ function onToolbarMouseOver(e: MouseEvent) {
   if (!btn) return;
   const label = btn.getAttribute('aria-label');
   if (!label) return;
-  const r = btn.getBoundingClientRect();
+  // unzoomRect + unzoomViewport: CSS zoom 下 rect 跟 viewport 归一到 unzoomed 防 tooltip 错位 (蘑菇汇报)
+  const r = unzoomRect(btn);
+  const { vw } = unzoomViewport();
   // 上方空间不够 32px 时翻转到按钮下方,避免 Capture 等顶部贴边场景 tooltip 跑出窗口看不见
   const flipDown = r.top < 32;
   // tooltip 用 translateX(-50%) 居中对齐按钮中心,最左/最右按钮可能让 tooltip 超出窗口边界。
@@ -248,7 +251,7 @@ function onToolbarMouseOver(e: MouseEvent) {
   const HALF = 40;
   const MARGIN = 8;
   const center = r.left + r.width / 2;
-  const safeLeft = Math.max(HALF + MARGIN, Math.min(window.innerWidth - HALF - MARGIN, center));
+  const safeLeft = Math.max(HALF + MARGIN, Math.min(vw - HALF - MARGIN, center));
   customTooltip.value = {
     visible: true,
     text: label,

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { useToast } from '@/composables/useToast';
+import { unzoomRect } from '@/utils/zoom';
 const { toasts, dismiss, pause, resume } = useToast();
 
 // 容器顶部实时对齐搜索栏顶部. 用 rAF 持续校正, 覆盖 TopBar 高度变化 / Electron
@@ -11,12 +12,13 @@ const topOffset = ref('14px');
 let rafId: number | null = null;
 
 function measureOffset(): string {
+  // unzoomRect: CSS zoom 下 toast 用 fixed 顶部对齐, rect 跟 inline top 单位要归一
   const searchBox = document.querySelector('[data-search-box]') as HTMLElement | null;
   if (searchBox && searchBox.offsetParent !== null) {
-    return `${searchBox.getBoundingClientRect().top}px`;
+    return `${unzoomRect(searchBox).top}px`;
   }
   const header = document.querySelector('header');
-  if (header) return `${header.getBoundingClientRect().top + 8}px`;
+  if (header) return `${unzoomRect(header).top + 8}px`;
   return '14px';
 }
 

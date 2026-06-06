@@ -6,7 +6,7 @@ import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
 import { publish, isOnline } from '../reminder/bus.js';
-import { loadSocialMetaMaps } from './notes.js';
+import { loadSocialMetaMaps, loadEditorCountMap } from './notes.js';
 
 const app = new Hono();
 
@@ -295,7 +295,11 @@ app.get('/:id/notes', async (c) => {
   }
 
   // PR #6: 拼 reaction summary + comment count (群 feed NoteCard 底部显示). 群里都是 shared 笔记, 不分支
-  const { reactionMap, commentCountMap } = await loadSocialMetaMaps(noteIds, userId);
+  // PR #7b: 拼 editorCount + parentNoteId (NoteCard 显示"X 人编辑过" + "本群独占版/N 群共享版"标)
+  const [{ reactionMap, commentCountMap }, editorCountMap] = await Promise.all([
+    loadSocialMetaMaps(noteIds, userId),
+    loadEditorCountMap(noteIds),
+  ]);
 
   // raw SQL 返回 snake_case, 手动映射成 camelCase (跟其他 endpoint 返回格式一致)
   const data = rows.map(r => ({
@@ -317,6 +321,7 @@ app.get('/:id/notes', async (c) => {
     updatedAt: r.updated_at,
     visibility: r.visibility,
     editPermission: r.edit_permission,
+    parentNoteId: r.parent_note_id, // PR #7b: fork 出来的 note 指向 root id, root 自己为 null
     sharedGroupIds: sharesMap.get(r.id) || [],
     sharedAt: r.sharedAt,
     authorNickname: r.authorNickname,
@@ -324,6 +329,7 @@ app.get('/:id/notes', async (c) => {
     groupPinned: !!r.groupPinnedAt, // 群内独立置顶状态 (跟 pinned 作者全局置顶分离)
     reactionSummary: reactionMap.get(r.id) || [],
     commentCount: commentCountMap.get(r.id) || 0,
+    editorCount: editorCountMap.get(r.id) || 0, // PR #7b: 非作者编辑次数, NoteCard "X 人编辑过" 显示
   }));
   return c.json({
     data,

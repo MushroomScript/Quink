@@ -44,6 +44,13 @@ const updateNoteSchema = z.object({
   version: z.number().int().positive().optional(),
   // PR #5b: 改编辑权限, 仅作者能改 (非作者传 → 403)
   editPermission: z.enum(['admin', 'all']).optional(),
+  // PR #7b COW: 改 shared 笔记时透传"从哪个上下文改" (前端按 router /groups/:gid 自动填).
+  // 非作者改 → 必 fork 到 editContext.groupId 对应的群版本.
+  // 作者改 + editContext.groupId 在 + 当前 note 是 root + 分享群数 > 1 → fork 到该群 (只影响该群).
+  // 作者改 + 无 editContext.groupId → 直接改 root, 仍连的群都同步 (灵感页修改语义).
+  editContext: z.object({
+    groupId: z.string().optional(),
+  }).optional(),
 });
 
 // PR #2 阶段 5c: 广播 'group-notes-changed' 给目标群所有 active 成员 (除操作者).
@@ -230,8 +237,12 @@ app.get('/', async (c) => {
       authorMap = new Map(authors.map(u => [u.id, { nickname: u.nickname, avatar: u.avatar }]));
     }
     // PR #6: 给 shared 笔记拼 reaction summary + comment count (NoteCard 底部显示). private 笔记跳过.
+    // PR #7b: 给 shared 笔记拼 editorCount (NoteCard 显示"X 人编辑过", 仅算非作者编辑次数, 作者自己改不计).
     const sharedNoteIds = results.filter(n => n.visibility === 'shared').map(n => n.id);
-    const { reactionMap, commentCountMap } = await loadSocialMetaMaps(sharedNoteIds, userId);
+    const [{ reactionMap, commentCountMap }, editorCountMap] = await Promise.all([
+      loadSocialMetaMaps(sharedNoteIds, userId),
+      loadEditorCountMap(sharedNoteIds),
+    ]);
     data = results.map(n => {
       const enriched: any = { ...n, sharedGroupIds: sharesMap.get(n.id) || [] };
       if (authorMap) {
@@ -242,6 +253,7 @@ app.get('/', async (c) => {
       if (n.visibility === 'shared') {
         enriched.reactionSummary = reactionMap.get(n.id) || ALLOWED_REACTION_EMOJIS.map(e => ({ emoji: e, count: 0, mine: false }));
         enriched.commentCount = commentCountMap.get(n.id) || 0;
+        enriched.editorCount = editorCountMap.get(n.id) || 0;
       }
       return enriched;
     });
@@ -378,6 +390,109 @@ async function getNoteForAccess(userId: string, noteId: string, mode: AccessMode
       eq(schema.noteEditGrants.userId, userId),
     )).get();
   return grant ? note : null;
+}
+
+// PR #7b COW 分叉: shared 笔记被非作者改 / 作者从群组页改"还连多群的 root note" 时调用.
+// 必须在 db.transaction((tx) => ...) 内同步执行. 同步执行: 新建 fork note row (复制 root 内容, parentNoteId 指 root,
+// 清锁, version=1), 转移该群的 note_shares + group_note_pins (从 original 转给 newId), 复制 note_edit_grants 让
+// 作者授权延续到 fork. reactions / comments 不跟随 fork (蘑菇拍板 2026-06-06: 表态属于原内容, 仍留 original).
+// 单层链: parentNoteId 永远指 root note, 不嵌套 fork-of-fork. 若 original 已是 fork (parentNoteId 非空), 新 fork
+// 仍指向 original.parentNoteId. 返回新 fork 的 note id, 调用方在 tx 内继续 apply updates 到 new row.
+function forkNote(
+  tx: any,
+  original: typeof schema.notes.$inferSelect,
+  groupId: string,
+  now: string,
+): string {
+  const newId = nanoid(12);
+  const rootId = original.parentNoteId ?? original.id;
+  tx.insert(schema.notes).values({
+    id: newId,
+    userId: original.userId, // COW 关键: 原作者归属保留, fork 后 userId 不变
+    content: original.content,
+    contentPinyin: original.contentPinyin,
+    summary: original.summary,
+    category: original.category,
+    tags: original.tags as any,
+    type: original.type,
+    todoStatus: original.todoStatus,
+    todoDue: original.todoDue,
+    todoRemindSentAt: original.todoRemindSentAt,
+    todoRemindRrule: original.todoRemindRrule,
+    aiProcessed: original.aiProcessed,
+    pinned: original.pinned,
+    createdAt: original.createdAt, // fork 不是"新建", 沿用 root 创建时间 (按创建时间排序时新老版本挨在一起)
+    updatedAt: now,
+    deletedAt: null,
+    visibility: 'shared', // fork 出来必然是 shared (fork 触发条件就要求 shared)
+    editLockBy: null,
+    editLockToken: null,
+    editLockExpiresAt: null,
+    version: 1,
+    editPermission: original.editPermission,
+    parentNoteId: rootId,
+  }).run();
+  // 该群的 note_shares 从 original 转到 newId. 其它群仍指 original (除非也被 fork).
+  tx.delete(schema.noteShares).where(and(
+    eq(schema.noteShares.noteId, original.id),
+    eq(schema.noteShares.groupId, groupId),
+  )).run();
+  tx.insert(schema.noteShares).values({
+    noteId: newId,
+    groupId,
+    sharedAt: now,
+  }).run();
+  // group_note_pins 跟随: 该群该笔记的置顶迁到 fork (否则置顶视觉断)
+  const pin = tx.select().from(schema.groupNotePins).where(and(
+    eq(schema.groupNotePins.groupId, groupId),
+    eq(schema.groupNotePins.noteId, original.id),
+  )).get();
+  if (pin) {
+    tx.delete(schema.groupNotePins).where(and(
+      eq(schema.groupNotePins.groupId, groupId),
+      eq(schema.groupNotePins.noteId, original.id),
+    )).run();
+    tx.insert(schema.groupNotePins).values({
+      groupId,
+      noteId: newId,
+      pinnedBy: pin.pinnedBy,
+      pinnedAt: pin.pinnedAt,
+    }).run();
+  }
+  // note_edit_grants 复制: 作者授权过的人在 fork 上也保留权限 (尊重作者意图)
+  const grants = tx.select().from(schema.noteEditGrants).where(
+    eq(schema.noteEditGrants.noteId, original.id),
+  ).all();
+  for (const g of grants) {
+    tx.insert(schema.noteEditGrants).values({
+      noteId: newId,
+      userId: g.userId,
+      grantedAt: g.grantedAt,
+      grantedBy: g.grantedBy,
+    }).run();
+  }
+  return newId;
+}
+
+// PR #7b: 批量拉一组笔记的 distinct editor count (不含作者本人, 作者改不写 history).
+// NoteCard 显示"X 人编辑过"用. shared 笔记才查 (private 笔记不会有 history 记录).
+export async function loadEditorCountMap(noteIds: string[]): Promise<Map<string, number>> {
+  if (noteIds.length === 0) return new Map();
+  const rows = await db.select({
+    noteId: schema.noteEditHistory.noteId,
+    userId: schema.noteEditHistory.userId,
+  }).from(schema.noteEditHistory)
+    .where(inArray(schema.noteEditHistory.noteId, noteIds))
+    .all();
+  const perNote = new Map<string, Set<string>>();
+  for (const r of rows) {
+    let s = perNote.get(r.noteId);
+    if (!s) { s = new Set(); perNote.set(r.noteId, s); }
+    s.add(r.userId);
+  }
+  const out = new Map<string, number>();
+  for (const [nid, set] of perNote) out.set(nid, set.size);
+  return out;
 }
 
 // PR #5b helper: 校验 userId 在某 shared 笔记关联的群里是 owner/admin. 给 DELETE / 审批申请等
@@ -714,6 +829,29 @@ app.delete('/:id/edit-grants/:userId', async (c) => {
   return c.json({ data: { message: '已撤销编辑权' } });
 });
 
+// PR #7b: GET /api/notes/:id/edit-history - 列编辑历史 (非作者编辑次数). NoteDetail "X 人编辑过" 胶囊 popover 用.
+// 鉴权: getNoteForAccess(read) - 能看到笔记的人都能看历史 (作者 + 共享群 active member). 私有笔记理论上永远空数组但仍能 GET.
+app.get('/:id/edit-history', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+
+  const rows = await db.select({
+    id: schema.noteEditHistory.id,
+    userId: schema.noteEditHistory.userId,
+    editedAt: schema.noteEditHistory.editedAt,
+    nickname: schema.users.nickname,
+    avatar: schema.users.avatar,
+  }).from(schema.noteEditHistory)
+    .leftJoin(schema.users, eq(schema.users.id, schema.noteEditHistory.userId))
+    .where(eq(schema.noteEditHistory.noteId, id))
+    .orderBy(desc(schema.noteEditHistory.editedAt))
+    .all();
+  return c.json({ data: rows });
+});
+
 // ─────────────────────────────────────────────────────────────────────────
 // PR #6 表情 reaction + 评论 thread (共享笔记互动)
 // 鉴权: getNoteForAccess(read) 让所有"能看到笔记"的人都能 reaction / 评论 (跟 read 同范围, 比 write 宽).
@@ -1007,11 +1145,16 @@ app.get('/:id', async (c) => {
   const shares = await db.select({ groupId: schema.noteShares.groupId })
     .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
   // PR #6: shared 笔记带 reaction summary + comment count, NoteDetail 直接用 (省一个 round trip + SSE 增量更新)
+  // PR #7b: shared 笔记带 editorCount, NoteDetail "X 人编辑过" 胶囊用
   let enriched: any = { ...note, sharedGroupIds: shares.map(s => s.groupId) };
   if (note.visibility === 'shared') {
-    const { reactionMap, commentCountMap } = await loadSocialMetaMaps([id], userId);
+    const [{ reactionMap, commentCountMap }, editorCountMap] = await Promise.all([
+      loadSocialMetaMaps([id], userId),
+      loadEditorCountMap([id]),
+    ]);
     enriched.reactionSummary = reactionMap.get(id) || ALLOWED_REACTION_EMOJIS.map(e => ({ emoji: e, count: 0, mine: false }));
     enriched.commentCount = commentCountMap.get(id) || 0;
+    enriched.editorCount = editorCountMap.get(id) || 0;
   }
   return c.json({ data: enriched });
 });
@@ -1107,7 +1250,8 @@ app.patch('/:id', async (c) => {
     return c.json({ error: '只有作者可以修改共享设置' }, 403);
   }
 
-  const updates: Record<string, any> = { updatedAt: dayjs().toISOString() };
+  const now = dayjs().toISOString();
+  const updates: Record<string, any> = { updatedAt: now };
 
   // PR #5: shared 笔记必须持锁 + version 校验. private 笔记保持原行为 (作者直接改, 不需锁)
   // PR #5b: 作者本人改自己的共享笔记也不需要锁 (改 editPermission / visibility / 内容都是"管理自己东西", 无冲突).
@@ -1153,9 +1297,76 @@ app.patch('/:id', async (c) => {
   if (data.pinned !== undefined) updates.pinned = data.pinned;
   // PR #5b: 改编辑权限. 仅作者能改 (上面已校验非作者传过来直接 403)
   if (data.editPermission !== undefined) updates.editPermission = data.editPermission;
+
+  // PR #7b COW fork 决策. shared 笔记被"群组页打开编辑"的非作者 / 作者改 → 可能 fork 到该群专属版本.
+  // isContentChange: 改"用户写出来的内容字段" (内容/类别/标签/类型/todo 字段). 不含: pinned (作者全局置顶, 私域) /
+  //   visibility / sharedGroupIds (分享设置, 走 in-place) / editPermission (作者管理, in-place) / lockToken / version.
+  const isContentChange = (
+    data.content !== undefined ||
+    data.summary !== undefined ||
+    data.category !== undefined ||
+    data.tags !== undefined ||
+    data.type !== undefined ||
+    data.todoStatus !== undefined ||
+    data.todoDue !== undefined ||
+    data.todoRemindRrule !== undefined
+  );
+  const ctxGroupId = data.editContext?.groupId;
+  // 拉当前 sharedGroupIds: fork 决策 + 后续广播都需要
+  const currentShareGroupIds = (await db.select({ groupId: schema.noteShares.groupId })
+    .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all()).map(r => r.groupId);
+
+  let shouldFork = false;
+  let effectiveGroupId: string | undefined = ctxGroupId; // 可能被下面自动推断覆盖 (非作者主视图改时)
+  if (existing.visibility === 'shared' && isContentChange) {
+    if (!isAuthor) {
+      // 非作者改 shared 必 fork. 但前端不一定能传 editContext (主视图也可能编辑别人共享笔记).
+      // 90% case 无歧义: B 在主视图看到 A 共享的笔记 → B 必定是某个共享群的成员 → 算 B 的 active 群 ∩ 笔记共享群
+      //   - 交集 1 个 → 自动用那群 (无歧义最常见 case)
+      //   - 交集 >1 个 → editContext_ambiguous 让前端引导用户去群组页明确 (罕见: B 同时在多群且都共享了)
+      //   - 交集 0 个 → 防御性 400 (理论上 getNoteForAccess(read) 已保证 ≥1)
+      if (!effectiveGroupId) {
+        const intersect = await db.select({ groupId: schema.groupMembers.groupId })
+          .from(schema.groupMembers)
+          .where(and(
+            eq(schema.groupMembers.userId, userId),
+            eq(schema.groupMembers.status, 'active'),
+            inArray(schema.groupMembers.groupId, currentShareGroupIds),
+          )).all();
+        if (intersect.length === 0) {
+          return c.json({ error: 'note_not_in_group', message: '该笔记不在你所在的任何群里' }, 400);
+        }
+        if (intersect.length > 1) {
+          return c.json({
+            error: 'editContext_ambiguous',
+            message: '你在多个群里都能看到这条笔记, 请从群组页面打开编辑',
+            candidateGroupIds: intersect.map(m => m.groupId),
+          }, 400);
+        }
+        effectiveGroupId = intersect[0].groupId;
+      } else if (!currentShareGroupIds.includes(effectiveGroupId)) {
+        return c.json({ error: 'note_not_in_group', message: '该笔记未分享到此群' }, 400);
+      }
+      shouldFork = true;
+    } else if (effectiveGroupId && existing.parentNoteId === null && currentShareGroupIds.length > 1) {
+      // 作者 + 群组页改 + 当前是 root + 分享到多群 → fork (避免作者从群组页改影响其它群)
+      if (!currentShareGroupIds.includes(effectiveGroupId)) {
+        return c.json({ error: 'note_not_in_group', message: '该笔记未分享到此群' }, 400);
+      }
+      shouldFork = true;
+    }
+    // 其他作者改情况走 in-place:
+    //  - 作者无 editContext (灵感页 / 主视图改 root, 多群同步是预期语义)
+    //  - 作者改 root + 单群 (fork 单群无意义, 不增加无用 fork)
+    //  - 作者改 fork (parentNoteId 非空, 已经是该群专属版本, 不二次分叉)
+  }
   // PR #2 改 visibility / sharedGroupIds: 校验后整批替换 note_shares (delete all + insert new)
   // 客户端可以三种方式调: 仅传 visibility (改私密性) / 仅传 sharedGroupIds (改群列表) / 两个一起
-  const willUpdateShares = data.visibility !== undefined || data.sharedGroupIds !== undefined;
+  // 注: fork 路径不允许改分享设置 (fork 是"在该群版本上改内容", 改分享设置只有作者从主视图 in-place 改)
+  if (shouldFork && (data.visibility !== undefined || data.sharedGroupIds !== undefined)) {
+    return c.json({ error: 'fork 路径不允许改 visibility / sharedGroupIds, 请去主视图改' }, 400);
+  }
+  const willUpdateShares = !shouldFork && (data.visibility !== undefined || data.sharedGroupIds !== undefined);
   let newSharedGroupIds: string[] | undefined;
   if (willUpdateShares) {
     const newVisibility = data.visibility ?? existing.visibility;
@@ -1173,16 +1384,42 @@ app.patch('/:id', async (c) => {
     if (data.visibility !== undefined) updates.visibility = data.visibility;
   }
 
-  // PR #2 阶段 5c: 拿 PATCH 前的旧 sharedGroupIds 做差异广播 (旧群通知"被取消", 新群通知"新增")
-  let oldGroupIds: string[] = [];
-  if (willUpdateShares) {
-    const oldShares = await db.select({ groupId: schema.noteShares.groupId })
-      .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
-    oldGroupIds = oldShares.map(s => s.groupId);
+  // PR #7b fork 路径: 事务里 forkNote + apply updates to new note + 写 history (非作者时).
+  // 不改 original (除 note_shares + group_note_pins 已在 forkNote 内调整). 广播给该群 + 仍连原 note 的其它群.
+  if (shouldFork) {
+    let newNoteId = '';
+    db.transaction((tx) => {
+      newNoteId = forkNote(tx, existing, effectiveGroupId!, now);
+      // 把 updates 套到 fork 出的新 note. version / 锁字段在 forkNote 里已重置为 1/null, 不要再 set 进去.
+      const forkUpdates = { ...updates };
+      delete forkUpdates.version;
+      delete forkUpdates.editLockBy;
+      delete forkUpdates.editLockToken;
+      delete forkUpdates.editLockExpiresAt;
+      tx.update(schema.notes).set(forkUpdates).where(eq(schema.notes.id, newNoteId)).run();
+      // PR #7b history: 非作者改才写 ("原作者发布 · @B 编辑过", 作者自己不算编辑过)
+      if (!isAuthor) {
+        tx.insert(schema.noteEditHistory).values({
+          id: nanoid(12),
+          noteId: newNoteId,
+          userId,
+          editedAt: now,
+        }).run();
+      }
+    });
+    // 广播: 该群成员看到新 fork, 其它仍连 original 的群成员需要刷新 (original 的 sharedGroupIds 里去掉了该群)
+    const allGroupIds = [...new Set([effectiveGroupId!, ...currentShareGroupIds])];
+    broadcastNoteShared(allGroupIds, userId).catch(e => console.error('[notes] broadcast failed:', e));
+
+    const newNote = await db.select().from(schema.notes).where(eq(schema.notes.id, newNoteId)).get();
+    return c.json({
+      data: { ...newNote, sharedGroupIds: [effectiveGroupId!] },
+      forked: true,
+      forkedFromNoteId: id,
+    });
   }
 
-  // 事务: notes update + note_shares 整批替换 一起跑, 防写一半留脏数据
-  const now = updates.updatedAt as string;
+  // 事务: notes update + note_shares 整批替换 + PR #7b 非作者 history 一起跑, 防写一半留脏数据
   db.transaction((tx) => {
     tx.update(schema.notes).set(updates).where(eq(schema.notes.id, id)).run();
     if (willUpdateShares) {
@@ -1193,17 +1430,24 @@ app.patch('/:id', async (c) => {
         ).run();
       }
     }
+    // PR #7b history: 非作者 in-place 改 shared + 改内容 → 写一条 (作者 in-place 改不写)
+    if (!isAuthor && existing.visibility === 'shared' && isContentChange) {
+      tx.insert(schema.noteEditHistory).values({
+        id: nanoid(12),
+        noteId: id,
+        userId,
+        editedAt: now,
+      }).run();
+    }
   });
 
   // PR #2 阶段 5c: 广播给 旧 ∪ 新 groupIds 的成员 (旧群刷掉这条笔记, 新群加上这条笔记 / 内容改了也要同步)
   if (willUpdateShares) {
-    const allGroupIds = [...new Set([...oldGroupIds, ...(newSharedGroupIds || [])])];
+    const allGroupIds = [...new Set([...currentShareGroupIds, ...(newSharedGroupIds || [])])];
     broadcastNoteShared(allGroupIds, userId).catch(e => console.error('[notes] broadcast failed:', e));
   } else if (existing.visibility === 'shared') {
     // 只改了内容/tag 没改群列表, 但已经是 shared → 通知所有群成员刷新看新内容
-    const shares = await db.select({ groupId: schema.noteShares.groupId })
-      .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
-    broadcastNoteShared(shares.map(s => s.groupId), userId).catch(e => console.error('[notes] broadcast failed:', e));
+    broadcastNoteShared(currentShareGroupIds, userId).catch(e => console.error('[notes] broadcast failed:', e));
   }
 
   const updated = await db.select().from(schema.notes).where(eq(schema.notes.id, id)).get();

@@ -109,6 +109,20 @@ export interface Note {
   // reactionSummary 按白名单 5 个 emoji 固定顺序 (count=0 也含); NoteCard 按需过滤 count>0 显示, ReactionBar 永远渲染 5 个
   reactionSummary?: NoteReactionSummaryItem[];
   commentCount?: number;
+  // PR #7b COW 分叉: parentNoteId 非 null = fork 出来的笔记 (该群专属版本), null = root note (作者初版, 可能仍连多群).
+  // NoteCard / NoteDetail / NoteEditModal 用这字段判断展示"本群独占版" vs "N 群共享版" 标.
+  parentNoteId?: string | null;
+  // PR #7b 编辑历史计数: 非作者编辑次数 (作者改不计). NoteCard 显示"X 人编辑过" 胶囊, 详情走 getNoteEditHistory 拉完整列表
+  editorCount?: number;
+}
+
+// PR #7b 编辑历史一条: NoteDetail "X 人编辑过" popover 列编辑者用. 后端 join users 给 nickname/avatar.
+export interface NoteEditHistoryRow {
+  id: string;
+  userId: string;
+  editedAt: string;
+  nickname: string | null;
+  avatar: string | null;
 }
 
 // PR #6 单个 emoji 的反应汇总. mine = 我自己加过该 emoji (点击 toggle 移除).
@@ -182,8 +196,20 @@ export interface GroupNoteEditGrantRow {
   authorNickname: string | null;
 }
 
-// PR #2 scope: 笔记列表过滤. mine (只看我自己) / shared (群里别人共享给我的) / group:<id> (某群可见)
-export type NotesScope = 'mine' | 'shared' | `group:${string}`;
+// PR #2 / PR #7a 笔记列表过滤 scope. 跟 stores/notes.ts 的 ViewState.scope 同 5 档:
+//   mine          (PR #2 默认, 作者本人全部含 shared)
+//   private       (PR #7a, 仅作者本人 private)
+//   others_shared (PR #7a, 作者本人 private + 他人共享给我所在群的 shared)
+//   shared        (PR #2 遗留, 仅他人共享给我所在群的 shared, 偏好不映射, 兼容旧调用方)
+//   all           (PR #7a, mine + 他人共享给我所在群的 shared)
+//   group:<id>    (PR #2, 某群可见笔记)
+export type NotesScope =
+  | 'mine'
+  | 'private'
+  | 'others_shared'
+  | 'shared'
+  | 'all'
+  | `group:${string}`;
 
 export type ReminderChannelType =
   | 'browser' | 'email' | 'bark' | 'wecom_bot' | 'dingtalk_bot' | 'feishu_bot' | 'telegram' | 'webhook';
@@ -363,8 +389,10 @@ export const api = {
     });
   },
 
-  updateNote(id: string, data: Partial<Note> & { lockToken?: string }) {
-    return request<{ data: Note }>(`/notes/${id}`, {
+  // PR #7b: PATCH 返回可能含 forked: true + forkedFromNoteId (非作者改 / 作者从群组页改 root 多群 → fork 写入).
+  // store 收到 forked 触发本 view fetchNotes (新 fork 出现 + 老 note share 状态变化), 详见 stores/notes.ts updateNote.
+  updateNote(id: string, data: Partial<Note> & { lockToken?: string; editContext?: { groupId?: string } }) {
+    return request<{ data: Note; forked?: boolean; forkedFromNoteId?: string }>(`/notes/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
@@ -426,6 +454,11 @@ export const api = {
     return request<{ data: { message: string } }>(`/notes/${noteId}/edit-grants/${userId}`, {
       method: 'DELETE',
     });
+  },
+
+  // PR #7b: 拉编辑历史. NoteDetail "X 人编辑过" 胶囊 popover 用. 仅非作者编辑写历史, 故作者改不出现在列表里.
+  getNoteEditHistory(id: string) {
+    return request<{ data: NoteEditHistoryRow[] }>(`/notes/${id}/edit-history`);
   },
 
   // PR #5b: 群级汇总 (作者+admin 看), 给群组详情页"编辑申请管理"面板用

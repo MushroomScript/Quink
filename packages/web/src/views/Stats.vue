@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, markRaw } from 'vue';
 import { useRouter } from 'vue-router';
 import { api, isLoggedIn } from '@/api';
 import { useNotesStore } from '@/stores/notes';
+import { unzoomRect } from '@/utils/zoom';
 
 const router = useRouter();
 const notesStore = useNotesStore();
@@ -92,7 +93,8 @@ const tooltip = ref<{ visible: boolean; date: string; parts: TooltipPart[]; top:
 function onCellEnter(e: MouseEvent, cell: CellData) {
   // 无记录的天不弹 tooltip(空白 cell 没信息可显示)
   if (!cell.count) return;
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  // unzoomRect: CSS zoom 下 tooltip 位置归一坐标系防错位
+  const rect = unzoomRect(e.currentTarget as HTMLElement);
   const parts: TooltipPart[] = [];
   if (cell.noteCount) parts.push({ label: '灵感', count: cell.noteCount });
   if (cell.snippetCount) parts.push({ label: '笔记', count: cell.snippetCount });

@@ -13,6 +13,7 @@
  * 时分用两个 <select>（hh / mm），跟现有 Quink 下拉风格一致。
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { unzoomRect, unzoomViewport } from '@/utils/zoom';
 import dayjs, { type Dayjs } from 'dayjs';
 
 const props = withDefaults(defineProps<{
@@ -57,16 +58,18 @@ function openPicker() {
 
 function positionPopup() {
   if (!triggerEl.value) return;
-  const rect = triggerEl.value.getBoundingClientRect();
+  // unzoomRect + unzoomViewport: CSS zoom 下归一坐标系, 防 popup 飞出视口
+  const rect = unzoomRect(triggerEl.value);
+  const { vw, vh } = unzoomViewport();
   const popupWidth = isDateTime.value ? 320 : 288;
   const popupHeight = isDateTime.value ? 380 : 330;
   // 下方空间够就下方，否则上方
-  const spaceBelow = window.innerHeight - rect.bottom;
+  const spaceBelow = vh - rect.bottom;
   const top = spaceBelow >= popupHeight + 8
     ? rect.bottom + 4
     : Math.max(8, rect.top - popupHeight - 4);
   // 左边对齐触发器，但不超出视口右侧
-  const left = Math.min(rect.left, window.innerWidth - popupWidth - 8);
+  const left = Math.min(rect.left, vw - popupWidth - 8);
   popupStyle.value = {
     top: `${top}px`,
     left: `${Math.max(8, left)}px`,

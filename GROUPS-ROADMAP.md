@@ -26,7 +26,7 @@
 | **#5c scope preferences** | preferences.showSharedInMain 全局开关 (默认 false, 开后 3 主 view 显示共享笔记) + scope='all' 子查询 | 被 PR #7a 吸收 (4 选偏好 + 多 scope 分支替代 bool 开关) | — |
 | **#6 表情 reaction + 评论** | note_reactions + note_comments thread + ReactionBar/CommentThread 组件 + NoteCard summary + NoteDetail 集成 + SSE 4 事件 | ✅ done | ~1000 行 |
 | **#7a Phase A + 偏好生效** | notes.parent_note_id + note_edit_history 表 (仅存储, 7b 接入 fork) + sharedDisplay 偏好 4 选 (own/others/none/all) + 后端 scope 加 'private' / 'others_shared' / 'all' 3 个新分支 + Settings 下拉 + store/App.vue 同步链 | ✅ done | ~150 行 |
-| **#7b fork 写入 + UI 标记** | PATCH /:id fork 写入逻辑 (含 editContext 字段) + 资源跟随 (group_note_pins / sharedGroupIds / 锁 / version) + note_edit_history 写入 + UI "本群独占版" / "N 群共享版" 标 + NoteCard/NoteDetail/NoteEditModal 显示 fork 来源 | pending | ~800 行 (估) |
+| **#7b fork 写入 + UI 标记** | forkNote helper + PATCH /:id fork 决策 (editContext.groupId 触发) + 资源跟随 (note_shares / group_note_pins / note_edit_grants) + note_edit_history 非作者写入 + loadEditorCountMap + GET /:id/edit-history API + Note type 加 parentNoteId/editorCount + store updateNote 处理 forked 标志 + NoteEditModal editContext 透传 + 版本标 + NoteCard 版本胶囊 + editorCount 显示 + NoteDetail 编辑历史 popover | ✅ done | ~430 行 |
 | **#7c AI/导出/孤儿收尾** | AI chat update_note 适配 fork (主动问用户) + 导出按 sharedDisplay + 作者删 fork 版 UX 确认 + shared→private 转换约束 + 统计按 origin + 孤儿物理删后台任务 | pending | ~500 行 (估) |
 
 总量预估 ~3550 行。每个 PR 独立 ship 不破坏现有功能。
@@ -514,6 +514,69 @@ CREATE INDEX idx_note_edit_history_note ON note_edit_history(note_id, edited_at 
 - note_edit_history 写入 (表已建但没写入逻辑)
 - UI "本群独占版" / "N 群共享版" 标
 - AI chat 工具适配 / 导出 / 孤儿清理
+
+### Sub-PR 7b 实施细节 (已 ship)
+
+落实 Phase B + UI 标 (Corner #2 / #3):
+
+- **后端 `forkNote(tx, original, groupId, now)` helper** (`packages/server/src/routes/notes.ts`):
+  - 在 tx 内同步执行. 新建 fork note (新 id, parentNoteId 指 root, userId 保留作者归属, createdAt 沿用 root, 清锁三列 + version=1, visibility='shared', editPermission 跟原)
+  - note_shares 转移: 该群 (groupId, oldId) → (groupId, newId), 其它群 (otherGid, oldId) 不动
+  - group_note_pins 跟随: 该群该笔记的置顶迁到 fork
+  - note_edit_grants 复制: 作者授权过的人在 fork 也保留权限 (尊重作者意图, 蘑菇拍板 2026-06-06)
+  - reactions / comments **不跟随** fork (蘑菇拍板: 表态属于原内容, 仍留 original)
+  - 单层链: 若 original 已是 fork, 新 fork 仍指向 original.parentNoteId (不嵌套)
+
+- **PATCH /:id fork 决策** (路由内联):
+  - `updateNoteSchema` 加 `editContext: { groupId?: string }` 字段
+  - `isContentChange`: 改了 content/summary/category/tags/type/todoStatus/todoDue/todoRemindRrule 任一. 不含 pinned (作者私域) / visibility / sharedGroupIds / editPermission (分享设置)
+  - 非作者 + shared + isContentChange + editContext.groupId 存在 → 必 fork. ctxGroupId 缺失返 `400 editContext_required`, 不在 currentShareGroupIds 返 `400 note_not_in_group`
+  - 作者 + shared + isContentChange + editContext.groupId 存在 + parentNoteId === null + 多群 (sharedGroupIds.length > 1) → fork (避免作者从群组页改影响其它群)
+  - 其他作者改情况走 in-place: 灵感页改 root 多群同步 / 改 root 单群 / 改 fork (单群专属)
+  - fork 路径禁止改 visibility / sharedGroupIds (分享设置只有作者从主视图 in-place 改)
+  - 返回 `{ data: newNote, forked: true, forkedFromNoteId: id }`
+
+- **note_edit_history 写入**: 事务里 `if (!isAuthor && shared && isContentChange) insert`. fork 路径写 newNoteId, in-place 路径写旧 id. 作者改不写 (保持 "原作者发布 · @B 编辑过" 语义)
+
+- **loadEditorCountMap(noteIds)** export helper: 批量拉一组笔记的 distinct editor 数. GET /api/notes / GET /:id / GET /api/groups/:id/notes 三处 enrich
+
+- **GET /api/notes/:id/edit-history**: 列编辑历史 join users 拿 nickname/avatar 按 editedAt DESC. NoteDetail "X 人编辑过" popover 用
+
+- **前端 store `updateNote` 处理 `forked` 标志** (`packages/web/src/stores/notes.ts`):
+  - res.forked === true → 当前 view fetchNotes keepCount 拉权威数据 (新 fork + 老 note 状态变化都同步), 跨 view 标 dirty 下次 onActivated 同步
+  - 不走原 in-place mutate (新 fork 新 id, 老 note 字段也变, mutate 无法处理)
+
+- **`NoteEditModal.vue`**:
+  - useRoute 自动识别 `/groups/:gid` → `editContext.groupId` 透传给 PATCH
+  - Header 加版本标 chip: fork → "本群独占版"(琥珀色), root 多群 → "N 群共享版"(蓝), root 单群 → "群共享版"
+  - PATCH 错误处理加 `editContext_required` / `note_not_in_group` 分支 toast
+
+- **`NoteCard.vue`**:
+  - `versionBadge` computed: fork → "群独占版", root 多群 → "N 群共享版" (root 单群无歧义不标)
+  - 跟现有 "已分享" / "管理员可编辑" 胶囊并列
+  - 底部 social meta 行加 PhPencilSimple + editorCount "X 人编辑过" 计数 (跟 reaction / commentCount 同行)
+  - `showSocialMeta` 触发条件扩到 `editorCount > 0`
+
+- **`NoteDetail.vue`**:
+  - 加 "X 人编辑过" 胶囊 + popover (lazy load via api.getNoteEditHistory, 列编辑者 avatar/nickname/时间)
+  - 版本标 chip 跟 NoteCard 同 3 档逻辑 (parentNoteId / sharedCount)
+  - 跟现有分享设置行分开 (现有行 v-if=isMyNote 仅作者, 新行 v-if=isShared 群成员也看得到)
+
+- **`api/index.ts`**:
+  - Note 加 `parentNoteId?` + `editorCount?`
+  - 新 `NoteEditHistoryRow` interface
+  - `updateNote` 入参类型扩 `editContext?: { groupId?: string }`, 返回类型扩 `forked?: boolean; forkedFromNoteId?: string`
+  - 加 `getNoteEditHistory(id)` 方法
+
+### Sub-PR 7b 不做的 (留给 7c)
+
+- AI chat `update_note` / `search_notes` 适配 fork (AI 拿不到"哪个 fork 是哪个群版本", 需主动问用户) — Corner #7
+- 导出 ZIP 按 sharedDisplay (默认 self 模式导自己分享的所有 fork) — Corner #8
+- 作者删 fork 版 UX 确认 ("该版本由 B、C 编辑过, 确认删除？") — Corner #9
+- shared → private 转换约束 (仅未被任何群修改过能转 private) — Corner #5
+- 统计按 origin 维度 (parent_note_id 链追溯 root 算 1 条) — Corner #6
+- 孤儿物理删后台任务 (所有共享群都 fork 走 → root 失去引用 → 物理删) — Corner #4
+- 主视图改别人共享笔记 (editContext.groupId 缺失) 的歧义解决: 已实现"宽容方案" — 后端算 `user.active_groups ∩ note.shared_groups`, 唯一交集自动 fork 到那群 (90% case 无歧义); 多个交集才返 `editContext_ambiguous` 让前端 toast 引导去群组页. 罕见歧义 case (B 同时在多群且都共享了同一条) 留 7c 看是否加群选择器交互
 
 ---
 
