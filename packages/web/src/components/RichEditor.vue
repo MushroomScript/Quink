@@ -316,22 +316,44 @@ onMounted(() => {
       },
     },
     after: () => {
-      vditor?.focus();
-      // focusEnd: 再次编辑场景(NoteEditModal),光标定位到末尾让用户接着写
-      // 用 Range.selectNodeContents + collapse(false) 直接操作 DOM range,
-      // Vditor 内部 selection 跟 DOM selection 共用,会自动 sync
+      // focusEnd: 再次编辑场景 (NoteEditModal), 光标定位到末尾让用户接着写.
+      // CDP 实测 (蘑菇 2026-06-06 汇报): 用 TreeWalker 找最后一个 text node 锚定 selection (避开 PRE element boundary
+      // 导致 Chromium 渲染光标到开头视觉位置的 bug). after() 在 Vditor IR 渲染完成后立即调 → 不用 setTimeout
+      // 让用户首帧就看到光标在末尾 (避免"光标飘一下才到末尾"). RAF + 100ms 双保险防 Vditor 后续 mutation reset.
+      // 注: focusEnd 时不调 vditor.focus(), 因为 vditor.focus() 内部把光标重置到默认位置, 会跟我们设的末尾冲突.
       if (props.focusEnd) {
-        setTimeout(() => {
+        const setCursorToEnd = () => {
           const contentEl = editorRef.value?.querySelector('.vditor-ir .vditor-reset') as HTMLElement | null;
           if (!contentEl) return;
+          contentEl.focus();
+          // CDP 实测 (蘑菇 2026-06-06 汇报"光标在末尾位置一个字后面"): Vditor IR 渲染后 PRE 末尾有一个空 text node
+          // (length=0), 直接抓最后 text node 会落到空节点开头 → Chromium 渲染光标在最后一段下一行位置, 视觉错位.
+          // 必须跳过空 text node, 找最后一个有内容的 text node, 把光标设到它末尾 (offset = text.length).
+          const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT);
+          let lastTextNode: Text | null = null;
+          let n: Node | null;
+          while ((n = walker.nextNode())) {
+            if ((n as Text).length > 0) lastTextNode = n as Text;
+          }
           const range = document.createRange();
-          range.selectNodeContents(contentEl);
-          range.collapse(false);
+          if (lastTextNode) {
+            range.setStart(lastTextNode, lastTextNode.length);
+            range.collapse(true);
+          } else {
+            // 极端 fallback: 内容无 text node (纯 element / 图片) → 走 boundary 方案
+            range.selectNodeContents(contentEl);
+            range.collapse(false);
+          }
           const sel = window.getSelection();
           sel?.removeAllRanges();
           sel?.addRange(range);
           contentEl.scrollTop = contentEl.scrollHeight;
-        }, 50);
+        };
+        setCursorToEnd();                            // 同步首次: 用户首帧看到的就是末尾
+        requestAnimationFrame(setCursorToEnd);       // 下一帧: 防 Vditor 内部首次 paint 后调整 selection
+        setTimeout(setCursorToEnd, 100);             // 100ms 兜底: 防 Vditor 后续 async mutation reset
+      } else {
+        vditor?.focus();
       }
       emit('ready');
       // Vditor 加载完后才有 toolbar DOM,这时给 wrapper 绑事件委托

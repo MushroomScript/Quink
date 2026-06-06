@@ -2,6 +2,7 @@
 import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
+import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import RichEditor from './RichEditor.vue';
 import { api, type Note } from '@/api';
@@ -12,7 +13,11 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 
 const route = useRoute();
 const store = useNotesStore();
+const auth = useAuthStore();
 const toast = useToast();
+// 是否是我自己写的笔记. RichEditor.submit 永远回传 visibility/sharedGroupIds (form data 总带),
+// 但非作者改共享笔记时不能把这俩字段透传给 PATCH, 否则后端撞"只有作者可以修改共享设置" 403.
+const isMyNote = computed(() => !props.note.userId || props.note.userId === auth.user?.id);
 const saving = ref(false);
 const editorRef = ref<InstanceType<typeof RichEditor>>();
 const modalCardRef = ref<HTMLElement>();
@@ -23,19 +28,6 @@ const showConfirm = ref(false);
 const editGroupId = computed<string | undefined>(() => {
   const m = route.path.match(/^\/groups\/([^/]+)/);
   return m ? m[1] : undefined;
-});
-
-// PR #7b 版本标 chip 文案. 仅 shared 笔记显示, 提醒用户"改这条会影响什么":
-//   fork (parentNoteId 非空) = "本群独占版" — 该群专属, 只影响该群
-//   root + 多群 = "N 群共享版" — 改会同步多群 (作者从灵感页改) / 触发 fork (作者从群组页改 / 非作者改)
-//   root + 单群 = "群共享版" — 改会同步该群 (无歧义不强调)
-const versionBadge = computed<{ text: string; tone: 'fork' | 'root' } | null>(() => {
-  if (props.note.visibility !== 'shared') return null;
-  if (props.note.parentNoteId) return { text: '本群独占版', tone: 'fork' };
-  const n = props.note.sharedGroupIds?.length ?? 0;
-  if (n > 1) return { text: `${n} 群共享版`, tone: 'root' };
-  if (n === 1) return { text: '群共享版', tone: 'root' };
-  return null;
 });
 
 // PR #5 编辑锁: 仅 shared 笔记走 (private 不需要协作锁, 直接编辑).
@@ -152,10 +144,13 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
       content: data.html,
       type: data.type as any,
       tags: data.tags,
-      // PR #2: 传 visibility / sharedGroupIds 让 server 重建 note_shares (整批替换)
-      visibility: data.visibility,
-      sharedGroupIds: data.sharedGroupIds,
     };
+    // 仅作者本人才传分享设置 (后端校验非作者传 visibility/sharedGroupIds → 403). RichEditor 永远回传这俩
+    // form 字段, 但非作者不该真改, 只是 UI 回填. 不传 = 后端走 in-place 改内容路径不动 note_shares
+    if (isMyNote.value) {
+      patchData.visibility = data.visibility;
+      patchData.sharedGroupIds = data.sharedGroupIds;
+    }
     // PR #5: shared 笔记必须带 lockToken + version (server 校验 + 自增清锁)
     if (isSharedNote.value && lockToken.value) {
       patchData.lockToken = lockToken.value;
@@ -258,10 +253,11 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <!-- 全屏打开走 modal-fade(无 scale): scale 动画期间 transform 会让内部 RichEditor 的
-         fixed inset-0 被困在小窗口尺寸里(transform 祖先成为 containing block),
-         看着像"小窗一闪过"。非全屏走 modal(有 scale,正常体验)。 -->
-    <Transition :name="initialFullscreen ? 'modal-fade' : 'modal'" @after-leave="onAfterLeave">
+    <!-- 全屏跟非全屏都走 modal-fade (蘑菇 2026-06-06 拍板):
+         - 全屏: scale 动画期间 transform 让 fixed inset-0 被困在小窗口尺寸里, 走 fade 避免
+         - 非全屏: scale(0.95)→scale(1) 期间 vditor 内 cursor 视觉位置跟着缩放 (cursor 实际在末尾但视觉飘半个字),
+           Vditor IR 没法控制 cursor 抗 scale, caret-color: transparent 也救不回. 改 fade 彻底解决 focusEnd cursor 飘动. -->
+    <Transition name="modal-fade" @after-leave="onAfterLeave">
     <div v-if="showInner" class="fixed inset-0 z-[var(--z-modal-edit)] flex items-center justify-center">
       <!-- Backdrop: 毛玻璃 -->
       <div class="absolute inset-0 bg-black/40 backdrop-blur-md" @click="tryClose" />
@@ -270,15 +266,7 @@ onBeforeUnmount(() => {
       <div ref="modalCardRef" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[80vh] flex flex-col overflow-hidden ring-1 ring-black/5">
         <!-- Header -->
         <div class="flex items-center justify-between px-5 py-3 bg-gray-50/80">
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-medium text-gray-500">编辑笔记</span>
-            <!-- PR #7b: 版本标. fork = 黄琥珀提醒"只影响该群"; root 多群 = 蓝提示"会同步多群" -->
-            <span
-              v-if="versionBadge"
-              class="text-[10px] px-1.5 py-0.5 rounded-md"
-              :class="versionBadge.tone === 'fork' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'"
-            >{{ versionBadge.text }}</span>
-          </div>
+          <span class="text-xs font-medium text-gray-500">编辑笔记</span>
           <div class="flex items-center gap-3">
             <span class="text-[11px] text-gray-400 hidden sm:inline">
               <kbd class="px-1.5 py-0.5 bg-gray-200/60 rounded text-[10px]">Esc</kbd> 关闭

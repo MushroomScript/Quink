@@ -120,14 +120,6 @@ async function toggleEditHistory() {
     }
   }
 }
-// PR #7b 版本标 chip 文案 (跟 NoteEditModal / NoteCard 同 3 档逻辑保口径一致)
-const versionBadge = computed<{ text: string; tone: 'fork' | 'root' } | null>(() => {
-  if (!note.value || note.value.visibility !== 'shared') return null;
-  if (note.value.parentNoteId) return { text: '群独占版', tone: 'fork' };
-  const n = sharedGroupIds.value.length;
-  if (n > 1) return { text: `${n} 群共享版`, tone: 'root' };
-  return null;
-});
 const openEditModal = inject<(note: Note, fullscreen?: boolean) => void>('openEditModal');
 const detailTitle = inject<Ref<string>>('detailTitle');
 const hasRefPreviewPending = inject<Ref<boolean>>('hasRefPreviewPending');
@@ -543,14 +535,9 @@ onUnmounted(() => {
           @click="showSharedGroupsPopup = false; showGrantsPopup = false" />
       </div>
 
-      <!-- PR #7b: 版本标 + 编辑历史行 (所有 shared 笔记可见, 含群成员看作者笔记). 跟分享设置行分开避免破坏 isMyNote 条件. -->
-      <div v-if="isShared && (versionBadge || editorCount > 0)" class="mb-4 flex items-center gap-2 text-xs relative flex-wrap">
-        <span v-if="versionBadge"
-          class="px-2 py-0.5 rounded-full font-medium"
-          :class="versionBadge.tone === 'fork' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'">
-          {{ versionBadge.text }}
-        </span>
-        <span v-if="editorCount > 0" class="relative inline-block">
+      <!-- PR #7b: 编辑历史行 (shared 笔记 + editorCount > 0 时显示). 跟分享设置行分开避免破坏 isMyNote 条件. -->
+      <div v-if="isShared && editorCount > 0" class="mb-4 flex items-center gap-2 text-xs relative flex-wrap">
+        <span class="relative inline-block">
           <button @click.stop="toggleEditHistory"
             class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
             <PhPencilSimple size="0.75rem" weight="fill" />

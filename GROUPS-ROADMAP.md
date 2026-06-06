@@ -548,19 +548,24 @@ CREATE INDEX idx_note_edit_history_note ON note_edit_history(note_id, edited_at 
 
 - **`NoteEditModal.vue`**:
   - useRoute 自动识别 `/groups/:gid` → `editContext.groupId` 透传给 PATCH
-  - Header 加版本标 chip: fork → "本群独占版"(琥珀色), root 多群 → "N 群共享版"(蓝), root 单群 → "群共享版"
-  - PATCH 错误处理加 `editContext_required` / `note_not_in_group` 分支 toast
+  - PATCH 错误处理加 `editContext_ambiguous` / `note_not_in_group` 分支 toast (引导用户去群组页改)
+  - 加 `isMyNote` 守卫: 仅作者本人才把 `visibility` / `sharedGroupIds` 塞进 patchData (RichEditor.submit 永远回传这俩 form 字段, 非作者透传会撞后端"只有作者可以修改共享设置" 403)
 
 - **`NoteCard.vue`**:
-  - `versionBadge` computed: fork → "群独占版", root 多群 → "N 群共享版" (root 单群无歧义不标)
-  - 跟现有 "已分享" / "管理员可编辑" 胶囊并列
   - 底部 social meta 行加 PhPencilSimple + editorCount "X 人编辑过" 计数 (跟 reaction / commentCount 同行)
   - `showSocialMeta` 触发条件扩到 `editorCount > 0`
 
 - **`NoteDetail.vue`**:
   - 加 "X 人编辑过" 胶囊 + popover (lazy load via api.getNoteEditHistory, 列编辑者 avatar/nickname/时间)
-  - 版本标 chip 跟 NoteCard 同 3 档逻辑 (parentNoteId / sharedCount)
   - 跟现有分享设置行分开 (现有行 v-if=isMyNote 仅作者, 新行 v-if=isShared 群成员也看得到)
+
+- **`stores/notes.ts`**:
+  - `updateNote` fork 路径派 `quink-group-notes-changed` 事件 (editContext.groupId 存在时), 让 GroupDetail 重拉群笔记 feed (GroupDetail 用本地 ref 自管, store 同步走不到)
+
+- **版本标 chip 设计被放弃** (蘑菇 2026-06-06 拍板):
+  - 原方案想标 "群独占版" (fork) / "N 群共享版" (root 多群)
+  - 问题: root 多群对非作者是信息泄露 (B 不该知道 A 还共享给了哪些群); fork 标对群成员也没意义 (他们本来不知道有 root 跟 fork 的区分, 这条对他们就是群里的一条笔记). 作者本人看 fork 的需求弱, 真要追溯原版可走 parent_note_id 链未来加按钮
+  - 决策: 3 处 versionBadge 全删. 用户视觉无 fork 概念暴露, fork 行为对群成员透明
 
 - **`api/index.ts`**:
   - Note 加 `parentNoteId?` + `editorCount?`

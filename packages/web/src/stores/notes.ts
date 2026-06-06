@@ -255,6 +255,15 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function updateNote(id: string, data: Partial<Note> & { lockToken?: string; editContext?: { groupId?: string } }) {
     const res = await api.updateNote(id, data);
+    // PR #7b: GroupDetail 用本地 ref 自管群笔记 (CLAUDE.md "群 feed 不走 store"), store 同步走不到那.
+    // 从群组上下文改 (editContext.groupId 存在) → 派事件让 GroupDetail 重拉 feed, fork / in-place 路径都要派
+    // (作者 in-place 改自己笔记 + 非作者 fork 改别人笔记都从群组页触发, 同款需求). 跟 NoteCard 改群内置顶同款事件.
+    const ctxGroupId = data.editContext?.groupId;
+    function notifyGroupReload() {
+      if (ctxGroupId) {
+        window.dispatchEvent(new CustomEvent('quink-group-notes-changed', { detail: { groupId: ctxGroupId } }));
+      }
+    }
     // PR #7b: COW fork 路径 (非作者改 shared / 作者从群组页改 root 多群 → 后端 fork 写入).
     // 此时 res.data 是新 fork note (新 id), 老 note 仍存在 (note_shares 仅去掉 ctxGroupId, 其它群保留).
     // in-place mutate 无法同步: 老 note 字段可能也变 (note_shares 少了一项), 新 fork 不在任一 view local cache 里.
@@ -266,6 +275,7 @@ export const useNotesStore = defineStore('notes', () => {
       for (const k of Object.keys(_viewState) as ViewKey[]) {
         if (k !== activeView.value) _viewState[k].dirty = true;
       }
+      notifyGroupReload();
       return res.data;
     }
     // 改字段同步到所有 view 的本地 notes 副本. 4 种情境对称处理 (源 / 目标 × 当前 / 后台):
@@ -331,6 +341,7 @@ export const useNotesStore = defineStore('notes', () => {
         targetVs.dirty = true;
       }
     }
+    notifyGroupReload();
     return res.data;
   }
 

@@ -46,17 +46,6 @@ const isShared = computed(() => props.note.visibility === 'shared');
 const sharedCount = computed(() => props.note.sharedGroupIds?.length ?? 0);
 const editorCount = computed(() => props.note.editorCount ?? 0);
 
-// PR #7b 版本标 chip: 只在 fork case 显示 ("群独占版"是关键警告 — 编辑只影响该群).
-// root + 多群 case 不显示在 NoteCard (会跟现有 "已分享" / "管理员可编辑" / "@作者" chip 一起撑爆 header,
-// 实测 5个 chip 同行宽 ~280px > 多数 NoteCard 宽度 → "灵感"两字纵向挤压, "几秒前"竖排, 三点按钮出卡片
-// 外点不到). 多群信息已经在 "已分享" chip 的 title hover 里, 用户能看. fork 标改到 NoteDetail 全幅视图
-// + NoteEditModal header 显示, 那两处空间够.
-const versionBadge = computed<{ text: string; tone: 'fork' } | null>(() => {
-  if (!isShared.value) return null;
-  if (props.note.parentNoteId) return { text: '群独占版', tone: 'fork' };
-  return null;
-});
-
 // PR #6: shared 笔记底部 reaction summary + 评论计数 (readonly 展示, 点 NoteCard 走详情交互).
 // 只显示 count>0 的 emoji 避免 5 个胶囊占满, 0 评论时整行不显示
 const visibleReactions = computed(() => (props.note.reactionSummary || []).filter(r => r.count > 0));
@@ -422,12 +411,7 @@ const typeColor: Record<string, string> = {
           @pointerdown.stop="!store.selectMode ? onPointerDown($event) : undefined">
           {{ typeLabels[note.type] }}
         </span>
-        <!-- PR #7b 版本标: 仅 fork case 显示 "群独占版" (黄琥珀). root + 多群 不在 NoteCard 紧凑视图标 -->
-        <span v-if="versionBadge"
-          class="text-[11px] px-2 py-0.5 rounded-full font-medium select-none whitespace-nowrap bg-amber-50 text-amber-700">
-          {{ versionBadge.text }}
-        </span>
-        <!-- PR #2 / PR #5b: 我自己发的共享笔记加 "已分享" chip; 数量在详情页/title hover 看. 字号 padding 跟 type chip 一致.
+<!-- PR #2 / PR #5b: 我自己发的共享笔记加 "已分享" chip; 数量在详情页/title hover 看. 字号 padding 跟 type chip 一致.
              别人发的显示作者头像 + nickname -->
         <span v-if="isMyNote && isShared && sharedCount > 0"
           class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark select-none whitespace-nowrap"
