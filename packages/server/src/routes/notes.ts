@@ -16,7 +16,7 @@ app.use('*', authMiddleware);
 
 const createNoteSchema = z.object({
   content: z.string().min(1),
-  type: z.enum(['note', 'todo', 'snippet', 'link']).default('note'),
+  type: z.enum(['quink', 'note', 'todo']).default('quink'),
   category: z.string().optional(),
   tags: z.array(z.string()).optional(),
   todoDue: z.string().optional(), // ISO datetime, 复用为提醒时间
@@ -31,7 +31,7 @@ const updateNoteSchema = z.object({
   summary: z.string().optional(),
   category: z.string().optional(),
   tags: z.array(z.string()).optional(),
-  type: z.enum(['note', 'todo', 'snippet', 'link']).optional(),
+  type: z.enum(['quink', 'note', 'todo']).optional(),
   todoStatus: z.enum(['pending', 'done']).optional(),
   todoDue: z.string().nullable().optional(),
   todoRemindRrule: z.string().nullable().optional(),
@@ -1397,6 +1397,30 @@ app.patch('/:id', async (c) => {
       delete forkUpdates.editLockToken;
       delete forkUpdates.editLockExpiresAt;
       tx.update(schema.notes).set(forkUpdates).where(eq(schema.notes.id, newNoteId)).run();
+      // PR #7b: 非作者持锁改触发 fork 时, 也要清 original (root) 的锁. 锁是 "PATCH 提交即释放" 语义,
+      // fork 路径相当于 B 把 root 锁拿了又没还 → 其他群成员看 root 仍显示 "B 正在编辑". root 内容没改不动 version.
+      if (!isAuthor) {
+        tx.update(schema.notes).set({
+          editLockBy: null,
+          editLockToken: null,
+          editLockExpiresAt: null,
+        }).where(eq(schema.notes.id, id)).run();
+      }
+      // PR #7b 孤儿处理 (蘑菇 2026-06-06 拍板, 替代 Corner #4 原 "物理删" 决策):
+      // forkNote 已删除 (id, effectiveGroupId) 这条 note_shares. 查 existing 剩余 shares 数为 0 →
+      // existing 变孤儿 (所有共享群都 fork 走了). 不物理删 (作者可能想保留原稿), 改私密 + 移回收站
+      // 让作者可恢复. 锁字段顺便清 (作者 fork 上面没清, 这里补一致性).
+      const remaining = tx.select({ count: sql<number>`count(*)` })
+        .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).get() as { count: number } | undefined;
+      if ((remaining?.count ?? 0) === 0) {
+        tx.update(schema.notes).set({
+          visibility: 'private',
+          deletedAt: now,
+          editLockBy: null,
+          editLockToken: null,
+          editLockExpiresAt: null,
+        }).where(eq(schema.notes.id, id)).run();
+      }
       // PR #7b history: 非作者改才写 ("原作者发布 · @B 编辑过", 作者自己不算编辑过)
       if (!isAuthor) {
         tx.insert(schema.noteEditHistory).values({
@@ -1472,17 +1496,24 @@ app.delete('/:id', async (c) => {
     }
   }
 
+  // PR #7b: 先拉 sharedGroupIds 给前端 (操作者自己的 GroupDetail 用本地 ref 自管, 收不到 SSE,
+  // 前端 store.deleteNote 收到这个数组后派 quink-group-notes-changed 给每个群刷新)
+  let sharedGroupIds: string[] = [];
+  if (existing.visibility === 'shared') {
+    const shares = await db.select({ groupId: schema.noteShares.groupId })
+      .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
+    sharedGroupIds = shares.map(s => s.groupId);
+  }
+
   await db.update(schema.notes)
     .set({ deletedAt: dayjs().toISOString() })
     .where(eq(schema.notes.id, id));
 
   // PR #2 阶段 5c: 软删共享笔记 → 通知群成员 (note_shares 保留但 deletedAt 过滤让 feed 看不到)
-  if (existing.visibility === 'shared') {
-    const shares = await db.select({ groupId: schema.noteShares.groupId })
-      .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
-    broadcastNoteShared(shares.map(s => s.groupId), userId).catch(e => console.error('[notes] broadcast failed:', e));
+  if (existing.visibility === 'shared' && sharedGroupIds.length > 0) {
+    broadcastNoteShared(sharedGroupIds, userId).catch(e => console.error('[notes] broadcast failed:', e));
   }
-  return c.json({ message: '已移入回收站' });
+  return c.json({ message: '已移入回收站', sharedGroupIds });
 });
 
 /**

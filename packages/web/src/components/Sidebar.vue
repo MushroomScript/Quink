@@ -125,17 +125,18 @@ function filterByCategory(name: string) {
     notesStore.filterCategory = name;
   }
   notesStore.fetchNotes();
-  // 只在非内容页时跳灵感,灵感/笔记/待办页原地筛选
-  const contentPaths = ['/', '/notes', '/todos'];
+  // 只在非内容页时跳灵感,灵感/笔记/待办页原地筛选 (PR #8: 灵感 / → /quink)
+  const contentPaths = ['/quink', '/notes', '/todos'];
   if (!contentPaths.includes(route.path)) {
-    router.push('/');
+    router.push('/quink');
   }
 }
 
 // dropType 标记: 前 3 项 = "拖到此处改 type"; AI 用 dropAction='ai' (拖到 AI 项 = 跳 /ai 新对话 / 停留 1s 自动展开)
-const mainNav: Array<{ path: string; label: string; icon: any; dropType?: 'note' | 'snippet' | 'todo'; dropAction?: 'ai' }> = [
-  { path: '/', label: '灵感', icon: markRaw(PhLightbulb), dropType: 'note' },
-  { path: '/notes', label: '笔记', icon: markRaw(PhNotePencil), dropType: 'snippet' },
+// PR #8: dropType 字段值跟新命名对齐 (quink=灵感, note=笔记, todo=待办)
+const mainNav: Array<{ path: string; label: string; icon: any; dropType?: 'quink' | 'note' | 'todo'; dropAction?: 'ai' }> = [
+  { path: '/quink', label: '灵感', icon: markRaw(PhLightbulb), dropType: 'quink' },
+  { path: '/notes', label: '笔记', icon: markRaw(PhNotePencil), dropType: 'note' },
   { path: '/todos', label: '待办', icon: markRaw(PhCheckSquare), dropType: 'todo' },
   { path: '/ai', label: 'AI', icon: markRaw(PhSparkle), dropAction: 'ai' },
   { path: '/groups', label: '群组', icon: markRaw(PhUsersThree) },

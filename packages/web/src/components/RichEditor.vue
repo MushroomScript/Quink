@@ -50,7 +50,7 @@ const props = withDefaults(defineProps<{
   showVisibilityChip?: boolean;
 }>(), {
   initialContent: '',
-  initialType: 'note',
+  initialType: 'quink',
   initialTags: () => [],
   initialFullscreen: false,
   focusEnd: false,
@@ -100,9 +100,10 @@ const visibilityModel = ref<{ visibility: 'private' | 'shared'; sharedGroupIds: 
   sharedGroupIds: [...props.initialSharedGroupIds],
 });
 
+// PR #8 命名重整: value 跟新字段值一致 (quink=灵感, note=笔记, todo=待办)
 const noteTypes = [
-  { value: 'note', label: '灵感', icon: markRaw(PhLightbulb), iconStyle: '' },
-  { value: 'snippet', label: '笔记', icon: markRaw(PhNotePencil), iconStyle: '' },
+  { value: 'quink', label: '灵感', icon: markRaw(PhLightbulb), iconStyle: '' },
+  { value: 'note', label: '笔记', icon: markRaw(PhNotePencil), iconStyle: '' },
   { value: 'todo', label: '待办', icon: markRaw(PhCheckSquare), iconStyle: '' },
 ];
 

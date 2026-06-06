@@ -29,7 +29,7 @@ async function viewRefresh() {
 onActivated(() => {
   store.activeView = 'notes';
   store.currentRefresh = viewRefresh;
-  store.filterType = 'snippet';
+  store.filterType = 'note';
   const wasEmpty = vs.notes.length === 0;
   if (wasEmpty) {
     store.filterCategory = '';
@@ -62,8 +62,8 @@ watch(() => vs.notes.length, () => snapshotCards(), { flush: 'sync' });
     <Transition name="editor-area">
       <div v-show="!store.isFiltering && !store.selectMode" class="editor-area-wrap mb-4 md:mb-6">
         <div>
-          <MobileInput v-if="isMobile" default-type="snippet" />
-          <NoteInput v-else default-type="snippet" />
+          <MobileInput v-if="isMobile" default-type="note" />
+          <NoteInput v-else default-type="note" />
         </div>
       </div>
     </Transition>

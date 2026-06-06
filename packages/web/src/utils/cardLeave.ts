@@ -85,12 +85,11 @@ export function fadeInEnter(el: Element, done: () => void) {
   setTimeout(done, 300);
 }
 
-// 笔记 type 映射到 sidebar 上对应的导航菜单路径
+// 笔记 type 映射到 sidebar 上对应的导航菜单路径 (PR #8 命名重整: quink=灵感, note=笔记, todo=待办)
 const TYPE_TO_NAV_PATH: Record<string, string> = {
-  note: '/',
+  quink: '/quink',
+  note: '/notes',
   todo: '/todos',
-  snippet: '/notes',
-  link: '/notes',
 };
 
 function findNavTargetRect(navPath: string): DOMRect | null {
@@ -109,8 +108,8 @@ export function flyToNavLeave(el: Element, done: () => void) {
   card.style.transition = '';
   lockToScreen(card);
   const cardRect = positionMap.get(card) || card.getBoundingClientRect();
-  const noteType = card.dataset.noteType || 'note';
-  const navPath = TYPE_TO_NAV_PATH[noteType] || '/';
+  const noteType = card.dataset.noteType || 'quink';
+  const navPath = TYPE_TO_NAV_PATH[noteType] || '/quink';
   const targetRect = findNavTargetRect(navPath);
   let dx = 0, dy = -120, scale = 0.6;
   if (targetRect) {

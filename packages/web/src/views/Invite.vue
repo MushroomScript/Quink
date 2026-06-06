@@ -78,7 +78,7 @@ onMounted(loadPreview);
         </div>
         <p class="text-sm text-gray-700 mb-1">无法加入</p>
         <p class="text-xs text-gray-400 mb-4">{{ errorMsg }}</p>
-        <button @click="router.push('/')" class="px-4 py-1.5 text-xs rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">
+        <button @click="router.push('/quink')" class="px-4 py-1.5 text-xs rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">
           返回首页
         </button>
       </div>
@@ -91,7 +91,7 @@ onMounted(loadPreview);
         <h2 class="text-base font-medium mb-1">已申请加入</h2>
         <p class="text-sm text-gray-500 mb-1">{{ preview?.name }}</p>
         <p class="text-xs text-gray-400 mb-5">等待管理员审批, 通过后会自动加入</p>
-        <button @click="router.push('/')" class="px-4 py-1.5 text-xs rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">
+        <button @click="router.push('/quink')" class="px-4 py-1.5 text-xs rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">
           返回首页
         </button>
       </div>

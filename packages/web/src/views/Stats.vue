@@ -33,7 +33,8 @@ const tagCount = ref(0);
 const trashCount = ref(0);
 const loading = ref(true);
 
-const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '笔记', link: '链接' };
+// PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
+const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
 
 function getTypeCount(type: string): number {
   return (stats.value.typeDist || []).find((t: any) => t.type === type)?.count || 0;
@@ -45,8 +46,8 @@ const activeDays = computed(() => (stats.value.dailyCounts || []).length);
 // 顶部卡片数字渐变马卡龙色: 浅马卡龙起色 → 中等饱和同色系末色,135deg 斜向更自然
 // path 为 null 的卡片(活跃天数)点击不跳转,其余跳到对应 sidebar 入口 view
 const topCards = computed(() => [
-  { label: '灵感', count: getTypeCount('note'), icon: markRaw(PhLightbulb), color: 'bg-blue-50 text-blue-600', gradient: 'linear-gradient(135deg, #A7C7FF, #6890E0)', path: '/' },
-  { label: '笔记', count: getTypeCount('snippet'), icon: markRaw(PhNotePencil), color: 'bg-emerald-50 text-emerald-600', gradient: 'linear-gradient(135deg, #B5E8C8, #5BC589)', path: '/notes' },
+  { label: '灵感', count: getTypeCount('quink'), icon: markRaw(PhLightbulb), color: 'bg-blue-50 text-blue-600', gradient: 'linear-gradient(135deg, #A7C7FF, #6890E0)', path: '/quink' },
+  { label: '笔记', count: getTypeCount('note'), icon: markRaw(PhNotePencil), color: 'bg-emerald-50 text-emerald-600', gradient: 'linear-gradient(135deg, #B5E8C8, #5BC589)', path: '/notes' },
   { label: '待办', count: getTypeCount('todo'), icon: markRaw(PhCheckSquare), color: 'bg-amber-50 text-amber-600', gradient: 'linear-gradient(135deg, #FFE4A0, #FBBF24)', path: '/todos' },
   { label: '资源', count: fileCount.value, icon: markRaw(PhPaperclip), color: 'bg-purple-50 text-purple-600', gradient: 'linear-gradient(135deg, #D4C5FF, #A78BFA)', path: '/resources' },
   { label: '标签', count: tagCount.value, icon: markRaw(PhTag), color: 'bg-sky-50 text-sky-600', gradient: 'linear-gradient(135deg, #BAE6FD, #38BDF8)', path: '/tags' },
@@ -54,12 +55,13 @@ const topCards = computed(() => [
   { label: '回收站', count: trashCount.value, icon: markRaw(PhTrash), color: 'bg-gray-100 text-gray-500', gradient: 'linear-gradient(135deg, #E5E7EB, #9CA3AF)', path: '/trash' },
 ]);
 
-type CellData = { date: string; day: number; count: number; noteCount: number; snippetCount: number; todoCount: number; linkCount: number };
+// PR #8 命名重整: quinkCount=灵感 (原 noteCount), noteCount=笔记 (原 snippetCount). link 类型已删
+type CellData = { date: string; day: number; count: number; quinkCount: number; noteCount: number; todoCount: number };
 
 const heatmapData = computed(() => {
   const map = new Map<string, Omit<CellData, 'date' | 'day'>>();
   for (const d of stats.value.dailyCounts || []) {
-    map.set(d.date, { count: d.count, noteCount: d.noteCount || 0, snippetCount: d.snippetCount || 0, todoCount: d.todoCount || 0, linkCount: d.linkCount || 0 });
+    map.set(d.date, { count: d.count, quinkCount: d.quinkCount || 0, noteCount: d.noteCount || 0, todoCount: d.todoCount || 0 });
   }
   const today = new Date();
   const weeks: CellData[][] = [];
@@ -74,10 +76,9 @@ const heatmapData = computed(() => {
         date: dateStr,
         day: d,
         count: entry?.count || 0,
+        quinkCount: entry?.quinkCount || 0,
         noteCount: entry?.noteCount || 0,
-        snippetCount: entry?.snippetCount || 0,
         todoCount: entry?.todoCount || 0,
-        linkCount: entry?.linkCount || 0,
       });
     }
     weeks.push(week);
@@ -96,10 +97,9 @@ function onCellEnter(e: MouseEvent, cell: CellData) {
   // unzoomRect: CSS zoom 下 tooltip 位置归一坐标系防错位
   const rect = unzoomRect(e.currentTarget as HTMLElement);
   const parts: TooltipPart[] = [];
-  if (cell.noteCount) parts.push({ label: '灵感', count: cell.noteCount });
-  if (cell.snippetCount) parts.push({ label: '笔记', count: cell.snippetCount });
+  if (cell.quinkCount) parts.push({ label: '灵感', count: cell.quinkCount });
+  if (cell.noteCount) parts.push({ label: '笔记', count: cell.noteCount });
   if (cell.todoCount) parts.push({ label: '待办', count: cell.todoCount });
-  if (cell.linkCount) parts.push({ label: '链接', count: cell.linkCount });
   tooltip.value = {
     visible: true,
     date: cell.date,
@@ -115,7 +115,7 @@ function onCellLeave() { tooltip.value.visible = false; }
 function onCellClick(cell: CellData) {
   if (!cell.count) return;
   tooltip.value.visible = false;
-  router.push({ path: '/', query: { date: cell.date } });
+  router.push({ path: '/quink', query: { date: cell.date } });
 }
 
 // 项目自有调色板(13 色,避免 10 色循环重复)
@@ -170,11 +170,11 @@ function toggleShowAll() {
   hoveredPieIdx.value = null;
 }
 
-// 点击分类(饼图段或右侧 list 项): 跟 sidebar 分类点击同效果 — 设 store filterCategory + 跳 / 灵感页
+// 点击分类(饼图段或右侧 list 项): 跟 sidebar 分类点击同效果 — 设 store filterCategory + 跳 /quink 灵感页
 function onCategoryClick(name: string) {
   notesStore.filterCategory = name;
   notesStore.fetchNotes();
-  router.push('/');
+  router.push('/quink');
 }
 
 // "未分类"(NULL 笔记后端筛不到) + "其他"(真实分类名语义模糊) + isOthers(折叠"其他 N 项") 都不可点击筛选

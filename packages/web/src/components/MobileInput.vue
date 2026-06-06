@@ -6,7 +6,7 @@ import VisibilityChip from './VisibilityChip.vue';
 // 跟 NoteInput 对齐: 主界面编辑器 type 强制走 view 对应的 defaultType,
 // 避免在 /notes / /todos 编辑器写的内容默认变成灵感 (D1 错配)。
 const props = withDefaults(defineProps<{ defaultType?: string }>(), {
-  defaultType: 'note',
+  defaultType: 'quink',
 });
 
 const store = useNotesStore();

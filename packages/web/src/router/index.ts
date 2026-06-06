@@ -11,10 +11,15 @@ const router = createRouter({
       meta: { public: true },
     },
     {
-      path: '/',
+      // PR #8 命名重整: 灵感路由从 / 改到 /quink, 跟 /notes /todos 对称. 旧 / 加重定向到 /quink 保留用户书签
+      path: '/quink',
       name: 'inspiration',
       component: () => import('@/views/Inspiration.vue'),
       meta: { title: '灵感' },
+    },
+    {
+      path: '/',
+      redirect: '/quink',
     },
     {
       path: '/notes',

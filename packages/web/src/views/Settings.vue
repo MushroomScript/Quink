@@ -711,7 +711,7 @@ function showMsg(msg: string, type: 'success' | 'error' = 'success') {
 }
 
 function goBack() {
-  router.push('/');
+  router.push('/quink');
 }
 </script>
 

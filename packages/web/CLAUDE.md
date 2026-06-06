@@ -71,22 +71,23 @@ helper 内部 Electron 端 zoom 返回 1, 行为不变 (跟直接用 r.bottom �
 
 ## 笔记类型（type 字段）→ view 映射
 
-schema 定义 4 个值：`note / todo / snippet / link`（看 `packages/server/src/db/schema.ts`）。前端 sidebar 主导航只有 3 个对应 view，**type 到 view 的映射不直观**：
+PR #8 命名重整 (2026-06-06) 后字段值跟 UI 完全对齐，schema 定义 3 个值：`quink / note / todo`（看 `packages/server/src/db/schema.ts`）：
 
 | 路由 | view | filterType |
 |---|---|---|
-| `/` 灵感 | `Inspiration.vue` | `note` |
-| `/notes` 笔记 | `Notes.vue` | **`snippet`**（不是 `note`） |
+| `/quink` 灵感 | `Inspiration.vue` | `quink` |
+| `/notes` 笔记 | `Notes.vue` | `note` |
 | `/todos` 待办 | `Todos.vue` | `todo` |
-| 无 | （`type='link'` 没有专属 view 入口） | `link` |
 
-`type='link'` 是设计 quirk —— 创建后只能通过搜索或 AI 工具调用查到。未来补 `/links` 路由 + filterType='link' 才能用。
+旧路径 `/` 走 router redirect 自动跳 `/quink` 保留书签兼容。
+
+历史 quirk：PR #8 之前 quink 字段叫 `note`、note 字段叫 `snippet`、还有个废弃的 `link` 类型；DB 启动迁移 `type_field_migration_v1` 自动转换并删 link 笔记。改老代码 / 老文档时如果还看到 `'snippet'` / `'link'` 是漏改。
 
 这个映射也写在 `src/utils/cardLeave.ts` 的 `TYPE_TO_NAV_PATH`（控制回收站恢复时卡片飞向哪个 sidebar 菜单项）。改 type 枚举或加 view 时记得两边都改。
 
 ### 编辑器 type 策略
 
-3 个主 view 的编辑器（`NoteInput` / `MobileInput`）**不显示类型选择器**，type 强制走 view 对应的 `default-type` prop（Inspiration→note / Notes→snippet / Todos→todo）。这是 D1 错配 bug 的根除方案：之前用户在 /notes 编辑器选"灵感"保存 → 卡片 type=note 但列表过滤 type=snippet → 卡片不出现在保存当下的列表里，体验错乱。
+3 个主 view 的编辑器（`NoteInput` / `MobileInput`）**不显示类型选择器**，type 强制走 view 对应的 `default-type` prop（Inspiration→quink / Notes→note / Todos→todo）。这是 D1 错配 bug 的根除方案：之前用户在 /notes 编辑器选"灵感"保存 → 卡片 type 跟 view 过滤不一致 → 卡片不出现在保存当下的列表里，体验错乱。
 
 **跨类型快速记录**走 Capture 快捷弹窗，Capture 直接用 RichEditor 保留类型选择器（默认 `showTypeSelector=true`）。如果未来想给主 view 编辑器加回类型 selector，请先想清楚 D1 错配会回来。
 

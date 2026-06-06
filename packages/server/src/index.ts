@@ -120,17 +120,17 @@ app.get('/api/stats', authMiddleware, async (c) => {
       and(eq(schema.notes.userId, userId), sql`${schema.notes.type} = 'todo' AND ${schema.notes.todoStatus} = 'pending' AND ${schema.notes.deletedAt} IS NULL`)
     ).get();
 
-  // 每日记录数（热力图）+ 按 type 分组(tooltip 显示当天灵感/笔记/待办/链接各几条)
+  // 每日记录数（热力图）+ 按 type 分组(tooltip 显示当天灵感/笔记/待办各几条)
+  // PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删除
   const dailyCounts = db.all(sql`
     SELECT substr(${schema.notes.createdAt}, 1, 10) as date,
       count(*) as count,
+      sum(case when ${schema.notes.type} = 'quink' then 1 else 0 end) as quinkCount,
       sum(case when ${schema.notes.type} = 'note' then 1 else 0 end) as noteCount,
-      sum(case when ${schema.notes.type} = 'snippet' then 1 else 0 end) as snippetCount,
-      sum(case when ${schema.notes.type} = 'todo' then 1 else 0 end) as todoCount,
-      sum(case when ${schema.notes.type} = 'link' then 1 else 0 end) as linkCount
+      sum(case when ${schema.notes.type} = 'todo' then 1 else 0 end) as todoCount
     FROM notes WHERE user_id = ${userId} AND deleted_at IS NULL
     GROUP BY date ORDER BY date
-  `) as { date: string; count: number; noteCount: number; snippetCount: number; todoCount: number; linkCount: number }[];
+  `) as { date: string; count: number; quinkCount: number; noteCount: number; todoCount: number }[];
 
   // 分类分布（饼图）
   const categoryDist = db.all(sql`

@@ -145,9 +145,12 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
       type: data.type as any,
       tags: data.tags,
     };
-    // 仅作者本人才传分享设置 (后端校验非作者传 visibility/sharedGroupIds → 403). RichEditor 永远回传这俩
-    // form 字段, 但非作者不该真改, 只是 UI 回填. 不传 = 后端走 in-place 改内容路径不动 note_shares
-    if (isMyNote.value) {
+    // 分享设置 (visibility / sharedGroupIds) 仅"主视图 + 作者本人"才传:
+    //   非作者传 → 后端 403 "只有作者可以修改共享设置"
+    //   作者从群组页改 root 多群 → 后端进入 fork 路径, 此时传分享设置撞 400 "fork 不允许改 visibility/sharedGroupIds"
+    // 群组页改语义是"改本群版本", 分享设置改 root 才有意义, 因此群组页 modal 不传这俩.
+    // RichEditor 永远回传这俩 form 字段是为了 UI 回填, 不代表用户真改了
+    if (isMyNote.value && !editGroupId.value) {
       patchData.visibility = data.visibility;
       patchData.sharedGroupIds = data.sharedGroupIds;
     }

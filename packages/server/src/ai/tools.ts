@@ -15,7 +15,7 @@ export const TOOL_DEFINITIONS = [
         type: 'object',
         properties: {
           query: { type: 'string', description: '搜索关键词（匹配内容、摘要、标签）' },
-          type: { type: 'string', enum: ['note', 'todo', 'snippet', 'link'], description: '笔记类型筛选' },
+          type: { type: 'string', enum: ['quink', 'note', 'todo'], description: '笔记类型筛选: quink=灵感, note=笔记, todo=待办' },
           category: { type: 'string', description: '分类名称筛选' },
           tags: { type: 'string', description: '标签筛选，逗号分隔，AND 匹配' },
           dateFrom: { type: 'string', description: '起始日期 YYYY-MM-DD' },
@@ -63,7 +63,7 @@ export const TOOL_DEFINITIONS = [
       parameters: {
         type: 'object',
         properties: {
-          type: { type: 'string', enum: ['note', 'todo', 'snippet', 'link'], description: '按类型筛选' },
+          type: { type: 'string', enum: ['quink', 'note', 'todo'], description: '按类型筛选: quink=灵感, note=笔记, todo=待办' },
           scope: { type: 'string', enum: ['mine', 'shared', 'all'], description: '可见范围：mine=仅我创建 / shared=仅他人共享给我所在群 / all=两者并集（默认）' },
           limit: { type: 'number', description: '返回数量，默认10' },
         },
@@ -127,7 +127,7 @@ export const TOOL_DEFINITIONS = [
         type: 'object',
         properties: {
           content: { type: 'string', description: '笔记内容（Markdown格式）' },
-          type: { type: 'string', enum: ['note', 'todo', 'snippet'], description: '类型，默认note' },
+          type: { type: 'string', enum: ['quink', 'note', 'todo'], description: '类型: quink=灵感(默认) / note=笔记 / todo=待办' },
           category: { type: 'string', description: '分类' },
           tags: { type: 'array', items: { type: 'string' }, description: '标签数组' },
         },

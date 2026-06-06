@@ -249,13 +249,12 @@ function deletedAgo(n: any) {
   return n.deletedAt ? dayjs(n.deletedAt).fromNow() + '删除' : '';
 }
 
-// 跟 NoteCard 一致, 让回收站卡片视觉风格统一
-const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '笔记', link: '链接' };
+// PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
+const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
 const typeColor: Record<string, string> = {
-  note: 'bg-primary-light text-primary',
+  quink: 'bg-primary-light text-primary',
+  note: 'bg-emerald-100 text-emerald-600',
   todo: 'bg-amber-100 text-amber-600',
-  snippet: 'bg-emerald-100 text-emerald-600',
-  link: 'bg-sky-100 text-sky-600',
 };
 
 function onRefresh() { load(); }

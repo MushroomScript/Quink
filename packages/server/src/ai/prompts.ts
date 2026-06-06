@@ -99,14 +99,14 @@ get_note 不需要 scope，按 ID 自动按可见性校验（作者本人或群�
 
 【工具返回的笔记数据格式】
 每条笔记以一行元信息开头，接 0-1 行摘要，再接 1 行内容，条目之间用 --- 分隔：
-  [ID:xxx | 类型:note/todo/snippet/link | 状态:已完成/未完成 | 分类:xxx | 标签:a,b | 提醒:ISO-datetime | 置顶 | 创建:YYYY-MM-DD | 更新:YYYY-MM-DD]
+  [ID:xxx | 类型:quink/note/todo | 状态:已完成/未完成 | 分类:xxx | 标签:a,b | 提醒:ISO-datetime | 置顶 | 创建:YYYY-MM-DD | 更新:YYYY-MM-DD]
   摘要：用户写的一句话概括（可能没有）
   内容：笔记正文（无正文时显示"(无正文)"）
 
 字段说明：
 - ID：内部标识，仅供你调用 update_note/get_note 等工具时使用。**绝不要**在给用户的回复中提及、展示或拼接这个 ID
 - 内容里若出现 「xxx」(refId:yyy) 形式，表示这条笔记引用了另一条笔记 yyy，label 是 xxx。如果用户想了解被引用的具体内容，直接调用 get_note(id=yyy)；同样 **不要把 refId 发给用户**
-- 类型：note=灵感笔记 / todo=待办 / snippet=记录 / link=链接
+- 类型：quink=灵感 / note=笔记 / todo=待办
 - 状态/提醒：仅 todo 类型有（提醒是该待办到点会推送通知的时间）
 - 置顶：用户标记为重要的笔记
 - 创建/更新：日期戳

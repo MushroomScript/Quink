@@ -36,7 +36,8 @@ async function addAsInspiration() {
   if (!text.value.trim() || !isLoggedIn()) return;
   processing.value = true;
   try {
-    await api.createNote({ content: text.value, type: 'note' });
+    // PR #8 命名重整: 灵感字段值 'quink' (旧 'note')
+    await api.createNote({ content: text.value, type: 'quink' });
     saved.value = true;
     setTimeout(() => hideWindow(), 600);
   } catch {}
@@ -47,6 +48,7 @@ async function addAsNote() {
   if (!text.value.trim() || !isLoggedIn()) return;
   processing.value = true;
   try {
+    // PR #8 命名重整: 笔记字段值 'note' (旧 'snippet'). 顺手修历史 bug: 旧代码这里 type 写 'note' 实际加的是灵感, 跟 addAsInspiration 重复
     await api.createNote({ content: text.value, type: 'note', category: '笔记' });
     saved.value = true;
     setTimeout(() => hideWindow(), 600);
@@ -71,7 +73,8 @@ async function saveOrganized() {
   if (!result.value.trim()) return;
   processing.value = true;
   try {
-    await api.createNote({ content: result.value, type: 'note' });
+    // PR #8 命名重整: AI 整理后保存默认为灵感 'quink' (旧 'note')
+    await api.createNote({ content: result.value, type: 'quink' });
     saved.value = true;
     setTimeout(() => hideWindow(), 600);
   } catch {}

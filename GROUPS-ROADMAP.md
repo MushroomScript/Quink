@@ -27,9 +27,19 @@
 | **#6 表情 reaction + 评论** | note_reactions + note_comments thread + ReactionBar/CommentThread 组件 + NoteCard summary + NoteDetail 集成 + SSE 4 事件 | ✅ done | ~1000 行 |
 | **#7a Phase A + 偏好生效** | notes.parent_note_id + note_edit_history 表 (仅存储, 7b 接入 fork) + sharedDisplay 偏好 4 选 (own/others/none/all) + 后端 scope 加 'private' / 'others_shared' / 'all' 3 个新分支 + Settings 下拉 + store/App.vue 同步链 | ✅ done | ~150 行 |
 | **#7b fork 写入 + UI 标记** | forkNote helper + PATCH /:id fork 决策 (editContext.groupId 触发) + 资源跟随 (note_shares / group_note_pins / note_edit_grants) + note_edit_history 非作者写入 + loadEditorCountMap + GET /:id/edit-history API + Note type 加 parentNoteId/editorCount + store updateNote 处理 forked 标志 + NoteEditModal editContext 透传 + 版本标 + NoteCard 版本胶囊 + editorCount 显示 + NoteDetail 编辑历史 popover | ✅ done | ~430 行 |
-| **#7c AI/导出/孤儿收尾** | AI chat update_note 适配 fork (主动问用户) + 导出按 sharedDisplay + 作者删 fork 版 UX 确认 + shared→private 转换约束 + 统计按 origin + 孤儿物理删后台任务 | pending | ~500 行 (估) |
+| **#7c AI/导出/孤儿收尾** | 已**拆解到** #8 / #9 / #13. 孤儿处理已在 7b 用 "改私密 + 软删" 落地 (Corner #4 改决策). 作者删 fork 版提示 → 进 #9. AI chat update_note 适配 fork + shared→private 转换约束 + 统计按 origin + 导出按 sharedDisplay → 进 #13 | 拆解 | — |
+| **#8 命名重整** | 字段值改名 (`note`→`inspiration`, `snippet`→`note`, 删 `link`) + 路由改名 (`/`→`/inspiration` + 旧 `/` 重定向) + AI prompts 同步 + DB 自动迁移 | pending | ~500 行 (估) |
+| **#9 权限重整** | 字段权限细分 (B 类作者私域字段非作者禁改) + NoteCard 三点菜单按钮 v-if / 编辑器界面非作者只显示正文 / 后端 PATCH 守卫 / "另存为灵感/笔记/待办" (副本 userId=操作人, 正文加引用原作者) / 申请编辑权点编辑改弹窗 / 作者删 fork 版给提示 / "私密"字面改 "私人" / 群组批量操作权限筛选 (普通成员隐藏多选按钮) | pending | ~700 行 (估) |
+| **#10 通知中心** | 新通知表 + 通知 view (4 tab: 全部/内容/提醒/群组) + 入口 (头像列表传输按钮上方) + SSE 推送 + 接入: 另存为通知 / 申请编辑权通知 / 提醒到点 / 群组变更通知 / 评论从 toast 搬到通知页 (reaction 仍卡片) | pending | ~700 行 (估) |
+| **#11 提醒分家** | 个人提醒 (todoDue, 每人自管, 删了内容也响) + 群提醒新表 (群管理员设, 群所有人收) + 群组提醒接收开关 (每人自己控该群提醒) | pending | ~500 行 (估) |
+| **#12 群组回收站 + 审计** | 每群一个回收站 (从群组页进, 标题"X 群的回收站") + 7 天强制清 + 群主+管理员都能恢复, 仅群主能永久删 + 后端所有改/删存内容快照 (审计表 + 服务器主人管理界面留 #12+ 单独做) | pending | ~700 行 (估) |
+| **#13 收尾** | AI chat update_note 适配 fork (主动问用户改哪一版) + shared→private 转换约束 (仅未被任何群修改过能转) + 统计按 origin 维度 (fork 算 1 条, parent_note_id 链追溯) + 导出按 sharedDisplay | pending | ~500 行 (估) |
 
-总量预估 ~3550 行。每个 PR 独立 ship 不破坏现有功能。
+总量预估 ~6900 行 (含已 ship 跟 6 个新 PR). 每个 PR 独立 ship 不破坏现有功能.
+
+**PR 命名重整约定 (蘑菇 2026-06-06)**:
+- 原计划 7c-1 ~ 7c-5 子 PR 命名作废, 直接用 #8 #9 #10 #11 #12 #13 平铺往后排
+- 原 PR #7c 内容拆解到 #9 (作者删 fork 提示) 跟 #13 (AI/导出/统计/约束)
 
 ---
 
@@ -434,7 +444,7 @@ private 笔记始终显示, 此偏好仅控制纳入哪些群组共享笔记:
 | 1 | fork 时 AI 标签/分类/摘要 | **不重跑**, 复制旧标签 (接受可能跟新内容不符) |
 | 2 | 修改历史 (谁改过) | **要做**: 加 `note_edit_history` 表 (note_id, user_id, edited_at), UI 显示"原作者发布 · B、C 编辑过" |
 | 3 | 作者改时上下文混淆 | **要做**: UI 明确标"本群独占版" / "N 群共享版", 灵感页改共享版同步多群, 群组页改只影响该群 |
-| 4 | 孤儿笔记 (所有共享群都 fork 走了, 或群解散后没引用) | **物理删** (作者发出去就不留备份, 没群引用 = 该内容已不属于任何人) |
+| 4 | 孤儿笔记 (所有共享群都 fork 走了, 或群解散后没引用) | **改私密 + 软删到回收站** (蘑菇 2026-06-06 改决策, 不再物理删: 作者可能想保留原稿, 走 30 天软删窗口可恢复) |
 | 5 | shared → private 转换 | **仅未被任何群修改过的版本能改 private**, 改后从所有群移除 (等于撤回 + 加到自己列表). 被别人编辑过的 fork 版**不能改 private** (已是群的资产) |
 | 6 | 统计计数 | **fork 算 1 条**, 按 origin 维度 (有 parent_note_id 链可追溯) |
 | 7 | AI Chat `update_note` / `search_notes` | **明确哪个 fork 改哪个**. AI 不知道是哪个群的版本 → 主动问用户 |
@@ -519,6 +529,8 @@ CREATE INDEX idx_note_edit_history_note ON note_edit_history(note_id, edited_at 
 
 落实 Phase B + UI 标 (Corner #2 / #3):
 
+- **PATCH /:id fork 路径事务里的孤儿处理** (Corner #4 改决策): forkNote 删完 (id, ctxGroupId) 后查 `existing.id` 剩余 note_shares 数, = 0 → existing 变孤儿 → 改 `visibility='private'` + `deletedAt=now` + 清锁三列. 作者可在回收站找回 / 改回 shared 重新分享 / 30 天后自动彻底清
+
 - **后端 `forkNote(tx, original, groupId, now)` helper** (`packages/server/src/routes/notes.ts`):
   - 在 tx 内同步执行. 新建 fork note (新 id, parentNoteId 指 root, userId 保留作者归属, createdAt 沿用 root, 清锁三列 + version=1, visibility='shared', editPermission 跟原)
   - note_shares 转移: 该群 (groupId, oldId) → (groupId, newId), 其它群 (otherGid, oldId) 不动
@@ -549,7 +561,10 @@ CREATE INDEX idx_note_edit_history_note ON note_edit_history(note_id, edited_at 
 - **`NoteEditModal.vue`**:
   - useRoute 自动识别 `/groups/:gid` → `editContext.groupId` 透传给 PATCH
   - PATCH 错误处理加 `editContext_ambiguous` / `note_not_in_group` 分支 toast (引导用户去群组页改)
-  - 加 `isMyNote` 守卫: 仅作者本人才把 `visibility` / `sharedGroupIds` 塞进 patchData (RichEditor.submit 永远回传这俩 form 字段, 非作者透传会撞后端"只有作者可以修改共享设置" 403)
+  - 分享设置守卫: 仅"主视图 + 作者本人"才传 visibility / sharedGroupIds (`isMyNote.value && !editGroupId.value`).
+    - 非作者主视图传 → 撞后端 "只有作者可以修改共享设置" 403
+    - 作者群组页改 root 多群 → 进入 fork 路径, 传分享设置撞 "fork 不允许改 visibility/sharedGroupIds" 400
+    - 群组页语义 = "改本群版本", 分享设置改 root 才有意义, 群组页 modal 不该跟. RichEditor 永远回传这俩 form 字段只为 UI 回填, 不代表用户真改
 
 - **`NoteCard.vue`**:
   - 底部 social meta 行加 PhPencilSimple + editorCount "X 人编辑过" 计数 (跟 reaction / commentCount 同行)
@@ -560,7 +575,14 @@ CREATE INDEX idx_note_edit_history_note ON note_edit_history(note_id, edited_at 
   - 跟现有分享设置行分开 (现有行 v-if=isMyNote 仅作者, 新行 v-if=isShared 群成员也看得到)
 
 - **`stores/notes.ts`**:
-  - `updateNote` fork 路径派 `quink-group-notes-changed` 事件 (editContext.groupId 存在时), 让 GroupDetail 重拉群笔记 feed (GroupDetail 用本地 ref 自管, store 同步走不到)
+  - `updateNote` fork / in-place 两路径都派 `quink-group-notes-changed` 事件 (editContext.groupId 存在时), 让 GroupDetail 重拉群笔记 feed (GroupDetail 用本地 ref 自管, store 同步走不到). 抽 `notifyGroupReload` helper 复用
+  - `deleteNote` 收 res.sharedGroupIds 后给每个群派 `quink-group-notes-changed` 让操作者自己的 GroupDetail 重拉 (别人通过后端 broadcastNoteShared 收 SSE 已自动刷)
+  - 新 `refreshFromRemote()` export: 当前 view 是 3 主 view 之一 → fetchNotes keepCount, 跨 view 全标 dirty 让下次 onActivated 同步. SSE group-notes-changed handler 用
+
+- **`routes/notes.ts` DELETE /:id**: response 加 `sharedGroupIds` 字段, 给前端 store.deleteNote 派事件用. 后端 broadcastNoteShared 仍走 (复用同一 array, 单次查询)
+
+- **`utils/sse.ts`**:
+  - `group-notes-changed` handler 除了派 window 事件给 GroupDetail, 同时调 `useNotesStore().refreshFromRemote()` 让主 view 也同步 (sharedDisplay='all'/'others_shared' 时主 view 显示别人共享笔记 → 别人改了要刷新)
 
 - **版本标 chip 设计被放弃** (蘑菇 2026-06-06 拍板):
   - 原方案想标 "群独占版" (fork) / "N 群共享版" (root 多群)
@@ -580,8 +602,395 @@ CREATE INDEX idx_note_edit_history_note ON note_edit_history(note_id, edited_at 
 - 作者删 fork 版 UX 确认 ("该版本由 B、C 编辑过, 确认删除？") — Corner #9
 - shared → private 转换约束 (仅未被任何群修改过能转 private) — Corner #5
 - 统计按 origin 维度 (parent_note_id 链追溯 root 算 1 条) — Corner #6
-- 孤儿物理删后台任务 (所有共享群都 fork 走 → root 失去引用 → 物理删) — Corner #4
+- ~~孤儿物理删后台任务~~ — Corner #4 蘑菇改决策走"软删 + 改私密"已在 7b 实施, 7c 不需要再做
 - 主视图改别人共享笔记 (editContext.groupId 缺失) 的歧义解决: 已实现"宽容方案" — 后端算 `user.active_groups ∩ note.shared_groups`, 唯一交集自动 fork 到那群 (90% case 无歧义); 多个交集才返 `editContext_ambiguous` 让前端 toast 引导去群组页. 罕见歧义 case (B 同时在多群且都共享了同一条) 留 7c 看是否加群选择器交互
+
+---
+
+## PR #8 命名重整 (next, pending)
+
+**目标**: 把项目早期遗留的"type 字段值跟 UI 名字对不上 + 路由不对称 + link 类型遗留"这 3 个技术债一次性清理. 命名干净后 #9 起 PR 不在乱命名上叠 bug.
+
+### 命名映射 (蘑菇 2026-06-06 拍板)
+
+**type 字段值改名** (蘑菇 2026-06-06 拍板用 `quink`):
+
+| UI 上叫 | 旧字段值 | 新字段值 |
+|---|---|---|
+| 灵感 | `note` | `quink` |
+| 笔记 | `snippet` | `note` |
+| 待办 | `todo` | `todo` (不变) |
+| (link 类型废弃) | `link` | 删除 (DB 当前 0 条已确认安全) |
+
+**路由 URL 改名**:
+
+| UI 上叫 | 旧 URL | 新 URL |
+|---|---|---|
+| 灵感 | `/` | `/quink` |
+| 笔记 | `/notes` | 不变 |
+| 待办 | `/todos` | 不变 |
+
+旧 `/` 加 302 重定向到 `/quink` 保证用户输入域名仍有默认页.
+
+### 数据库自动迁移
+
+后端启动时跟现有 `CREATE TABLE IF NOT EXISTS + ALTER TABLE` 同模式 try-catch 包: 
+```sql
+-- 迁移顺序重要: 先把 'snippet' 改 'note', 不然 'note' 改 'quink' 后又会把改完的 'quink' 再当成旧 'note' 改 (错)
+UPDATE notes SET type='note' WHERE type='snippet';
+UPDATE notes SET type='quink' WHERE type='note' AND type != 'note'; -- 这里要小心顺序, 实际实现用 CASE 或临时值避免覆盖
+DELETE FROM notes WHERE type='link';
+```
+
+实际实现用 CASE 表达式避免顺序坑:
+```sql
+UPDATE notes SET type = CASE
+  WHEN type = 'snippet' THEN 'note'
+  WHEN type = 'note' THEN 'quink'
+  WHEN type = 'link' THEN 'DELETE_ME'
+  ELSE type
+END;
+DELETE FROM notes WHERE type = 'DELETE_ME';
+```
+
+Schema enum 同步: notes.type 从 `['note', 'todo', 'snippet', 'link']` 改 `['quink', 'note', 'todo']`.
+
+### 代码改动范围 (约 30 文件)
+
+- **Schema** (`packages/server/src/db/schema.ts`): notes.type enum 修改
+- **类型定义** (`packages/server/src/db/schema.ts` + `packages/web/src/api/index.ts`): NoteType 同步
+- **routes/notes.ts**: zod schema 跟 createNoteSchema / updateNoteSchema 里的 enum 改
+- **AI prompts** (`packages/server/src/ai/prompts.ts`): auto_tag / auto_classify / chat 工具描述里提到 'note' / 'snippet' / 'link' 全改
+- **AI tools** (`packages/server/src/ai/tools.ts`): create_note / update_note 的 type 参数 enum 描述改
+- **前端 router** (`packages/web/src/router/index.ts` + 类似): 路径 `/` 改 `/quink` + 加 `/` redirect
+- **前端 store** (`packages/web/src/stores/notes.ts`): `typeToView` map 改, `ViewKey` 跟 `_viewState` key 同步检查 (key 可能不需要改, 它跟字段值无关)
+- **侧边栏** (`packages/web/src/components/Sidebar.vue`): 路径 + typeFilter 映射改
+- **TopBar** (`packages/web/src/components/TopBar.vue`): types 过滤的 chip 显示
+- **3 主 view 文件**: Inspiration.vue / Notes.vue / Todos.vue 内部的 `filterType` / `default-type` prop / 类型判断
+- **NoteCard.vue + NoteDetail.vue + RichEditor.vue + MobileInput.vue + NoteInput.vue + Capture.vue**: 所有 `type === 'note'` / `type === 'snippet'` 字符串改
+- **TYPE_TO_NAV_PATH** (`packages/web/src/utils/cardLeave.ts`): 类型到路径的映射
+- **AI.vue / AiChat.vue**: 创建笔记的 type 参数
+- **scripts/seed-trash.mjs**: 演示数据里的 type
+- **CLAUDE.md**: 根级 + packages/web/CLAUDE.md 里"笔记类型→view 映射"段全改
+
+### 自测清单 (Claude MCP 能测)
+
+- tsc 双 EXIT=0
+- 后端启动无 schema migration 错误
+- sqlite-mcp 查 notes 表的 type 值: 应该全是 `quink` / `note` / `todo` 三种, 无 `snippet` 无 `link`
+- chrome-devtools-mcp 注入: 看 Sidebar 路径 / NoteCard chip 文案对得上
+
+### 手测清单 (需要蘑菇)
+
+1. 浏览器输 `http://localhost:24888/` → 应自动跳 `/quink` (灵感页)
+2. 旧浏览器书签 `/notes` `/todos` 应仍能打开 (不变)
+3. 新建笔记 / 灵感 / 待办: 数据库里的 type 字段值应该是 `note` / `quink` / `todo`
+4. 编辑器底部类型选择器: 3 个选项分别叫 灵感 笔记 待办, 不应再出现 link
+5. AI 创建笔记: AI 应使用新字段值 (chat 给 AI 一句话让它建 todo, 看是否成功)
+
+---
+
+## PR #9 权限重整 (pending)
+
+**目标**: 把"谁能改笔记什么字段"按 5 类细分, 前后端守卫一致. UI 按角色隐藏对应按钮. 加"另存为"功能让无权限的人也能保留内容副本.
+
+### 字段权限 5 类
+
+| 字段类 | 包含字段 | 谁能改 | 改触发 |
+|---|---|---|---|
+| **正文** | `content`, `summary` | 作者+群主+管理员+grants 白名单 | 非作者+ shared 触发 fork |
+| **作者私域** | `category`, `tags`, `pinned` (主页置顶) | **仅作者** (含群主管理员都不能改别人的) | in-place |
+| **类型/状态** | `type`, `todoStatus` | 作者+群主+管理员 (普通成员含 grants 都不能改) | 改 type 不 fork (字段不属于 fork 范畴) |
+| **分享设置** | `visibility`, `sharedGroupIds`, `editPermission` | 仅作者 | in-place |
+| **群级独立** | `groupPinned` | 群主+管理员 (PR #6 已落) | 群级 API |
+
+### NoteCard 三点菜单按钮可见性
+
+| 按钮 | 显示条件 |
+|---|---|
+| 主页置顶 / 取消主页置顶 | `isMyNote && !inGroupContext` |
+| 群内置顶 / 取消 | `canPinInGroup` (PR #6 已落) |
+| 编辑 | 永远显示 (没权限 → 改弹申请窗, 不进编辑器) |
+| 标记完成 / 未完成 | `isMyNote || isGroupAdmin` (todo 类型时显示, 普通成员含 grants 都不显示) |
+| 设置提醒 (个人) | `type === 'todo'` (所有人都能设自己的, 不限作者) |
+| 设置群提醒 | `inGroupContext && isGroupAdmin && type === 'todo'` (群管理员/群主额外按钮, 详见 PR #11) |
+| 另存为灵感 / 笔记 / 待办 | 所有人都能用 (复制成自己的私人副本); 按 note.type 决定文案 |
+| 多选 | `isGroupAdmin` (群组上下文) 或 `!isShared` (主视图只针对私人笔记) |
+| 删除 | `canDelete` (PR #7b 已落) |
+
+### "另存为" 操作详情
+
+- 按钮文案按 note.type 决定: `quink` → "另存为灵感", `note` → "另存为笔记", `todo` → "另存为待办"
+- 操作: 后端 POST `/api/notes/:id/duplicate` 创建副本 note
+  - 副本 userId = 当前操作人
+  - 副本 visibility = 'private'
+  - 副本 type = 跟原笔记 type 一致
+  - 副本 content = 原笔记 content + 开头自动加引用块: `> 原作者: @{原作者昵称} ｜ {原笔记 createdAt YYYY-MM-DD}\n\n`
+  - 副本 parentNoteId = 不指向 (因为不是 fork, 是独立副本)
+  - 副本 tags / category / pinned / todoStatus / todoDue 都不复制 (副本自己一套)
+- 通知原作者: SSE 推 `note-duplicated` 事件给原作者 → 前端 PR #10 前先用 toast 顶, PR #10 接入通知页
+
+### 申请编辑权改成弹窗
+
+PR #5b 时申请编辑权是 toast 上有"申请"按钮 → 现改成: 没权限的人点编辑按钮 → 弹申请对话框 (输入申请理由 + "提交申请" / "取消")
+- 提交后调现有 `POST /:id/edit-request` API
+- 通知作者跟群管理员 (PR #10 前仍走 SSE + toast)
+
+### 编辑器界面变化
+
+- 作者本人: 什么都能改 (跟现在一致)
+- 非作者 (有 write 权限): UI 上的 type 选择器 disable, tags / category 入口隐藏, 只让改正文. 后端 PATCH 守卫额外兜底 (剥 B/C 类字段, 静默忽略)
+- 非作者 (没 write 权限): 根本进不了编辑器 (点编辑触发申请弹窗)
+
+### 后端 PATCH 守卫
+
+```ts
+if (!isAuthor) {
+  // 删除作者私域 + 类型/状态 + 分享设置字段 (前端 UI 已隐藏对应入口, 这里防御性兜底防旧客户端 / 直接调 API)
+  delete data.category;
+  delete data.tags;
+  delete data.pinned;
+  // type / todoStatus 看 isGroupAdmin: 是群管理员/群主则放行, 否则剥
+  if (!isGroupAdmin) {
+    delete data.type;
+    delete data.todoStatus;
+  }
+  // visibility / sharedGroupIds / editPermission 已在 PR #5/5b 拦截
+}
+```
+
+### 群组批量操作
+
+- 普通成员: 群组页隐藏多选按钮 (`isGroupAdmin || isMyNote` 才显示)
+- 管理员/群主: 多选可选含别人的, 批量操作时按权限筛
+  - 批量删: 自己的 + 我管理的群里别人的, 都删. toast "已删 N 条, 跳过 M 条无权限"
+  - 批量改 category / tags: 仅自己的笔记生效, 别人的跳过
+  - 批量改 type / todoStatus: 自己的 + 群里别人的 (我是管理员/群主) 都生效
+
+### "私密" 字面改 "私人"
+
+编辑器底部分享设置里"私密 / 共享"中的"私密"统一改"私人" (语义更软). 影响 RichEditor.vue / NoteEditModal.vue / Settings.vue (如果有) 等少量文案.
+
+### 作者删 fork 版给提示
+
+作者通过自己列表看到 fork 出来的版本 (parentNoteId 非空) 想删时, 弹特殊确认: 
+"这个版本由 @B @C 编辑过, 共 N 处修改. 确认删除？"
+跟现有"确认删 @张三 的笔记"弹窗模式一致, 但是给作者看的.
+
+### 自测清单
+
+- tsc 双 EXIT=0
+- 后端 PATCH 守卫: sqlite 构造数据后用 curl 模拟非作者 PATCH 传 tags / category → 应静默忽略
+- chrome-devtools 注入检查: NoteCard 三点菜单按钮 v-if 跟 isMyNote / isGroupAdmin 联动正确
+- 后端 POST /:id/duplicate: curl 调用看返回的副本 note 字段正确
+
+### 手测清单
+
+1. **作者本人在自己 NoteCard 上**: 三点菜单全显示 (含主页置顶 / 编辑 / 标完成 / 设提醒 / 另存为 / 多选 / 删除)
+2. **群成员看群里别人笔记** (普通 member 角色): 隐藏 "主页置顶" / "标完成" / "设群提醒" / "多选" / "删除"; 显示 "编辑" "设提醒" (个人) "另存为"
+3. **群管理员/群主**看群里别人笔记: 隐藏 "主页置顶"; 显示其余全部 (含"设群提醒"/"多选"/"删除")
+4. **点"另存为"**: 副本出现在自己列表, type 跟原一致, 正文开头有"原作者: @xxx"
+5. **没编辑权的人点"编辑"**: 弹"申请编辑权"对话框 (不是直接进编辑器)
+6. **作者删自己 fork 出去的版本**: 弹"这个版本由 @B @C 编辑过, N 处修改"特殊确认
+
+---
+
+## PR #10 通知中心 (pending)
+
+**目标**: 加全局通知系统, 集中所有"用户该被告知"的事件. OS 通知 + 通知页双保险, 不再依赖 toast 一闪而过.
+
+### 数据库表设计
+
+```sql
+CREATE TABLE notifications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id), -- 收件人
+  category TEXT NOT NULL, -- 'content' / 'reminder' / 'group' (对应 UI 的 3 个 tab)
+  type TEXT NOT NULL, -- 'edit-request' / 'edit-request-approved' / 'duplicated' / 'reminder-due' / 'group-reminder-due' / 'note-deleted-by-admin' / 'comment-added' / 'comment-replied' / 'group-join-request' / 'group-joined' / 'group-removed' / 'group-promoted' / 'group-demoted' / 'group-dissolved' / 'fork-by-other' 等
+  title TEXT NOT NULL, -- 通知标题, 显示在卡片
+  body TEXT, -- 详情, 可选
+  payload TEXT, -- JSON, 跳转/动作用 (含 noteId / groupId / fromUserId 等)
+  read_at TEXT, -- NULL = 未读
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_notifications_user_created ON notifications(user_id, created_at DESC);
+CREATE INDEX idx_notifications_user_unread ON notifications(user_id, read_at) WHERE read_at IS NULL;
+```
+
+### 后端 API
+
+- `GET /api/notifications?category=&page=&limit=` 列通知 (按 category 过滤, 时间倒序)
+- `GET /api/notifications/unread-count` 拉未读数 (左上角图标徽章用)
+- `POST /api/notifications/:id/read` 标已读
+- `POST /api/notifications/read-all` 一键全标已读
+- `DELETE /api/notifications/:id` 删一条
+- `DELETE /api/notifications` 清空 (含 query `?category=`)
+
+### 后端 helper
+
+`createNotification(userId, category, type, title, body, payload)`: 写表 + SSE publish `notification-new` 给该用户 (前端通知页 + 徽章自动更新).
+
+### 接入点 (替换现有 SSE / toast)
+
+| 事件 | 旧实现 | 新实现 |
+|---|---|---|
+| 提醒到点 (reminder-due) | reminder/sender.ts publish `reminder` SSE → 前端 OS Notification + toast | 仍 OS Notification, 但额外 `createNotification(userId, 'reminder', ...)` 写一条 |
+| 群提醒到点 (group-reminder-due) | (PR #11 新加) | 给群里 active 成员 (含订阅开启的) 各 `createNotification` 一条 |
+| 申请编辑权 (edit-request) | PR #5b toast 给作者+admin | `createNotification` 给作者+admin, 同时仍 OS Notification (作者期望立即知道) |
+| 申请审批结果 (edit-request-resolved) | PR #5b toast 给申请人 | `createNotification` 给申请人 |
+| 被另存为 (duplicated) | PR #9 toast 给原作者 | `createNotification` 给原作者 |
+| 笔记被群管理员删 (note-deleted-by-admin) | (没有) | `createNotification` 给作者 |
+| 笔记被别人 fork (fork-by-other) | (没有) | `createNotification` 给作者 (告知该笔记在 X 群被 @Y fork 走了) |
+| 评论我的笔记 (comment-added) | PR #6 SSE → CommentThread 增量 | 额外 `createNotification` 给作者. 评论自己创的 thread 给其他评论者. reaction 不进通知 (频率太高) |
+| 群里有人申请加入 (group-join-request) | PR #1 SSE → owner toast | `createNotification` 给 owner + admin |
+| 我被加入新群 (group-joined) | (没有) | `createNotification` 给新成员 |
+| 我被踢出群 (group-removed) | (没有) | `createNotification` |
+| 被任命管理员 (group-promoted) | (没有) | `createNotification` |
+| 取消管理员 (group-demoted) | (没有) | `createNotification` |
+| 群被解散 (group-dissolved) | (没有) | `createNotification` 给所有 active 成员 |
+
+### 前端 view
+
+新加 `views/Notifications.vue` 路由 `/notifications`. 跟 Resources.vue 同款顶部布局:
+- 标题 "消息通知" + 未读数量 + 刷新按钮 (没搜索框)
+- 4 个 tab: 全部 / 内容 / 提醒 / 群组 (UI 同 Resources 的 type 切换)
+- 列表: 一行一条通知, 含 icon (按 type) + title + body 截断 + 时间 + 未读小圆点
+- 点击通知: 跳到关联资源 (noteId 跳 NoteDetail, groupId 跳 GroupDetail) + 标已读
+- 右键 (或长按) 单条: 删除 / 标已读
+- 顶部"全标已读" / "清空当前 tab" 按钮
+
+### 入口
+
+左上角头像点击展开的用户菜单, 在"传输列表"按钮**上方**加一行: "消息通知 [N]" (徽章显示未读数). 点击调 `router.push('/notifications')`.
+
+### SSE 接入
+
+`utils/sse.ts` 新加 `notification-new` handler: 派 window 事件 → 通知页监听 reload + 徽章自动更新.
+
+### 自测清单
+
+- tsc 双 EXIT=0
+- 后端启动 schema migration
+- sqlite 模拟插入几条通知 → GET /api/notifications 返回正确
+- 前端通知页空状态 + 加载状态 UI 正确
+
+### 手测清单
+
+1. 用 A 账号给 B 共享笔记, B 申请编辑权 → A 通知页"内容"tab 收到一条
+2. 设个 2 分钟后的提醒 → 到点 OS 弹通知 + 通知页"提醒"tab 多一条
+3. C 把 B 拉进群 → B 通知页"群组"tab 多"被加入新群"
+4. 标记已读 → 徽章数字减 1
+5. 点击通知 → 跳对应笔记/群
+
+---
+
+## PR #11 提醒分家 (pending)
+
+**目标**: 把现在挂在 notes.todo_due 上的"作者私域提醒"模式改成: 每个人对每个笔记都能设自己的私人提醒 (含非作者); 群管理员/群主额外可设"群提醒"群里所有人收.
+
+### 概念
+
+- **个人提醒**: 任何用户对任何笔记都能设. 多对多关系. 别人看不到. 笔记删了也响 (蘑菇决策: 待办被删除时发通知告知"提醒失效").
+- **群提醒**: 群主/管理员对某共享笔记设 (笔记必须在该群里 share). 群所有 active 成员 (且开启接收开关的) 都收. 公开可见 (谁设的写在通知里).
+
+### 数据库表
+
+```sql
+-- 个人提醒 (替代 notes.todo_due / todo_remind_rrule / todo_remind_sent_at 三列)
+CREATE TABLE note_personal_reminders (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  note_id TEXT NOT NULL REFERENCES notes(id),
+  due_at TEXT NOT NULL, -- ISO datetime
+  rrule TEXT, -- RFC 5545 RRULE 字符串, NULL = 单次
+  remind_sent_at TEXT, -- 防重发
+  created_at TEXT NOT NULL,
+  UNIQUE (user_id, note_id) -- 一个用户对一个笔记最多 1 条
+);
+CREATE INDEX idx_personal_reminders_due ON note_personal_reminders(due_at) WHERE remind_sent_at IS NULL;
+
+-- 群提醒
+CREATE TABLE note_group_reminders (
+  id TEXT PRIMARY KEY,
+  note_id TEXT NOT NULL REFERENCES notes(id),
+  group_id TEXT NOT NULL REFERENCES groups(id),
+  due_at TEXT NOT NULL,
+  rrule TEXT,
+  remind_sent_at TEXT,
+  created_by TEXT NOT NULL REFERENCES users(id), -- 谁设的, 通知里显示
+  created_at TEXT NOT NULL,
+  UNIQUE (note_id, group_id) -- 一个笔记在一个群最多 1 条群提醒
+);
+CREATE INDEX idx_group_reminders_due ON note_group_reminders(due_at) WHERE remind_sent_at IS NULL;
+
+-- 群提醒接收开关 (每用户每群可关)
+CREATE TABLE group_reminder_subscriptions (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  group_id TEXT NOT NULL REFERENCES groups(id),
+  enabled INTEGER NOT NULL DEFAULT 1, -- 默认接收
+  PRIMARY KEY (user_id, group_id)
+);
+```
+
+### 数据迁移
+
+启动时把现有 notes 里有 todo_due 的, 写一条对应的 note_personal_reminders (user_id = 作者):
+```sql
+INSERT INTO note_personal_reminders (id, user_id, note_id, due_at, rrule, remind_sent_at, created_at)
+SELECT nanoid12(), user_id, id, todo_due, todo_remind_rrule, todo_remind_sent_at, datetime('now')
+FROM notes WHERE todo_due IS NOT NULL;
+```
+(nanoid12 需要在 JS 层生成, SQL 里不行, 实际用 better-sqlite3 拉数据 → JS 循环 INSERT).
+
+迁移完成后: notes 表里 todo_due / todo_remind_sent_at / todo_remind_rrule 三列**保留不删** (避免破坏老客户端读), 但新版后端不再写它们. 未来某个 PR 才彻底删.
+
+### Scheduler 重构
+
+`packages/server/src/reminder/scheduler.ts` 当前扫 notes.todo_due. 改成: 同时扫 note_personal_reminders 跟 note_group_reminders 两张表.
+
+- 个人提醒: 命中 → publish `reminder` SSE 给该 user_id (前端弹 OS 通知) + PR #10 接入 `createNotification(userId, 'reminder', ...)` 写通知
+- 群提醒: 命中 → 拉群里所有 active 成员 + 该用户开了 group_reminder_subscriptions.enabled → 给每个 user_id 同上处理
+- 笔记被软删 (deleted_at NOT NULL): 提醒**仍然扫得到但不发**, 改成 `createNotification(userId, 'reminder', '待办已被删除, 提醒失效')` 标记发过. RRULE 重复的也只发一次"失效"通知, 然后从表里删
+
+### NoteCard 三点菜单变化
+
+- 普通成员 (含 grants): 「设置提醒」(个人) — 调 `POST /api/notes/:id/personal-reminder`
+- 群管理员/群主: 「设置提醒」+「设置群提醒」两个 — 群提醒调 `POST /api/notes/:id/group-reminder?groupId=`
+
+### GroupDetail 加群提醒接收开关
+
+群详情页 (`packages/web/src/components/GroupDetail.vue`) 在公告下面加一个开关: "接收本群提醒" (默认开). 调 `PATCH /api/groups/:id/reminder-subscription` 改.
+
+### API
+
+- `POST /api/notes/:id/personal-reminder` body `{ dueAt, rrule? }` (个人)
+- `DELETE /api/notes/:id/personal-reminder`
+- `POST /api/notes/:id/group-reminder` body `{ groupId, dueAt, rrule? }` (群管理员)
+- `DELETE /api/notes/:id/group-reminder?groupId=`
+- `GET /api/notes/:id/reminders` 拉某笔记的所有提醒 (自己的个人 + 我所在群的群提醒) 给 NoteCard 显示用
+- `PATCH /api/groups/:id/reminder-subscription` body `{ enabled }`
+- `GET /api/groups/:id/reminder-subscription`
+
+### NoteCard 提醒图标显示
+
+原来铃铛只显示作者的 todoDue. 改成: 任何用户看 NoteCard 时, 铃铛显示:
+- 优先级: 我的个人提醒 > 我所在群的群提醒 > 没提醒不显示
+- title hover 显示提醒来源 (个人 / 群名)
+
+### 自测清单
+
+- tsc 双 EXIT=0
+- 数据迁移: sqlite 查 note_personal_reminders 应跟原 notes.todo_due 一一对应
+- scheduler 重构后扫 2 张表逻辑正确 (sqlite 插入 past due 的 reminder 看是否 publish 出来)
+
+### 手测清单
+
+1. A 给 B 共享待办笔记 → B 点 NoteCard 三点菜单 → 应有"设置提醒" (个人)
+2. B 设个人提醒 2 分钟后 → 到点 B 收 OS 通知, A 不收
+3. A 把 B 升级管理员 → B 再开 NoteCard 三点菜单 → 应多出"设置群提醒"
+4. B 设群提醒 → 群里 A 跟其它成员都收到 OS 通知
+5. B 在群详情页关闭"接收本群提醒" → 群提醒到点 B 不收 OS 通知 (但通知页可能仍有? 跟 PR #10 联调时决定)
+6. A 删除该笔记 → B 收"待办已被删除, 提醒失效"通知
 
 ---
 

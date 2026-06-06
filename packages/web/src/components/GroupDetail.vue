@@ -248,7 +248,7 @@ async function doRemoveMember() {
     toast.show(isSelf ? '已退群' : `已移除 ${confirmRemoveName.value}`, 'success');
     confirmRemoveId.value = '';
     confirmRemoveName.value = '';
-    if (isSelf) router.push('/');
+    if (isSelf) router.push('/quink');
   } catch (e: any) {
     toast.show(e?.message || '操作失败', 'error');
   }

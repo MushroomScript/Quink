@@ -125,7 +125,8 @@ const detailTitle = inject<Ref<string>>('detailTitle');
 const hasRefPreviewPending = inject<Ref<boolean>>('hasRefPreviewPending');
 const restoreRefPreview = inject<() => void>('restoreRefPreview');
 
-const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '笔记', link: '链接' };
+// PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
+const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
 
 async function renderContent(content: string): Promise<string> {
   try {
@@ -244,7 +245,7 @@ function toggleMenu() {
   showMenu.value = true;
 }
 
-async function moveTo(type: 'note' | 'snippet' | 'todo') {
+async function moveTo(type: 'quink' | 'note' | 'todo') {
   if (!note.value) return;
   await store.updateNote(note.value.id, { type } as any);
   showMenu.value = false;
@@ -293,7 +294,13 @@ async function doDelete() {
   // 留个 snapshot 给撤销用 (跳页后 note ref 会被清, 必须先拷贝)
   const snapshot = { ...note.value };
   confirmDelete.value = false;
-  await store.deleteNote(id);
+  // PR #7b: try-catch 兜底 — 后端 403 / 网络错时之前 await throw 后续语句全跳过 = "什么都不提示"
+  try {
+    await store.deleteNote(id);
+  } catch (e: any) {
+    toast.show(e?.message || '删除失败', 'error', 3000);
+    return;
+  }
   goBack();
   toast.show('已移到回收站', {
     duration: 5000,
@@ -316,7 +323,7 @@ function goBack() {
   if (window.history.length > 1) {
     router.back();
   } else {
-    router.push('/');
+    router.push('/quink');
   }
 }
 
@@ -416,13 +423,13 @@ onUnmounted(() => {
               <span>{{ note.todoDue ? '编辑提醒' : '设置提醒' }}</span>
             </button>
             <div class="border-t border-gray-100 my-0.5"></div>
-            <!-- 移至类型: 当前 type 不显示, 避免"移至自身"无效项 -->
-            <button v-if="note.type !== 'note'" @click.stop="moveTo('note')"
+            <!-- 移至类型 (PR #8 命名重整: quink=灵感, note=笔记): 当前 type 不显示, 避免"移至自身"无效项 -->
+            <button v-if="note.type !== 'quink'" @click.stop="moveTo('quink')"
               class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
               <PhLightbulb size="0.875rem" weight="fill" />
               <span>移至灵感</span>
             </button>
-            <button v-if="note.type !== 'snippet'" @click.stop="moveTo('snippet')"
+            <button v-if="note.type !== 'note'" @click.stop="moveTo('note')"
               class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
               <PhNotePencil size="0.875rem" weight="fill" />
               <span>移至笔记</span>
@@ -432,8 +439,10 @@ onUnmounted(() => {
               <PhCheckSquare size="0.875rem" weight="fill" />
               <span>移至待办</span>
             </button>
-            <div class="border-t border-gray-100 my-0.5"></div>
-            <button @click.stop="askDelete()"
+            <!-- PR #7b: 非作者不显示删除按钮. NoteDetail 是独立 route 拿不到群上下文,
+                 无法判断我是否该笔记某共享群的 admin → 别人的笔记一律隐藏删除, 让用户去群组页 NoteCard 删 -->
+            <div v-if="isMyNote" class="border-t border-gray-100 my-0.5"></div>
+            <button v-if="isMyNote" @click.stop="askDelete()"
               class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 transition-colors">
               <PhTrash size="0.875rem" weight="fill" />
               <span>删除</span>
@@ -456,9 +465,13 @@ onUnmounted(() => {
         <Transition name="modal">
           <div v-if="confirmDelete" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
             <div class="absolute inset-0 bg-black/30" @click="confirmDelete = false" />
-            <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-              <p class="text-sm text-gray-700 mb-1">删除内容</p>
-              <p class="text-xs text-gray-400 mb-4">可在回收站找回</p>
+            <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 text-center">
+              <p class="text-sm text-gray-700 mb-1">
+                {{ isMyNote ? '删除内容' : `确认删除 @${(note as any)?.authorNickname || '某人'} 的笔记？` }}
+              </p>
+              <p class="text-xs text-gray-400 mb-4">
+                {{ isMyNote ? '可在回收站找回' : '群成员将看不到这条笔记 (作者本人仍可恢复)' }}
+              </p>
               <div class="flex gap-2 justify-center">
                 <button @click="confirmDelete = false" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
                 <button @click="doDelete" class="inline-flex items-center justify-center px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>

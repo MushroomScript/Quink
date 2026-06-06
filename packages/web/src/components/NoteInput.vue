@@ -8,7 +8,7 @@ import RichEditor from './RichEditor.vue';
 // 不显示类型选择器 — 避免"在 /notes 编辑器选'灵感'保存"导致的卡片错落到非匹配列表的问题 (D1)。
 // 跨类型快速记录走 Capture 快捷弹窗 (那里直接用 RichEditor 保留 type selector)。
 const props = withDefaults(defineProps<{ defaultType?: string }>(), {
-  defaultType: 'note',
+  defaultType: 'quink',
 });
 
 const store = useNotesStore();

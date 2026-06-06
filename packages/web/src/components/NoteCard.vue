@@ -60,6 +60,9 @@ const inGroupContext = computed(() => route.path.startsWith('/groups/'));
 const groupIdFromRoute = computed(() => inGroupContext.value ? (route.params.id as string) : null);
 const groupRole = inject<ComputedRef<'owner' | 'admin' | 'member' | null>>('groupRole', computed(() => null));
 const canPinInGroup = computed(() => inGroupContext.value && (groupRole.value === 'owner' || groupRole.value === 'admin'));
+// PR #7b: 删除按钮可见性. 作者本人永远可删; 别人的笔记仅"群组页 + 我是该群 owner/admin"才显示 ("管理操作" 后端校验同款).
+// 主视图看到别人共享笔记 (sharedDisplay='all'/'others_shared') 默认不显示删除, 让用户去群组页操作
+const canDelete = computed(() => isMyNote.value || canPinInGroup.value);
 // 视觉用的"是否置顶": 群组上下文看 groupPinned (独立于作者全局 pinned), 否则看 note.pinned
 const displayPinned = computed(() => inGroupContext.value ? !!props.note.groupPinned : props.note.pinned);
 
@@ -276,7 +279,13 @@ async function doDelete() {
   confirmDelete.value = false;
   // 留个 snapshot 给撤销用: store.deleteNote 走 splice 会让 props.note 引用失效, 必须先拷贝
   const snapshot = { ...props.note };
-  await store.deleteNote(props.note.id);
+  // PR #7b: try-catch 兜底 — 后端 403 / 网络错时之前会静默(toast.show 不执行 = "什么都不提示")
+  try {
+    await store.deleteNote(props.note.id);
+  } catch (e: any) {
+    toast.show(e?.message || '删除失败', 'error', 3000);
+    return;
+  }
   toast.show('已移到回收站', {
     duration: 5000,
     action: {
@@ -376,12 +385,12 @@ async function saveReminder(payload: { remindAt: string | null; rrule: string | 
   }
 }
 
-const typeLabels: Record<string, string> = { note: '灵感', todo: '待办', snippet: '笔记', link: '链接' };
+// PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
+const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
 const typeColor: Record<string, string> = {
-  note: 'bg-primary-light text-primary',
+  quink: 'bg-primary-light text-primary',
+  note: 'bg-emerald-100 text-emerald-600',
   todo: 'bg-amber-100 text-amber-600',
-  snippet: 'bg-emerald-100 text-emerald-600',
-  link: 'bg-sky-100 text-sky-600',
 };
 </script>
 
@@ -526,8 +535,8 @@ const typeColor: Record<string, string> = {
             <PhCheckSquare size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>多选</span>
           </button>
-          <div class="border-t border-gray-100 my-0.5"></div>
-          <button @click.stop="askDelete()"
+          <div v-if="canDelete" class="border-t border-gray-100 my-0.5"></div>
+          <button v-if="canDelete" @click.stop="askDelete()"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 transition-colors">
             <PhTrash size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>删除</span>
@@ -545,14 +554,18 @@ const typeColor: Record<string, string> = {
       @save="saveReminder"
     />
 
-    <!-- 删除确认弹窗 -->
+    <!-- 删除确认弹窗 (PR #5b/#7b: 删别人笔记时显示作者名 + 警告, 自己笔记保持简洁) -->
     <Teleport to="body">
       <Transition name="modal">
         <div v-if="confirmDelete" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
           <div class="absolute inset-0 bg-black/30" @click="confirmDelete = false" />
-          <div class="relative bg-white rounded-xl shadow-xl p-5 w-72 text-center">
-            <p class="text-sm text-gray-700 mb-1">删除内容</p>
-            <p class="text-xs text-gray-400 mb-4">可在回收站找回</p>
+          <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 text-center">
+            <p class="text-sm text-gray-700 mb-1">
+              {{ isMyNote ? '删除内容' : `确认删除 @${(note as any).authorNickname || '某人'} 的笔记？` }}
+            </p>
+            <p class="text-xs text-gray-400 mb-4">
+              {{ isMyNote ? '可在回收站找回' : '群成员将看不到这条笔记 (作者本人仍可恢复)' }}
+            </p>
             <div class="flex gap-2 justify-center">
               <button @click="confirmDelete = false"
                 class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>

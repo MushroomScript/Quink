@@ -27,13 +27,13 @@ const headers = {
   Authorization: `Bearer ${token}`,
 };
 
-// 12 条 = 3 type × 4 条。type='link' 在 Quink 前端没专属 view（恢复后用户找不到），跳过
+// 12 条 = 3 type × 4 条 (PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃)
 const notes = [
-  // type='note' → 飞向"灵感" (/)
-  { type: 'note', content: '# 周末计划\n\n- 看完《沙丘 2》\n- 整理书架\n- 给妈妈打电话', tags: ['生活', '周末'] },
-  { type: 'note', content: '突然想到一个 idea：把每天看到的好句子拍照保存，变成自己的灵感库', tags: ['创意'] },
-  { type: 'note', content: '最近在读的书：**《零售的本质》** 强推。\n\n核心一句话：「顾客需求驱动一切。」', tags: ['读书'] },
-  { type: 'note', content: '推荐链接：https://www.anthropic.com/news/claude-4 \nClaude 4 发布', tags: ['AI'] },
+  // type='quink' → 飞向"灵感" (/quink)
+  { type: 'quink', content: '# 周末计划\n\n- 看完《沙丘 2》\n- 整理书架\n- 给妈妈打电话', tags: ['生活', '周末'] },
+  { type: 'quink', content: '突然想到一个 idea：把每天看到的好句子拍照保存，变成自己的灵感库', tags: ['创意'] },
+  { type: 'quink', content: '最近在读的书：**《零售的本质》** 强推。\n\n核心一句话：「顾客需求驱动一切。」', tags: ['读书'] },
+  { type: 'quink', content: '推荐链接：https://www.anthropic.com/news/claude-4 \nClaude 4 发布', tags: ['AI'] },
 
   // type='todo' → 飞向"待办" (/todos)
   { type: 'todo', content: '回复 张三 关于合同的邮件' },
@@ -41,11 +41,11 @@ const notes = [
   { type: 'todo', content: '买猫粮（友好的伙伴 鸡肉味）' },
   { type: 'todo', content: '订下周四 18:00 的牙医' },
 
-  // type='snippet' → 飞向"笔记" (/notes)
-  { type: 'snippet', content: '```ts\nconst delay = (ms) => new Promise(r => setTimeout(r, ms));\n```' },
-  { type: 'snippet', content: '```sh\ngit log --oneline --graph --all | head -20\n```' },
-  { type: 'snippet', content: '```py\ndef debounce(wait):\n    timer = None\n    # 实现略\n```' },
-  { type: 'snippet', content: '```css\n.notes-masonry {\n  column-count: 3;\n  column-gap: 14px;\n}\n```' },
+  // type='note' → 飞向"笔记" (/notes)
+  { type: 'note', content: '```ts\nconst delay = (ms) => new Promise(r => setTimeout(r, ms));\n```' },
+  { type: 'note', content: '```sh\ngit log --oneline --graph --all | head -20\n```' },
+  { type: 'note', content: '```py\ndef debounce(wait):\n    timer = None\n    # 实现略\n```' },
+  { type: 'note', content: '```css\n.notes-masonry {\n  column-count: 3;\n  column-gap: 14px;\n}\n```' },
 ];
 
 async function createAndTrash(note) {

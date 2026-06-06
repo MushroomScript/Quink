@@ -26,7 +26,7 @@ async function handleSubmit() {
       await auth.login(username.value, password.value);
     }
     localStorage.setItem('quink_last_username', username.value);
-    router.push('/');
+    router.push('/quink');
   } catch (err: any) {
     error.value = err.message || '操作失败';
   } finally {

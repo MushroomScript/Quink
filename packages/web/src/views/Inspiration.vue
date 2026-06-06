@@ -58,7 +58,7 @@ onActivated(() => {
     window.dispatchEvent(new CustomEvent('quink-filter-tag', { detail: tagQuery }));
     return;
   }
-  store.filterType = 'note';
+  store.filterType = 'quink';
   // 首次进入(本 view 数据为空)才拉, 已有数据保留 (loadMore 拉到的 90 条 / 当前滚动状态都保留)
   const wasEmpty = vs.notes.length === 0;
   if (wasEmpty) {
@@ -95,8 +95,8 @@ onDeactivated(() => {
     <Transition name="editor-area">
       <div v-show="!store.isFiltering && !store.selectMode" class="editor-area-wrap mb-4 md:mb-6">
         <div>
-          <MobileInput v-if="isMobile" default-type="note" />
-          <NoteInput v-else default-type="note" />
+          <MobileInput v-if="isMobile" default-type="quink" />
+          <NoteInput v-else default-type="quink" />
         </div>
       </div>
     </Transition>

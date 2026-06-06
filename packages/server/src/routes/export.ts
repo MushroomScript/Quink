@@ -41,7 +41,8 @@ app.get('/', async (c) => {
   // 笔记 → Markdown 文件
   for (const note of notes) {
     const date = dayjs(note.createdAt).format('YYYY-MM-DD_HHmmss');
-    const typeLabel = note.type === 'todo' ? '待办' : note.type === 'snippet' ? '笔记' : '灵感';
+    // PR #8 命名重整: quink=灵感, note=笔记, todo=待办
+    const typeLabel = note.type === 'todo' ? '待办' : note.type === 'note' ? '笔记' : '灵感';
     const filename = `notes/${date}_${typeLabel}_${note.id}.md`;
 
     // YAML frontmatter + content

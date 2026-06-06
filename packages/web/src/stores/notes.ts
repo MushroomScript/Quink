@@ -222,16 +222,15 @@ export const useNotesStore = defineStore('notes', () => {
     await fetchNotes(vs.lastExtra, { append: true });
   }
 
-  // type → 对应 view 的映射. note → 灵感, snippet → 笔记, todo → 待办. link 类型暂无专属 view,
-  // 不加到任何本地 viewState (等下次目标 view fetchNotes 才拉到).
+  // type → 对应 view 的映射 (PR #8 命名重整: quink=灵感, note=笔记, todo=待办)
   const typeToView: Record<string, ViewKey> = {
-    note: 'inspiration',
-    snippet: 'notes',
+    quink: 'inspiration',
+    note: 'notes',
     todo: 'todos',
   };
 
   // PR #2 createNote 加 visibility + sharedGroupIds 透传给 server
-  async function createNote(content: string, type: string = 'note', tags?: string[], visibility: 'private' | 'shared' = 'private', sharedGroupIds: string[] = []) {
+  async function createNote(content: string, type: string = 'quink', tags?: string[], visibility: 'private' | 'shared' = 'private', sharedGroupIds: string[] = []) {
     const res = await api.createNote({ content, type, tags, visibility, sharedGroupIds });
     // 按新笔记 type 决定加到哪个 viewState, 不绑当前 activeView. 这样跨 view 创建 (如在灵感页
     // 用 Capture 创建 type=todo) 切到对应 view 立刻看到, 不用等 fetchNotes.
@@ -251,6 +250,18 @@ export const useNotesStore = defineStore('notes', () => {
       vs.total++;
     }
     return res.data;
+  }
+
+  // PR #7b: 远端笔记变化时同步主 view (SSE group-notes-changed handler 调). 当前 view 是 3 主 view 之一
+  // (sharedDisplay='all'/'others_shared' 时主 view 会显示别人共享的笔记) → fetchNotes keepCount 拉新数据;
+  // 跨 view 全部标 dirty 让下次 onActivated 走 viewRefresh 同步.
+  function refreshFromRemote() {
+    if (activeView.value) {
+      void fetchNotes(undefined, { keepCount: true });
+    }
+    for (const k of Object.keys(_viewState) as ViewKey[]) {
+      if (k !== activeView.value) _viewState[k].dirty = true;
+    }
   }
 
   async function updateNote(id: string, data: Partial<Note> & { lockToken?: string; editContext?: { groupId?: string } }) {
@@ -346,7 +357,12 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function deleteNote(id: string) {
-    await api.deleteNote(id);
+    const res = await api.deleteNote(id);
+    // PR #7b: 删共享笔记后给每个所在群派 quink-group-notes-changed 让操作者自己的 GroupDetail 重拉
+    // (GroupDetail 用本地 ref 自管收不到自己的 SSE; 别人通过后端 broadcastNoteShared 收 SSE 已自动刷)
+    for (const gid of res.sharedGroupIds ?? []) {
+      window.dispatchEvent(new CustomEvent('quink-group-notes-changed', { detail: { groupId: gid } }));
+    }
     // 跨 view 同步删除:
     //   前台 view: splice 移除 id (DOM attached, useMasonry 走 shrunk 增量删除 line 158-189 安全).
     //     注意必须 splice mutate 不能 filter reassign — filter 创建新数组等于 reassign, useMasonry
@@ -539,7 +555,7 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   // 批量改 type: todoStatus 字段不动 (todo→snippet/note 时 DB 仍保留, 转回 todo 时复用)
-  async function batchUpdateType(type: 'note' | 'snippet' | 'todo') {
+  async function batchUpdateType(type: 'quink' | 'note' | 'todo') {
     const ids = Array.from(selectedIds.value);
     exitSelectMode();
     await Promise.all(ids.map(id => api.updateNote(id, { type } as any).catch(e => console.error('[batchUpdateType]', id, e))));
@@ -588,6 +604,7 @@ export const useNotesStore = defineStore('notes', () => {
     currentRefresh,
     sortBy,
     sharedDisplay,
+    refreshFromRemote,
     fetchNotes,
     createNote,
     pollNoteAiResult,

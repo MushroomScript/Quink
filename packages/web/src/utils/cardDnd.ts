@@ -161,7 +161,7 @@ async function onUp(e: PointerEvent) {
 async function handleDrop(target: string, ids: string[]) {
   const store = useNotesStore();
   if (target.startsWith('type:')) {
-    const type = target.slice(5) as 'note' | 'snippet' | 'todo';
+    const type = target.slice(5) as 'quink' | 'note' | 'todo';
     for (const id of ids) {
       try { await store.updateNote(id, { type } as any); } catch {}
     }

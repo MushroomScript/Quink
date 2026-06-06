@@ -31,7 +31,7 @@ sqlite.exec(`
     summary TEXT,
     category TEXT,
     tags TEXT DEFAULT '[]',
-    type TEXT NOT NULL DEFAULT 'note',
+    type TEXT NOT NULL DEFAULT 'quink',
     todo_status TEXT,
     todo_due TEXT,
     ai_processed INTEGER NOT NULL DEFAULT 0,
@@ -311,6 +311,28 @@ sqlite.exec(`
   -- 列某笔记编辑历史: WHERE note_id=? ORDER BY edited_at DESC
   CREATE INDEX IF NOT EXISTS idx_note_edit_history_note ON note_edit_history(note_id, edited_at DESC);
 `);
+// PR #8 命名重整 (2026-06-06): type 字段值跟 UI 对齐迁移. 单次跑后写 config flag 防重复
+// (反复跑会把新含义的 'note' 又错误改成 'quink'). 旧值映射:
+//   'snippet' (旧"笔记"页) → 'note'
+//   'note' (旧"灵感"页)   → 'quink'
+//   'link' → DELETE (废弃类型, 当前 DB 无 type=link 笔记, 安全删)
+// CASE 一次性表达式行级求值不会有"snippet 改 note 后又被 note 规则改 quink"的 race.
+try {
+  const row = sqlite.prepare("SELECT value FROM config WHERE key = 'type_field_migration_v1'").get() as { value: string } | undefined;
+  if (!row) {
+    sqlite.transaction(() => {
+      const deleted = sqlite.prepare("DELETE FROM notes WHERE type = 'link'").run();
+      const updated = sqlite.prepare(`UPDATE notes SET type = CASE
+        WHEN type = 'snippet' THEN 'note'
+        WHEN type = 'note' THEN 'quink'
+        ELSE type
+      END WHERE type IN ('snippet', 'note')`).run();
+      sqlite.prepare("INSERT INTO config (key, value) VALUES (?, ?)").run('type_field_migration_v1', JSON.stringify(true));
+      console.log(`[type migration v1] deleted ${deleted.changes} link notes, updated ${updated.changes} notes (snippet→note, note→quink)`);
+    })();
+  }
+} catch (e) { console.error('[type migration v1] failed:', e); }
+
 // Migrate: 群公告 (groups 表加 3 列). owner/admin 可编辑, 全群唯一
 try { sqlite.exec('ALTER TABLE groups ADD COLUMN announcement TEXT'); } catch {}
 try { sqlite.exec('ALTER TABLE groups ADD COLUMN announcement_updated_at TEXT'); } catch {}

@@ -35,7 +35,7 @@ async function load() {
 }
 
 function filterByTag(tag: string) {
-  router.push({ path: '/', query: { tag } });
+  router.push({ path: '/quink', query: { tag } });
 }
 
 async function renameTag() {

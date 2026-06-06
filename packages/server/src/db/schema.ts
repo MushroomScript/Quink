@@ -19,7 +19,9 @@ export const notes = sqliteTable('notes', {
   summary: text('summary'),
   category: text('category'), // e.g. "编程/踩坑记录"
   tags: text('tags', { mode: 'json' }).$type<string[]>().default([]),
-  type: text('type', { enum: ['note', 'todo', 'snippet', 'link'] }).notNull().default('note'),
+  // PR #8 命名重整 (2026-06-06): type 字段值重新对齐 UI. 历史 quirk 已修正:
+  // quink=灵感页 (原'note'), note=笔记页 (原'snippet'), todo=待办页 (不变). link 类型废弃删除.
+  type: text('type', { enum: ['quink', 'note', 'todo'] }).notNull().default('quink'),
   todoStatus: text('todo_status', { enum: ['pending', 'done'] }),
   todoDue: text('todo_due'), // ISO datetime, 复用为"提醒时间"。到此刻 scheduler 触发推送。
   todoRemindSentAt: text('todo_remind_sent_at'), // 上次发送时间, 防重发。改 todoDue 时由 PATCH 重置为 null

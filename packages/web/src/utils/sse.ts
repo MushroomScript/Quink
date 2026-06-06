@@ -180,11 +180,16 @@ export function startReminderSse() {
   });
 
   // PR #2 阶段 5c: group-notes-changed - 共享笔记 POST/PATCH/DELETE 时给目标群成员推, 触发群 feed 自动刷新
-  // 派 window 事件让 GroupDetail.vue 监听 (sse.ts 拿不到 component instance / router)
+  // 派 window 事件让 GroupDetail.vue 监听 (sse.ts 拿不到 component instance / router).
+  // PR #7b: 同时让主 view (Inspiration/Notes/Todos) 也同步 — sharedDisplay='all'/'others_shared' 时主 view 显示别人共享笔记.
+  // store.refreshFromRemote 处理"当前主 view fetchNotes + 跨 view 标 dirty"逻辑
   es.addEventListener('group-notes-changed', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
       window.dispatchEvent(new CustomEvent('quink-group-notes-changed', { detail: { groupId: data.groupId } }));
+      import('@/stores/notes').then(({ useNotesStore }) => {
+        useNotesStore().refreshFromRemote();
+      });
     } catch (e) { console.error('[sse] group-notes-changed parse failed:', e); }
   });
 

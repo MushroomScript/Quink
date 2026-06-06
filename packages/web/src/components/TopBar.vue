@@ -45,7 +45,7 @@ function toggleBatchType() {
     batchTypePos.value = { top: (r.bottom + 4) + 'px', left: (r.right - 140) + 'px' };
   }
 }
-function pickBatchType(type: 'note' | 'snippet' | 'todo') {
+function pickBatchType(type: 'quink' | 'note' | 'todo') {
   store.batchUpdateType(type);
   showBatchType.value = false;
 }
@@ -123,9 +123,10 @@ const filterTags = ref<string[]>([]);
 // filterTypes 默认跟当前 view 对应的类型走 (之前默认全选 3 个 → 用户输关键字搜出 3 类型,
 // 但 view 自己又 filterType 过滤到单类型,看起来"全选了却没全搜"。现在默认值跟 view 对齐,所见即所得)
 function getDefaultFilterTypes(): string[] {
-  if (route.path === '/notes') return ['snippet'];
+  // PR #8 命名重整: /quink=灵感=quink, /notes=笔记=note, /todos=待办=todo
+  if (route.path === '/notes') return ['note'];
   if (route.path === '/todos') return ['todo'];
-  return ['note'];
+  return ['quink'];
 }
 const filterTypes = ref<string[]>(getDefaultFilterTypes());
 const filterDateFrom = ref('');
@@ -204,9 +205,10 @@ watchEffect(() => {
   store.isFiltering = searchFocused.value || showMobileSearch.value || !!store.searchQuery || !!hasFilters.value || showFilters.value;
 });
 
+// PR #8 命名重整: value 跟新字段值一致 (quink=灵感, note=笔记, todo=待办)
 const typeOptions = [
-  { value: 'note', label: '灵感', icon: markRaw(PhLightbulb) },
-  { value: 'snippet', label: '笔记', icon: markRaw(PhNotePencil) },
+  { value: 'quink', label: '灵感', icon: markRaw(PhLightbulb) },
+  { value: 'note', label: '笔记', icon: markRaw(PhNotePencil) },
   { value: 'todo', label: '待办', icon: markRaw(PhCheckSquare) },
 ];
 
@@ -722,12 +724,12 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
   <Teleport to="body">
     <div v-if="showBatchType" class="fixed z-[var(--z-overlay)]" :style="batchTypePos">
       <div class="bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-32">
-        <button @click="pickBatchType('note')"
+        <button @click="pickBatchType('quink')"
           class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 inline-flex items-center gap-1.5">
           <PhLightbulb size="0.75rem" weight="fill" />
           <span>灵感</span>
         </button>
-        <button @click="pickBatchType('snippet')"
+        <button @click="pickBatchType('note')"
           class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 inline-flex items-center gap-1.5">
           <PhNotePencil size="0.75rem" weight="fill" />
           <span>笔记</span>

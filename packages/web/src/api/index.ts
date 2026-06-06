@@ -80,7 +80,8 @@ export interface Note {
   summary: string | null;
   category: string | null;
   tags: string[];
-  type: 'note' | 'todo' | 'snippet' | 'link';
+  // PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
+  type: 'quink' | 'note' | 'todo';
   todoStatus: 'pending' | 'done' | null;
   todoDue: string | null; // ISO datetime, 复用为"提醒时间"
   todoRemindSentAt: string | null; // 上次发送时间 (前端只读, 改 todoDue 时后端自动重置)
@@ -398,8 +399,10 @@ export const api = {
     });
   },
 
+  // PR #7b: 返回 sharedGroupIds (空数组 = private 笔记). 给 store.deleteNote 派 quink-group-notes-changed
+  // 事件让操作者自己的 GroupDetail 重拉 (本地 ref 自管, 收不到自己的 SSE)
   deleteNote(id: string) {
-    return request<{ message: string }>(`/notes/${id}`, { method: 'DELETE' });
+    return request<{ message: string; sharedGroupIds: string[] }>(`/notes/${id}`, { method: 'DELETE' });
   },
 
   // PR #5 编辑锁: 仅 shared 笔记走. 返回 lockToken + expiresAt; 409 已被别人锁返回 lockByNickname
