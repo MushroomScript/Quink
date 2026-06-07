@@ -39,12 +39,11 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
 
 <template>
   <div class="login-page min-h-full flex items-center justify-center px-4 relative overflow-hidden">
-    <!-- Background glow: 跟随卡片放视口中心而非偏上 1/4 -->
-    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none" style="background: rgb(var(--c-accent) / 0.15)"></div>
+    <!-- Background glow -->
+    <div class="absolute top-1/4 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none" style="background: rgb(var(--c-accent) / 0.15)"></div>
 
     <div class="w-full max-w-sm relative z-[var(--z-sticky)]">
-      <!-- logo + 标题: absolute 浮在卡片上方 (bottom-full + mb-8 自动接卡片). 不占主轴空间 → 卡片自身居中视口 -->
-      <div class="absolute left-0 right-0 bottom-full mb-8 text-center select-none">
+      <div class="text-center mb-8 select-none">
         <img :src="`/quink-${currentTheme}-192.png`" alt="Quink" class="w-20 h-20 mx-auto mb-4" draggable="false" />
         <h1 class="text-4xl font-bold tracking-tight" style="color: rgb(var(--c-accent))">Quink</h1>
         <p class="text-sm mt-2" style="color: var(--sb-dim)">一念 - 记录你的每一个灵感</p>
@@ -122,19 +121,4 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
 }
 .login-link { color: rgba(255,255,255,0.35); }
 .login-link:hover { color: rgba(255,255,255,0.7); }
-
-/* 矮屏 (横屏手机 / 小笔记本): logo absolute 浮在卡片上方会被顶出视口看不到.
-   回退成"卡片正常 flow + logo 在上"模式, 让 logo 跟卡片整体居中 (虽然卡片不再视口正中, 但避免 logo 看不见) */
-@media (max-height: 700px) {
-  .login-page > div:last-child > div:first-child {
-    position: static;
-    margin-bottom: 1.5rem;
-  }
-  .login-page > div:last-child > div:first-child img {
-    width: 3rem; height: 3rem; margin-bottom: 0.5rem;
-  }
-  .login-page > div:last-child > div:first-child h1 {
-    font-size: 1.875rem;
-  }
-}
 </style>

@@ -233,6 +233,9 @@ function applyZoomLevel(level: number) {
   } else {
     (document.documentElement.style as any).zoom = (level / 100).toString();
   }
+  // CSS zoom 改变后 --app-height 必须重算 (zoom 变化但 innerHeight 不变, --app-height 公式 = innerHeight / zoom)
+  // 蘑菇汇报登录页"卡片快挨着底端" root cause 之一: zoom=1.5 时 --app-height 用 zoomed innerHeight 设 CSS px 被 zoom 再乘一次 → #app height 是视口 zoom 倍
+  try { (window as any).__quink_setAppHeight?.(); } catch {}
 }
 
 // HMR 友好：模块级保存上次挂的副作用，重 mount 时先清理旧的，避免 capture 阶段旧 handler
