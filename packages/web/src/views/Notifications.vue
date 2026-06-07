@@ -163,44 +163,44 @@ async function doClear() {
           v-for="n in store.items"
           :key="n.id"
           @click="onItemClick(n.id)"
-          class="group p-3 rounded-lg cursor-pointer transition-colors flex items-start gap-3"
+          class="group p-3 rounded-lg cursor-pointer transition-colors"
           :style="
             n.readAt
-              ? 'background: var(--bg-secondary)'
+              ? 'background: var(--bg-secondary); border-left: 3px solid transparent'
               : 'background: var(--bg-primary-light); border-left: 3px solid rgb(var(--c-accent))'
           "
         >
-          <!-- icon -->
-          <div
-            class="shrink-0 mt-0.5"
-            :style="n.readAt ? 'color: var(--text-muted)' : 'color: rgb(var(--c-accent))'"
-          >
-            <component :is="iconFor(n.category)" size="1.25rem" weight="fill" />
-          </div>
-          <!-- title + body + time -->
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2">
-              <div class="font-medium text-sm truncate" style="color: var(--text-primary)">
-                {{ n.title }}
-              </div>
-              <span v-if="!n.readAt" class="shrink-0 w-2 h-2 rounded-full bg-red-400/90"></span>
+          <!-- 第一行: icon + title + 未读小圆点 + 删除按钮. icon 跟 title 都用 items-center 单行天然居中 (复用 sidebar 待办 link 模式) -->
+          <div class="flex items-center gap-3">
+            <component
+              :is="iconFor(n.category)"
+              size="1.125rem"
+              weight="fill"
+              class="shrink-0"
+              :style="n.readAt ? 'color: var(--text-muted)' : 'color: rgb(var(--c-accent))'"
+            />
+            <div class="font-medium text-sm truncate flex-1" style="color: var(--text-primary)">
+              {{ n.title }}
             </div>
-            <div v-if="n.body" class="text-xs mt-1 truncate" style="color: var(--text-secondary)">
+            <span v-if="!n.readAt" class="shrink-0 w-2 h-2 rounded-full bg-red-400/90"></span>
+            <button
+              @click="onDelete(n.id, $event)"
+              class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-100 hover:text-red-500"
+              style="color: var(--text-muted)"
+              title="删除"
+            >
+              <PhTrash size="1rem" weight="bold" />
+            </button>
+          </div>
+          <!-- 第二行: body + time, 缩进 icon (1.125rem = 18px) + gap (gap-3 = 12px) = 30px 跟 title 起点对齐 -->
+          <div class="mt-1 space-y-0.5" style="padding-left: 30px">
+            <div v-if="n.body" class="text-xs truncate" style="color: var(--text-secondary)">
               {{ n.body }}
             </div>
-            <div class="text-[11px] mt-1 tabular-nums" style="color: var(--text-muted)">
+            <div class="text-[11px] tabular-nums" style="color: var(--text-muted)">
               {{ timeAgo(n.createdAt) }}
             </div>
           </div>
-          <!-- 删除按钮 (hover 显示) -->
-          <button
-            @click="onDelete(n.id, $event)"
-            class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-100 hover:text-red-500"
-            style="color: var(--text-muted)"
-            title="删除"
-          >
-            <PhTrash size="1rem" weight="bold" />
-          </button>
         </div>
         <div v-if="store.hasMore" class="text-center py-4">
           <button
