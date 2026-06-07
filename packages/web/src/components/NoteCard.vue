@@ -351,13 +351,15 @@ async function askDelete() {
   confirmDelete.value = true;
 }
 
-// PR #9 "另存为": 复制成自己的私人副本. 文案按 type 决定
+// PR #9 "另存为": 复制成自己的私人副本. 文案按 type 决定. 保存成功后本地同步插入 (SSE 给其他设备由后端 publish 触发)
 async function doDuplicate() {
   showMenu.value = false;
   try {
-    await api.duplicateNote(props.note.id);
+    const res = await api.duplicateNote(props.note.id);
     const label = props.note.type === 'todo' ? '待办' : (props.note.type === 'note' ? '笔记' : '灵感');
-    toast.show(`已另存为${label}副本`, 'success', 3000);
+    toast.show(`已另存为我的${label}`, 'success', 3000);
+    // 本设备同步副本到对应 view (拉单条插入"首位 after pinned"). 同账号其他设备由后端 publish 'note-created' SSE 触发同款路径
+    store.syncNoteCreated(res.data.id);
   } catch (e: any) {
     toast.show(e?.message || '另存失败', 'error', 3000);
   }
@@ -626,7 +628,7 @@ const typeColor: Record<string, string> = {
           <button @click.stop="doDuplicate()"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhCopySimple size="0.875rem" weight="fill" style="margin-top: 2px" />
-            <span>另存为{{ typeLabels[note.type] || '副本' }}</span>
+            <span>另存为我的{{ typeLabels[note.type] || '副本' }}</span>
           </button>
           <!-- PR #9 多选: 群组页要群管理员; 主视图作者本人或非共享 (排除主视图见到的别人共享笔记) -->
           <button v-if="canMultiSelect" @click.stop="enterSelectMode()"
