@@ -30,7 +30,7 @@
 | **#7c AI/导出/孤儿收尾** | 已**拆解到** #8 / #9 / #13. 孤儿处理已在 7b 用 "改私密 + 软删" 落地 (Corner #4 改决策). 作者删 fork 版提示 → 进 #9. AI chat update_note 适配 fork + shared→private 转换约束 + 统计按 origin + 导出按 sharedDisplay → 进 #13 | 拆解 | — |
 | **#8 命名重整** | 字段值改名 (`snippet`→`note`, `note`→`quink`, 删 `link`) + 路由改名 (`/`→`/quink` + 旧 `/` 重定向) + AI prompts 同步 + DB 自动迁移 | ✅ done (0eea943) | ~670 行 |
 | **#9 权限重整** | 字段权限细分 (B 类作者私域字段非作者禁改) + NoteCard 三点菜单按钮 v-if / 编辑器界面非作者只显示正文 / 后端 PATCH 守卫 / "另存为灵感/笔记/待办" (副本 userId=操作人, 正文加引用原作者) / 申请编辑权点编辑改弹窗 / 作者删 fork 版给提示 / "私密"字面改 "私人" / 群组批量操作权限筛选 (普通成员隐藏多选按钮) | ✅ done | ~400 行 |
-| **#10 通知中心** | 新通知表 + 通知 view (4 tab: 全部/内容/提醒/群组) + 入口 (头像列表传输按钮上方) + SSE 推送 + 接入: 另存为通知 / 申请编辑权通知 / 提醒到点 / 群组变更通知 / 评论从 toast 搬到通知页 (reaction 仍卡片) | pending | ~700 行 (估) |
+| **#10 通知中心** | 新通知表 + 通知 view (4 tab: 全部/内容/提醒/群组) + 入口 (头像列表传输按钮上方) + SSE 推送 + 接入: 另存为通知 / 申请编辑权通知 / 提醒到点 / 群组变更通知 / 评论从 toast 搬到通知页 (reaction 仍卡片) | 10a ✅ done (后端地基), 10b/10c pending | ~700 行 (估) |
 | **#11 提醒分家** | 个人提醒 (todoDue, 每人自管, 删了内容也响) + 群提醒新表 (群管理员设, 群所有人收) + 群组提醒接收开关 (每人自己控该群提醒) | pending | ~500 行 (估) |
 | **#12 群组回收站 + 审计** | 每群一个回收站 (从群组页进, 标题"X 群的回收站") + 7 天强制清 + 群主+管理员都能恢复, 仅群主能永久删 + 后端所有改/删存内容快照 (审计表 + 服务器主人管理界面留 #12+ 单独做) | pending | ~700 行 (估) |
 | **#13 收尾** | AI chat update_note 适配 fork (主动问用户改哪一版) + shared→private 转换约束 (仅未被任何群修改过能转) + 统计按 origin 维度 (fork 算 1 条, parent_note_id 链追溯) + 导出按 sharedDisplay | pending | ~500 行 (估) |
@@ -795,9 +795,11 @@ if (!isAuthor) {
 
 ---
 
-## PR #10 通知中心 (pending)
+## PR #10 通知中心 (10a ✅ ship, 10b/10c pending)
 
 **目标**: 加全局通知系统, 集中所有"用户该被告知"的事件. OS 通知 + 通知页双保险, 不再依赖 toast 一闪而过.
+
+**拆分**: 10a 后端地基 (schema + 6 endpoint + createNotification helper + cleanup 30 天) ✅ done / 10b 前端 view (Notifications.vue + 路由 + 入口 + SSE 监听 + 徽章) pending / 10c 接入点改造 (现有 8+ 处 SSE/toast 替换成 createNotification) pending.
 
 ### 数据库表设计
 

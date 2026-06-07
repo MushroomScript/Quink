@@ -301,6 +301,21 @@ export const groupNotePins = sqliteTable('group_note_pins', {
   pk: primaryKey({ columns: [table.groupId, table.noteId] }),
 }));
 
+// PR #10 通知中心: 集中所有"用户该被告知"的事件 (申请编辑权 / 另存为 / 提醒到点 / 群组变更 / 评论等),
+// 不再依赖 toast 一闪而过. category 对应 UI 3 tab, type 是具体事件名 (字符串不 enum 防后续扩字段时全表 ALTER).
+// payload 存 JSON 给"点击通知跳关联资源"用 (noteId / groupId / fromUserId 等). read_at NULL=未读, 标已读时填 ISO datetime
+export const notifications = sqliteTable('notifications', {
+  id: text('id').primaryKey(), // nanoid
+  userId: text('user_id').notNull().references(() => users.id), // 收件人 (不是事件触发者)
+  category: text('category', { enum: ['content', 'reminder', 'group'] }).notNull(),
+  type: text('type').notNull(), // 'edit-request' / 'duplicated' / 'reminder-due' / 'group-joined' 等 (字符串非 enum, 加新 type 不用迁移)
+  title: text('title').notNull(), // 通知卡片标题
+  body: text('body'), // 详情, 可选
+  payload: text('payload', { mode: 'json' }).$type<Record<string, any>>().default({}), // 跳转/动作用 (noteId/groupId/fromUserId 等)
+  readAt: text('read_at'), // NULL = 未读
+  createdAt: text('created_at').notNull(),
+});
+
 export type Group = typeof groups.$inferSelect;
 export type NewGroup = typeof groups.$inferInsert;
 export type GroupMember = typeof groupMembers.$inferSelect;
@@ -341,3 +356,6 @@ export type NoteVisibility = Note['visibility'];
 export type ReminderChannel = typeof reminderChannels.$inferSelect;
 export type NewReminderChannel = typeof reminderChannels.$inferInsert;
 export type ReminderChannelType = ReminderChannel['type'];
+export type Notification = typeof notifications.$inferSelect;
+export type NewNotification = typeof notifications.$inferInsert;
+export type NotificationCategory = Notification['category'];

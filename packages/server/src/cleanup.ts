@@ -24,3 +24,18 @@ export function cleanAllTrash() {
     }
   } catch (e) { console.error('[cleanAllTrash]', e); }
 }
+
+// PR #10 通知 30 天清: 仅清已读 (read_at IS NOT NULL) + created_at 早于 30 天前. 未读不清 (用户没看到).
+// 硬编码 30 天不开 user.preferences (通知不是用户主动产生的数据, 不像 trash 用户在意保留期).
+// 同 cleanAllTrash 6h 跑一次, 跑量级很小 (单用户通知不至于上千)
+const NOTIFICATION_RETENTION_DAYS = 30;
+export function cleanOldNotifications() {
+  try {
+    const cutoff = dayjs().subtract(NOTIFICATION_RETENTION_DAYS, 'day').toISOString();
+    const result = db.delete(schema.notifications).where(and(
+      sql`${schema.notifications.readAt} IS NOT NULL`,
+      sql`${schema.notifications.createdAt} < ${cutoff}`,
+    )).run();
+    if (result.changes > 0) console.log(`[cleanOldNotifications] purged ${result.changes} read notifications older than ${NOTIFICATION_RETENTION_DAYS}d`);
+  } catch (e) { console.error('[cleanOldNotifications]', e); }
+}

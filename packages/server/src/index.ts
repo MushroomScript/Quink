@@ -16,6 +16,7 @@ import exportRoutes from './routes/export.js';
 import reminderChannelsRoutes from './routes/reminder-channels.js';
 import sseRoutes from './routes/sse.js';
 import groupsRoutes, { inviteApp } from './routes/groups.js';
+import notificationsRoutes from './routes/notifications.js';
 import { startReminderScheduler } from './reminder/scheduler.js';
 import { startEditLockCleanup } from './routes/notes.js';
 
@@ -128,6 +129,7 @@ app.route('/api/data', exportRoutes); // GET /api/data = export, POST /api/data 
 app.route('/api/reminder-channels', reminderChannelsRoutes);
 app.route('/api/sse', sseRoutes);
 app.route('/api/groups', groupsRoutes);
+app.route('/api/notifications', notificationsRoutes);
 // 邀请页 + 申请走独立挂载点 (GET /api/invite/:token 公开不需 auth, POST .../apply 内部加 authMiddleware)
 app.route('/api/invite', inviteApp);
 
@@ -211,9 +213,13 @@ serve({ fetch: app.fetch, port: PORT, hostname: '0.0.0.0' });
 })();
 
 // 启动 + 每 6h 跑一次全量清理 (用户改 trashRetentionDays 时另在 PATCH /me 处单独触发该用户的清理, 见 cleanup.ts)
-import { cleanAllTrash } from './cleanup.js';
+import { cleanAllTrash, cleanOldNotifications } from './cleanup.js';
 cleanAllTrash();
-setInterval(cleanAllTrash, 6 * 60 * 60 * 1000);
+cleanOldNotifications();
+setInterval(() => {
+  cleanAllTrash();
+  cleanOldNotifications();
+}, 6 * 60 * 60 * 1000);
 
 // 待办提醒 scheduler: 每分钟扫表, 命中 todoDue <= now 的待办 -> 发到所有 enabled channels
 startReminderScheduler();

@@ -361,6 +361,24 @@ try { sqlite.exec(`
 `); } catch {}
 try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_audit_logs_user_created ON audit_logs(user_id, created_at DESC)'); } catch {}
 try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)'); } catch {}
+
+// PR #10 通知中心. payload 默认 '{}' 跟 drizzle .default({}) 对齐, 老行 readAt 默认 NULL (= 未读).
+// 两个 INDEX: 列通知按 (user, created_at DESC); 未读数走 partial index (sqlite 支持) 只索引未读行省空间
+try { sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    category TEXT NOT NULL,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT,
+    payload TEXT DEFAULT '{}',
+    read_at TEXT,
+    created_at TEXT NOT NULL
+  );
+`); } catch {}
+try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC)'); } catch {}
+try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, read_at) WHERE read_at IS NULL'); } catch {}
 // 一次性回填 + 升级重算: PINYIN_SCHEMA_VERSION 每次 toPinyinSearchable 算法升级时 +1,
 // 启动检测 config 表里存的版本号,低于当前版本就把所有 content_pinyin 清空让下面回填重算。
 // v1: 全拼 + 单读音首字母. v2: 多音字首字母穷举. v3: 多音字只取前 2 读音. v4: 加罕用读音黑名单.

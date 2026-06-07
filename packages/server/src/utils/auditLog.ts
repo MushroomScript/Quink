@@ -11,6 +11,7 @@
 //   group: group.note_pin / group.note_unpin / group.announcement
 //   file: file.upload / file.delete / file.rename
 //   ai: ai.config_create / ai.config_update / ai.config_delete / ai.chat
+//   notification (PR #10): notification.read / notification.read_all / notification.delete / notification.clear
 //   admin: admin.cleanup_trash (cron 触发的) 等
 //
 // 失败 swallow (不阻塞主流程), console.error 留痕

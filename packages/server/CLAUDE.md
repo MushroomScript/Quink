@@ -125,6 +125,7 @@ PR #5 默认所有群 active member 都能改共享笔记, PR #5b 把默认收�
 - **SSE 事件名约定**:
   - 笔记类: `note-created` / `note-updated` / `note-deleted` / `trash-cleared` / `note-reaction-changed` / `note-comment-added` / `note-comment-updated` / `note-comment-deleted` (前端 `sse.ts` 内 handler 已映射到 store 同步)
   - 群组类: `group-changed` / `group-notes-changed` / `group-dissolved` / `group-member-*` / `group-join-*` (已有, 现增加给发起人本人 publish 一份)
+  - 通知类 (PR #10): `notification-new` 由 `utils/notifications.ts:createNotification` helper 在事件源头发送 (payload 含 id/category/type/title/body/payload/createdAt, **不带 `_originClientId`** 因为收件人多设备都该收到, 不是发起人触发的事件) / `notification-changed` with `{ scope: 'read' | 'read-all' | 'delete' | 'clear', id?, category? }` 用户操作通知后让本人多设备同步 (走标准 `_ocid` 路径)
   - 通用类: `data-changed` with `{ scope }` payload. scope 取值: `categories` / `ai-configs` / `ai-prompts` / `ai-conversations` / `ai-messages` / `reminder-channels` / `resources` / `user-profile`. 前端 `sse.ts` 派 `quink-{scope}-changed` CustomEvent, view 用 `useSseSync(scope, refresh)` composable 监听
 - **新加写 endpoint 必做清单**:
   1. handler 顶部 `const _ocid = c.req.header('X-Quink-Client-Id');`
