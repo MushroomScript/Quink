@@ -78,6 +78,36 @@ const canMultiSelect = computed(() =>
 const isAuthorDeletingFork = computed(() => isMyNote.value && !!(props.note as any).parentNoteId);
 const forkEditors = ref<Array<{ userId: string; nickname: string | null }>>([]);
 const forkEditCount = ref(0);
+
+// PR #9 编辑预判: shared 笔记 + 非作者时看后端返的 canWrite. 没权限 → 直接弹申请编辑权对话框, 不进 NoteEditModal
+// (NoteEditModal acquireLock 失败兜底仍保留, 防权限中途被撤的罕见 race)
+const canEdit = computed(() => isMyNote.value || !isShared.value || !!(props.note as any).canWrite);
+const showRequestPerm = ref(false);
+const requestPermMessage = ref('');
+const submittingRequest = ref(false);
+async function submitEditRequest() {
+  if (submittingRequest.value) return;
+  submittingRequest.value = true;
+  try {
+    await api.requestNoteEditPermission(props.note.id, requestPermMessage.value.trim() || undefined);
+    toast.show('已提交申请, 等待作者或管理员审批', 'success', 3000);
+    showRequestPerm.value = false;
+    requestPermMessage.value = '';
+  } catch (e: any) {
+    toast.show('申请失败: ' + (e.message || '未知错误'), 'error', 3000);
+  } finally { submittingRequest.value = false; }
+}
+
+// 三点菜单"编辑"按钮 click: 有写权限直接进 modal, 没权限弹申请对话框 (不进 modal)
+function handleEditClick() {
+  showMenu.value = false;
+  if (canEdit.value) {
+    openEditModal?.(props.note);
+  } else {
+    requestPermMessage.value = '';
+    showRequestPerm.value = true;
+  }
+}
 // 视觉用的"是否置顶": 群组上下文看 groupPinned (独立于作者全局 pinned), 否则看 note.pinned
 const displayPinned = computed(() => inGroupContext.value ? !!props.note.groupPinned : props.note.pinned);
 
@@ -573,8 +603,8 @@ const typeColor: Record<string, string> = {
             <PhMapPin v-else size="0.875rem" weight="fill" />
             <span>{{ displayPinned ? (inGroupContext ? '取消群内置顶' : '取消置顶') : (inGroupContext ? '群内置顶' : '置顶') }}</span>
           </button>
-          <!-- 编辑: 永远显示. NoteEditModal 内部 acquireLock 失败时弹"申请编辑权"对话框 (PR #9) -->
-          <button @click.stop="openEditModal?.(note); showMenu = false"
+          <!-- 编辑: 永远显示. PR #9 前端预判 canWrite, 没权限直接弹申请对话框 (NoteEditModal acquireLock 兜底仍在) -->
+          <button @click.stop="handleEditClick()"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhPencilSimple size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>编辑</span>
@@ -622,6 +652,33 @@ const typeColor: Record<string, string> = {
       :rrule="note.todoRemindRrule"
       @save="saveReminder"
     />
+
+    <!-- PR #9 申请编辑权对话框: 没 write 权限的人点编辑触发, 不走 NoteEditModal -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="showRequestPerm" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+          <div class="absolute inset-0 bg-black/30" @click="showRequestPerm = false" />
+          <div class="relative bg-white rounded-xl shadow-xl p-5 w-96">
+            <p class="text-sm text-gray-700 font-medium mb-1">申请编辑权限</p>
+            <p class="text-xs text-gray-400 mb-3">
+              {{ (note.editPermission || 'admin') === 'admin' ? '这条笔记仅管理员可编辑' : '这条笔记所有人可编辑' }}, 提交后由作者或群管理员审批
+            </p>
+            <textarea v-model="requestPermMessage" rows="3" maxlength="500"
+              placeholder="附上申请理由 (可选, 最多 500 字)"
+              spellcheck="false"
+              class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs leading-relaxed outline-none focus:border-primary resize-none text-gray-600" />
+            <div class="flex gap-2 justify-end mt-4">
+              <button @click="showRequestPerm = false"
+                class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">取消</button>
+              <button @click="submitEditRequest" :disabled="submittingRequest"
+                class="px-4 py-1.5 text-xs rounded-lg bg-primary-light text-primary-dark hover:bg-primary/20 disabled:opacity-50 transition-colors font-medium">
+                {{ submittingRequest ? '提交中...' : '提交申请' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- 删除确认弹窗 (PR #5b/#7b: 删别人笔记时显示作者名 + 警告, 自己笔记保持简洁; PR #9: 作者删 fork 版特殊提示) -->
     <Teleport to="body">

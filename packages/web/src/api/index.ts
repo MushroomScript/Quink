@@ -120,6 +120,9 @@ export interface Note {
   parentNoteId?: string | null;
   // PR #7b 编辑历史计数: 非作者编辑次数 (作者改不计). NoteCard 显示"X 人编辑过" 胶囊, 详情走 getNoteEditHistory 拉完整列表
   editorCount?: number;
+  // PR #9: 当前用户对本笔记是否有写权限. shared 笔记由后端 enrich (isAuthor || editPermission='all' || 在共享群是 admin/owner || 在 grants 白名单).
+  // private 笔记不返回此字段 (作者本人无视, 别人也读不到), NoteCard 前端用 isMyNote || !isShared || canWrite 预判.
+  canWrite?: boolean;
 }
 
 // PR #7b 编辑历史一条: NoteDetail "X 人编辑过" popover 列编辑者用. 后端 join users 给 nickname/avatar.

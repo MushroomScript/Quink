@@ -240,10 +240,17 @@ app.get('/', async (c) => {
     }
     // PR #6: 给 shared 笔记拼 reaction summary + comment count (NoteCard 底部显示). private 笔记跳过.
     // PR #7b: 给 shared 笔记拼 editorCount (NoteCard 显示"X 人编辑过", 仅算非作者编辑次数, 作者自己改不计).
-    const sharedNoteIds = results.filter(n => n.visibility === 'shared').map(n => n.id);
-    const [{ reactionMap, commentCountMap }, editorCountMap] = await Promise.all([
+    // PR #9: 给 shared 笔记拼 canWrite (NoteCard 预判"点编辑能否进 modal", 没权限直接弹申请对话框).
+    const sharedNotes = results.filter(n => n.visibility === 'shared');
+    const sharedNoteIds = sharedNotes.map(n => n.id);
+    const sharedForCanWrite = sharedNotes.map(n => ({
+      id: n.id, userId: n.userId, editPermission: n.editPermission,
+      sharedGroupIds: sharesMap.get(n.id) || [],
+    }));
+    const [{ reactionMap, commentCountMap }, editorCountMap, canWriteMap] = await Promise.all([
       loadSocialMetaMaps(sharedNoteIds, userId),
       loadEditorCountMap(sharedNoteIds),
+      loadCanWriteMap(sharedForCanWrite, userId),
     ]);
     data = results.map(n => {
       const enriched: any = { ...n, sharedGroupIds: sharesMap.get(n.id) || [] };
@@ -256,6 +263,7 @@ app.get('/', async (c) => {
         enriched.reactionSummary = reactionMap.get(n.id) || ALLOWED_REACTION_EMOJIS.map(e => ({ emoji: e, count: 0, mine: false }));
         enriched.commentCount = commentCountMap.get(n.id) || 0;
         enriched.editorCount = editorCountMap.get(n.id) || 0;
+        enriched.canWrite = canWriteMap.get(n.id) ?? false;
       }
       return enriched;
     });
@@ -502,6 +510,47 @@ function forkNote(
     }).run();
   }
   return newId;
+}
+
+// PR #9: 批量算一组 shared 笔记的 canWrite. 前端 NoteCard 用来预判"点编辑是 openModal 还是弹申请对话框",
+// 避免没权限的用户进 modal 闪一下后才弹申请窗 (NoteEditModal acquireLock 失败兜底仍保留, 防权限中途被撤罕见 case).
+// 参数 sharedNotes 必须已含 sharedGroupIds (调用方 enrich 阶段批量查过 note_shares 后传入).
+// canWrite = isAuthor || editPermission='all' || 我在任一共享群是 owner/admin || 我在 grants 白名单
+export async function loadCanWriteMap(
+  sharedNotes: Array<{ id: string; userId: string; editPermission: string | null; sharedGroupIds: string[] }>,
+  userId: string,
+): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  if (sharedNotes.length === 0) return out;
+  // 收集所有共享群 ID, 查我在这些群里的 active 角色
+  const allGroupIds = new Set<string>();
+  for (const n of sharedNotes) for (const gid of n.sharedGroupIds) allGroupIds.add(gid);
+  let adminGroups = new Set<string>();
+  if (allGroupIds.size > 0) {
+    const myMemberships = await db.select({ groupId: schema.groupMembers.groupId, role: schema.groupMembers.role })
+      .from(schema.groupMembers)
+      .where(and(
+        eq(schema.groupMembers.userId, userId),
+        eq(schema.groupMembers.status, 'active'),
+        inArray(schema.groupMembers.groupId, [...allGroupIds]),
+      )).all();
+    adminGroups = new Set(myMemberships.filter(m => m.role === 'owner' || m.role === 'admin').map(m => m.groupId));
+  }
+  // 批量查我在这些笔记上的 grants
+  const grants = await db.select({ noteId: schema.noteEditGrants.noteId })
+    .from(schema.noteEditGrants)
+    .where(and(
+      eq(schema.noteEditGrants.userId, userId),
+      inArray(schema.noteEditGrants.noteId, sharedNotes.map(n => n.id)),
+    )).all();
+  const grantedNoteIds = new Set(grants.map(g => g.noteId));
+  for (const n of sharedNotes) {
+    if (n.userId === userId) { out.set(n.id, true); continue; }
+    if (n.editPermission === 'all') { out.set(n.id, true); continue; }
+    if (n.sharedGroupIds.some(gid => adminGroups.has(gid))) { out.set(n.id, true); continue; }
+    out.set(n.id, grantedNoteIds.has(n.id));
+  }
+  return out;
 }
 
 // PR #7b: 批量拉一组笔记的 distinct editor count (不含作者本人, 作者改不写 history).
@@ -1202,15 +1251,21 @@ app.get('/:id', async (c) => {
     .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
   // PR #6: shared 笔记带 reaction summary + comment count, NoteDetail 直接用 (省一个 round trip + SSE 增量更新)
   // PR #7b: shared 笔记带 editorCount, NoteDetail "X 人编辑过" 胶囊用
+  // PR #9: shared 笔记带 canWrite, NoteCard / NoteDetail 预判"点编辑能否进 modal"
   let enriched: any = { ...note, sharedGroupIds: shares.map(s => s.groupId) };
   if (note.visibility === 'shared') {
-    const [{ reactionMap, commentCountMap }, editorCountMap] = await Promise.all([
+    const [{ reactionMap, commentCountMap }, editorCountMap, canWriteMap] = await Promise.all([
       loadSocialMetaMaps([id], userId),
       loadEditorCountMap([id]),
+      loadCanWriteMap([{
+        id: note.id, userId: note.userId, editPermission: note.editPermission,
+        sharedGroupIds: shares.map(s => s.groupId),
+      }], userId),
     ]);
     enriched.reactionSummary = reactionMap.get(id) || ALLOWED_REACTION_EMOJIS.map(e => ({ emoji: e, count: 0, mine: false }));
     enriched.commentCount = commentCountMap.get(id) || 0;
     enriched.editorCount = editorCountMap.get(id) || 0;
+    enriched.canWrite = canWriteMap.get(id) ?? false;
   }
   return c.json({ data: enriched });
 });
