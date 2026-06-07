@@ -9,6 +9,13 @@ import { autoTag, autoClassify, autoSummary } from '../ai/client.js';
 import { toPinyinSearchable } from '../utils/pinyin.js';
 import { publish } from '../reminder/bus.js';
 import { logAudit } from '../utils/auditLog.js';
+import { createNotification } from '../utils/notifications.js';
+
+// 笔记 markdown 内容截 30 字符作为通知 title 后缀, 去 markdown 标记+换行. 太长前端 truncate
+function noteSnippet(content: string, max = 30): string {
+  const plain = content.replace(/[#*_`>\-\[\]!()]/g, '').replace(/\s+/g, ' ').trim();
+  return plain.length > max ? plain.slice(0, max) + '…' : plain;
+}
 
 const app = new Hono();
 
@@ -854,12 +861,19 @@ app.post('/:id/edit-request', async (c) => {
   const requester = await db.select({ nickname: schema.users.nickname })
     .from(schema.users).where(eq(schema.users.id, userId)).get();
   const recipients = await getNoteAuthorityRecipients(id);
+  const snippet = noteSnippet(note.content);
   for (const rid of recipients) {
     if (rid === userId) continue;
     publish(rid, 'note-edit-request', {
       requestId: reqId, noteId: id, noteUserId: note.userId,
       requesterId: userId, requesterNickname: requester?.nickname || '群成员', message: sanitizedMessage,
     }, _ocid);
+    // PR #10c: 写入通知中心. body 跟 toast 文案对齐, payload 含 noteId 让 view 点击跳详情
+    createNotification(rid, 'content', 'edit-request',
+      `${requester?.nickname || '群成员'} 申请编辑你的笔记`,
+      sanitizedMessage ? `${snippet}: ${sanitizedMessage}` : snippet,
+      { noteId: id, requestId: reqId, fromUserId: userId },
+    ).catch(() => {});
   }
   await logAudit(c, 'note.edit_request', 'note', id, { requestId: reqId });
   return c.json({ data: newReq }, 201);
@@ -896,6 +910,11 @@ app.post('/:id/edit-requests/:reqId/approve', async (c) => {
   publish(req.userId, 'note-edit-request-resolved', {
     requestId: reqId, noteId: id, status: 'approved', handledBy: userId,
   }, _ocid);
+  // PR #10c: 写通知给申请人
+  createNotification(req.userId, 'content', 'edit-request-approved',
+    '编辑权限申请已通过', noteSnippet(note.content),
+    { noteId: id, requestId: reqId },
+  ).catch(() => {});
   await logAudit(c, 'note.edit_approve', 'note', id, { requestId: reqId, granteeId: req.userId });
   return c.json({ data: { message: '已同意, 申请人已获得永久编辑权' } });
 });
@@ -925,6 +944,11 @@ app.post('/:id/edit-requests/:reqId/reject', async (c) => {
   publish(req.userId, 'note-edit-request-resolved', {
     requestId: reqId, noteId: id, status: 'rejected', handledBy: userId,
   }, _ocid);
+  // PR #10c: 写通知给申请人
+  createNotification(req.userId, 'content', 'edit-request-rejected',
+    '编辑权限申请被拒绝', noteSnippet(note.content),
+    { noteId: id, requestId: reqId },
+  ).catch(() => {});
   await logAudit(c, 'note.edit_reject', 'note', id, { requestId: reqId, requesterId: req.userId });
   return c.json({ data: { message: '已拒绝' } });
 });
@@ -1251,6 +1275,14 @@ app.post('/:id/comments', async (c) => {
     .catch(e => console.error('[comments] broadcast failed:', e));
   // 多设备同步: CommentThread.onCommentAdded 已有 id 去重防重 push
   publish(userId, 'note-comment-added', { noteId: id, comment: enriched }, _ocid);
+  // PR #10c: 写通知给笔记作者 (除非评论的是自己的笔记). reaction 不写通知 (频率太高)
+  if (note.userId !== userId) {
+    createNotification(note.userId, 'content', 'comment-added',
+      `${user?.nickname || '用户'} 评论了你的笔记`,
+      noteSnippet(sanitizedContent),
+      { noteId: id, commentId: cid, fromUserId: userId },
+    ).catch(() => {});
+  }
   await logAudit(c, 'note.comment_create', 'comment', cid, { noteId: id, isReply: !!normalizedParentId });
   return c.json({ data: enriched }, 201);
 });
@@ -1561,6 +1593,12 @@ app.post('/:id/duplicate', async (c) => {
       duplicatorId: userId,
       duplicatorNickname: dup?.nickname || '群成员',
     });
+    // PR #10c: 写通知给原作者
+    createNotification(original.userId, 'content', 'duplicated',
+      `${dup?.nickname || '群成员'} 另存为了你的笔记`,
+      noteSnippet(original.content),
+      { noteId: id, newNoteId: newId, fromUserId: userId },
+    ).catch(() => {});
   }
   await logAudit(c, 'note.duplicate', 'note', newId, {
     originNoteId: id, originAuthorId: original.userId,

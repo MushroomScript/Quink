@@ -10,6 +10,7 @@ const { RRule } = rrulePkg;
 import { dispatchToAllChannels } from './sender.js';
 import { publish } from './bus.js';
 import type { ReminderPayload } from './types.js';
+import { createNotification } from '../utils/notifications.js';
 
 const SCAN_INTERVAL_MS = 60_000; // 每分钟扫一次
 let timer: NodeJS.Timeout | null = null;
@@ -101,6 +102,10 @@ async function tick() {
 
     // 推 SSE note-updated, 让前端在线连接立即刷新单条 note (无需手动按刷新按钮)
     publish(note.userId, 'note-updated', { noteId: note.id });
+    // PR #10c: 提醒到点同时写通知中心 (OS 通知一闪而过, 通知页常驻让用户事后回看)
+    createNotification(note.userId, 'reminder', 'reminder-due',
+      payload.title, payload.body, { noteId: note.id, remindAt: payload.remindAt },
+    ).catch(() => {});
   }
 }
 

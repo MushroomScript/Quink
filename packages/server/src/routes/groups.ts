@@ -8,6 +8,19 @@ import { authMiddleware } from '../auth.js';
 import { publish, isOnline } from '../reminder/bus.js';
 import { loadSocialMetaMaps, loadEditorCountMap } from './notes.js';
 import { logAudit } from '../utils/auditLog.js';
+import { createNotification } from '../utils/notifications.js';
+
+// ── 辅助: 拉群 owner + admin id 列表, 给 group-join-request 通知用 (审批权限的人都收) ──
+async function getGroupOwnerAndAdmins(groupId: string): Promise<string[]> {
+  const rows = await db.select({ userId: schema.groupMembers.userId, role: schema.groupMembers.role })
+    .from(schema.groupMembers)
+    .where(and(
+      eq(schema.groupMembers.groupId, groupId),
+      eq(schema.groupMembers.status, 'active'),
+      sql`${schema.groupMembers.role} IN ('owner', 'admin')`,
+    )).all();
+  return rows.map(r => r.userId);
+}
 
 const app = new Hono();
 
@@ -162,6 +175,10 @@ inviteApp.post('/:token/apply', authMiddleware, async (c) => {
     await broadcastGroupChanged(g.id, [userId, g.ownerId], _ocid);
     // 多设备同步: 加入群后, 申请人本人其他设备 sidebar 也要看到新群
     publish(userId, 'group-changed', { groupId: g.id }, _ocid);
+    // PR #10c: 给新成员写通知 (你加入了新群); autoJoin 模式下 owner 已有 toast (PR #1), 通知中心不再重复
+    createNotification(userId, 'group', 'group-joined',
+      `你已加入「${g.name}」`, null, { groupId: g.id },
+    ).catch(() => {});
     return c.json({ data: { status: 'joined', groupId: g.id } });
   }
   // 审批模式: 创建 pending 申请, 防同一人重复申请 (existing pending 直接复用)
@@ -188,6 +205,14 @@ inviteApp.post('/:token/apply', authMiddleware, async (c) => {
   // SSE 推 owner: 让 owner 实时看到申请 (前端弹通知 / 角标)
   const applicant = await db.select({ nickname: schema.users.nickname, username: schema.users.username, avatar: schema.users.avatar })
     .from(schema.users).where(eq(schema.users.id, userId)).get();
+  // PR #10c: 通知中心给 owner + admin 都写 (覆盖 owner 不在时 admin 接管审批的体验); SSE toast 仍只给 owner
+  const reviewerIds = await getGroupOwnerAndAdmins(g.id);
+  for (const rid of reviewerIds) {
+    createNotification(rid, 'group', 'group-join-request',
+      `${applicant?.nickname || '用户'} 申请加入「${g.name}」`,
+      null, { groupId: g.id, requestId: reqRow.id, fromUserId: userId },
+    ).catch(() => {});
+  }
   publish(g.ownerId, 'group-join-request', {
     requestId: reqRow.id,
     groupId: g.id,
@@ -547,7 +572,10 @@ app.delete('/:id', async (c) => {
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me || me.role !== 'owner') return c.json({ error: '仅创建者可解散群组' }, 403);
-  // 先拉所有成员 id, 解散后 SSE 通知他们 (前端从 sidebar 移除该群)
+  // 先拉所有成员 id + 群名, 解散后 SSE 通知他们 (前端从 sidebar 移除该群) + 写通知中心
+  const groupRow = await db.select({ name: schema.groups.name }).from(schema.groups)
+    .where(eq(schema.groups.id, groupId)).get();
+  const dissolvedName = groupRow?.name || '群组';
   const memberIds = (await db.select({ userId: schema.groupMembers.userId })
     .from(schema.groupMembers)
     .where(eq(schema.groupMembers.groupId, groupId))
@@ -563,6 +591,12 @@ app.delete('/:id', async (c) => {
   });
   for (const uid of memberIds) {
     publish(uid, 'group-dissolved', { groupId }, _ocid);
+    // PR #10c: 给所有 active 成员写通知 (含解散者本人, 让多设备 sidebar 同步移除)
+    if (uid !== userId) {
+      createNotification(uid, 'group', 'group-dissolved',
+        `「${dissolvedName}」已被解散`, null, { groupId },
+      ).catch(() => {});
+    }
   }
   await logAudit(c, 'group.dissolve', 'group', groupId, { memberCount: memberIds.length });
   return c.json({ message: '群组已解散' });
@@ -669,6 +703,13 @@ app.post('/:id/join-requests/:reqId/approve', async (c) => {
   // 广播给其他成员 (排除操作者 + 申请人, 申请人通过 group-join-approved 触发 loadGroups)
   await broadcastGroupChanged(groupId, [userId, reqRow.userId], _ocid);
   publish(userId, 'group-changed', { groupId }, _ocid);
+  // PR #10c: 给申请人写通知 (你的申请已通过)
+  const approvedGroup = await db.select({ name: schema.groups.name }).from(schema.groups)
+    .where(eq(schema.groups.id, groupId)).get();
+  createNotification(reqRow.userId, 'group', 'group-joined',
+    `你已加入「${approvedGroup?.name || '群组'}」`,
+    '审批通过', { groupId },
+  ).catch(() => {});
   await logAudit(c, 'group.member_add', 'group', groupId, {
     newMemberId: reqRow.userId, requestId: reqId, approvedBy: me.role,
   });
@@ -691,6 +732,13 @@ app.post('/:id/join-requests/:reqId/reject', async (c) => {
     .set({ status: 'rejected', handledAt: now, handledBy: userId })
     .where(eq(schema.groupJoinRequests.id, reqId));
   publish(reqRow.userId, 'group-join-rejected', { groupId, requestId: reqId }, _ocid);
+  // PR #10c: 给申请人写通知 (你的申请被拒)
+  const rejGroup = await db.select({ name: schema.groups.name }).from(schema.groups)
+    .where(eq(schema.groups.id, groupId)).get();
+  createNotification(reqRow.userId, 'group', 'group-join-rejected',
+    `加入「${rejGroup?.name || '群组'}」的申请被拒绝`,
+    null, { groupId },
+  ).catch(() => {});
   await logAudit(c, 'group.member_reject', 'group', groupId, {
     requesterId: reqRow.userId, requestId: reqId,
   });
@@ -758,6 +806,15 @@ app.delete('/:id/members/:userId', async (c) => {
   // 广播给剩余成员 (status='removed' 的人不在 active 列表自动排除, 不会通知到自己)
   await broadcastGroupChanged(groupId, [meId], _ocid);
   publish(meId, 'group-changed', { groupId }, _ocid);
+  // PR #10c: 被踢时给被踢者写通知 (主动退群不写, 自己知道)
+  if (!isSelf) {
+    const kickGroup = await db.select({ name: schema.groups.name }).from(schema.groups)
+      .where(eq(schema.groups.id, groupId)).get();
+    createNotification(targetId, 'group', 'group-removed',
+      `你已被移出「${kickGroup?.name || '群组'}」`,
+      null, { groupId },
+    ).catch(() => {});
+  }
   await logAudit(c, isSelf ? 'group.leave' : 'group.kick', 'group', groupId, {
     targetUserId: targetId, role: me.role,
   });
@@ -817,6 +874,19 @@ app.patch('/:id/members/:userId', async (c) => {
   // 广播给所有成员让 chip 颜色实时更新 (排除操作者)
   await broadcastGroupChanged(groupId, [meId], _ocid);
   publish(meId, 'group-changed', { groupId }, _ocid);
+  // PR #10c: 给 targetId 写通知 (被任命/取消管理员). member→admin = promoted; admin→member = demoted
+  const isPromote = target.role === 'member' && parsed.data.role === 'admin';
+  const isDemote = target.role === 'admin' && parsed.data.role === 'member';
+  if (isPromote || isDemote) {
+    const roleGroup = await db.select({ name: schema.groups.name }).from(schema.groups)
+      .where(eq(schema.groups.id, groupId)).get();
+    createNotification(targetId, 'group', isPromote ? 'group-promoted' : 'group-demoted',
+      isPromote
+        ? `你被任命为「${roleGroup?.name || '群组'}」的管理员`
+        : `你已不再是「${roleGroup?.name || '群组'}」的管理员`,
+      null, { groupId },
+    ).catch(() => {});
+  }
   await logAudit(c, 'group.member_role', 'group', groupId, {
     targetUserId: targetId, newRole: parsed.data.role, oldRole: target.role,
   });
