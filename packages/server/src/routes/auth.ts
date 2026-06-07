@@ -4,7 +4,8 @@ import { db, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
-import { hashPassword, verifyPassword, signToken, authMiddleware } from '../auth.js';
+import { hashPassword, verifyPassword, signToken, authMiddleware, invalidateTokenVersionCache } from '../auth.js';
+import { logAudit } from '../utils/auditLog.js';
 import { publish } from '../reminder/bus.js';
 import { cleanTrashForUser } from '../cleanup.js';
 import { DEFAULT_CATEGORIES } from '../ai/prompts.js';
@@ -52,10 +53,14 @@ app.post('/register', async (c) => {
     nickname,
     avatar: null,
     preferences: {},
+    tokenVersion: 0,
     createdAt: dayjs().toISOString(),
   };
 
   await db.insert(schema.users).values(user);
+  // 安全审计: 注册操作记录
+  c.set('userId', user.id);
+  await logAudit(c, 'auth.register', 'user', user.id, { username: user.username });
   // seed 默认大类 (工作/学习/生活/其他). 自动分类 prompt 用 {categories} 占位, AI 从这个列表里选 (有"其他"兜底),
   // 不能编新分类. 老用户不补种 (蘑菇 2026-05-29 决定); 失败容忍, 用户后续手动加分类也行
   await Promise.all(
@@ -65,7 +70,7 @@ app.post('/register', async (c) => {
       }).catch(err => console.error('[register] seed category failed:', name, err))
     )
   );
-  const token = signToken(user.id);
+  const token = signToken(user.id, user.tokenVersion);
 
   return c.json({
     data: {
@@ -88,10 +93,15 @@ app.post('/login', async (c) => {
   const user = await db.select().from(schema.users).where(eq(schema.users.username, username)).get();
 
   if (!user || !verifyPassword(password, user.passwordHash)) {
+    // 安全审计: 登录失败 (含密码错误 / 用户不存在). 频繁失败可被监控为暴力破解
+    c.set('userId', user?.id || 'anonymous');
+    await logAudit(c, 'auth.login_failed', 'user', user?.id || null, { username });
     return c.json({ error: '用户名或密码错误' }, 401);
   }
 
-  const token = signToken(user.id);
+  c.set('userId', user.id);
+  await logAudit(c, 'auth.login', 'user', user.id, { username });
+  const token = signToken(user.id, user.tokenVersion ?? 0);
   return c.json({
     data: {
       token,
@@ -161,9 +171,17 @@ app.post('/password', authMiddleware, async (c) => {
     return c.json({ error: '旧密码不正确' }, 401);
   }
 
-  await db.update(schema.users).set({ passwordHash: hashPassword(newPassword) }).where(eq(schema.users.id, userId));
+  // 安全审计 M2: 改密码 → tokenVersion++ + invalidate 缓存 → 所有旧 token 立即失效, 所有设备 401 必须重登
+  // 蘑菇拍板: 长效 token 不变, 但改密码要"修改密码后立即退出登录才对"
+  const newTv = (user.tokenVersion ?? 0) + 1;
+  await db.update(schema.users)
+    .set({ passwordHash: hashPassword(newPassword), tokenVersion: newTv })
+    .where(eq(schema.users.id, userId));
+  invalidateTokenVersionCache(userId);
+  // 安全审计: 改密码是高敏感操作, 必须记录 (含 tokenVersion 升级方便排查)
+  await logAudit(c, 'auth.password_change', 'user', userId, { newTokenVersion: newTv });
   publish(userId, 'data-changed', { scope: 'user-profile' }, _ocid);
-  return c.json({ message: '密码已修改' });
+  return c.json({ message: '密码已修改, 所有设备需重新登录' });
 });
 
 export default app;

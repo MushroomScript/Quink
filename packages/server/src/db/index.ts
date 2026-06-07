@@ -21,6 +21,7 @@ sqlite.exec(`
     nickname TEXT NOT NULL,
     avatar TEXT,
     preferences TEXT DEFAULT '{}',
+    token_version INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   );
 
@@ -337,6 +338,29 @@ try {
 try { sqlite.exec('ALTER TABLE groups ADD COLUMN announcement TEXT'); } catch {}
 try { sqlite.exec('ALTER TABLE groups ADD COLUMN announcement_updated_at TEXT'); } catch {}
 try { sqlite.exec('ALTER TABLE groups ADD COLUMN announcement_updated_by TEXT REFERENCES users(id)'); } catch {}
+
+// 安全审计 M2: users 加 token_version 字段, 改密码时 ++ 立即让旧 token 失效
+try { sqlite.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0'); } catch {}
+
+// 安全审计 S6: group_members 加 hide_presence 字段, 用户可在某群隐身 (上下线不推 presence-changed 但仍能收事件)
+try { sqlite.exec('ALTER TABLE group_members ADD COLUMN hide_presence INTEGER NOT NULL DEFAULT 0'); } catch {}
+
+// 操作审计日志表 (蘑菇 2026-06-07 拍板). 全后端所有写 endpoint 关键位置调 logAudit(userId, action, ...)
+// 文本字段为主, 索引按 user_id + created_at 查最近活动
+try { sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    meta TEXT,
+    ip TEXT,
+    created_at TEXT NOT NULL
+  );
+`); } catch {}
+try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_audit_logs_user_created ON audit_logs(user_id, created_at DESC)'); } catch {}
+try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)'); } catch {}
 // 一次性回填 + 升级重算: PINYIN_SCHEMA_VERSION 每次 toPinyinSearchable 算法升级时 +1,
 // 启动检测 config 表里存的版本号,低于当前版本就把所有 content_pinyin 清空让下面回填重算。
 // v1: 全拼 + 单读音首字母. v2: 多音字首字母穷举. v3: 多音字只取前 2 读音. v4: 加罕用读音黑名单.

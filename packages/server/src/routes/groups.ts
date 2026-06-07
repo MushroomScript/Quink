@@ -7,6 +7,7 @@ import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
 import { publish, isOnline } from '../reminder/bus.js';
 import { loadSocialMetaMaps, loadEditorCountMap } from './notes.js';
+import { logAudit } from '../utils/auditLog.js';
 
 const app = new Hono();
 
@@ -66,15 +67,52 @@ async function enrichGroup(groupId: string, viewerId?: string) {
 //  公开邀请页 (不需 auth)
 // =========================================================
 
+// 安全审计 H3: 公开 endpoint 加 IP rate-limit + 404/410 统一防 token 历史合法性区分泄露.
+// 简单的 in-memory token bucket: 每 IP 60 req/min. 进程重启清空 (个人使用场景接受). 大流量场景建议改 Redis.
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX = 60;
+const ipBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const b = ipBuckets.get(ip);
+  if (!b || b.resetAt < now) {
+    ipBuckets.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (b.count >= RATE_LIMIT_MAX) return false;
+  b.count++;
+  return true;
+}
+
+// 定期清过期 bucket (防 Map 无限增长). 5 min 一次扫
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, b] of ipBuckets) {
+    if (b.resetAt < now) ipBuckets.delete(ip);
+  }
+}, 5 * 60 * 1000);
+
 // 看邀请页: 任何人凭 token 都能看到群组名 + 头像 + 人数, 决定是否加入
 const inviteApp = new Hono();
 inviteApp.get('/:token', async (c) => {
+  // 取真实 IP (开发环境直连 -> remote-addr; 反代场景按部署配置改成 X-Forwarded-For)
+  const ip = c.req.header('x-forwarded-for')?.split(',')[0].trim()
+    || c.req.header('x-real-ip')
+    || 'unknown';
+  if (!checkRateLimit(ip)) {
+    return c.json({ error: '请求过于频繁, 请稍后再试' }, 429);
+  }
+
   const token = c.req.param('token');
-  if (!token) return c.json({ error: '邀请链接无效或已被重置' }, 404);
+  // 安全审计 H3: 404 / 410 / 无效都返同一错误体. 不区分"token 不存在" vs "token 过期",
+  // 防攻击者通过状态码判断 token 历史合法性
+  const INVALID_RESPONSE = c.json({ error: '邀请链接无效或已过期' }, 404);
+  if (!token) return INVALID_RESPONSE;
   const g = await db.select().from(schema.groups).where(eq(schema.groups.inviteToken, token)).get();
-  if (!g || !g.inviteToken) return c.json({ error: '邀请链接无效或已被重置' }, 404);
+  if (!g || !g.inviteToken) return INVALID_RESPONSE;
   if (g.inviteExpiresAt && dayjs(g.inviteExpiresAt).isBefore(dayjs())) {
-    return c.json({ error: '邀请链接已过期, 请联系管理员重新生成' }, 410);
+    return INVALID_RESPONSE;
   }
   const countRow = db.select({ count: sql<number>`count(*)` })
     .from(schema.groupMembers)
@@ -226,6 +264,9 @@ app.post('/', async (c) => {
   });
   // 多设备同步: 给作者本人所有设备 publish 'group-changed' 让其他设备 sidebar 群列表出现新群
   publish(userId, 'group-changed', { groupId }, _ocid);
+  await logAudit(c, 'group.create', 'group', groupId, {
+    name: parsed.data.name, autoJoin: parsed.data.autoJoin,
+  });
   const enriched = await enrichGroup(groupId, userId);
   return c.json({ data: enriched }, 201);
 });
@@ -239,20 +280,25 @@ app.get('/:id', async (c) => {
   if (!me) return c.json({ error: '群组不存在或你不是成员' }, 404);
   const enriched = await enrichGroup(groupId, userId);
   // 成员列表 (含 user nickname/avatar, 排序: owner → admin → member, 同角色按加入时间)
+  // 安全审计 S6: 拉 hide_presence 用于"隐身成员对他人 online=false"过滤
   const members = db.all(sql`
-    SELECT gm.user_id, gm.role, gm.joined_at, u.username, u.nickname, u.avatar
+    SELECT gm.user_id, gm.role, gm.joined_at, gm.hide_presence as hidePresence, u.username, u.nickname, u.avatar
     FROM group_members gm
     INNER JOIN users u ON u.id = gm.user_id
     WHERE gm.group_id = ${groupId} AND gm.status = 'active'
     ORDER BY CASE gm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, gm.joined_at ASC
-  `) as Array<{ user_id: string; role: string; joined_at: string; username: string; nickname: string; avatar: string | null }>;
+  `) as Array<{ user_id: string; role: string; joined_at: string; hidePresence: number; username: string; nickname: string; avatar: string | null }>;
   return c.json({
     data: {
       ...enriched,
       members: members.map(m => ({
         userId: m.user_id, role: m.role, joinedAt: m.joined_at,
         username: m.username, nickname: m.nickname, avatar: m.avatar,
-        online: isOnline(m.user_id),
+        // 安全审计 S6: 自己看自己 online 真实; 看别人时, 别人隐身 → online=false; 看自己的 hidePresence 状态
+        hidePresence: m.user_id === userId ? !!m.hidePresence : undefined,
+        online: m.user_id === userId
+          ? isOnline(m.user_id)
+          : (m.hidePresence ? false : isOnline(m.user_id)),
       })),
     },
   });
@@ -510,6 +556,7 @@ app.delete('/:id', async (c) => {
   for (const uid of memberIds) {
     publish(uid, 'group-dissolved', { groupId }, _ocid);
   }
+  await logAudit(c, 'group.dissolve', 'group', groupId, { memberCount: memberIds.length });
   return c.json({ message: '群组已解散' });
 });
 
@@ -662,18 +709,77 @@ app.delete('/:id/members/:userId', async (c) => {
     }
   }
   const now = dayjs().toISOString();
-  await db.update(schema.groupMembers)
-    .set({ status: 'removed' })
-    .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.userId, targetId)));
+  // 安全审计 H8: 改成员状态 + 清被踢人在该群的所有 noteShares + group_note_pins / note_edit_grants / note_edit_requests
+  // 全在事务内做. 防 TOCTOU: A 是群成员 + 同一秒 POST 笔记分享到该群, owner 踢 A → 旧设计被踢后 noteShares 仍 insert 成功.
+  // 现在踢人后 A 在该群的所有"内容关联"立即清空, 后续若 race 进来的 insert 也无害 (那条笔记已"分享到 0 人" → 不会出现在 feed)
+  db.transaction((tx) => {
+    tx.update(schema.groupMembers)
+      .set({ status: 'removed' })
+      .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.userId, targetId))).run();
+    // 清被踢/退群人在该群分享的所有笔记关系 (note_shares 跟 group_note_pins 是该群+该用户的"参与凭证")
+    // 笔记本身不删 (作者本人可能还想在主视图保留), 只清群关联
+    tx.delete(schema.noteShares).where(and(
+      eq(schema.noteShares.groupId, groupId),
+      sql`${schema.noteShares.noteId} IN (SELECT id FROM notes WHERE user_id = ${targetId})`,
+    )).run();
+    tx.delete(schema.groupNotePins).where(and(
+      eq(schema.groupNotePins.groupId, groupId),
+      eq(schema.groupNotePins.pinnedBy, targetId),
+    )).run();
+    // 被踢人在该群相关笔记上的 edit-grant / pending edit-request 也清 (跨群 grant 保留)
+    tx.delete(schema.noteEditGrants).where(and(
+      eq(schema.noteEditGrants.userId, targetId),
+      sql`${schema.noteEditGrants.noteId} IN (SELECT note_id FROM note_shares WHERE group_id = ${groupId})`,
+    )).run();
+    tx.delete(schema.noteEditRequests).where(and(
+      eq(schema.noteEditRequests.userId, targetId),
+      eq(schema.noteEditRequests.status, 'pending'),
+      sql`${schema.noteEditRequests.noteId} IN (SELECT note_id FROM note_shares WHERE group_id = ${groupId})`,
+    )).run();
+  });
   // 主动退群不需要推 SSE 给自己 (前端已知道 + 已 toast), 只在被别人踢时推
   if (!isSelf) publish(targetId, 'group-member-removed', { groupId, by: meId, self: false }, _ocid);
   // 广播给剩余成员 (status='removed' 的人不在 active 列表自动排除, 不会通知到自己)
   await broadcastGroupChanged(groupId, [meId], _ocid);
   publish(meId, 'group-changed', { groupId }, _ocid);
+  await logAudit(c, isSelf ? 'group.leave' : 'group.kick', 'group', groupId, {
+    targetUserId: targetId, role: me.role,
+  });
   return c.json({ message: isSelf ? '已退群' : '已移除' });
 });
 
 const roleSchema = z.object({ role: z.enum(['admin', 'member']) });
+
+// 安全审计 S6: 设置我在该群的隐身状态. 隐身: 上下线不给群其他成员推 presence-changed, 但我仍能收所有事件
+// PATCH /api/groups/:id/members/me/presence-mode  body: { hidePresence: boolean }
+app.patch('/:id/members/me/presence-mode', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const groupId = c.req.param('id');
+  const me = await getActiveMember(groupId, userId);
+  if (!me) return c.json({ error: '群组不存在或你不是成员' }, 404);
+  const body = await c.req.json().catch(() => ({} as any));
+  const hide = !!body?.hidePresence;
+  await db.update(schema.groupMembers)
+    .set({ hidePresence: hide })
+    .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.userId, userId)));
+  // 通知该群其他成员: 我从隐身切到不隐身时立即广播 online; 切到隐身时立即广播 offline (让群成员视觉同步)
+  // 复用 broadcastPresence 不行(它现在按 hidePresence 过滤). 直接 publish 给该群其他 active 成员
+  const others = await db.select({ userId: schema.groupMembers.userId })
+    .from(schema.groupMembers)
+    .where(and(
+      eq(schema.groupMembers.groupId, groupId),
+      eq(schema.groupMembers.status, 'active'),
+    )).all();
+  const fakeOnline = !hide && isOnline(userId);
+  for (const m of others) {
+    if (m.userId === userId) continue;
+    publish(m.userId, 'presence-changed', { userId, online: fakeOnline });
+  }
+  publish(userId, 'group-changed', { groupId }, _ocid);
+  await logAudit(c, 'group.presence_mode', 'group', groupId, { hidePresence: hide });
+  return c.json({ data: { hidePresence: hide } });
+});
 
 // 改成员角色 (owner only, admin/member 互转, 不能转 owner)
 app.patch('/:id/members/:userId', async (c) => {
@@ -695,6 +801,9 @@ app.patch('/:id/members/:userId', async (c) => {
   // 广播给所有成员让 chip 颜色实时更新 (排除操作者)
   await broadcastGroupChanged(groupId, [meId], _ocid);
   publish(meId, 'group-changed', { groupId }, _ocid);
+  await logAudit(c, 'group.member_role', 'group', groupId, {
+    targetUserId: targetId, newRole: parsed.data.role, oldRole: target.role,
+  });
   return c.json({ message: '已更新' });
 });
 

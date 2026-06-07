@@ -30,14 +30,36 @@ const AVATAR_MAX_SIZE = 2 * 1024 * 1024; // 2MB
 const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
 // MIME → 扩展名 fallback（仅在 file.name 无扩展名时用）
+// 安全审计 H11: 不再支持 svg 推断 (svg 完全黑名单, MIME 黑名单也拒)
 const MIME_EXT_MAP: Record<string, string> = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
-  'image/webp': 'webp', 'image/svg+xml': 'svg',
+  'image/webp': 'webp',
   'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/ogg': 'ogg',
   'audio/webm': 'webm', 'audio/mp4': 'm4a',
   'application/pdf': 'pdf', 'text/plain': 'txt', 'text/markdown': 'md',
   'text/csv': 'csv', 'application/json': 'json', 'application/zip': 'zip',
 };
+
+// 安全审计 H11: 拒绝可被浏览器渲染脚本 / 同源 XSS 的文件类型. 扩展名 + MIME 双重黑名单
+const BLOCKED_EXT = new Set([
+  'svg', 'svgz',                                   // SVG (含内嵌 <script>)
+  'html', 'htm', 'xhtml',                          // HTML / XHTML
+  'xml', 'mathml', 'mhtml', 'mht',                 // XML / MathML / MHTML
+  'js', 'mjs', 'jsx', 'ts', 'tsx',                 // 脚本
+  'wasm',                                          // WebAssembly
+]);
+const BLOCKED_MIME = new Set([
+  'image/svg+xml', 'image/svg',
+  'text/html', 'application/xhtml+xml',
+  'application/xml', 'text/xml', 'application/mathml+xml',
+  'multipart/related',
+  'text/javascript', 'application/javascript', 'application/wasm',
+]);
+
+// 图片 MIME 白名单 (静态服务时仅这些走 inline, 其他强制 attachment)
+const IMAGE_MIME_INLINE = new Set([
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif', 'image/heic', 'image/heif',
+]);
 
 function getExt(type: string, originalName?: string): string {
   if (originalName) {
@@ -147,6 +169,12 @@ app.post('/file', async (c) => {
   }
 
   const ext = getExt(file.type, file.name);
+
+  // 安全审计 H11: 拒绝可触发存储型 XSS 的文件类型 (扩展名 + MIME 双重判断, 防绕过)
+  const mimeLower = (file.type || '').toLowerCase();
+  if (BLOCKED_EXT.has(ext.toLowerCase()) || BLOCKED_MIME.has(mimeLower)) {
+    return c.json({ error: `不支持的文件类型: ${ext} (出于安全考虑禁止上传可执行脚本 / SVG / HTML)` }, 400);
+  }
 
   // displayName 优先（录音弹窗输入），否则用 file.name 去扩展名（粘贴/拖拽）
   const rawName = typeof displayNameField === 'string' && displayNameField.trim()

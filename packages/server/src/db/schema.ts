@@ -7,6 +7,9 @@ export const users = sqliteTable('users', {
   nickname: text('nickname').notNull(),
   avatar: text('avatar'), // URL or base64
   preferences: text('preferences', { mode: 'json' }).$type<Record<string, any>>().default({}),
+  // 安全审计 M2: token 版本号. 改密码 / 主动登出所有设备 时 ++ → 旧 token 立即失效.
+  // JWT 长效不变 (蘑菇拍板"不希望用一阵就重新登陆"), 仅改密码需要让旧 token 失效
+  tokenVersion: integer('token_version').notNull().default(0),
   createdAt: text('created_at').notNull(),
 });
 
@@ -244,10 +247,26 @@ export const groupMembers = sqliteTable('group_members', {
   userId: text('user_id').notNull().references(() => users.id),
   role: text('role', { enum: ['owner', 'admin', 'member'] }).notNull().default('member'),
   status: text('status', { enum: ['active', 'removed'] }).notNull().default('active'),
+  // 安全审计 S6: 在该群隐身. true 时本人上下线不给群其他成员推 presence-changed,
+  // 但隐身用户仍正常收所有事件 (笔记变更 / 评论 / 申请通知 等). 蘑菇明示"隐身不影响收提示消息"
+  hidePresence: integer('hide_presence', { mode: 'boolean' }).notNull().default(false),
   joinedAt: text('joined_at').notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.groupId, table.userId] }),
 }));
+
+// 操作审计日志 (蘑菇 2026-06-07 拍板): 所有写 endpoint 关键位置记录, 文本字段为主, 占空间不大
+// 不分级, 全部 INFO 级别. 攻击追溯 / 用户自查"我啥时候改过啥"双用. 当前不暴露 admin 界面, 后续加 /api/admin/audit-logs
+export const auditLogs = sqliteTable('audit_logs', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),    // 不加 FK 防用户删除时影响审计
+  action: text('action').notNull(),     // e.g. 'note.create' / 'note.delete' / 'group.kick' / 'auth.login' / 'auth.password_change'
+  targetType: text('target_type'),      // e.g. 'note' / 'group' / 'user' / 'comment'
+  targetId: text('target_id'),
+  meta: text('meta', { mode: 'json' }).$type<Record<string, any>>(),
+  ip: text('ip'),
+  createdAt: text('created_at').notNull(),
+});
 
 // 申请加入记录: pending → owner 审批 → approved/rejected. cancelled = 申请人主动撤回
 export const groupJoinRequests = sqliteTable('group_join_requests', {

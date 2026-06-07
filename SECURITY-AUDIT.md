@@ -429,38 +429,58 @@ while ($true) {
 
 ## 修复检查清单（修一项勾一项）
 
-- [ ] H11 SVG/HTML 上传 XSS
-- [ ] H12 transcribe-async 路径穿越
-- [ ] S1 SSE 风暴 rate-limit
-- [ ] H9 editContext.groupId 伪造
-- [ ] H1 duplicate 不过滤 deletedAt
-- [ ] H2 lock 续约 DoS
-- [ ] H6 processNoteWithAi race
-- [ ] H8 validateSharedGroups TOCTOU
-- [ ] H4 webhook SSRF
-- [ ] H5 ai-config SSRF + apiKey exfil
-- [ ] H3 invite rate-limit
-- [ ] M1 JWT_SECRET 启动校验
-- [ ] M2 token 吊销机制
-- [ ] M3 note-edit-request SSE _ocid
-- [ ] M6 edit-history 跨群泄露
-- [ ] M7 group edit-requests 不分页
-- [ ] M8 edit-request 拒绝后冷却
-- [ ] M9 preferences schema 收紧
-- [ ] M11 content max length
-- [ ] M13 import zip bomb
-- [ ] M14 query token 日志泄漏
-- [ ] M16 评论 markdown sanitize
-- [ ] M18 webhook header 黑名单
-- [ ] L1 getNoteForAccess deletedAt
+**已修（commit 待提交）**：
+
+- [x] H1 duplicate 不过滤 deletedAt — `getNoteForAccess` 加 `note.deletedAt` 过滤
+- [x] H2 lock 续约 DoS — heartbeat 加 `getNoteForAccess(write)` 复核 + 主动清失效锁
+- [x] H3 invite rate-limit — IP token bucket 60req/min + 404/410 统一返 404
+- [x] H4 webhook SSRF — `validateOutboundUrl` helper + IP 黑名单 + 错误脱敏 + M18 header 黑名单
+- [x] H5 ai-config SSRF + apiKey exfil — `/configs` POST/PATCH + `/test` 写入校验
+- [x] H6 processNoteWithAi race — AI 字段仅在 fresh row 原值为 null 时回填
+- [x] H8 validateSharedGroups TOCTOU — 踢人事务内清 noteShares / pins / grants / pending requests
+- [x] H9 editContext.groupId 伪造 — 校验 userId 在 effectiveGroupId 是 active member
+- [x] H11 SVG/HTML 上传 XSS — 扩展名 + MIME 双重黑名单 + nosniff + 非图片 attachment
+- [x] H12 transcribe-async 路径穿越 — `path.basename` + `relative` 校验 in-dir
+- [x] S1 SSE 风暴 rate-limit — `broadcastNoteShared` per-user per-group 1次/s
+- [x] S6 presence 隐身 — `group_members.hide_presence` + PATCH `/groups/:id/members/me/presence-mode` + GET /:id 脱敏（前端 UI 待加）
+- [x] M1 JWT_SECRET 启动校验 — `NODE_ENV=production` 时 console.error 红字警告
+- [x] M2 token 吊销 — `users.token_version` + JWT payload `tv` + 改密码 tv++ + 10s 缓存
+- [x] L1 getNoteForAccess deletedAt — 跟 H1 一起改的
+- [x] L4 评论根删除子挂死 — 软删根评论同时软删 `parentId=cid` 的子评论
+- [x] 操作日志（蘑菇要求）— audit_logs 表 + `logAudit(c, action, ...)` helper + auth/note/group 关键 endpoint 接入
+
+**未修（视情况后续做）**：
+
+- [ ] M3 note-edit-request SSE _ocid — publish 调用透传 _ocid
+- [ ] M6 edit-history 跨群泄露 — 编辑者只列我同群的，跨群匿名
+- [ ] M7 group edit-requests 不分页 — 加 LIMIT + 分页
+- [ ] M8 edit-request 拒绝后冷却 24h
+- [ ] M9 preferences schema 收紧 — z.record(z.any()) 换成显式字段
+- [ ] M11 content max length — 100k 字符上限 + 巨型笔记跳过 AI
+- [ ] M13 import zip bomb — 限 zip size + 解压总 size
+- [ ] M14 query token 日志泄漏 — 短期一次性下载 token
+- [ ] M16 评论 markdown sanitize — 后端基础 XSS 过滤
 - [ ] L2 PATCH comment SSE 字段
-- [ ] L4 评论根删除子挂死
-- [ ] L5 SSE 并发上限
-- [ ] L6 categories parentId 校验
+- [ ] L5 SSE 并发上限 — 每用户 SSE 连接数限制
+- [ ] L6 categories parentId 校验 — 跨用户 / 循环引用
 - [ ] L7 duplicate rate-limit
-- [ ] L8 uploads LIKE 改精确匹配
-- [ ] S5 SSE payload sanitize
-- [ ] S6 presence 偏好开关
+- [ ] L8 uploads LIKE 改精确匹配 — markdown link 正则 / URL 索引表
+- [ ] S5 SSE payload sanitize — 同 M16
+- [ ] 前端：改密码后立即手动登出（不依赖 401 回环跳登录）
+- [ ] 前端：群详情页加"隐身"开关 + 自己 chip 显示"隐身中"
+
+**操作日志主路径已覆盖**：
+- `auth.register` / `auth.login` / `auth.login_failed` / `auth.password_change`
+- `note.create` / `note.update` / `note.update_fork` / `note.delete` / `note.duplicate` / `note.restore` / `note.permanent_delete` / `note.permanent_delete_all_trash`
+- `group.create` / `group.dissolve` / `group.kick` / `group.leave` / `group.member_role` / `group.presence_mode`
+
+**未加日志的写 endpoint（次要，后续补）**：
+- note 互动：reaction / comment_create / comment_update / comment_delete
+- note 权限：edit_request / edit_approve / edit_reject / edit_grant_revoke
+- group：member_add（申请审批通过）/ note_pin / note_unpin / announcement / update / invite_reset / invite_revoke
+- file：upload / delete / rename
+- ai：config_create / config_update / config_delete / chat
+- reminder：channel_create / channel_update / channel_delete / channel_test
 
 ---
 

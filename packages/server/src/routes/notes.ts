@@ -8,6 +8,7 @@ import { authMiddleware } from '../auth.js';
 import { autoTag, autoClassify, autoSummary } from '../ai/client.js';
 import { toPinyinSearchable } from '../utils/pinyin.js';
 import { publish } from '../reminder/bus.js';
+import { logAudit } from '../utils/auditLog.js';
 
 const app = new Hono();
 
@@ -56,12 +57,36 @@ const updateNoteSchema = z.object({
 // PR #2 阶段 5c: 广播 'group-notes-changed' 给目标群所有 active 成员 (除操作者).
 // POST/PATCH 共享笔记 / 永久删除 共享笔记时调用, 前端在群详情页时自动 reload group feed
 // originClientId: 调用方从 c.req.header('X-Quink-Client-Id') 拿, 透传给 publish 让发起方设备跳过自己发的事件 (其他用户和同账号其他设备的 clientId 不同, 正常处理)
+// 安全审计 S1: per-user per-group 1 次/秒去抖, 防 A 高频 PATCH 让群里 99 人客户端炸开 (每秒 990 API).
+// 取舍: 同账号内连续 PATCH 后 SSE 合并到下一秒一次推送, 用户体验上"延迟 ≤1s" 但能挡住 DoS.
+// in-memory map, 进程重启清空 (用单进程模式, 多 worker 部署改 Redis)
+const SSE_THROTTLE_WINDOW_MS = 1000;
+const broadcastShareThrottle = new Map<string, number>(); // key=`${actorId}|${groupId}`, value=last broadcast ms
+
+setInterval(() => {
+  const cutoff = Date.now() - SSE_THROTTLE_WINDOW_MS * 5;
+  for (const [k, ts] of broadcastShareThrottle) {
+    if (ts < cutoff) broadcastShareThrottle.delete(k);
+  }
+}, 30 * 1000);
+
 async function broadcastNoteShared(groupIds: string[], exceptUserId: string, originClientId?: string) {
   if (groupIds.length === 0) return;
+  // 按 (actorUserId, groupId) 节流: 同一发起人对同一群在 1s 内仅推一次
+  const now = Date.now();
+  const allowedGroupIds = groupIds.filter(gid => {
+    const key = exceptUserId + '|' + gid;
+    const last = broadcastShareThrottle.get(key) || 0;
+    if (now - last < SSE_THROTTLE_WINDOW_MS) return false;
+    broadcastShareThrottle.set(key, now);
+    return true;
+  });
+  if (allowedGroupIds.length === 0) return;
+
   const members = await db.select({ userId: schema.groupMembers.userId, groupId: schema.groupMembers.groupId })
     .from(schema.groupMembers)
     .where(and(
-      inArray(schema.groupMembers.groupId, groupIds),
+      inArray(schema.groupMembers.groupId, allowedGroupIds),
       eq(schema.groupMembers.status, 'active'),
     )).all();
   // dedup userId+groupId, 一个用户在多个目标群里也只一条事件
@@ -324,6 +349,7 @@ app.post('/trash/:id/restore', async (c) => {
       broadcastNoteShared(shares.map(s => s.groupId), userId, _ocid).catch(e => console.error('[notes] restore broadcast failed:', e));
     }
   }
+  await logAudit(c, 'note.restore', 'note', id, { visibility: existing.visibility });
   return c.json({ message: '已恢复' });
 });
 
@@ -350,6 +376,7 @@ app.delete('/trash/:id', async (c) => {
   if (shareGroupIds.length > 0) {
     broadcastNoteShared(shareGroupIds, userId, _ocid).catch(e => console.error('[notes] permanent delete broadcast failed:', e));
   }
+  await logAudit(c, 'note.permanent_delete', 'note', id, { sharedGroupIds: shareGroupIds });
   return c.json({ message: '已永久删除' });
 });
 
@@ -370,6 +397,7 @@ app.delete('/trash', async (c) => {
   });
   // 多设备同步: 作者本人所有设备清空回收站界面 + 主 view cache 标 dirty
   publish(userId, 'trash-cleared', { count: ids.length }, _ocid);
+  await logAudit(c, 'note.permanent_delete_all_trash', 'note', null, { count: ids.length });
   return c.json({ message: '已清空' });
 });
 
@@ -399,6 +427,9 @@ type AccessMode = 'read' | 'write';
 async function getNoteForAccess(userId: string, noteId: string, mode: AccessMode = 'read'): Promise<typeof schema.notes.$inferSelect | null> {
   const note = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId)).get();
   if (!note) return null;
+  // 安全审计 H1 + L1: 软删笔记不能被任何操作访问 (duplicate / lock / PATCH / reaction / comment).
+  // 作者要恢复请用 /trash/:id/restore. 防被害者删除后他人仍能复制走 (隐私残留)
+  if (note.deletedAt) return null;
   // 作者本人无视所有限制 (read + write)
   if (note.userId === userId) return note;
   // 不是作者: 必须 shared 笔记
@@ -662,6 +693,19 @@ app.post('/:id/lock/heartbeat', async (c) => {
   const now = dayjs();
   if (note.editLockExpiresAt && dayjs(note.editLockExpiresAt).isBefore(now)) {
     return c.json({ error: 'lock_expired' }, 409);
+  }
+
+  // 安全审计 H2: 续约时复核 write 权. 防"用户 X 拿 grant → 申锁 → 作者撤 grant → X 持锁续约阻塞别人 5min" DoS.
+  // 作者本人始终通过 (write 校验里 author 直接放行); editPermission='all' 也通过; 仅 grant 被撤的情况会拒
+  if (note.userId !== userId) {
+    const writable = await getNoteForAccess(userId, id, 'write');
+    if (!writable) {
+      // 主动清掉这把过期权限的锁让别人能拿
+      await db.update(schema.notes).set({
+        editLockBy: null, editLockToken: null, editLockExpiresAt: null,
+      }).where(eq(schema.notes.id, id));
+      return c.json({ error: 'no_write_permission' }, 403);
+    }
   }
 
   const expiresAt = now.add(LOCK_TTL_MS, 'ms').toISOString();
@@ -1212,14 +1256,28 @@ app.delete('/:id/comments/:cid', async (c) => {
   }
 
   const now = dayjs().toISOString();
+  // 安全审计 L4: 删根评论时级联软删所有子评论 (parentId=cid). 防子评论挂死 (前端组 thread 时找不到 parent).
+  // 单层 thread (二级评论也都归到顶层 cid 作 parentId), 一次 UPDATE 即可清完
+  const deletedCommentIds: string[] = [cid];
+  if (comment.parentId === null) {
+    // 这是根评论, 找所有挂在它下面的子评论一起软删
+    const children = await db.select({ id: schema.noteComments.id }).from(schema.noteComments)
+      .where(and(
+        eq(schema.noteComments.parentId, cid),
+        sql`${schema.noteComments.deletedAt} IS NULL`,
+      )).all();
+    deletedCommentIds.push(...children.map(c => c.id));
+  }
   await db.update(schema.noteComments).set({ deletedAt: now })
-    .where(eq(schema.noteComments.id, cid));
+    .where(inArray(schema.noteComments.id, deletedCommentIds));
 
-  broadcastNoteSocial(id, 'note-comment-deleted', { noteId: id, commentId: cid }, userId, _ocid)
-    .catch(e => console.error('[comments] broadcast failed:', e));
-  // 多设备同步: CommentThread.onCommentDeleted 用 findIndex 已是幂等
-  publish(userId, 'note-comment-deleted', { noteId: id, commentId: cid }, _ocid);
-  return c.json({ data: { message: '已删除' } });
+  // 广播每条删除事件给所有读者 (子评论数量通常 ≤10, 不需合并)
+  for (const did of deletedCommentIds) {
+    broadcastNoteSocial(id, 'note-comment-deleted', { noteId: id, commentId: did }, userId, _ocid)
+      .catch(e => console.error('[comments] broadcast failed:', e));
+    publish(userId, 'note-comment-deleted', { noteId: id, commentId: did }, _ocid);
+  }
+  return c.json({ data: { message: '已删除', deletedCount: deletedCommentIds.length } });
 });
 
 // GET /api/notes/:id
@@ -1329,6 +1387,9 @@ app.post('/', async (c) => {
   broadcastNoteShared(sharedGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
   // 多设备同步: 给作者本人所有设备 publish (broadcastNoteShared 排除发起人, 同账号其他设备一起被排除; 私有笔记不走 broadcast 也漏)
   publish(userId, 'note-created', { noteId: note.id }, _ocid);
+  await logAudit(c, 'note.create', 'note', note.id, {
+    type: note.type, visibility, sharedGroupIds,
+  });
 
   return c.json({ data: { ...note, sharedGroupIds } }, 201);
 });
@@ -1393,6 +1454,9 @@ app.post('/:id/duplicate', async (c) => {
       duplicatorNickname: dup?.nickname || '群成员',
     });
   }
+  await logAudit(c, 'note.duplicate', 'note', newId, {
+    originNoteId: id, originAuthorId: original.userId,
+  });
 
   return c.json({ data: { ...newNote, sharedGroupIds: [] } }, 201);
 });
@@ -1560,11 +1624,34 @@ app.patch('/:id', async (c) => {
       } else if (!currentShareGroupIds.includes(effectiveGroupId)) {
         return c.json({ error: 'note_not_in_group', message: '该笔记未分享到此群' }, 400);
       }
+      // 安全审计 H9: 校验非作者 X 是 effectiveGroupId 群的 active member, 防伪造 editContext.groupId 让 fork 落到 X 不在的群
+      // 攻击场景: X 在 G1 看到 B 的笔记, 传 editContext.groupId=G2 (X 不在 G2) → fork 落 G2, 挂着 B 名字写 X 的内容 → 身份冒充
+      const myActiveInTarget = await db.select({ groupId: schema.groupMembers.groupId })
+        .from(schema.groupMembers)
+        .where(and(
+          eq(schema.groupMembers.userId, userId),
+          eq(schema.groupMembers.groupId, effectiveGroupId),
+          eq(schema.groupMembers.status, 'active'),
+        )).get();
+      if (!myActiveInTarget) {
+        return c.json({ error: 'not_member_of_target_group', message: '你不是该群组的成员' }, 403);
+      }
       shouldFork = true;
     } else if (effectiveGroupId && existing.parentNoteId === null && currentShareGroupIds.length > 1) {
       // 作者 + 群组页改 + 当前是 root + 分享到多群 → fork (避免作者从群组页改影响其它群)
       if (!currentShareGroupIds.includes(effectiveGroupId)) {
         return c.json({ error: 'note_not_in_group', message: '该笔记未分享到此群' }, 400);
+      }
+      // 安全审计 H9: 作者也校验自己是 effectiveGroupId 群的 active member (作者可能已退该群, 不应再 fork 进去)
+      const authorActiveInTarget = await db.select({ groupId: schema.groupMembers.groupId })
+        .from(schema.groupMembers)
+        .where(and(
+          eq(schema.groupMembers.userId, userId),
+          eq(schema.groupMembers.groupId, effectiveGroupId),
+          eq(schema.groupMembers.status, 'active'),
+        )).get();
+      if (!authorActiveInTarget) {
+        return c.json({ error: 'not_member_of_target_group', message: '你不是该群组的成员' }, 403);
       }
       shouldFork = true;
     }
@@ -1650,6 +1737,9 @@ app.patch('/:id', async (c) => {
     broadcastNoteShared(allGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
     // 多设备同步: 给作者本人所有设备 publish 让其他设备 store 拉 fork 新版本
     publish(userId, 'note-updated', { noteId: newNoteId }, _ocid);
+    await logAudit(c, 'note.update_fork', 'note', newNoteId, {
+      originNoteId: id, groupId: effectiveGroupId, isAuthor,
+    });
 
     const newNote = await db.select().from(schema.notes).where(eq(schema.notes.id, newNoteId)).get();
     return c.json({
@@ -1691,6 +1781,10 @@ app.patch('/:id', async (c) => {
   }
   // 多设备同步: 给作者本人所有设备 publish 让其他设备 store 拉单条 refreshSingleNote (复用 scheduler 那条线已有的 note-updated SSE 事件)
   publish(userId, 'note-updated', { noteId: id }, _ocid);
+  await logAudit(c, 'note.update', 'note', id, {
+    fields: Object.keys(updates).filter(k => k !== 'updatedAt'),
+    isAuthor,
+  });
 
   const updated = await db.select().from(schema.notes).where(eq(schema.notes.id, id)).get();
   // 返回 sharedGroupIds 让前端拿到当前最新分享列表
@@ -1734,6 +1828,9 @@ app.delete('/:id', async (c) => {
   }
   // 多设备同步: 作者本人所有设备主 view 移除该 id
   publish(userId, 'note-deleted', { noteId: id }, _ocid);
+  await logAudit(c, 'note.delete', 'note', id, {
+    visibility: existing.visibility, sharedGroupIds, isAuthor,
+  });
   return c.json({ message: '已移入回收站', sharedGroupIds });
 });
 
@@ -1766,12 +1863,19 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
       summaryEnabled && plainTextLen >= summaryMinLen ? autoSummary(userId, content) : Promise.resolve(null),
     ]);
 
+    // 安全审计 H6: AI 异步回填可能跟用户立即 PATCH 撞 race. 仅在原值仍为 null/空时回填,
+    // 防 AI 返回值覆盖用户手动改的字段 (用户改 tags=['foo'], AI 同时返回 ['bar'] → 不能盖)
+    const fresh = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId)).get();
+    if (!fresh) return; // 笔记被删了, 静默退出
     const updates: Record<string, any> = { aiProcessed: true };
-    if (tags.length > 0 && existingTags.length === 0) updates.tags = tags;
+    const freshTags = (fresh.tags as string[]) || [];
+    if (tags.length > 0 && existingTags.length === 0 && freshTags.length === 0) {
+      updates.tags = tags;
+    }
     // 不再"AI 返回新分类就自动 insert" (2026-05-29). autoClassify 已经在内部用 {categories} 限定 + 校验,
     // 返回值要么在 categories 表里要么是 null. category 表只在注册 seed / 用户手动添加时增长.
-    if (category) updates.category = category;
-    if (summary) updates.summary = summary;
+    if (category && !fresh.category) updates.category = category;
+    if (summary && !fresh.summary) updates.summary = summary;
 
     await db.update(schema.notes).set(updates).where(eq(schema.notes.id, noteId));
     console.log(`[AI] Note ${noteId}: tags=${JSON.stringify(tags)}, category=${category}, summary=${summary}`);

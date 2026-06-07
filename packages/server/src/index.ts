@@ -86,6 +86,23 @@ app.use('/api/uploads/*', async (c, next) => {
 
   return next();
 });
+// 安全审计 H11: 静态文件响应加 X-Content-Type-Options: nosniff 防 MIME sniff 绕过, 非图片强制 attachment 让浏览器下载不渲染.
+// IMAGE_INLINE_EXT 跟 upload.ts BLOCKED_EXT 配套 (svg/html 上传已拒, 历史遗留文件经此 disposition=attachment 兜底)
+const IMAGE_INLINE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'heif']);
+app.use('/api/uploads/*', async (c, next) => {
+  await next();
+  // 总是加 nosniff (无论浏览器从哪个 MIME 渲染都不再嗅探, 防 .png 实际是 html 等绕过)
+  c.res.headers.set('X-Content-Type-Options', 'nosniff');
+  const path = new URL(c.req.url).pathname;
+  const ext = (path.split('.').pop() || '').toLowerCase();
+  // 缩略图 .thumb.jpg 也算图片
+  const isThumb = path.endsWith('.thumb.jpg');
+  if (!IMAGE_INLINE_EXT.has(ext) && !isThumb) {
+    // 非图片: 强制 attachment 让浏览器下载. 防 SVG/HTML/JS 等历史文件在浏览器内执行
+    const filename = decodeURIComponent(path.split('/').pop() || 'download');
+    c.res.headers.set('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`);
+  }
+});
 app.use('/api/uploads/*', serveStatic({ root: './', rewriteRequestPath: (path) => path.replace('/api/uploads', '/uploads') }));
 
 // Routes
