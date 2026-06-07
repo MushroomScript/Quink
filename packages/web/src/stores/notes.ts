@@ -265,6 +265,23 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function updateNote(id: string, data: Partial<Note> & { lockToken?: string; editContext?: { groupId?: string } }) {
+    // 自动注入 version 兜底: 所有笔记 (private / shared) 改内容字段时后端必须校验 version 防多设备旧覆盖新.
+    // NoteEditModal 已显式传 version, 这里给 NoteCard 切待办 / NoteDetail 改 type / cardDnd 拖改类型分类 等其它入口兜底, 调用方不用每处都加.
+    // 找不到 cached note (NoteDetail 通过 URL 直接打开未入 store 的极少数 case) → 不注入, 调用方该场景需自己传 version
+    if (data.version === undefined) {
+      const isContentChange = data.content !== undefined || data.summary !== undefined ||
+        data.category !== undefined || data.tags !== undefined || data.type !== undefined ||
+        data.todoStatus !== undefined || data.todoDue !== undefined || data.todoRemindRrule !== undefined;
+      if (isContentChange) {
+        for (const k of Object.keys(_viewState) as ViewKey[]) {
+          const cached = _viewState[k].notes.find((n) => n.id === id);
+          if (cached) {
+            data = { ...data, version: cached.version || 1 };
+            break;
+          }
+        }
+      }
+    }
     const res = await api.updateNote(id, data);
     // PR #7b: GroupDetail 用本地 ref 自管群笔记 (CLAUDE.md "群 feed 不走 store"), store 同步走不到那.
     // 从群组上下文改 (editContext.groupId 存在) → 派事件让 GroupDetail 重拉 feed, fork / in-place 路径都要派
@@ -482,6 +499,62 @@ export const useNotesStore = defineStore('notes', () => {
     }
   }
 
+  // SSE 收到 note-created 时调 (POST /notes 或 trash restore 后, 给作者本人所有设备多设备同步).
+  // 拉单条 + 按 type 插入对应 viewState. 已存在 (本设备发起 POST 后又收到自己发的 SSE, 或并发多次创建) → 跳过插入只走更新.
+  async function syncNoteCreated(id: string) {
+    try {
+      const res = await api.getNote(id);
+      const note = res.data;
+      const targetViewKey = typeToView[note.type];
+      if (!targetViewKey) return;
+      const vs = _viewState[targetViewKey];
+      const existIdx = vs.notes.findIndex((n) => n.id === id);
+      if (existIdx >= 0) {
+        // 已存在 → 走更新 (本设备发起或 race), Object.assign 字段保引用
+        syncFreshToViewStates(id, note);
+        return;
+      }
+      if (targetViewKey === activeView.value) {
+        // 目标 view 是当前 view → 插入到"首位 after pinned" (跟 createNote 同款逻辑)
+        const insertIdx = vs.notes.findIndex((n) => !n.pinned);
+        const next = [...vs.notes];
+        if (insertIdx === -1) next.push(note);
+        else next.splice(insertIdx, 0, note);
+        vs.notes = next;
+        vs.total++;
+      } else {
+        // 目标 view 是后台 → 标 dirty 下次 onActivated 时 viewRefresh 同步
+        vs.dirty = true;
+      }
+    } catch (e) {
+      console.error('[syncNoteCreated]', id, e);
+    }
+  }
+
+  // SSE 收到 note-deleted 时调 (DELETE /:id 软删 或 DELETE /trash/:id 彻底删除后, 给作者本人所有设备同步).
+  // 不调 API (会再 DELETE 一次), 只本地从所有 viewState 移除该 id. 跟 deleteNote 后半段同款 (前台 splice / 后台 dirty)
+  function syncNoteDeleted(id: string) {
+    for (const k of Object.keys(_viewState) as ViewKey[]) {
+      const vs = _viewState[k];
+      const idx = vs.notes.findIndex((n) => n.id === id);
+      if (idx < 0) continue;
+      if (k === activeView.value) {
+        vs.notes.splice(idx, 1);
+        vs.total = Math.max(0, vs.total - 1);
+      } else {
+        vs.dirty = true;
+      }
+    }
+  }
+
+  // SSE 收到 trash-cleared 时调 (DELETE /trash 清空回收站后多设备同步).
+  // 简化: 标所有 view dirty 让下次 onActivated 走 viewRefresh. Trash view 用本地 ref 单独监听 quink-trash-cleared CustomEvent
+  function syncTrashCleared() {
+    for (const k of Object.keys(_viewState) as ViewKey[]) {
+      _viewState[k].dirty = true;
+    }
+  }
+
   // 创建后轮询单条笔记的 AI 结果, 命中 aiProcessed=true 时同步进所有 view.
   // 退避序列 2/3/5/8/12s 累积 30s.
   async function pollNoteAiResult(id: string) {
@@ -609,6 +682,9 @@ export const useNotesStore = defineStore('notes', () => {
     createNote,
     pollNoteAiResult,
     refreshSingleNote,
+    syncNoteCreated,
+    syncNoteDeleted,
+    syncTrashCleared,
     updateNote,
     deleteNote,
     undoDelete,

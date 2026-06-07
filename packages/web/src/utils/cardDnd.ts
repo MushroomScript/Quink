@@ -7,6 +7,7 @@
 // (跟之前 HTML5 模式同语义, NoteCard / Sidebar 改造时仅改触发方式不改协议).
 import { reactive } from 'vue';
 import { useNotesStore } from '@/stores/notes';
+import { useToast } from '@/composables/useToast';
 
 const DRAG_THRESHOLD = 4;
 
@@ -160,16 +161,23 @@ async function onUp(e: PointerEvent) {
 
 async function handleDrop(target: string, ids: string[]) {
   const store = useNotesStore();
+  const toast = useToast();
+  // 拖动失败时按错误类型给提示, 不要静默吞 (version_conflict 时用户拖了没反应不知道为啥)
+  const handleErr = (e: any) => {
+    const msg = e?.message || '';
+    if (msg.includes('version_conflict')) toast.show('笔记已在别处修改, 请刷新后重试', 'error', 3000);
+    else if (msg) toast.show('操作失败: ' + msg, 'error', 3000);
+  };
   if (target.startsWith('type:')) {
     const type = target.slice(5) as 'quink' | 'note' | 'todo';
     for (const id of ids) {
-      try { await store.updateNote(id, { type } as any); } catch {}
+      try { await store.updateNote(id, { type } as any); } catch (e) { handleErr(e); }
     }
     if (store.selectMode) store.exitSelectMode();
   } else if (target.startsWith('cat:')) {
     const name = target.slice(4);
     for (const id of ids) {
-      try { await store.updateNote(id, { category: name } as any); } catch {}
+      try { await store.updateNote(id, { category: name } as any); } catch (e) { handleErr(e); }
     }
     if (store.selectMode) store.exitSelectMode();
   } else if (target === 'action:trash') {

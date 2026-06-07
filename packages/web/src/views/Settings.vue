@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, watch, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import { useSseSync } from '@/utils/sseSync';
 import { useNotesStore } from '@/stores/notes';
 import { useToast } from '@/composables/useToast';
 import { api } from '@/api';
@@ -171,6 +172,11 @@ async function loadReminderChannels() {
     console.error('[Settings] loadReminderChannels failed:', e);
   }
 }
+
+// 多设备 SSE 同步: 其他设备改了配置 → Settings 自动 reload 对应区块
+useSseSync('reminder-channels', loadReminderChannels);
+useSseSync(['ai-configs', 'ai-prompts'], loadAiData);
+useSseSync('user-profile', () => auth.fetchMe?.());
 
 // browser 通道全用户唯一: 后端拦截了, 这里 UI 同步 disable. 编辑现有 browser channel 时不算 (id 自己排除)
 const hasBrowserChannel = computed(() => reminderChannels.value.some(c => c.type === 'browser'));

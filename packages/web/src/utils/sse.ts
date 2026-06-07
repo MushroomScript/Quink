@@ -5,6 +5,7 @@
 
 import { getAuthToken } from '@/api';
 import { backendBaseUrl } from './backendUrl';
+import { isMyEvent } from './clientId';
 
 type ReminderEvent = {
   noteId: string;
@@ -62,6 +63,7 @@ export function startReminderSse() {
   es.addEventListener('reminder', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as ReminderEvent;
+      if (isMyEvent(data)) return;
       console.log('[sse] reminder received:', data);
       showNotification({ title: data.title, body: data.body, tag: data.noteId });
     } catch (e) {
@@ -71,15 +73,81 @@ export function startReminderSse() {
 
   // note-updated: scheduler 触发提醒后 publish, 让前端刷新单条 note 字段
   // (避免单次提醒发完后 todoRemindSentAt 后端有值前端不知道, 卡片仍显示"未提醒"态)
+  // 也用于"作者本人多设备同步": PATCH 笔记后 server publish 给作者所有设备让其他设备 refreshSingleNote 拉新内容
   es.addEventListener('note-updated', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { noteId: string };
+      if (isMyEvent(data)) return;
       // 动态 import 避免 sse.ts 跟 store 形成静态循环依赖
       import('@/stores/notes').then(({ useNotesStore }) => {
         useNotesStore().refreshSingleNote(data.noteId);
       });
     } catch (e) {
       console.error('[sse] note-updated parse failed:', e);
+    }
+  });
+
+  // note-created: POST /notes 或 trash restore 后 server publish 给作者本人所有设备
+  // → 其他设备 store 拉单条插入对应 viewState (跟 createNote 同款"首位 after pinned"插入)
+  es.addEventListener('note-created', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { noteId: string };
+      if (isMyEvent(data)) return;
+      import('@/stores/notes').then(({ useNotesStore }) => {
+        useNotesStore().syncNoteCreated(data.noteId);
+      });
+    } catch (e) {
+      console.error('[sse] note-created parse failed:', e);
+    }
+  });
+
+  // note-deleted: DELETE /:id (软删) 或 DELETE /trash/:id (彻底删除) 后 server publish 给作者本人所有设备
+  // → 其他设备本地 store 从 viewState 移除该 id (不调 API 避免重复 DELETE)
+  // Trash.vue 用本地 ref 自管 trashedNotes, 单独监听 quink-note-deleted CustomEvent
+  es.addEventListener('note-deleted', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { noteId: string };
+      if (isMyEvent(data)) return;
+      import('@/stores/notes').then(({ useNotesStore }) => {
+        useNotesStore().syncNoteDeleted(data.noteId);
+      });
+      // 派 CustomEvent 给 Trash / NoteDetail 等局部组件监听 (如果当前在 Trash 看回收站列表, 这条要从列表里清掉)
+      window.dispatchEvent(new CustomEvent('quink-note-deleted', { detail: { noteId: data.noteId } }));
+    } catch (e) {
+      console.error('[sse] note-deleted parse failed:', e);
+    }
+  });
+
+  // 通用 data-changed: 给非笔记/群组的其他界面 (categories / ai-configs / ai-prompts / ai-conversations / ai-messages / reminder-channels / resources / user-profile) 用.
+  // 后端在写 endpoint 调 publish(userId, 'data-changed', { scope }, _ocid). 前端按 scope 派对应 CustomEvent 让 view onMounted listener 触发本地 refresh.
+  // 不在 store 里因为这些 view 没有 pinia store, 用 window CustomEvent 让 view 内 onMounted 监听最简洁
+  es.addEventListener('data-changed', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { scope?: string; [k: string]: any };
+      if (isMyEvent(data)) return;
+      if (!data.scope) return;
+      // user-profile 是全局 (头像/昵称影响所有用到 auth.user 的 UI), 不依赖某个 view 监听, 直接调 fetchMe
+      if (data.scope === 'user-profile') {
+        import('@/stores/auth').then(({ useAuthStore }) => useAuthStore().fetchMe?.());
+      }
+      window.dispatchEvent(new CustomEvent(`quink-${data.scope}-changed`, { detail: data }));
+    } catch (e) {
+      console.error('[sse] data-changed parse failed:', e);
+    }
+  });
+
+  // trash-cleared: DELETE /trash 清空回收站后 server publish 给作者本人所有设备
+  // → 标所有主 view dirty 让下次 onActivated 触发刷新. Trash 用 CustomEvent 单独处理
+  es.addEventListener('trash-cleared', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data || '{}') as { count?: number };
+      if (isMyEvent(data)) return;
+      import('@/stores/notes').then(({ useNotesStore }) => {
+        useNotesStore().syncTrashCleared();
+      });
+      window.dispatchEvent(new CustomEvent('quink-trash-cleared'));
+    } catch (e) {
+      console.error('[sse] trash-cleared handler failed:', e);
     }
   });
 
@@ -110,6 +178,7 @@ export function startReminderSse() {
   es.addEventListener('group-join-approved', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
+      if (isMyEvent(data)) return;
       Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
         useGroupsStore().onJoinApproved();
         useToast().show('申请已通过, 加入群组成功', 'success');
@@ -138,6 +207,7 @@ export function startReminderSse() {
   es.addEventListener('group-dissolved', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
+      if (isMyEvent(data)) return;
       Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
         useGroupsStore().onDissolved(data.groupId);
         useToast().show('群组已被解散', 'default');
@@ -154,6 +224,7 @@ export function startReminderSse() {
   es.addEventListener('group-member-removed', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string; by: string; self: boolean };
+      if (isMyEvent(data)) return;
       Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
         useGroupsStore().onMemberRemoved(data.groupId, data.self);
         if (data.self) useToast().show('你已被移出群组', 'error');
@@ -172,6 +243,7 @@ export function startReminderSse() {
   es.addEventListener('group-member-joined', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string; userId: string };
+      if (isMyEvent(data)) return;
       import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onMemberJoined(data.groupId);
       });
@@ -186,6 +258,7 @@ export function startReminderSse() {
   es.addEventListener('group-notes-changed', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
+      if (isMyEvent(data)) return;
       window.dispatchEvent(new CustomEvent('quink-group-notes-changed', { detail: { groupId: data.groupId } }));
       import('@/stores/notes').then(({ useNotesStore }) => {
         useNotesStore().refreshFromRemote();
@@ -233,6 +306,7 @@ export function startReminderSse() {
   es.addEventListener('note-edit-request-resolved', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; status: 'approved' | 'rejected' };
+      if (isMyEvent(data)) return;
       const approved = data.status === 'approved';
       import('@/composables/useToast').then(({ useToast }) => {
         useToast().show(
@@ -256,6 +330,7 @@ export function startReminderSse() {
   es.addEventListener('note-reaction-changed', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; summary: any[] };
+      if (isMyEvent(data)) return;
       window.dispatchEvent(new CustomEvent('quink-note-reaction-changed', { detail: data }));
     } catch (e) { console.error('[sse] note-reaction-changed parse failed:', e); }
   });
@@ -263,6 +338,7 @@ export function startReminderSse() {
   es.addEventListener('note-comment-added', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; comment: any };
+      if (isMyEvent(data)) return;
       window.dispatchEvent(new CustomEvent('quink-note-comment-added', { detail: data }));
     } catch (e) { console.error('[sse] note-comment-added parse failed:', e); }
   });
@@ -270,6 +346,7 @@ export function startReminderSse() {
   es.addEventListener('note-comment-updated', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; commentId: string; content: string; updatedAt: string };
+      if (isMyEvent(data)) return;
       window.dispatchEvent(new CustomEvent('quink-note-comment-updated', { detail: data }));
     } catch (e) { console.error('[sse] note-comment-updated parse failed:', e); }
   });
@@ -277,6 +354,7 @@ export function startReminderSse() {
   es.addEventListener('note-comment-deleted', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; commentId: string };
+      if (isMyEvent(data)) return;
       window.dispatchEvent(new CustomEvent('quink-note-comment-deleted', { detail: data }));
     } catch (e) { console.error('[sse] note-comment-deleted parse failed:', e); }
   });
@@ -286,6 +364,7 @@ export function startReminderSse() {
   es.addEventListener('presence-changed', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { userId: string; online: boolean };
+      if (isMyEvent(data)) return;
       import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onPresenceChanged(data.userId, data.online);
       });
@@ -297,6 +376,7 @@ export function startReminderSse() {
   es.addEventListener('group-changed', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
+      if (isMyEvent(data)) return;
       import('@/stores/groups').then(({ useGroupsStore }) => {
         const store = useGroupsStore();
         // 当前正在看这个群 → 刷新详情 + 待审 (owner/admin 才有 join requests 权限)

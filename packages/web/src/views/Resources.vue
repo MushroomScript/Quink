@@ -13,6 +13,7 @@ import VideoThumbnail from '@/components/VideoThumbnail.vue';
 import { heicThumbUrl } from '@/utils/heicCache';
 import { preconvert as pdfPreconvert } from '@/utils/pdfCache';
 import { useVideoPreview } from '@/composables/useVideoPreview';
+import { useSseSync } from '@/utils/sseSync';
 import { openedAttachments } from '@/utils/openedAttachments';
 
 const { open: openVideoPreview } = useVideoPreview();
@@ -400,6 +401,9 @@ async function load() {
   } catch {}
   loading.value = false;
 }
+
+// 多设备 SSE 同步: 其他设备改了文件 / 文件夹 → 自动 reload
+useSseSync('resources', load);
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';

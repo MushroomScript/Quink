@@ -25,6 +25,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
+  // 每 tab 唯一 clientId, server publish 时附在事件 payload, 前端 SSE handler 跳过自己发的事件 (本设备已直接 mutate UI 不需要 SSE 二次触发)
+  try {
+    const { getClientId } = await import('@/utils/clientId');
+    headers['X-Quink-Client-Id'] = getClientId();
+  } catch { /* 兜底 */ }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout

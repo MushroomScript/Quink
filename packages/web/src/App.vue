@@ -417,7 +417,39 @@ onMounted(async () => {
 
   // 跨多 NoteCard 复制时整理剪贴板: 浏览器默认拼接 textContent 会让"类型 分类 时间 内容 #tag"
   // 全部挤一坨,粘出来乱. 这里检测 selection 是否跨多个卡片,跨多个时自定义 clipboard:
-  // 每张卡片 = [类型 · 分类 · 时间] + 正文 + tags, 中间用 --- 分隔
+  // 每张卡片 = [类型 · 分类 · 时间] + 正文 + tags, 中间用 --- 分隔.
+  // 单卡片 / 详情 (.note-content / .vditor-reset 渲染区): selection.toString() 在跨 <p> 时加 \n\n 但用户视觉只看 1 换行,
+  // 跟单 <p> 内 <br><br> (视觉 1 空行) 文本上分不开 (selStr 都是 "\n\n"). 走 walk DOM 区分:
+  //   - 每个块元素 (P/DIV/LI/H*) 结束加 1 个 \n (不加 2 个浏览器多余)
+  //   - <br> 加 1 个 \n
+  // 结果:
+  //   <p>1</p><p>2</p> → "1\n2" (无空行, 段落间距视觉对应)
+  //   <p>1<br><br>2</p> → "1\n\n2" (1 空行, 双 br 视觉对应)
+  //   <p>1</p><br><p>2</p> → "1\n\n2" (1 空行, 跨段 br 视觉对应)
+  // 编辑器 (Vditor) 内复制: RichEditor.onEditorCopy capture phase + stopPropagation 已拦, 不会触发到这里
+  const walkMarkdownDom = (fragment: DocumentFragment): string => {
+    let text = '';
+    const blockTags = new Set(['P', 'DIV', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE']);
+    const walk = (node: Node) => {
+      if (node.nodeType === 3) {
+        // text node: 去掉首尾 \n (innerHTML 里 </p>\n<p> 的 \n 是 text node, 不该算)
+        text += (node.textContent || '').replace(/^\n+|\n+$/g, '');
+      } else if (node.nodeType === 1) {
+        const el = node as Element;
+        const tag = el.tagName;
+        if (tag === 'BR') {
+          text += '\n';
+        } else if (blockTags.has(tag)) {
+          for (const c of Array.from(el.childNodes)) walk(c);
+          text += '\n';
+        } else {
+          for (const c of Array.from(el.childNodes)) walk(c);
+        }
+      }
+    };
+    for (const c of Array.from(fragment.childNodes)) walk(c);
+    return text.replace(/\n+$/, '');
+  };
   const copyHandler = (e: ClipboardEvent) => {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
@@ -427,24 +459,44 @@ onMounted(async () => {
     for (const card of cards) {
       if (sel.containsNode(card, true)) touched.push(card);
     }
-    if (touched.length < 2) return; // 单卡片 / 不在列表 → 浏览器默认行为
-    const blocks = touched.map(card => {
-      // type 标签自己也带 .text-[11px] class,跟时间区分:type 是 .rounded-full, 时间是 .ml-auto
-      const type = card.querySelector('.flex.items-center.gap-2 > .rounded-full')?.textContent?.trim() || '';
-      const category = card.querySelector('.flex.items-center.gap-2 > .text-xs:not(.rounded-full)')?.textContent?.trim() || '';
-      const time = card.querySelector('.flex.items-center.gap-2 > .ml-auto')?.textContent?.trim() || '';
-      const headerLine = [type, category, time].filter(Boolean).join(' · ');
-      const summary = card.querySelector('p.italic')?.textContent?.trim() || '';
-      const content = card.querySelector('.note-content')?.textContent?.trim() || '';
-      const tags = [...card.querySelectorAll('.flex.flex-wrap > span')].map(s => s.textContent?.trim()).filter(Boolean).join(' ');
-      const parts = [headerLine, summary, content, tags].filter(Boolean);
-      return parts.join('\n');
-    });
+    if (touched.length >= 2) {
+      const blocks = touched.map(card => {
+        // type 标签自己也带 .text-[11px] class,跟时间区分:type 是 .rounded-full, 时间是 .ml-auto
+        const type = card.querySelector('.flex.items-center.gap-2 > .rounded-full')?.textContent?.trim() || '';
+        const category = card.querySelector('.flex.items-center.gap-2 > .text-xs:not(.rounded-full)')?.textContent?.trim() || '';
+        const time = card.querySelector('.flex.items-center.gap-2 > .ml-auto')?.textContent?.trim() || '';
+        const headerLine = [type, category, time].filter(Boolean).join(' · ');
+        const summary = card.querySelector('p.italic')?.textContent?.trim() || '';
+        // 走 walkMarkdownDom 把整个 .note-content 内的 markdown DOM 转干净文本 (跟单卡片同款规则)
+        let content = '';
+        const noteContent = card.querySelector('.note-content');
+        if (noteContent) {
+          const frag = document.createDocumentFragment();
+          for (const c of Array.from(noteContent.childNodes)) frag.appendChild(c.cloneNode(true));
+          content = walkMarkdownDom(frag);
+        }
+        const tags = [...card.querySelectorAll('.flex.flex-wrap > span')].map(s => s.textContent?.trim()).filter(Boolean).join(' ');
+        const parts = [headerLine, summary, content, tags].filter(Boolean);
+        return parts.join('\n');
+      });
+      e.preventDefault();
+      e.clipboardData?.setData('text/plain', blocks.join('\n\n---\n\n'));
+      return;
+    }
+    // 单卡片 / 详情: 在 markdown 渲染区时走 walkMarkdownDom 区分段落 vs <br><br>
+    const anchor = sel.anchorNode;
+    const targetEl = (anchor?.nodeType === 3 ? anchor.parentElement : (anchor as HTMLElement | null));
+    const inMarkdown = targetEl?.closest?.('.note-content, .vditor-reset');
+    if (!inMarkdown) return;
+    const range = sel.getRangeAt(0);
+    const fragment = range.cloneContents();
+    if (!fragment.hasChildNodes()) return;
+    const text = walkMarkdownDom(fragment);
+    if (!text) return;
     e.preventDefault();
-    e.clipboardData?.setData('text/plain', blocks.join('\n\n---\n\n'));
+    e.clipboardData?.setData('text/plain', text);
   };
   document.addEventListener('copy', copyHandler);
-  prevCopyHandler = copyHandler;
 
   // 拦截 Ctrl+A:
   // - 多选模式(store.selectMode=true): 选中所有卡片(加进 selectedIds), 不选文字

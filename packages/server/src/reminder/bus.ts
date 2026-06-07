@@ -33,10 +33,13 @@ export function subscribe(userId: string, write: Subscriber): () => void {
   };
 }
 
-export function publish(userId: string, event: string, data: any): boolean {
+// originClientId: 发起方 tab/窗口的 clientId (前端 X-Quink-Client-Id header, endpoint handler 从 c.req.header 读). 附在 payload, 前端 SSE handler 跳过自己发的事件.
+// 不传 originClientId (如 scheduler / presence 等"非用户触发"事件) → payload 不附字段, 所有设备都正常处理.
+export function publish(userId: string, event: string, data: any, originClientId?: string): boolean {
   const subs = subscribers.get(userId);
   if (!subs || subs.size === 0) return false;
-  const json = JSON.stringify(data);
+  const payload = originClientId !== undefined ? { ...data, _originClientId: originClientId } : data;
+  const json = JSON.stringify(payload);
   let delivered = false;
   for (const write of subs) {
     try {

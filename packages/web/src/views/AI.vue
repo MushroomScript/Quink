@@ -8,6 +8,7 @@ import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import { backendBaseUrl } from '@/utils/backendUrl';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { dragState } from '@/utils/cardDnd';
+import { useSseSync } from '@/utils/sseSync';
 import {
   PhXCircle,
   PhList,
@@ -159,6 +160,10 @@ async function loadConversations() {
     conversations.value = res.data;
   } catch {}
 }
+
+// 多设备 SSE 同步: 其他设备改了对话 / 加了消息 → 自动刷新对话列表 (当前对话的消息变化也按需 reload)
+useSseSync('ai-conversations', loadConversations);
+useSseSync('ai-messages', loadConversations); // 消息变化也触发对话列表 (updatedAt 排序变化)
 
 function newConversation() {
   saveConvState();

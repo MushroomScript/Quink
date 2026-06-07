@@ -3,6 +3,7 @@ import { db, schema } from '../db/index.js';
 import { eq, and, desc, sql, like, or, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { authMiddleware } from '../auth.js';
+import { publish } from '../reminder/bus.js';
 import dayjs from 'dayjs';
 import { getConfigForFeature, callAiWithToolLoop, type ChatMessage } from '../ai/client.js';
 import { DEFAULT_PROMPTS, AI_PERSONAS } from '../ai/prompts.js';
@@ -15,6 +16,7 @@ app.use('*', authMiddleware);
 // GET /conversations — 对话列表
 app.get('/conversations', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const search = c.req.query('search')?.trim();
 
   if (search) {
@@ -48,40 +50,47 @@ app.get('/conversations', async (c) => {
 // POST /conversations — 新建对话
 app.post('/conversations', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const id = nanoid(12);
   const now = dayjs().toISOString();
   const conv = { id, userId, title: '新对话', createdAt: now, updatedAt: now };
   await db.insert(schema.aiConversations).values(conv);
+  publish(userId, 'data-changed', { scope: 'ai-conversations' }, _ocid);
   return c.json({ data: conv }, 201);
 });
 
 // PATCH /conversations/:id — 更新标题
 app.patch('/conversations/:id', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const { title } = await c.req.json();
   const conv = await db.select().from(schema.aiConversations)
     .where(and(eq(schema.aiConversations.id, id), eq(schema.aiConversations.userId, userId))).get();
   if (!conv) return c.json({ error: '对话不存在' }, 404);
   await db.update(schema.aiConversations).set({ title }).where(eq(schema.aiConversations.id, id));
+  publish(userId, 'data-changed', { scope: 'ai-conversations' }, _ocid);
   return c.json({ data: { id, title } });
 });
 
 // DELETE /conversations/:id — 删除对话（级联删消息）
 app.delete('/conversations/:id', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const conv = await db.select().from(schema.aiConversations)
     .where(and(eq(schema.aiConversations.id, id), eq(schema.aiConversations.userId, userId))).get();
   if (!conv) return c.json({ error: '对话不存在' }, 404);
   await db.delete(schema.aiMessages).where(eq(schema.aiMessages.conversationId, id));
   await db.delete(schema.aiConversations).where(eq(schema.aiConversations.id, id));
+  publish(userId, 'data-changed', { scope: 'ai-conversations' }, _ocid);
   return c.json({ message: '已删除' });
 });
 
 // GET /conversations/:id/messages — 获取消息
 app.get('/conversations/:id/messages', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const conv = await db.select().from(schema.aiConversations)
     .where(and(eq(schema.aiConversations.id, id), eq(schema.aiConversations.userId, userId))).get();
@@ -97,6 +106,7 @@ app.get('/conversations/:id/messages', async (c) => {
 // DELETE /conversations/:id/messages/:msgId — 删除该消息及之后的所有消息（编辑重发用）
 app.delete('/conversations/:id/messages/:msgId', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id, msgId } = c.req.param();
   const conv = await db.select().from(schema.aiConversations)
     .where(and(eq(schema.aiConversations.id, id), eq(schema.aiConversations.userId, userId))).get();
@@ -107,12 +117,14 @@ app.delete('/conversations/:id/messages/:msgId', async (c) => {
   await db.delete(schema.aiMessages).where(
     and(eq(schema.aiMessages.conversationId, id), sql`${schema.aiMessages.createdAt} >= ${msg.createdAt}`)
   );
+  publish(userId, 'data-changed', { scope: 'ai-messages' }, _ocid);
   return c.json({ message: '已删除' });
 });
 
 // POST /conversations/:id/messages — 发送消息 + Function Calling + SSE 流式回复
 app.post('/conversations/:id/messages', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const { question } = await c.req.json();
   if (!question?.trim()) return c.json({ error: '请输入问题' }, 400);
@@ -131,6 +143,8 @@ app.post('/conversations/:id/messages', async (c) => {
     id: userMsgId, conversationId: id, role: 'user', content: question, sources: [], createdAt: now,
   });
   await db.update(schema.aiConversations).set({ updatedAt: now }).where(eq(schema.aiConversations.id, id));
+  // 多设备同步: 发起方设备已经显示 user message + 即将拿流式 assistant. 其他设备靠 SSE 通知后 fetch 拿 user message (assistant message 流式期间拿不到, 等 endpoint 结束后会再 publish 一次)
+  publish(userId, 'data-changed', { scope: 'ai-messages', convId: id }, _ocid);
 
   // 获取用户设置
   const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();

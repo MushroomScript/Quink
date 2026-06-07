@@ -201,7 +201,9 @@ async function onContentClick(e: MouseEvent) {
   input.checked = !input.checked;
   note.value.content = newContent;
   try {
-    await store.updateNote(note.value.id, { content: newContent });
+    // version: 兜底 URL 直接打开 (note 不在 store viewState) 场景, store 自动注入路径走不到. res.version 回写避免连续 toggle 用旧 version
+    const res = await store.updateNote(note.value.id, { content: newContent, version: note.value.version });
+    if (res?.version != null && note.value) note.value.version = res.version;
   } catch (err) {
     if (note.value) note.value.content = oldContent;
     input.checked = !input.checked;
@@ -247,7 +249,11 @@ function toggleMenu() {
 
 async function moveTo(type: 'quink' | 'note' | 'todo') {
   if (!note.value) return;
-  await store.updateNote(note.value.id, { type } as any);
+  const res = await store.updateNote(note.value.id, { type, version: note.value.version } as any);
+  if (res && note.value) {
+    note.value.type = res.type ?? type;
+    if (res.version != null) note.value.version = res.version;
+  }
   showMenu.value = false;
 }
 
@@ -272,10 +278,16 @@ function openReminderPicker() {
 async function saveReminder(payload: { remindAt: string | null; rrule: string | null }) {
   if (!note.value) return;
   try {
-    await store.updateNote(note.value.id, {
+    const res = await store.updateNote(note.value.id, {
       todoDue: payload.remindAt,
       todoRemindRrule: payload.rrule,
+      version: note.value.version,
     } as any);
+    if (res && note.value) {
+      note.value.todoDue = res.todoDue ?? payload.remindAt;
+      note.value.todoRemindRrule = res.todoRemindRrule ?? payload.rrule;
+      if (res.version != null) note.value.version = res.version;
+    }
     toast.show(payload.remindAt ? '已设置提醒' : '已清除提醒', 'success');
   } catch (e) {
     console.error('[NoteDetail] saveReminder failed:', e);

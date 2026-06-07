@@ -5,6 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
+import { publish } from '../reminder/bus.js';
 import { dispatchToSingleChannel } from '../reminder/sender.js';
 
 const app = new Hono();
@@ -27,6 +28,7 @@ const updateSchema = z.object({
 
 app.get('/', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const rows = await db.select().from(schema.reminderChannels)
     .where(eq(schema.reminderChannels.userId, userId))
     .orderBy(schema.reminderChannels.createdAt)
@@ -36,6 +38,7 @@ app.get('/', async (c) => {
 
 app.post('/', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const parsed = createSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
 
@@ -56,11 +59,13 @@ app.post('/', async (c) => {
     createdAt: dayjs().toISOString(),
   };
   await db.insert(schema.reminderChannels).values(row);
+  publish(userId, 'data-changed', { scope: 'reminder-channels' }, _ocid);
   return c.json({ data: row }, 201);
 });
 
 app.patch('/:id', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const id = c.req.param('id');
   const parsed = updateSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
@@ -76,20 +81,24 @@ app.patch('/:id', async (c) => {
 
   await db.update(schema.reminderChannels).set(updates).where(eq(schema.reminderChannels.id, id));
   const updated = await db.select().from(schema.reminderChannels).where(eq(schema.reminderChannels.id, id)).get();
+  publish(userId, 'data-changed', { scope: 'reminder-channels' }, _ocid);
   return c.json({ data: updated });
 });
 
 app.delete('/:id', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const id = c.req.param('id');
   await db.delete(schema.reminderChannels)
     .where(and(eq(schema.reminderChannels.id, id), eq(schema.reminderChannels.userId, userId)));
+  publish(userId, 'data-changed', { scope: 'reminder-channels' }, _ocid);
   return c.json({ message: '已删除' });
 });
 
 // 立即发测试消息: Settings 页"测试"按钮调用. 失败返回 400 + 错误描述, 让用户能直接看到 config 问题
 app.post('/:id/test', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const id = c.req.param('id');
   const ch = await db.select().from(schema.reminderChannels)
     .where(and(eq(schema.reminderChannels.id, id), eq(schema.reminderChannels.userId, userId))).get();

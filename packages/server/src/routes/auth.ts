@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { hashPassword, verifyPassword, signToken, authMiddleware } from '../auth.js';
+import { publish } from '../reminder/bus.js';
 import { cleanTrashForUser } from '../cleanup.js';
 import { DEFAULT_CATEGORIES } from '../ai/prompts.js';
 
@@ -102,6 +103,7 @@ app.post('/login', async (c) => {
 // GET /api/auth/me — 获取当前用户信息（需登录）
 app.get('/me', authMiddleware, async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
 
   if (!user) {
@@ -116,6 +118,7 @@ app.get('/me', authMiddleware, async (c) => {
 // PATCH /api/auth/me — 更新个人信息（需登录）
 app.patch('/me', authMiddleware, async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const body = await c.req.json();
   const parsed = updateProfileSchema.safeParse(body);
   if (!parsed.success) {
@@ -147,6 +150,7 @@ app.patch('/me', authMiddleware, async (c) => {
 // POST /api/auth/password — 修改密码
 app.post('/password', authMiddleware, async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { oldPassword, newPassword } = await c.req.json();
 
   if (!oldPassword || !newPassword) return c.json({ error: '请输入旧密码和新密码' }, 400);
@@ -158,6 +162,7 @@ app.post('/password', authMiddleware, async (c) => {
   }
 
   await db.update(schema.users).set({ passwordHash: hashPassword(newPassword) }).where(eq(schema.users.id, userId));
+  publish(userId, 'data-changed', { scope: 'user-profile' }, _ocid);
   return c.json({ message: '密码已修改' });
 });
 

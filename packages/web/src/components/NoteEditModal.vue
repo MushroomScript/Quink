@@ -41,6 +41,17 @@ const showInner = ref(false);
 
 async function acquireLock(): Promise<boolean> {
   if (!isSharedNote.value) return true;
+  // PR #5b (蘑菇 2026-06-07 修订): 唯一免锁场景 = 作者主视图改 root 多群. 其它都申锁:
+  //   - 非作者: 协作场景必锁
+  //   - 作者改 fork: fork 是群协作版本
+  //   - 作者改 root 单群: 单群 root 等价 fork
+  //   - 作者改 root 多群 + 群组页: 后端会 fork, 跟非作者改 root 同款流程
+  if (isMyNote.value) {
+    const isFork = !!props.note.parentNoteId;
+    const shareCount = props.note.sharedGroupIds?.length ?? 0;
+    const isMainView = !editGroupId.value;
+    if (!isFork && shareCount > 1 && isMainView) return true;
+  }
   const tok = localStorage.getItem('quink_token');
   try {
     const res = await fetch(`/api/notes/${props.note.id}/lock`, {
@@ -154,11 +165,14 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
       patchData.visibility = data.visibility;
       patchData.sharedGroupIds = data.sharedGroupIds;
     }
-    // PR #5: shared 笔记必须带 lockToken + version (server 校验 + 自增清锁)
+    // PR #5: shared 笔记免锁路径外都必须带 lockToken (server 校验 + 自增清锁). 作者主视图改 root 多群免锁不带 lockToken
     if (isSharedNote.value && lockToken.value) {
       patchData.lockToken = lockToken.value;
-      patchData.version = props.note.version || 1;
     }
+    // 所有笔记内容改动都带 version (private + shared 都做乐观锁防多设备旧覆盖新):
+    //   - 持锁分支 (非作者 / 作者改 fork / 作者改 root 单群 / 作者群组页改 root 多群): 必须传, 后端校验后 ++ 清锁
+    //   - 免锁分支 (作者改 private / 作者改 root 主视图多群): 改内容字段时校验, 不改内容时后端跳过 version 校验
+    patchData.version = props.note.version || 1;
     // PR #7b: 透传群上下文给后端 fork 决策. editGroupId 为空 (主视图改) 时不传, 后端走"作者改 root 多群同步"语义.
     if (editGroupId.value) {
       patchData.editContext = { groupId: editGroupId.value };
@@ -184,6 +198,9 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
     } else if (msg.includes('note_not_in_group')) {
       // PR #7b: 笔记跟当前群上下文不匹配 (并发 case: 进入编辑时还在群里, 提交时该笔记已从群里撤下)
       toast.show('该笔记已不在当前群组，请关闭后重新打开', 'error', 4000);
+    } else if (msg.includes('笔记不存在')) {
+      // 笔记可能已被别的设备/用户 fork 走变孤儿或软删, 当前端 cache 里仍持有旧 id
+      toast.show('笔记已不存在 (可能被其他人改动后归档), 请关闭后刷新页面', 'error', 4000);
     } else {
       toast.show('保存失败：' + (msg || '未知错误'), 'error', 3000);
     }

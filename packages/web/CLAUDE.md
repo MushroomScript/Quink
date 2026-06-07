@@ -235,3 +235,36 @@ Vditor IR 模式编辑器内部直接读 markdown href 给 `<img src>` / `<a hre
 | `setValue(aiResult)` | 拼前缀（AI 输出可能含文件链接） |
 | Vditor `succMap` | `resolveFileUrl(res.data.url)` 给 Vditor absolute url |
 | `insertValue` 两处（文件链接 / 语音备忘） | `resolveFileUrl(res.data.url)` 拼前缀 |
+
+## 多设备 SSE 同步 (`utils/sseSync.ts`)
+
+后端写 endpoint publish `data-changed` SSE 给作者本人所有设备 → 前端 `sse.ts` 派 `quink-{scope}-changed` CustomEvent → view 用 `useSseSync(scope, refresh)` composable 监听自动刷新. 详细约定见 `packages/server/CLAUDE.md` "多设备 SSE 同步约定".
+
+- **`utils/clientId.ts`**: `getClientId()` 用 sessionStorage 给每 tab/窗口分配唯一 ID. `isMyEvent(data)` 检查事件 `_originClientId` 是否等于本机 ID, 是则跳过 (本设备已直接 mutate UI 不需要 SSE 二次触发). `api/index.ts` request 函数自动加 `X-Quink-Client-Id` header
+- **`utils/sseSync.ts`**: `useSseSync(scope, refresh)` 在 view setup 内调用, onMounted 注册 window listener, onUnmounted 清理. 多 scope 共享同一 refresh: `useSseSync(['ai-configs', 'ai-prompts'], loadAiData)`
+- **现有接入点**:
+  - `Sidebar.vue`: `useSseSync('categories', loadCategories)`
+  - `Settings.vue`: `useSseSync('reminder-channels', loadReminderChannels)` + `useSseSync(['ai-configs', 'ai-prompts'], loadAiData)` + `useSseSync('user-profile', () => auth.fetchMe?.())`
+  - `AI.vue`: `useSseSync(['ai-conversations', 'ai-messages'], loadConversations)`
+  - `Resources.vue`: `useSseSync('resources', load)`
+  - `Trash.vue` 用 window CustomEvent (`quink-note-deleted` / `quink-trash-cleared`) 直接监听, 不走 useSseSync (本地 ref 不在 store)
+- **`user-profile` scope 是全局**: `sse.ts` handler 检测到时直接 `useAuthStore().fetchMe()`, 不依赖 view 监听
+- **新 scope 接入**: 后端写 endpoint 加 `publish(userId, 'data-changed', { scope: 'xxx' }, _ocid)` + 前端 view setup 加 `useSseSync('xxx', loadXxx)` 即可
+
+## Markdown 渲染区复制 (walk DOM 算法)
+
+`<p>1</p><p>2</p>` (段落分隔) 跟 `<p>1<br><br>2</p>` (双 br) `selection.toString()` 文本都是 `"1\n\n2"` 区分不开. 但视觉差异大: 段落分隔 = 段落间距 (≈ 1 换行视觉), 双 br = 2 行换行 (1 空行视觉). 必须 walk DOM 区分:
+
+- **算法** (`App.vue` 的 `walkMarkdownDom` + `RichEditor.vue` 的 `onEditorCopy`):
+  - 块元素 (P / DIV / LI / H1-6 / BLOCKQUOTE) 结束加 1 个 `\n`
+  - `<br>` 加 1 个 `\n`
+  - text node 内首尾 `\n` 过滤掉 (innerHTML 里 `</p>\n<p>` 的 `\n` 是 text node 噪音)
+  - 末尾 trim 多余 `\n`
+- **结果对齐视觉**:
+  - `<p>1</p><p>2</p>` → `"1\n2"` (段落间距, 无空行)
+  - `<p>1<br><br>2</p>` → `"1\n\n2"` (双 br, 1 空行)
+  - `<p>1</p><br><p>2</p>` → `"1\n\n2"` (段落+br+段落, 1 空行)
+  - 编辑器内 Vditor IR 模式: 1 Enter = `<p>1</p><p>2</p>` → `"1\n2"`, 2 Enter = `<p>1</p><p></p><p>2</p>` (中间空 P) → `"1\n\n2"`, N Enter → N-1 个 `\n`
+- **接入点** (`App.vue copyHandler`): 检测 `selection.anchorNode.closest('.note-content, .vditor-reset')` 在 markdown 渲染区 → 用 `range.cloneContents()` 提取 + `walkMarkdownDom(fragment)` 算文本 + `e.preventDefault() + setData('text/plain', text)`
+- **编辑器内**: `RichEditor.vue` 的 `onEditorCopy` 在 `after` callback 注册到 `editorRef.value` (capture phase), 用 `e.stopPropagation() + stopImmediatePropagation()` 防 Vditor 自己 copy handler 覆盖, 末尾 `setTimeout(() => navigator.clipboard.writeText(text))` 异步兜底防 Vditor `navigator.clipboard.writeText` 异步覆盖
+- **跨多卡片复制**: `App.vue copyHandler` `touched.length >= 2` 分支, 每张卡片 content 走 `walkMarkdownDom` 算后用 `\n` 接 type/category/time/summary/tags, 块间用 `\n\n---\n\n` 分隔

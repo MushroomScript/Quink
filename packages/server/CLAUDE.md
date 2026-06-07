@@ -100,7 +100,36 @@ PR #5 默认所有群 active member 都能改共享笔记, PR #5b 把默认收�
   - `NoteEditModal` 锁失败 toast 区分 409 locked / 403 no_write_permission, 后者 toast action 按钮一键申请
   - `GlobalToast` button 在 error kind 用白字 (避免原 toast-undo-btn 的红字 #FF3B3B 撞红底 bg-red-500)
 - **store.updateNote 不同步组件本地 ref**: `groupNotes` (GroupDetail) / `note.value` (NoteDetail) 是组件本地 ref, store 内 vs.notes 同步不到. NoteCard / NoteDetail 切 editPermission 后必须**直接 mutate** `props.note.editPermission` 或 `note.value.editPermission` 让 reactive UI 立刻反映. 否则按钮点击后 toast 提示成功但颜色不切 (经典 bug)
-- **作者改自己共享笔记免锁** (PR #5 微调): `PATCH /:id` 内 `if (existing.visibility === 'shared' && !isAuthor)` 才走 lock + version 强制. 锁本意防"群成员协作时撞改", 作者多设备靠 version 乐观锁兜底. 让作者改 editPermission / visibility / sharedGroupIds 等"管理操作"不卡 lock 流程
+- **编辑锁/version 规则** (蘑菇 2026-06-07 修订): 唯一免锁场景 = 作者主视图改 root 多群内容. 其它都要锁:
+  - 非作者改任何 shared 笔记 → 锁
+  - 作者改 fork (`parentNoteId !== null`) → 锁 (fork 是群协作版本)
+  - 作者改 root 单群 → 锁 (单群 root 等价 fork, 该群所有人会撞改)
+  - 作者改 root 多群 + 群组页 (有 editContext.groupId) → 锁 (会触发 fork)
+  - 作者主视图改 root 多群 → **免锁** (多群同步语义, 多设备靠 version 乐观锁兜底)
+  - 后端 `needLock` 判断: `!isAuthor || parentNoteId !== null || currentShareGroupIds.length <= 1 || !!ctxGroupId`
+  - version 校验扩到 private 笔记: 免锁分支也走 `if (isContentChange) { check version; version++; }` (跨设备防覆盖)
+  - 前端 `NoteEditModal.acquireLock` 用同款条件跳过申锁 (作者主视图改 root 多群直接 return true)
+  - **fork 决策修订** (蘑菇 2026-06-07): 非作者改 fork 不再二次 fork → in-place 改 fork. 之前 `if (!isAuthor) shouldFork=true` 太宽, fork 已经是该群专属版本二次 fork 会把原 fork 变孤儿 (visibility=private + deletedAt). 改成 `if (!isAuthor && existing.parentNoteId === null) shouldFork=true` 只在改 root 时 fork
+  - **fork 路径清原 root 锁条件**: `if (existing.editLockBy === userId)` 而非 `if (!isAuthor)`. 覆盖 2 个 fork 来源: 非作者改 root + 作者群组页改 root 多群 (蘑菇修订后作者也持锁)
 - **`GET /api/groups/:id/notes` 必须返回 sharedGroupIds + editPermission**: 群内 NoteCard 显示"已分享" chip + "管理员可编辑 ⟳" 胶囊都依赖这两个字段. 原始 SQL 手动 camelCase 映射时不要漏 (bug 实测: 漏了字段后整张胶囊视觉消失)
 - **群级汇总 API** (`routes/groups.ts`): `GET /:id/note-edit-requests` 拉该群所有 shared 笔记 pending 申请 (含 noteId + 申请人 + 笔记 preview + 作者 nickname); `GET /:id/note-edit-grants` 拉所有已授权用户. 给群组详情页"编辑申请管理"面板用 (不分页, 假设每群 pending 量不大)
 - **Electron 通知 click Win32 SetForegroundWindow lock 防御** (`packages/desktop/src/main.ts`): notification click 不仅 `mainWindow.focus()`, 还要 `setAlwaysOnTop(true)` 临时拉前 + 100ms 后 `setAlwaysOnTop(false)`. 单纯 focus() 在 Win11 上经常被 SetForegroundWindow lock 静默拒绝 (任务栏闪一下但窗口不上前). 跟主窗口持久窗口 hide→show 的 window-shown IPC 模式同根因, 但通知是外部应用唤醒, 不走 IPC, 直接 setAlwaysOnTop 救场更稳
+
+## 多设备 SSE 同步约定 (蘑菇 2026-06-07)
+
+同账号多设备 = N 个 SSE 连接, `publish(userId, ...)` 给该 userId 所有连接广播. 任何"会让其他设备界面更新"的写 endpoint 必须 publish.
+
+- **publish 函数签名** (`reminder/bus.ts`): `publish(userId, event, data, originClientId?)`. `originClientId` 附在 payload 的 `_originClientId` 字段, 前端用它跳过自己发的事件 (本设备已直接 mutate UI 不需要 SSE 二次触发)
+- **endpoint handler 顶部加** `const _ocid = c.req.header('X-Quink-Client-Id');`, 所有 publish / broadcast 调用追加 `, _ocid` 参数. 前端 `api/index.ts` request 函数自动加 `X-Quink-Client-Id` header (clientId 用 sessionStorage 每 tab 唯一)
+- **broadcastNoteShared / broadcastNoteSocial / broadcastGroupChanged 都有 originClientId 参数**, 调用时透传 `_ocid`. 这 3 个 broadcast 排除发起人 userId (避免本设备重复处理), 同账号其他设备一起被排除 → 需要单独 `publish(userId, ...)` 给作者本人补一份, 让其他设备收到
+- **SSE 事件名约定**:
+  - 笔记类: `note-created` / `note-updated` / `note-deleted` / `trash-cleared` / `note-reaction-changed` / `note-comment-added` / `note-comment-updated` / `note-comment-deleted` (前端 `sse.ts` 内 handler 已映射到 store 同步)
+  - 群组类: `group-changed` / `group-notes-changed` / `group-dissolved` / `group-member-*` / `group-join-*` (已有, 现增加给发起人本人 publish 一份)
+  - 通用类: `data-changed` with `{ scope }` payload. scope 取值: `categories` / `ai-configs` / `ai-prompts` / `ai-conversations` / `ai-messages` / `reminder-channels` / `resources` / `user-profile`. 前端 `sse.ts` 派 `quink-{scope}-changed` CustomEvent, view 用 `useSseSync(scope, refresh)` composable 监听
+- **新加写 endpoint 必做清单**:
+  1. handler 顶部 `const _ocid = c.req.header('X-Quink-Client-Id');`
+  2. 成功路径加 `publish(userId, 'data-changed', { scope: 'xxx' }, _ocid);` (或专用事件名)
+  3. 如果改 shared 笔记跟其他成员相关, 同时 `broadcastNoteShared(groupIds, userId, _ocid)`
+  4. 前端在对应 view setup 内加 `useSseSync('xxx', loadXxx)` 让其他设备自动刷新
+- **fork 路径专门 publish**: 非作者改 root 触发 fork 后, `publish(userId, 'note-updated', { noteId: newNoteId }, _ocid)` 给发起人本人 (fork id 不是原 root id, 其他设备需要拉新 fork)
+- **`user-profile` scope 是全局**: sse.ts handler 检测到 `scope === 'user-profile'` 直接调 `useAuthStore().fetchMe()`, 不依赖某个 view 监听 (头像/昵称变化影响所有用到 `auth.user` 的 UI)

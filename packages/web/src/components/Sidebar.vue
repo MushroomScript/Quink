@@ -10,6 +10,7 @@ import { useToast } from '@/composables/useToast';
 import { dragState } from '@/utils/cardDnd';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import { tasks as transferTasks, dockVisible as transferDockVisible } from '@/composables/useAttachmentTasks';
+import { useSseSync } from '@/utils/sseSync';
 import {
   PhLightbulb,
   PhNotePencil,
@@ -73,6 +74,8 @@ async function loadCategories() {
 loadStats();
 loadCategories();
 if (isLoggedIn()) groupsStore.loadGroups().catch(() => {});
+// 多设备 SSE 同步: 其他设备改了分类 → sidebar 自动 reload categories
+useSseSync('categories', loadCategories);
 // loadStats 是数据库聚合查询. store.notes 变化时同步刷新, 但 debounce 500ms 避免高频触发:
 // loadMore push 多次 / pollNoteAiResult 字段 mutate / 切 view 时 computed 返回新数组引用 等场景
 // 都会触发 watch, 没 debounce 一次操作就会产生 5+ 个 API 请求.

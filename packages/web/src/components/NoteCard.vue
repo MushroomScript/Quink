@@ -235,10 +235,11 @@ function onPointerDown(e: PointerEvent) {
   // 多选 + 当前在选中集 + 选中 ≥ 2 → 整批; 否则单条
   const useBatch = store.selectMode && store.selectedIds.has(props.note.id) && store.selectedIds.size > 1;
   const ids = useBatch ? Array.from(store.selectedIds) : [props.note.id];
-  // ghost 文字: 多条显数量, 单条显内容前 30 字 (没内容用 type label 兜底)
+  // ghost 文字: 多条显数量, 单条显内容前 120 字 (没内容用 type label 兜底).
+  // 去掉 markdown 标点字符 (#/*/`/...) 但保留换行 (\n 不在 char class 内), DragGhost CSS 用 whitespace-pre-line + line-clamp 多行显示
   const text = useBatch
     ? `${ids.length} 条内容`
-    : (props.note.content?.replace(/[#*`>~\-!\[\]]/g, '').trim().slice(0, 30) || typeLabels[props.note.type] || '内容');
+    : (props.note.content?.replace(/[#*`>~\-!\[\]]/g, '').trim().slice(0, 120) || typeLabels[props.note.type] || '内容');
   startCardDrag(e, {
     ids,
     type: ids.length === 1 ? props.note.type : null,

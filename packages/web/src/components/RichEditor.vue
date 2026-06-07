@@ -164,6 +164,48 @@ function isExternalFileDrag(e: DragEvent): boolean {
   return Array.from(e.dataTransfer?.types || []).includes('Files');
 }
 
+// Vditor IR 编辑器内 copy 拦截: selection.toString() 在跨 <p><p> 时浏览器自动插 \n\n, 不区分用户输入 1 Enter (两 P) 还是 2 Enter (中间空 P).
+// Vditor IR 渲染: 1 Enter → <p>1</p><p>2</p>; 2 Enter → <p>1</p><p></p><p>2</p>; 3 Enter → <p>1</p><p></p><p></p><p>2</p> (空 P 数 = Enter 数 - 1).
+// 算法: 每个 block (P/DIV/...) 结束加 \n (含空 block) → N 个 P 自然形成 N-1 个 \n 分隔 (空 P 贡献额外 \n), 最后 trim 末尾.
+// → 1 Enter 复制为 1\n2 (单换行), 2 Enter 复制为 1\n\n2 (双换行), N Enter 复制为 (N-1) 个 \n. 符合用户视觉.
+function onEditorCopy(e: ClipboardEvent) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  const fragment = range.cloneContents();
+  if (!fragment.hasChildNodes()) return;
+  let text = '';
+  const blockTags = new Set(['P', 'DIV', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE']);
+  const walk = (node: Node) => {
+    if (node.nodeType === 3) {
+      text += node.textContent || '';
+    } else if (node.nodeType === 1) {
+      const el = node as Element;
+      const tag = el.tagName;
+      if (tag === 'BR') {
+        text += '\n';
+      } else if (blockTags.has(tag)) {
+        // 不管空非空, walk child 完后加 \n. N 个 block 自然产生 N-1 个分隔 (trim 末尾掉一个)
+        for (const c of Array.from(el.childNodes)) walk(c);
+        text += '\n';
+      } else {
+        for (const c of Array.from(el.childNodes)) walk(c);
+      }
+    }
+  };
+  for (const c of Array.from(fragment.childNodes)) walk(c);
+  text = text.replace(/\n$/, ''); // trim 末尾单个 \n (最后一个 block 多加的). 中间多 \n 不动 (保留用户多 Enter 留的空行)
+  if (!text) return; // 提取不到内容 → fall through 浏览器默认
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  e.clipboardData?.setData('text/plain', text);
+  // Vditor 可能用 navigator.clipboard.writeText() 异步覆盖 ClipboardEvent. 我们也异步 write 抢覆盖 (用户真实 Ctrl+C 有 user gesture 能调用)
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    setTimeout(() => { navigator.clipboard.writeText(text).catch(() => {}); }, 0);
+  }
+}
+
 function onEditorDragEnter(e: DragEvent) {
   if (!isExternalFileDrag(e)) return;
   e.preventDefault();
@@ -366,6 +408,9 @@ onMounted(() => {
       editorRef.value?.addEventListener('dragover', onEditorDragOver, true);
       editorRef.value?.addEventListener('dragleave', onEditorDragLeave, true);
       editorRef.value?.addEventListener('drop', onEditorDrop, true);
+      // capture 阶段拦截 Vditor 内 copy: 用户期望"按一次 Enter = 一个 \n", 但 markdown 段落分隔渲染成 <p></p> 浏览器复制时变 \n\n.
+      // selection.toString() 在 contenteditable PRE 内常返空, 走 range.cloneContents() 自己 walk DOM 算干净文本 (P/DIV → \n, BR → \n)
+      editorRef.value?.addEventListener('copy', onEditorCopy, true);
     },
     input: () => {
       dirty.value = true;

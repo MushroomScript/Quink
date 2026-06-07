@@ -258,8 +258,31 @@ const typeColor: Record<string, string> = {
 };
 
 function onRefresh() { load(); }
-onMounted(() => { load(); window.addEventListener('quink-refresh', onRefresh); });
-onUnmounted(() => { window.removeEventListener('quink-refresh', onRefresh); });
+// 多设备同步: SSE 收到 note-deleted (软删/彻底删) 或 trash-cleared 时同步本地, 不调 API
+function onNoteDeletedExternal(e: Event) {
+  const id = (e as CustomEvent).detail?.noteId;
+  if (!id) return;
+  const idx = notes.value.findIndex(n => n.id === id);
+  if (idx >= 0) {
+    // 当前列表里有这条 → 永久删除场景, 直接移除
+    notes.value.splice(idx, 1);
+  } else {
+    // 列表里没有 → 可能是软删 (其他设备 trash 应该多一条), 重拉一次
+    void load();
+  }
+}
+function onTrashClearedExternal() { notes.value = []; }
+onMounted(() => {
+  load();
+  window.addEventListener('quink-refresh', onRefresh);
+  window.addEventListener('quink-note-deleted', onNoteDeletedExternal);
+  window.addEventListener('quink-trash-cleared', onTrashClearedExternal);
+});
+onUnmounted(() => {
+  window.removeEventListener('quink-refresh', onRefresh);
+  window.removeEventListener('quink-note-deleted', onNoteDeletedExternal);
+  window.removeEventListener('quink-trash-cleared', onTrashClearedExternal);
+});
 
 // 数据变更前主动 snapshot 所有卡片位置，避免 onLeave 钩子里拿到的是 v-if 切换后的错位坐标
 watch(() => notes.value.length, () => snapshotCards(), { flush: 'sync' });

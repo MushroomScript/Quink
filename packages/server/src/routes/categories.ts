@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db, schema } from '../db/index.js';
 import { eq, and, sql } from 'drizzle-orm';
 import { authMiddleware } from '../auth.js';
+import { publish } from '../reminder/bus.js';
 
 const app = new Hono();
 
@@ -32,6 +33,7 @@ app.get('/', async (c) => {
 
 app.post('/', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const body = await c.req.json();
   const parsed = createCategorySchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
@@ -43,23 +45,26 @@ app.post('/', async (c) => {
     icon: parsed.data.icon ?? null,
     sortOrder: parsed.data.sortOrder,
   }).returning();
-
+  publish(userId, 'data-changed', { scope: 'categories' }, _ocid);
   return c.json({ data: result[0] }, 201);
 });
 
 app.patch('/:id', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const id = parseInt(c.req.param('id'));
   const { name } = await c.req.json();
   if (!name?.trim()) return c.json({ error: '名称不能为空' }, 400);
   const cat = await db.select().from(schema.categories).where(and(eq(schema.categories.id, id), eq(schema.categories.userId, userId))).get();
   if (!cat) return c.json({ error: '分类不存在' }, 404);
   await db.update(schema.categories).set({ name: name.trim() }).where(eq(schema.categories.id, id));
+  publish(userId, 'data-changed', { scope: 'categories' }, _ocid);
   return c.json({ data: { ...cat, name: name.trim() } });
 });
 
 app.delete('/:id', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const id = parseInt(c.req.param('id'));
   const cat = await db.select().from(schema.categories).where(and(eq(schema.categories.id, id), eq(schema.categories.userId, userId))).get();
   if (!cat) return c.json({ error: '分类不存在' }, 404);
@@ -67,6 +72,7 @@ app.delete('/:id', async (c) => {
   await db.update(schema.notes).set({ category: null })
     .where(and(eq(schema.notes.userId, userId), eq(schema.notes.category, cat.name)));
   await db.delete(schema.categories).where(eq(schema.categories.id, id));
+  publish(userId, 'data-changed', { scope: 'categories' }, _ocid);
   return c.json({ message: '已删除' });
 });
 

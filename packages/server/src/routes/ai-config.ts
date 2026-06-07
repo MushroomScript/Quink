@@ -4,6 +4,7 @@ import { db, schema } from '../db/index.js';
 import { eq, and, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { authMiddleware } from '../auth.js';
+import { publish } from '../reminder/bus.js';
 import crypto from 'crypto';
 import dayjs from 'dayjs';
 import { DEFAULT_PROMPTS, AI_FEATURES, AI_FEATURE_LABELS } from '../ai/prompts.js';
@@ -26,6 +27,7 @@ const configSchema = z.object({
 // List configs
 app.get('/configs', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const configs = await db.select().from(schema.aiConfigs)
     .where(eq(schema.aiConfigs.userId, userId)).all();
   return c.json({ data: configs });
@@ -34,6 +36,7 @@ app.get('/configs', async (c) => {
 // Create config
 app.post('/configs', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const body = await c.req.json();
   const parsed = configSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
@@ -64,12 +67,14 @@ app.post('/configs', async (c) => {
   };
 
   await db.insert(schema.aiConfigs).values(config);
+  publish(userId, 'data-changed', { scope: 'ai-configs' }, _ocid);
   return c.json({ data: config }, 201);
 });
 
 // Update config
 app.patch('/configs/:id', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const body = await c.req.json();
   const parsed = configSchema.partial().safeParse(body);
@@ -94,18 +99,21 @@ app.patch('/configs/:id', async (c) => {
   await db.update(schema.aiConfigs).set(updates).where(eq(schema.aiConfigs.id, id));
 
   const updated = await db.select().from(schema.aiConfigs).where(eq(schema.aiConfigs.id, id)).get();
+  publish(userId, 'data-changed', { scope: 'ai-configs' }, _ocid);
   return c.json({ data: updated });
 });
 
 // Delete config
 app.delete('/configs/:id', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const existing = await db.select().from(schema.aiConfigs)
     .where(and(eq(schema.aiConfigs.id, id), eq(schema.aiConfigs.userId, userId))).get();
   if (!existing) return c.json({ error: '配置不存在' }, 404);
 
   await db.delete(schema.aiConfigs).where(eq(schema.aiConfigs.id, id));
+  publish(userId, 'data-changed', { scope: 'ai-configs' }, _ocid);
   return c.json({ message: '已删除' });
 });
 
@@ -114,6 +122,7 @@ app.delete('/configs/:id', async (c) => {
 // Get all prompts (returns defaults merged with user customizations)
 app.get('/prompts', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const userPrompts = await db.select().from(schema.aiPrompts)
     .where(eq(schema.aiPrompts.userId, userId)).all();
 
@@ -135,6 +144,7 @@ app.get('/prompts', async (c) => {
 // Update prompt for a feature
 app.patch('/prompts/:feature', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { feature } = c.req.param();
   if (!AI_FEATURES.includes(feature as any)) {
     return c.json({ error: '未知功能' }, 400);
@@ -162,23 +172,27 @@ app.patch('/prompts/:feature', async (c) => {
     });
   }
 
+  publish(userId, 'data-changed', { scope: 'ai-prompts' }, _ocid);
   return c.json({ data: { feature, prompt } });
 });
 
 // Reset prompt to default
 app.delete('/prompts/:feature', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { feature } = c.req.param();
 
   await db.delete(schema.aiPrompts)
     .where(and(eq(schema.aiPrompts.userId, userId), eq(schema.aiPrompts.feature, feature)));
 
+  publish(userId, 'data-changed', { scope: 'ai-prompts' }, _ocid);
   return c.json({ data: { feature, prompt: DEFAULT_PROMPTS[feature as keyof typeof DEFAULT_PROMPTS] } });
 });
 
 // ── Test Config ──
 app.post('/test', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { configId } = await c.req.json();
 
   const config = await db.select().from(schema.aiConfigs)
@@ -217,6 +231,7 @@ app.post('/test', async (c) => {
 // ── AI Process (polish/expand/write) ──
 app.post('/process', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { feature, content, prompt: customPrompt } = await c.req.json();
 
   if (!AI_FEATURES.includes(feature)) return c.json({ error: '未知功能' }, 400);
@@ -233,6 +248,7 @@ app.post('/process', async (c) => {
 // POST /api/ai/transcribe — 语音转文字
 app.post('/transcribe', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   try {
     const formData = await c.req.formData();
     const file = formData.get('file') as File;
@@ -250,6 +266,7 @@ app.post('/transcribe', async (c) => {
 // GET /api/ai/iat-url — 讯飞语音听写鉴权 URL
 app.get('/iat-url', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
   const prefs = (user as any)?.preferences || {};
   const xf = prefs.xfyun || {};
@@ -273,6 +290,7 @@ app.get('/iat-url', async (c) => {
 // POST /api/ai/transcribe-async — 异步转写语音（录音保存时调用）
 app.post('/transcribe-async', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { audioUrl } = await c.req.json();
   if (!audioUrl) return c.json({ error: '缺少 audioUrl' }, 400);
 
@@ -317,6 +335,7 @@ app.post('/transcribe-async', async (c) => {
 // GET /api/ai/transcription — 查询转写结果
 app.get('/transcription', async (c) => {
   const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const audioUrl = c.req.query('audioUrl');
   if (!audioUrl) return c.json({ error: '缺少 audioUrl' }, 400);
 
