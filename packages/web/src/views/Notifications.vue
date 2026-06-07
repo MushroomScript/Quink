@@ -132,7 +132,7 @@ async function doClear() {
         <span
           v-if="tabUnread(t.key) > 0"
           class="text-[10px] tabular-nums px-1 rounded-full min-w-[16px] text-center"
-          :class="store.currentTab === t.key ? 'bg-white/30' : 'bg-red-500 text-white'"
+          :class="store.currentTab === t.key ? 'bg-white/30' : 'bg-red-400/70 text-white'"
         >
           {{ tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key) }}
         </span>
@@ -183,7 +183,7 @@ async function doClear() {
               <div class="font-medium text-sm truncate" style="color: var(--text-primary)">
                 {{ n.title }}
               </div>
-              <span v-if="!n.readAt" class="shrink-0 w-2 h-2 rounded-full bg-red-500"></span>
+              <span v-if="!n.readAt" class="shrink-0 w-2 h-2 rounded-full bg-red-400/90"></span>
             </div>
             <div v-if="n.body" class="text-xs mt-1 line-clamp-2" style="color: var(--text-secondary)">
               {{ n.body }}

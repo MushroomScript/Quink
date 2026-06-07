@@ -7,6 +7,12 @@ description: 收尾流程 —— 看 working tree → 必要时更新 CLAUDE.md 
 
 完成一组改动后用 `/ship` 触发，自动做以下事情：
 
+## 0. 读 FOLLOWUPS.md（防忘）
+
+**ship 前必做**: `Read` 根 `FOLLOWUPS.md`. 看跟当前改动重叠的能不能顺手做掉 —— 比如这次 PR 是 PR #12 群组回收站, FOLLOWUPS 里【进 PR #12】段标了 `note-deleted-by-admin` 通知, 顺手补上一起 ship 比拖到后面更省事.
+
+如果发现该顺手做但还没做的 → 跟蘑菇确认后补改, 然后才 commit. 不要默默跳过。
+
 ## 1. 看 working tree
 
 并行跑（**一条 message 内多个 Bash 调用**）：
@@ -65,6 +71,19 @@ EOF
 ```
 
 commit 完简短报告：commit hash + 几个文件改了多少行。
+
+## 5. 同步 FOLLOWUPS.md（防忘）
+
+**commit 完必做**: 看 commit message 末尾 / 本次 ※ 观察段是否含"留待 PR #X" / "留待 11c" / "进 PR #X" / "后续 PR" 等关键字, 或新发现的"未做"事项。
+
+有 → `Edit` `FOLLOWUPS.md` 对应分组 append 一行 `- [ ] xxx (来源: commit <hash>, PR #X)`. 这是为了下次 ship 时 0 步能扫到。
+
+**对应分组逻辑**:
+- 已知目标 PR (PR #12 / PR #13 等) → 进【进 PR #X】段
+- 没明确归属 → 进【待补】段
+- 已完成的 followup → 移到【已完成】段不删 (留历史)
+
+**不要把"已做的事"误记进去 — 只记真没做的 followup**。
 
 ## 约束
 
