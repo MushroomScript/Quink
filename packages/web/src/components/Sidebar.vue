@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useNotesStore } from '@/stores/notes';
 import { useGroupsStore } from '@/stores/groups';
+import { useNotificationsStore } from '@/stores/notifications';
 import { api, isLoggedIn, type Category } from '@/api';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useToast } from '@/composables/useToast';
@@ -29,6 +30,7 @@ import {
   PhSignOut,
   PhArrowsDownUp,
   PhUsersThree,
+  PhBell,
 } from '@phosphor-icons/vue';
 
 const router = useRouter();
@@ -36,6 +38,7 @@ const route = useRoute();
 const auth = useAuthStore();
 const notesStore = useNotesStore();
 const groupsStore = useGroupsStore();
+const notificationsStore = useNotificationsStore();
 
 // Sidebar 整体折叠: w-60 → w-14. 折叠后只显示图标 + 红点角标, 隐藏分类区/拖拽 handle
 const SIDEBAR_COLLAPSED_KEY = 'quink_sidebar_collapsed';
@@ -213,6 +216,13 @@ function openTransferDock() {
   closeUserMenu();
   transferDockVisible.value = true;
 }
+
+// PR #10 通知中心入口: 头像菜单"传输列表"上方. badge 显示未读总数 (按 store.unread.total).
+// 未读数靠 onMounted 首次 + SSE notification-new 实时更新; 这里不主动 setInterval
+function openNotifications() {
+  closeUserMenu();
+  router.push('/notifications');
+}
 function getInitial(name: string) { return name ? name.charAt(0).toUpperCase() : '?'; }
 
 // 拖到回收站时 cardDnd 派 quink-drop-trash 事件, Sidebar 这里弹确认 modal (避开把 confirm UI 塞 utils/)
@@ -284,6 +294,8 @@ function onCategoryResizeEnd() {
 onMounted(() => {
   window.addEventListener('quink-drop-trash', onDropTrashEvent as EventListener);
   window.addEventListener('quink-ai-expand', onAiExpand);
+  // 首次拉未读数 (启动时徽章正确). 后续 SSE notification-new 自动 +1, 不需要 polling
+  if (isLoggedIn()) notificationsStore.loadUnreadCount().catch(() => {});
   try {
     const saved = Number(localStorage.getItem(CATEGORY_HEIGHT_KEY));
     if (saved >= CATEGORY_MIN_H && saved <= 800) categoryHeight.value = saved;
@@ -359,6 +371,19 @@ onUnmounted(() => {
           class="absolute bg-sidebar-light rounded-xl shadow-xl z-[var(--z-sidebar)] py-1"
           :class="sidebarCollapsed ? 'left-full ml-1 top-3 w-44' : 'left-3 right-3 top-full mt-1'"
           style="border: 1px solid var(--sb-border)">
+          <!-- PR #10 消息通知: 常驻入口. badge 显示 store.unread.total. 点击跳 /notifications -->
+          <button @click="openNotifications"
+            class="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition-colors"
+            style="color: var(--sb-text)"
+            @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--sb-hover)'"
+            @mouseleave="($event.currentTarget as HTMLElement).style.background = 'transparent'">
+            <PhBell size="1rem" weight="fill" /><span>消息通知</span>
+            <span v-if="notificationsStore.unread.total > 0"
+              class="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-medium rounded-full bg-red-500 text-white tabular-nums">
+              {{ notificationsStore.unread.total > 99 ? '99+' : notificationsStore.unread.total }}
+            </span>
+          </button>
+          <div style="border-top: 1px solid var(--sb-border); margin: 4px 0"></div>
           <!-- 传输列表: 常驻入口, 永远可点. 无任务时点开 dock 显示空状态 -->
           <button @click="openTransferDock"
             class="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition-colors"

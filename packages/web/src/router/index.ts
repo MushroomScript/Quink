@@ -95,6 +95,12 @@ const router = createRouter({
       meta: { title: '设置', hideSearch: true, hideRefresh: true },
     },
     {
+      path: '/notifications',
+      name: 'notifications',
+      component: () => import('@/views/Notifications.vue'),
+      meta: { title: '消息通知', hideSearch: true },
+    },
+    {
       path: '/capture',
       name: 'capture',
       component: () => import('@/views/Capture.vue'),

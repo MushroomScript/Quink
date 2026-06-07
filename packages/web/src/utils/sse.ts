@@ -411,6 +411,51 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] group-changed parse failed:', e); }
   });
 
+  // PR #10 通知中心 SSE.
+  // notification-new: 后端 createNotification helper 推给收件人 (本人所有设备). 不带 _originClientId
+  // (不是发起人触发的事件, 多设备都该收到). store handler 头插 + 未读数 +1
+  es.addEventListener('notification-new', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as {
+        id: string;
+        category: 'content' | 'reminder' | 'group';
+        type: string;
+        title: string;
+        body?: string | null;
+        payload?: Record<string, any> | null;
+        createdAt: string;
+      };
+      import('@/stores/notifications').then(({ useNotificationsStore }) => {
+        useNotificationsStore().handleNotificationNew({
+          id: data.id,
+          category: data.category,
+          type: data.type,
+          title: data.title,
+          body: data.body ?? null,
+          payload: data.payload ?? null,
+          readAt: null,
+          createdAt: data.createdAt,
+        });
+      });
+    } catch (e) { console.error('[sse] notification-new parse failed:', e); }
+  });
+
+  // notification-changed: 其他设备触发本人 read/delete/clear 后 publish. isMyEvent 跳过本设备
+  // (本设备已直接 store mutate), 其他设备 reload 当前 tab + 未读数
+  es.addEventListener('notification-changed', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as {
+        scope: 'read' | 'read-all' | 'delete' | 'clear';
+        id?: string;
+        category?: string | null;
+      };
+      if (isMyEvent(data)) return;
+      import('@/stores/notifications').then(({ useNotificationsStore }) => {
+        useNotificationsStore().handleNotificationChanged();
+      });
+    } catch (e) { console.error('[sse] notification-changed parse failed:', e); }
+  });
+
   es.onerror = (e) => {
     // EventSource readyState: 0=CONNECTING (重连中), 1=OPEN, 2=CLOSED
     // 401 时浏览器把状态置 CLOSED, 此时不会自动重连, 退出

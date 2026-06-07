@@ -923,7 +923,53 @@ export const api = {
   patchMemberRole(groupId: string, userId: string, role: 'admin' | 'member') {
     return request<{ message: string }>(`/groups/${groupId}/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) });
   },
+
+  // PR #10 通知中心
+  getNotifications(params?: { category?: 'content' | 'reminder' | 'group'; page?: number; limit?: number }) {
+    const q = new URLSearchParams();
+    if (params?.category) q.set('category', params.category);
+    if (params?.page) q.set('page', String(params.page));
+    if (params?.limit) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return request<{ data: NotificationItem[]; total: number; page: number; limit: number }>(
+      `/notifications${qs ? '?' + qs : ''}`,
+    );
+  },
+  getNotificationUnreadCount() {
+    return request<{ data: { total: number; content: number; reminder: number; group: number } }>(
+      '/notifications/unread-count',
+    );
+  },
+  markNotificationRead(id: string) {
+    return request<{ data: { id: string; readAt: string } }>(`/notifications/${id}/read`, { method: 'POST' });
+  },
+  markNotificationReadAll(category?: 'content' | 'reminder' | 'group') {
+    const qs = category ? `?category=${category}` : '';
+    return request<{ data: { updated: number } }>(`/notifications/read-all${qs}`, { method: 'POST' });
+  },
+  deleteNotification(id: string) {
+    return request<{ message: string }>(`/notifications/${id}`, { method: 'DELETE' });
+  },
+  clearNotifications(category?: 'content' | 'reminder' | 'group') {
+    const qs = category ? `?category=${category}` : '';
+    return request<{ data: { deleted: number } }>(`/notifications${qs}`, { method: 'DELETE' });
+  },
 };
+
+// PR #10 通知中心 type
+// userId optional: list/unread 接口返回带 userId; SSE notification-new payload 不带 (推给收件人本身, 不需要重复字段),
+// 让两种来源都能 typecheck. 前端用不到 userId 字段 (只渲染本人通知)
+export interface NotificationItem {
+  id: string;
+  userId?: string;
+  category: 'content' | 'reminder' | 'group';
+  type: string;
+  title: string;
+  body: string | null;
+  payload: Record<string, any> | null;
+  readAt: string | null;
+  createdAt: string;
+}
 
 // SSE token helper - utils/sse.ts 用; 跟 request() 内部 getToken 共用同一个 localStorage key
 export function getAuthToken(): string | null {
