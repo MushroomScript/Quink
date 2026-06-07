@@ -365,6 +365,11 @@ export const api = {
     });
   },
 
+  // 安全审计: 主动登出所有设备 (含本机). 后端 tokenVersion++ 让旧 token 立即失效
+  logoutAllDevices() {
+    return request<{ message: string }>('/auth/logout-all-devices', { method: 'POST' });
+  },
+
   // Notes
   getNotes(params?: Record<string, string>) {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';

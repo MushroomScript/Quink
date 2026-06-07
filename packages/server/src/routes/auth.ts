@@ -192,4 +192,19 @@ app.post('/password', authMiddleware, async (c) => {
   return c.json({ message: '密码已修改, 所有设备需重新登录' });
 });
 
+// 安全审计: 主动"登出所有设备" - 不需旧密码 (因为用户已登录), tokenVersion++ 让所有旧 token (含本机) 立即失效.
+// 用户场景: 怀疑某设备 token 泄漏 / 卖二手手机前清干净 / 共用电脑忘了登出. 实际效果跟改密码一致.
+app.post('/logout-all-devices', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+  if (!user) return c.json({ error: '用户不存在' }, 404);
+  const newTv = (user.tokenVersion ?? 0) + 1;
+  await db.update(schema.users).set({ tokenVersion: newTv }).where(eq(schema.users.id, userId));
+  invalidateTokenVersionCache(userId);
+  await logAudit(c, 'auth.logout_all_devices', 'user', userId, { newTokenVersion: newTv });
+  publish(userId, 'data-changed', { scope: 'user-profile' }, _ocid);
+  return c.json({ message: '所有设备已退出登录' });
+});
+
 export default app;

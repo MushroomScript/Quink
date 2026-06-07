@@ -683,6 +683,27 @@ async function changePassword() {
   finally { saving.value = false; }
 }
 
+// 安全审计: "登出所有设备" - 跟改密码同款 tokenVersion++ 效果, 区别仅是不需旧密码
+const confirmLogoutAll = ref(false);
+const logoutAllSaving = ref(false);
+async function doLogoutAll() {
+  if (logoutAllSaving.value) return;
+  logoutAllSaving.value = true;
+  try {
+    await api.logoutAllDevices();
+    confirmLogoutAll.value = false;
+    // 跟 changePassword 同款: 1.5s 让用户看到反馈再跳登录. 本机 token 此刻已失效 (server tokenVersion 已升), 即使用户立即关页面下次进来也会被 401 兜底跳登录
+    setTimeout(() => {
+      localStorage.removeItem('quink_token');
+      window.location.href = '/login';
+    }, 1500);
+  } catch (err: any) {
+    logoutAllSaving.value = false;
+    confirmLogoutAll.value = false;
+    showMsg('登出失败: ' + (err.message || '未知错误'), 'error');
+  }
+}
+
 // ── Export / Import ──
 const exporting = ref(false);
 const importing = ref(false);
@@ -818,12 +839,40 @@ function goBack() {
           <input v-model="newPwd" type="password" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary" placeholder="至少6位" />
         </div>
         <div v-if="pwdMsg" class="text-xs" :class="pwdMsg.includes('成功') ? 'text-green-600' : 'text-red-500'">{{ pwdMsg }}</div>
-        <button @click="changePassword" :disabled="saving" class="px-5 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark disabled:opacity-50 inline-grid place-items-center">
-          <span class="col-start-1 row-start-1 invisible">修改密码</span>
-          <span class="col-start-1 row-start-1">{{ saving ? '修改中' : '修改密码' }}</span>
-        </button>
+        <div class="flex items-center gap-3">
+          <button @click="changePassword" :disabled="saving || logoutAllSaving" class="px-5 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark disabled:opacity-50 inline-grid place-items-center">
+            <span class="col-start-1 row-start-1 invisible">修改密码</span>
+            <span class="col-start-1 row-start-1">{{ saving ? '修改中' : '修改密码' }}</span>
+          </button>
+          <!-- 安全审计: 登出所有设备 (含本机). 跟改密码一样让旧 token 立即失效, 区别只是不需要旧密码. 后续 2FA / 邮箱验证码改密码也会从这里扩展 -->
+          <button @click="confirmLogoutAll = true" :disabled="saving || logoutAllSaving" class="px-5 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+            登出所有设备
+          </button>
+        </div>
+        <p class="text-[11px] text-gray-400">登出所有设备会让所有现有登录立即失效, 包括本机. 适用于怀疑 token 泄漏 / 共用设备忘了登出.</p>
       </div>
     </div>
+
+    <!-- 登出所有设备确认弹窗 -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="confirmLogoutAll" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+          <div class="absolute inset-0 bg-black/30" @click="confirmLogoutAll = false" />
+          <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 text-center">
+            <p class="text-sm text-gray-700 mb-1">登出所有设备</p>
+            <p class="text-xs text-gray-400 mb-4">这会让你在其他所有地方 (含本机) 立即退出登录, 需要重新输入密码</p>
+            <div class="flex gap-2 justify-center">
+              <button @click="confirmLogoutAll = false" :disabled="logoutAllSaving"
+                class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50">取消</button>
+              <button @click="doLogoutAll" :disabled="logoutAllSaving"
+                class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600 disabled:opacity-50">
+                {{ logoutAllSaving ? '处理中...' : '确认登出' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- ═══ 偏好设置 ═══ -->
     <div v-if="activeTab === 'preferences'" class="space-y-6">

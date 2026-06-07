@@ -469,11 +469,18 @@ while ($true) {
 - [x] 前端：改密码后立即清 token 跳登录页（Settings.vue changePassword）
 - [x] 前端：群详情页加"隐身/在线"开关 + chip 状态显示（GroupDetail.vue）
 
-**未修（后续视需要）**：
+**已修（第三批）**：
 
-- [ ] M2 token 吊销机制 - "登出所有设备"按钮（手动触发 tv++）— 改密码已自动触发, 显式按钮属于体验项
-- [ ] 备份 / 数据导出 加密 — 涉及加密体系，超出本审计范围
-- [ ] 审计日志查看面板（/api/admin/audit-logs 拉取 + 前端列表）— 蘑菇用 sqlite-mcp 直接查 DB 也可
+- [x] "登出所有设备"按钮 — Settings.vue 修改密码右边按钮 + 确认弹窗 + 后端 `POST /api/auth/logout-all-devices` (tokenVersion++)
+
+**未修（明确不在审计范围）**：
+
+- 备份 / 数据导出加密 — 涉及加密体系设计，超出本审计范围
+- 审计日志查看面板 — 蘑菇用 sqlite-mcp 直接查 DB 已可 (`SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100`)
+- 未来扩展点（占位，不在本次范围）：
+  - 2FA / TOTP — `users` 加 `totp_secret/totp_enabled/backup_codes` 列 + login 两步校验
+  - 邮箱绑定 + 验证 — `users` 加 `email/email_verified` + SMTP 配置 + 验证码改密码
+  - 同账号登录设备列表 + 单设备登出 — 需要 SSE 连接关联回 device fingerprint
 
 **操作日志主路径已覆盖**：
 - `auth.register` / `auth.login` / `auth.login_failed` / `auth.password_change`
