@@ -954,7 +954,57 @@ export const api = {
     const qs = category ? `?category=${category}` : '';
     return request<{ data: { deleted: number } }>(`/notifications${qs}`, { method: 'DELETE' });
   },
+
+  // PR #11 提醒分家
+  setPersonalReminder(noteId: string, body: { dueAt: string; rrule?: string | null }) {
+    return request<{ data: { noteId: string; dueAt: string; rrule: string | null } }>(`/notes/${noteId}/personal-reminder`, {
+      method: 'POST', body: JSON.stringify(body),
+    });
+  },
+  deletePersonalReminder(noteId: string) {
+    return request<{ message: string }>(`/notes/${noteId}/personal-reminder`, { method: 'DELETE' });
+  },
+  setGroupReminder(noteId: string, body: { groupId: string; dueAt: string; rrule?: string | null }) {
+    return request<{ data: { noteId: string; groupId: string; dueAt: string; rrule: string | null } }>(`/notes/${noteId}/group-reminder`, {
+      method: 'POST', body: JSON.stringify(body),
+    });
+  },
+  deleteGroupReminder(noteId: string, groupId: string) {
+    return request<{ message: string }>(`/notes/${noteId}/group-reminder?groupId=${encodeURIComponent(groupId)}`, { method: 'DELETE' });
+  },
+  getNoteReminders(noteId: string) {
+    return request<{ data: { personal: PersonalReminderRow | null; group: GroupReminderRow[] } }>(`/notes/${noteId}/reminders`);
+  },
+  getGroupReminderSubscription(groupId: string) {
+    return request<{ data: { enabled: boolean } }>(`/groups/${groupId}/reminder-subscription`);
+  },
+  setGroupReminderSubscription(groupId: string, enabled: boolean) {
+    return request<{ data: { enabled: boolean } }>(`/groups/${groupId}/reminder-subscription`, {
+      method: 'PATCH', body: JSON.stringify({ enabled }),
+    });
+  },
 };
+
+// PR #11 提醒分家 type
+export interface PersonalReminderRow {
+  id: string;
+  userId: string;
+  noteId: string;
+  dueAt: string;
+  rrule: string | null;
+  remindSentAt: string | null;
+  createdAt: string;
+}
+export interface GroupReminderRow {
+  id: string;
+  noteId: string;
+  groupId: string;
+  dueAt: string;
+  rrule: string | null;
+  remindSentAt: string | null;
+  createdBy: string;
+  createdAt: string;
+}
 
 // PR #10 通知中心 type
 // userId optional: list/unread 接口返回带 userId; SSE notification-new payload 不带 (推给收件人本身, 不需要重复字段),

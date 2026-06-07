@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, inject, watchEffect, type ComputedRef } from 'vue';
+import { ref, computed, inject, onMounted, watchEffect, type ComputedRef } from 'vue';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useRouter, useRoute } from 'vue-router';
 import dayjs from 'dayjs';
@@ -8,7 +8,7 @@ import 'dayjs/locale/zh-cn';
 import { useNotesStore } from '@/stores/notes';
 import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
-import type { Note } from '@/api';
+import type { Note, PersonalReminderRow, GroupReminderRow } from '@/api';
 import { api } from '@/api';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import { PhUsersThree, PhArrowsClockwise } from '@phosphor-icons/vue';
@@ -437,13 +437,46 @@ watchEffect(async (onCleanup) => {
 const timeAgo = computed(() => dayjs(props.note.createdAt).fromNow());
 const fullTime = computed(() => dayjs(props.note.createdAt).format('YYYY-MM-DD HH:mm'));
 
+// PR #11 提醒分家: 我的个人提醒 + 我所在群的群提醒 (onMounted 拉, saveReminder 后本地 mutate)
+// 兼容: 拉失败 / 还没拉到 / 老笔记没新表条目 → fallback 到 props.note.todoDue/todoRemindRrule
+// 优先级 (用于铃铛 + 设置按钮显示): 我的个人提醒 > 我所在群的最早一条群提醒 > 老 todoDue
+const myPersonalReminder = ref<PersonalReminderRow | null>(null);
+const myGroupReminders = ref<GroupReminderRow[]>([]);
+const remindersLoaded = ref(false);
+async function loadReminders() {
+  try {
+    const res = await api.getNoteReminders(props.note.id);
+    myPersonalReminder.value = res.data.personal;
+    myGroupReminders.value = res.data.group;
+  } catch (e) {
+    console.error('[NoteCard] loadReminders failed:', e);
+  } finally {
+    remindersLoaded.value = true;
+  }
+}
+onMounted(() => {
+  // 只 todo 类型才需要拉 (其他类型铃铛不显示)
+  if (props.note.type === 'todo') loadReminders();
+});
+
+// effectiveReminder: 给铃铛 / 提醒文案 / "设置/编辑" 按钮文案用. 优先 personal > group > 老 todoDue
+const effectiveReminder = computed<{ dueAt: string | null; rrule: string | null; source: 'personal' | 'group' | 'legacy' | null }>(() => {
+  if (myPersonalReminder.value) return { dueAt: myPersonalReminder.value.dueAt, rrule: myPersonalReminder.value.rrule, source: 'personal' };
+  if (myGroupReminders.value.length > 0) {
+    const g = myGroupReminders.value[0];
+    return { dueAt: g.dueAt, rrule: g.rrule, source: 'group' };
+  }
+  if (props.note.todoDue) return { dueAt: props.note.todoDue, rrule: props.note.todoRemindRrule ?? null, source: 'legacy' };
+  return { dueAt: null, rrule: null, source: null };
+});
+
 // 提醒时间显示: 简短相对时间 (今天 14:30 / 明天 9:00 / 6月10日 / 已过) + 鼠标 hover 看完整
-// 用响应式 nowRef 让 computed 依赖时间流逝重算 — 否则单次提醒 scheduler 不动 todoDue,
-// 时间过去后卡片永远显示"今天 09:30"不会变"已过", 按刷新按钮也没用 (Object.assign 同样 todoDue 不 trigger)
+// 用响应式 nowRef 让 computed 依赖时间流逝重算 — 否则单次提醒 scheduler 不动 due, 时间过去后卡片永远显示"今天 09:30"不会变"已过"
 const nowRef = useNow();
 const reminderText = computed(() => {
-  if (!props.note.todoDue) return '';
-  const d = dayjs(props.note.todoDue);
+  const due = effectiveReminder.value.dueAt;
+  if (!due) return '';
+  const d = dayjs(due);
   const now = dayjs(nowRef.value);
   if (d.isBefore(now)) return '已过';
   if (d.isSame(now, 'day')) return `今天 ${d.format('HH:mm')}`;
@@ -452,26 +485,84 @@ const reminderText = computed(() => {
   return d.format('M月D日 HH:mm');
 });
 const reminderFullText = computed(() => {
-  if (!props.note.todoDue) return '';
-  const t = dayjs(props.note.todoDue).format('YYYY-MM-DD HH:mm');
-  return props.note.todoRemindRrule ? `${t}（重复: ${props.note.todoRemindRrule}）` : t;
+  const due = effectiveReminder.value.dueAt;
+  if (!due) return '';
+  const t = dayjs(due).format('YYYY-MM-DD HH:mm');
+  const sourceLabel = effectiveReminder.value.source === 'group' ? '（群提醒）' : '';
+  return effectiveReminder.value.rrule ? `${t}${sourceLabel}（重复: ${effectiveReminder.value.rrule}）` : `${t}${sourceLabel}`;
 });
 
+// PR #11: 是否能设群提醒. 仅 inGroupContext + 我是该群 owner/admin + 笔记 share 到当前群
+const canSetGroupReminder = computed(() => {
+  if (!inGroupContext.value || !groupIdFromRoute.value) return false;
+  if (groupRole.value !== 'owner' && groupRole.value !== 'admin') return false;
+  return isShared.value && (props.note.sharedGroupIds || []).includes(groupIdFromRoute.value);
+});
+// 当前群是否已有群提醒 (用于按钮文案 "设置/编辑/取消")
+const currentGroupReminder = computed(() => {
+  const gid = groupIdFromRoute.value;
+  if (!gid) return null;
+  return myGroupReminders.value.find(r => r.groupId === gid) || null;
+});
+
+// 提醒弹窗状态机: mode 区分个人/群提醒 (复用同一 ReminderPicker)
 const reminderPickerOpen = ref(false);
+const reminderPickerMode = ref<'personal' | 'group'>('personal');
 function openReminderPicker() {
   showMenu.value = false;
+  reminderPickerMode.value = 'personal';
   reminderPickerOpen.value = true;
 }
+function openGroupReminderPicker() {
+  showMenu.value = false;
+  reminderPickerMode.value = 'group';
+  reminderPickerOpen.value = true;
+}
+const reminderPickerInitial = computed(() => {
+  if (reminderPickerMode.value === 'group') {
+    return { remindAt: currentGroupReminder.value?.dueAt ?? null, rrule: currentGroupReminder.value?.rrule ?? null };
+  }
+  return { remindAt: myPersonalReminder.value?.dueAt ?? (props.note.todoDue ?? null), rrule: myPersonalReminder.value?.rrule ?? (props.note.todoRemindRrule ?? null) };
+});
+
 async function saveReminder(payload: { remindAt: string | null; rrule: string | null }) {
+  const mode = reminderPickerMode.value;
   try {
-    await store.updateNote(props.note.id, {
-      todoDue: payload.remindAt,
-      todoRemindRrule: payload.rrule,
-    } as any);
-    toast.show(payload.remindAt ? '已设置提醒' : '已清除提醒', 'success');
-  } catch (e) {
+    if (mode === 'group') {
+      const gid = groupIdFromRoute.value!;
+      if (payload.remindAt) {
+        const res = await api.setGroupReminder(props.note.id, { groupId: gid, dueAt: payload.remindAt, rrule: payload.rrule });
+        // 本地 mutate: 移除当前群旧条目 + 加入新条目, 让铃铛立即反映
+        const others = myGroupReminders.value.filter(r => r.groupId !== gid);
+        myGroupReminders.value = [{
+          id: '', noteId: props.note.id, groupId: gid,
+          dueAt: res.data.dueAt, rrule: res.data.rrule, remindSentAt: null,
+          createdBy: auth.user?.id || '', createdAt: new Date().toISOString(),
+        }, ...others];
+        toast.show('已设置群提醒', 'success');
+      } else {
+        await api.deleteGroupReminder(props.note.id, gid);
+        myGroupReminders.value = myGroupReminders.value.filter(r => r.groupId !== gid);
+        toast.show('已取消群提醒', 'success');
+      }
+    } else {
+      if (payload.remindAt) {
+        const res = await api.setPersonalReminder(props.note.id, { dueAt: payload.remindAt, rrule: payload.rrule });
+        myPersonalReminder.value = {
+          id: myPersonalReminder.value?.id || '', userId: auth.user?.id || '', noteId: props.note.id,
+          dueAt: res.data.dueAt, rrule: res.data.rrule, remindSentAt: null,
+          createdAt: myPersonalReminder.value?.createdAt || new Date().toISOString(),
+        };
+        toast.show('已设置提醒', 'success');
+      } else {
+        await api.deletePersonalReminder(props.note.id);
+        myPersonalReminder.value = null;
+        toast.show('已清除提醒', 'success');
+      }
+    }
+  } catch (e: any) {
     console.error('[NoteCard] saveReminder failed:', e);
-    toast.show('保存失败', 'error');
+    toast.show(e?.message || '保存失败', 'error');
   }
 }
 
@@ -540,18 +631,18 @@ const typeColor: Record<string, string> = {
         </span>
         <!-- category 跟 nickname 同 "可压缩担当": min-w-0 + truncate 让长 category 自己缩 (而非把三点推出卡片外) -->
         <span v-if="note.category" class="text-xs text-gray-400 truncate min-w-0">{{ note.category }}</span>
-        <!-- 提醒铃铛: 仅 todo 且已设 todoDue 时显示, 点击改提醒. 暗色用 amber, 已过用 gray -->
-        <span v-if="note.type === 'todo' && note.todoDue"
+        <!-- 提醒铃铛: 仅 todo 且 effectiveReminder 有 due 时显示. 数据源优先 personal > group > legacy todoDue -->
+        <span v-if="note.type === 'todo' && effectiveReminder.dueAt"
           class="ml-auto flex items-center gap-1 text-[11px] cursor-pointer hover:opacity-70 shrink-0 whitespace-nowrap"
           :class="reminderText === '已过' ? 'text-gray-400' : 'text-amber-600'"
           :title="reminderFullText"
           @click.stop="openReminderPicker">
-          <PhBellRinging v-if="note.todoRemindRrule" size="0.875rem" weight="fill" />
+          <PhBellRinging v-if="effectiveReminder.rrule" size="0.875rem" weight="fill" />
           <PhBell v-else size="0.875rem" weight="fill" />
           <span class="tabular-nums">{{ reminderText }}</span>
         </span>
         <span class="text-[11px] text-gray-400 shrink-0 whitespace-nowrap"
-          :class="{ 'ml-auto': !(note.type === 'todo' && note.todoDue) }"
+          :class="{ 'ml-auto': !(note.type === 'todo' && effectiveReminder.dueAt) }"
           :title="fullTime">{{ timeAgo }}</span>
         <!-- 三点菜单: shrink-0 关键 — 无之前 chip 撑爆时 button 被压到 width 0, svg overflow 出 button 外
              视觉上"出卡片"但 click 区域为 0, 蘑菇汇报"点了没反应"就是这个 -->
@@ -618,11 +709,17 @@ const typeColor: Record<string, string> = {
             <PhCheck v-else size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>{{ note.todoStatus === 'done' ? '标记未完成' : '标记已完成' }}</span>
           </button>
-          <!-- 设提醒 (个人): todo 类型所有人都能设 (PR #9 蘑菇拍板:个人提醒不限作者) -->
+          <!-- PR #11: 设个人提醒, todo 任何人都能设 (个人 = 我自己收, 别人看不到). 数据走 note_personal_reminders 表 -->
           <button v-if="note.type === 'todo'" @click.stop="openReminderPicker"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhBell size="0.875rem" weight="fill" style="margin-top: 2px" />
-            <span>{{ note.todoDue ? '编辑提醒' : '设置提醒' }}</span>
+            <span>{{ myPersonalReminder ? '编辑个人提醒' : '设置个人提醒' }}</span>
+          </button>
+          <!-- PR #11: 设群提醒, 仅 inGroupContext + 我是该群 owner/admin + 笔记 share 到此群 -->
+          <button v-if="note.type === 'todo' && canSetGroupReminder" @click.stop="openGroupReminderPicker"
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+            <PhBellRinging size="0.875rem" weight="fill" style="margin-top: 2px" />
+            <span>{{ currentGroupReminder ? '编辑群提醒' : '设置群提醒' }}</span>
           </button>
           <!-- PR #9 另存为: 仅群组界面显示 (主视图含自己分享的都不显示, 蘑菇 2026-06-07 修订: 只有群组上下文有"复制成自己副本"语义). 按 type 决定文案 -->
           <button v-if="inGroupContext" @click.stop="doDuplicate()"
@@ -647,11 +744,11 @@ const typeColor: Record<string, string> = {
       <div v-if="showMenu" class="fixed inset-0 z-[var(--z-overlay-backdrop)]" @click="showMenu = false" />
     </Teleport>
 
-    <!-- 提醒设置弹窗 -->
+    <!-- 提醒设置弹窗 (复用同一组件, mode 区分个人/群提醒) -->
     <ReminderPicker
       v-model:open="reminderPickerOpen"
-      :remind-at="note.todoDue"
-      :rrule="note.todoRemindRrule"
+      :remind-at="reminderPickerInitial.remindAt"
+      :rrule="reminderPickerInitial.rrule"
       @save="saveReminder"
     />
 

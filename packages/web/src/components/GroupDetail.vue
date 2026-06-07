@@ -11,7 +11,7 @@ import dayjs from 'dayjs';
 import {
   PhUsersThree, PhCopy, PhArrowsClockwise, PhX, PhCheck, PhTrash,
   PhCaretRight, PhCaretDown, PhPencilSimple, PhCamera, PhNote, PhMegaphone,
-  PhEye, PhEyeSlash,
+  PhEye, PhEyeSlash, PhBell,
 } from '@phosphor-icons/vue';
 import NoteCard from './NoteCard.vue';
 import type { Note, GroupNoteEditRequestRow, GroupMemberInfo } from '@/api';
@@ -85,6 +85,7 @@ async function load() {
     }
     loadGroupNotes(true);
     loadEditRequests();
+    loadReminderSubscription();
   } catch (e: any) {
     errorMsg.value = e?.message || '加载失败';
   } finally {
@@ -123,6 +124,30 @@ async function loadGroupNotes(reset = false) {
 function loadMoreGroupNotes() {
   groupNotesPage.value++;
   loadGroupNotes(false);
+}
+
+// PR #11 群提醒接收开关. 默认接收 (后端缺行返 true). 关闭后该群群提醒不发 (OS + 通知中心都跳过)
+const reminderSubEnabled = ref(true);
+async function loadReminderSubscription() {
+  if (!groupId.value) return;
+  try {
+    const res = await api.getGroupReminderSubscription(groupId.value);
+    reminderSubEnabled.value = res.data.enabled;
+  } catch (e) {
+    console.error('[GroupDetail] loadReminderSubscription failed:', e);
+  }
+}
+async function toggleReminderSubscription() {
+  if (!groupId.value) return;
+  const next = !reminderSubEnabled.value;
+  reminderSubEnabled.value = next; // 乐观
+  try {
+    await api.setGroupReminderSubscription(groupId.value, next);
+    toast.show(next ? '已开启本群提醒接收' : '已关闭本群提醒接收', 'success');
+  } catch (e: any) {
+    reminderSubEnabled.value = !next;
+    toast.show(e?.message || '操作失败', 'error');
+  }
 }
 
 watch(groupId, () => {
@@ -726,6 +751,19 @@ async function saveAnnouncement() {
               <div v-else class="text-xs text-gray-400 italic py-2">
                 群主还没发公告
               </div>
+            </section>
+
+            <!-- PR #11 群提醒接收开关: 默认接收, 关后该群"群提醒"到点不触发 OS / 通知中心 -->
+            <section class="bg-gray-50 rounded-xl p-4 flex items-center justify-between gap-2">
+              <div class="flex items-center gap-1.5 text-xs">
+                <PhBell size="0.875rem" weight="fill" class="text-primary-dark shrink-0" />
+                <span class="text-gray-700">接收本群提醒</span>
+              </div>
+              <button @click="toggleReminderSubscription"
+                :class="reminderSubEnabled ? 'bg-primary text-white' : 'bg-gray-200 text-gray-500'"
+                class="px-3 py-1 text-[11px] rounded-full transition-colors shrink-0">
+                {{ reminderSubEnabled ? '已开启' : '已关闭' }}
+              </button>
             </section>
 
             <!-- 群组成员 -->
