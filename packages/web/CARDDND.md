@@ -27,15 +27,28 @@ drop 目标 DOM 元素加 `data-drop-target="xxx"`，值约定：
 
 ## 触发 + 视觉
 
-**触发**：NoteCard `@pointerdown` 调 `startCardDrag(e, { ids, type, category, text })`。selectMode + 当前卡片在选中集 + size≥2 → ids 是整批；否则单条。type chip 在非 selectMode 充当 drag handle（让正文 select-text 不被 DnD 抢）。
+**触发**：NoteCard `@pointerdown` 调 `startCardDrag(e, { ids, type, category, text, html? })`。type chip 在非 selectMode 充当 drag handle（让正文 select-text 不被 DnD 抢）。
+
+**多选拖动规则**（蘑菇 2026-06-07 修订）：
+- `selectMode === true` → 拖的永远是**被选中**的卡片（`Array.from(store.selectedIds)`），**不管鼠标按住哪张**（按未选卡片 = 拖整个选中集；按已选卡片也是同效果）。
+- `selectMode && size === 0` → onPointerDown 直接 `return`，不响应（多选模式按未选区不应抓起任何东西）。
+- 非 selectMode → 单选拖当前卡片 `props.note.id`。
+- 之前的"selectMode + 当前在选中集 + size≥2"判断已废弃。
 
 **视觉**：`dragState.hoverTarget` 给 dropzone 加 `drop-target-active` class；`<DragGhost />`（App.vue 全局挂载）fixed 跟随鼠标。
+
+**Ghost markdown 渲染**：
+- 单选 + 拖的就是本卡片 → NoteCard 传 `html: renderedContent.value`（复用 watchEffect 已 Vditor.md2html 渲染好的 HTML，零开销，不重新调 md2html）。
+- 多选 / 拖别的卡片 → 不传 html。`cardDnd.ts onMove` 启动拖动时遍历 ids 用 `document.querySelector('[data-note-id="X"] .note-content .vditor-reset').innerHTML` 从 DOM 拿已渲染的 HTML 串联，用 `<hr class="ghost-divider" />` 虚线分隔。
+- DragGhost 模板 `v-if="ghostHtmlClean"` 单选 md 分支 + 兜底 `ghostText` 分支（无内容时显纯文字）。`ghostHtmlClean` computed 清掉元素间 `\n` text node（`/>\s+</g` → `><`）+ 末尾 `\n / br`，否则 ghost 内 inline context 下 \n 会形成 anonymous inline box (line-height ~18px) 多出"一行白边"。
+- CSS 注意：**不要**给 ghost-md-preview 加 `::after` linear-gradient fade-mask，内容未触发 max-height 截断时 mask 会把最后一段 P 覆盖压白看起来像"底部空白边"。用纯 `overflow: hidden` 硬截断即可。
 
 ## 多个边界
 
 - **same-type / same-cat 跳过**：单条且 from === to 时 hoverTarget=null（视觉/语义都拒绝）；多条混合 type 时 fromType=null 始终接受。
 - **AI 拖入兜底**：cardDnd 同时派 window 事件 + sessionStorage 中转（`quink_ai_pending_drop`）。AI mount 前丢失的事件由 onMounted/onActivated 读 sessionStorage 兜底；listener 收到也 removeItem 避免 onActivated 切回重复消费（已踩坑）。
 - **胶囊 audio anchor 例外**：NoteCard `onPointerDown` 内检查 e.target 是不是 audio anchor，是 → return 让 `audio.ts` 的 pointer 监听接管 seek 拖动。
+- **音频胶囊 CSS 选择器跟 token query 的耦合**：`style.css` 胶囊样式用 `[href$=".m4a"]` 后缀匹配，但 PR #3 群组文件授权后 `/api/uploads/*` href 尾部带 `?token=<jwt>` → 后缀匹配失效，胶囊视觉消失。修法：所有 audio 扩展（webm/mp3/wav/ogg/m4a）的选择器（基础样式 + `:hover` + `::before` 图标 + `::after`）都加 `[href*=".ext?"]` 模糊匹配变体并列。后续给 `/api/uploads/*` 改鉴权方式时注意保持 url 结构兼容 attribute selector。
 
 ## 涉及文件
 

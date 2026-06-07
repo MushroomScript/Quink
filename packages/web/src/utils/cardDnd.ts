@@ -19,7 +19,8 @@ interface DragState {
   hoverTarget: string | null;    // 当前 elementFromPoint 命中的 [data-drop-target] 值
   ghostX: number;                // 鼠标位置 (ghost 跟着鼠标)
   ghostY: number;
-  ghostText: string;             // ghost 上显示的文字 ("X 条" / 笔记摘要前 30 字)
+  ghostText: string;             // ghost 上显示的文字 ("X 条" 多选 / 兜底文本)
+  ghostHtml: string;             // 单选时复用 NoteCard.renderedContent (零开销, 已 Vditor.md2html 渲染好), DragGhost 用 v-html 渲染; 多选时为空走 ghostText
 }
 
 export const dragState = reactive<DragState>({
@@ -31,6 +32,7 @@ export const dragState = reactive<DragState>({
   ghostX: 0,
   ghostY: 0,
   ghostText: '',
+  ghostHtml: '',
 });
 
 interface PendingStart {
@@ -40,6 +42,7 @@ interface PendingStart {
   type: string | null;
   category: string;
   text: string;
+  html?: string;
 }
 
 let pendingStart: PendingStart | null = null;
@@ -108,6 +111,21 @@ function onMove(e: PointerEvent) {
     dragState.fromType = pendingStart.type;
     dragState.fromCategory = pendingStart.category;
     dragState.ghostText = pendingStart.text;
+    // ghostHtml: 调用方显式传 (单选且就是本卡片) → 直接用; 否则从 DOM 拿对应 [data-note-id] 内的 .vditor-reset innerHTML 串联.
+    // 串联用 <hr> 分隔, 让用户看出是多张卡片. CSS 限高 + fade-mask 截断.
+    // 零开销: NoteCard watchEffect 已渲染好, querySelector 直接读 DOM
+    if (pendingStart.html) {
+      dragState.ghostHtml = pendingStart.html;
+    } else if (pendingStart.ids.length > 0) {
+      const htmls: string[] = [];
+      for (const id of pendingStart.ids) {
+        const reset = document.querySelector(`[data-note-id="${id}"] .note-content .vditor-reset`);
+        if (reset?.innerHTML) htmls.push(reset.innerHTML);
+      }
+      dragState.ghostHtml = htmls.join('<hr class="ghost-divider" />');
+    } else {
+      dragState.ghostHtml = '';
+    }
     pendingStart = null;
   }
   if (!dragState.active) return;
@@ -206,6 +224,7 @@ function reset() {
   dragState.fromCategory = '';
   dragState.hoverTarget = null;
   dragState.ghostText = '';
+  dragState.ghostHtml = '';
   pendingStart = null;
   clearHoverNavTimer();
   navigatedTarget = null;

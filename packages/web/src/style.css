@@ -493,17 +493,19 @@ body.resources-dragging * {
   pointer-events: none;
 }
 
-/* ── 语音气泡（微信风格，CSS 属性选择器直接作用于 <a> 标签） ── */
-.note-content a[href$=".webm"],
-.note-content a[href$=".mp3"],
-.note-content a[href$=".wav"],
-.note-content a[href$=".ogg"],
-.note-content a[href$=".m4a"],
-.vditor-reset a[href$=".webm"],
-.vditor-reset a[href$=".mp3"],
-.vditor-reset a[href$=".wav"],
-.vditor-reset a[href$=".ogg"],
-.vditor-reset a[href$=".m4a"] {
+/* ── 语音气泡（微信风格，CSS 属性选择器直接作用于 <a> 标签） ──
+   注: 用 .ext?  跟 .ext  两选一. PR #3 群组文件授权后 url 尾部带 ?token=<jwt> 让 href 不再以 .ext 结尾,
+   `$=".m4a"` 失效. 加 `*=".m4a?"` 覆盖带 query 的 case (含路径里恰好出现 .m4a? 子串的罕见 corner case, 接受) */
+.note-content a[href$=".webm"], .note-content a[href*=".webm?"],
+.note-content a[href$=".mp3"],  .note-content a[href*=".mp3?"],
+.note-content a[href$=".wav"],  .note-content a[href*=".wav?"],
+.note-content a[href$=".ogg"],  .note-content a[href*=".ogg?"],
+.note-content a[href$=".m4a"],  .note-content a[href*=".m4a?"],
+.vditor-reset a[href$=".webm"], .vditor-reset a[href*=".webm?"],
+.vditor-reset a[href$=".mp3"],  .vditor-reset a[href*=".mp3?"],
+.vditor-reset a[href$=".wav"],  .vditor-reset a[href*=".wav?"],
+.vditor-reset a[href$=".ogg"],  .vditor-reset a[href*=".ogg?"],
+.vditor-reset a[href$=".m4a"],  .vditor-reset a[href*=".m4a?"] {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -523,27 +525,27 @@ body.resources-dragging * {
   vertical-align: -1px;
   margin: 4px 10px 4px 0;
 }
-.note-content a[href$=".webm"]:hover,
-.note-content a[href$=".mp3"]:hover,
-.note-content a[href$=".wav"]:hover,
-.note-content a[href$=".ogg"]:hover,
-.note-content a[href$=".m4a"]:hover,
-.vditor-reset a[href$=".webm"]:hover,
-.vditor-reset a[href$=".mp3"]:hover,
-.vditor-reset a[href$=".wav"]:hover,
-.vditor-reset a[href$=".ogg"]:hover,
-.vditor-reset a[href$=".m4a"]:hover { opacity: 0.85; }
+.note-content a[href$=".webm"]:hover, .note-content a[href*=".webm?"]:hover,
+.note-content a[href$=".mp3"]:hover,  .note-content a[href*=".mp3?"]:hover,
+.note-content a[href$=".wav"]:hover,  .note-content a[href*=".wav?"]:hover,
+.note-content a[href$=".ogg"]:hover,  .note-content a[href*=".ogg?"]:hover,
+.note-content a[href$=".m4a"]:hover,  .note-content a[href*=".m4a?"]:hover,
+.vditor-reset a[href$=".webm"]:hover, .vditor-reset a[href*=".webm?"]:hover,
+.vditor-reset a[href$=".mp3"]:hover,  .vditor-reset a[href*=".mp3?"]:hover,
+.vditor-reset a[href$=".wav"]:hover,  .vditor-reset a[href*=".wav?"]:hover,
+.vditor-reset a[href$=".ogg"]:hover,  .vditor-reset a[href*=".ogg?"]:hover,
+.vditor-reset a[href$=".m4a"]:hover,  .vditor-reset a[href*=".m4a?"]:hover { opacity: 0.85; }
 
-.note-content a[href$=".webm"]::before,
-.note-content a[href$=".mp3"]::before,
-.note-content a[href$=".wav"]::before,
-.note-content a[href$=".ogg"]::before,
-.note-content a[href$=".m4a"]::before,
-.vditor-reset a[href$=".webm"]::before,
-.vditor-reset a[href$=".mp3"]::before,
-.vditor-reset a[href$=".wav"]::before,
-.vditor-reset a[href$=".ogg"]::before,
-.vditor-reset a[href$=".m4a"]::before {
+.note-content a[href$=".webm"]::before, .note-content a[href*=".webm?"]::before,
+.note-content a[href$=".mp3"]::before,  .note-content a[href*=".mp3?"]::before,
+.note-content a[href$=".wav"]::before,  .note-content a[href*=".wav?"]::before,
+.note-content a[href$=".ogg"]::before,  .note-content a[href*=".ogg?"]::before,
+.note-content a[href$=".m4a"]::before,  .note-content a[href*=".m4a?"]::before,
+.vditor-reset a[href$=".webm"]::before, .vditor-reset a[href*=".webm?"]::before,
+.vditor-reset a[href$=".mp3"]::before,  .vditor-reset a[href*=".mp3?"]::before,
+.vditor-reset a[href$=".wav"]::before,  .vditor-reset a[href*=".wav?"]::before,
+.vditor-reset a[href$=".ogg"]::before,  .vditor-reset a[href*=".ogg?"]::before,
+.vditor-reset a[href$=".m4a"]::before,  .vditor-reset a[href*=".m4a?"]::before {
   content: "";
   display: inline-block;
   width: 16px;
@@ -554,11 +556,11 @@ body.resources-dragging * {
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M11 5L6 9H2v6h4l5 4V5z'/%3E%3Cpath d='M15.54 8.46a5 5 0 010 7.07'/%3E%3Cpath d='M19.07 4.93a10 10 0 010 14.14'/%3E%3C/svg%3E") no-repeat center / contain;
 }
 
-.note-content a[href$=".webm"]::after,
-.note-content a[href$=".mp3"]::after,
-.note-content a[href$=".wav"]::after,
-.note-content a[href$=".ogg"]::after,
-.note-content a[href$=".m4a"]::after {
+.note-content a[href$=".webm"]::after, .note-content a[href*=".webm?"]::after,
+.note-content a[href$=".mp3"]::after,  .note-content a[href*=".mp3?"]::after,
+.note-content a[href$=".wav"]::after,  .note-content a[href*=".wav?"]::after,
+.note-content a[href$=".ogg"]::after,  .note-content a[href*=".ogg?"]::after,
+.note-content a[href$=".m4a"]::after,  .note-content a[href*=".m4a?"]::after {
   content: none !important;
   display: none !important;
 }

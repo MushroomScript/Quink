@@ -232,19 +232,33 @@ function onPointerDown(e: PointerEvent) {
     const href = audioA.getAttribute('href') || '';
     if (/\.(webm|mp3|wav|ogg|m4a)(\?.*)?$/i.test(href)) return;
   }
-  // 多选 + 当前在选中集 + 选中 ≥ 2 → 整批; 否则单条
-  const useBatch = store.selectMode && store.selectedIds.has(props.note.id) && store.selectedIds.size > 1;
-  const ids = useBatch ? Array.from(store.selectedIds) : [props.note.id];
-  // ghost 文字: 多条显数量, 单条显内容前 120 字 (没内容用 type label 兜底).
-  // 去掉 markdown 标点字符 (#/*/`/...) 但保留换行 (\n 不在 char class 内), DragGhost CSS 用 whitespace-pre-line + line-clamp 多行显示
-  const text = useBatch
+  // 多选模式下: 拖的永远是被选中的卡片, 不管鼠标按哪张 (按未选卡片不响应, 按已选卡片也是拖整批).
+  //   - 没选任何卡片 → return 不响应拖动 (蘑菇约定: 多选模式按未选区不应抓起任何东西)
+  //   - 选 1 张 → 拖那 1 张 (即使鼠标按的是另一张)
+  //   - 选 N 张 → 拖那 N 张
+  // 普通模式: 拖当前卡片 (单选)
+  let ids: string[];
+  if (store.selectMode) {
+    if (store.selectedIds.size === 0) return;
+    ids = Array.from(store.selectedIds);
+  } else {
+    ids = [props.note.id];
+  }
+  const isBatch = ids.length > 1;
+  // ghost 文字 (兜底, ghostHtml 没值时显示): 多条显数量, 单条显内容前 120 字
+  const firstId = ids[0];
+  const firstNote = ids.length === 1 && firstId === props.note.id ? props.note : null;
+  const text = isBatch
     ? `${ids.length} 条内容`
-    : (props.note.content?.replace(/[#*`>~\-!\[\]]/g, '').trim().slice(0, 120) || typeLabels[props.note.type] || '内容');
+    : (firstNote?.content?.replace(/[#*`>~\-!\[\]]/g, '').trim().slice(0, 120) || typeLabels[firstNote?.type || props.note.type] || '内容');
+  // 单选 (无论是否在多选模式) 且 ids[0] 就是本卡片 → 复用 renderedContent (零开销).
+  // 多选 / 拖别的卡片 → 传 ids 让 cardDnd 在拖动启动时从 DOM 拿选中卡片的 .vditor-reset innerHTML 串联.
   startCardDrag(e, {
     ids,
-    type: ids.length === 1 ? props.note.type : null,
-    category: ids.length === 1 ? (props.note.category || '') : '',
+    type: ids.length === 1 && firstNote ? firstNote.type : null,
+    category: ids.length === 1 && firstNote ? (firstNote.category || '') : '',
     text,
+    html: ids.length === 1 && firstNote ? renderedContent.value : undefined,
   });
 }
 const confirmDelete = ref(false);
