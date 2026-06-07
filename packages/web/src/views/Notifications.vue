@@ -307,10 +307,9 @@ async function doClear() {
    3. brightness 1.1 微提亮 (避免太重)
    background-color 仍由 inline style 控制 (已读灰 / 未读紫底), background-image 跟它叠加不冲突 */
 .notif-item:hover {
-  /* Quink --c-accent 是 "116 143 252" 空格 channel 格式, 必须用 rgb(var() / alpha) 现代语法.
-     之前用 rgba(var(--c-accent), 0.22) 是错的 (rgba 不支持空格 channel), 整段被浏览器 ignore. */
+  /* hover 整行淡紫色背景 (蘑菇要求: 不要框 / 只要 bg 跟主题色呼应).
+     用 background-image linear-gradient 叠一层半透明 primary 跟 inline style 的 background-color 共存.
+     Quink --c-accent 是 "116 143 252" 空格 channel 格式, 必须用 rgb(var() / alpha) 现代语法 (rgba 不支持空格 channel) */
   background-image: linear-gradient(rgb(var(--c-accent) / 0.22), rgb(var(--c-accent) / 0.22));
-  box-shadow: inset 0 0 0 1.5px rgb(var(--c-accent) / 0.7);
-  filter: brightness(1.1);
 }
 </style>
