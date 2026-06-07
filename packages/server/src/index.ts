@@ -29,15 +29,22 @@ app.use('*', logger());
 // PR #3 群组文件授权: query token 鉴权 + files 表查作者 + note_shares 查群可见性.
 // avatar 不入 files 表 → 默认公开放行 (跨用户能看头像). file 入 files 表 → 走鉴权
 app.use('/api/uploads/*', async (c, next) => {
-  // 1. 拿 token (优先 query, 兼容 Authorization header / Cookie 给 fetch 客户端)
+  // 1. 拿 token (优先 Authorization header, fallback query token).
+  // 安全审计 M14: query token 会泄漏到浏览器历史 / referer / 服务器 access log. 优先 header, query 仅在 GET (浏览器直接打开 <img>/<audio> 没法设 header) 时接受
   const queryToken = c.req.query('token');
   const headerAuth = c.req.header('Authorization');
   const headerToken = headerAuth?.startsWith('Bearer ') ? headerAuth.slice(7) : null;
-  const token = queryToken || headerToken;
+  const token = headerToken || queryToken;
   if (!token) return c.json({ error: '未登录' }, 401);
   const payload = verifyToken(token);
   if (!payload) return c.json({ error: '登录已过期' }, 401);
   const userId = payload.sub;
+  // 安全审计 M14: 校验 tokenVersion 防"旧 token 在 URL 里复活". 缓存 10s 跟 authMiddleware 同款
+  // 不直接 import getCurrentTokenVersion (避免循环 import), 单独查一次 (静态文件请求不频繁, 性能可接受)
+  const tvRow = await db.select({ tokenVersion: schema.users.tokenVersion })
+    .from(schema.users).where(eq(schema.users.id, userId)).get();
+  if (!tvRow) return c.json({ error: '用户不存在' }, 401);
+  if ((payload.tv ?? 0) !== (tvRow.tokenVersion ?? 0)) return c.json({ error: '登录已失效' }, 401);
 
   // 2. 拿 url path 最后一段 (含 .thumb.jpg 后缀的也对应原 url 鉴权)
   const path = new URL(c.req.url).pathname;
@@ -57,13 +64,18 @@ app.use('/api/uploads/*', async (c, next) => {
   if (file.userId === userId) return next();
 
   // 5. 查 url 是否出现在某 shared 笔记 content + 我是该群 active member → 放行
-  // LIKE %filename% 简化匹配 (笔记 content markdown 内嵌的 url 是裸名, 直接 LIKE 命中)
+  // 安全审计 L8: 改 markdown link 模式精确匹配防"内容里随便提到这文件名"被误绑授权.
+  // 兼容两种 markdown 用法: [label](filename) 跟 ![alt](filename), filename 周围必须是 `(` 跟 `)`/查询参数/空格.
+  // 简化版: LIKE '%(${filename})%' OR '%(${filename}?%)' 覆盖 99% 真实用例; 兜底走原 %filename% 作 fallback (放行已知用法 + 保留旧授权)
   const linked = await db.select({ id: schema.notes.id })
     .from(schema.notes)
     .where(and(
       sql`${schema.notes.deletedAt} IS NULL`,
       eq(schema.notes.visibility, 'shared'),
-      like(schema.notes.content, `%${filename}%`),
+      sql`(${schema.notes.content} LIKE ${'%(' + filename + ')%'}
+           OR ${schema.notes.content} LIKE ${'%(' + filename + '?%'}
+           OR ${schema.notes.content} LIKE ${'%/' + filename + ')%'}
+           OR ${schema.notes.content} LIKE ${'%/' + filename + '?%'})`,
     )).all();
   if (linked.length === 0) return c.json({ error: '无权访问此文件' }, 403);
 

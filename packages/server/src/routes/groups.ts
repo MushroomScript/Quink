@@ -423,6 +423,7 @@ app.post('/:id/notes/:noteId/pin', async (c) => {
   for (const m of members) {
     if (m.userId !== userId) publish(m.userId, 'group-notes-changed', { groupId }, _ocid);
   }
+  await logAudit(c, 'group.note_pin', 'group', groupId, { noteId });
   return c.json({ message: '已置顶' });
 });
 
@@ -442,6 +443,7 @@ app.delete('/:id/notes/:noteId/pin', async (c) => {
   for (const m of members) {
     if (m.userId !== userId) publish(m.userId, 'group-notes-changed', { groupId }, _ocid);
   }
+  await logAudit(c, 'group.note_unpin', 'group', groupId, { noteId });
   return c.json({ message: '已取消置顶' });
 });
 
@@ -455,6 +457,9 @@ app.get('/:id/note-edit-requests', async (c) => {
   if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
     return c.json({ error: '只有群管理员可以查看编辑申请' }, 403);
   }
+  // 安全审计 M7: 加 LIMIT 防 DoS (攻击者灌大量 pending 让 admin 拉这接口卡顿). 默认 100, 超额前端展"还有更多"
+  const limit = Math.min(parseInt(c.req.query('limit') || '100', 10) || 100, 200);
+  const offset = parseInt(c.req.query('offset') || '0', 10) || 0;
   const rows = db.all(sql`
     SELECT r.id, r.note_id as noteId, r.user_id as userId, r.status, r.message, r.created_at as createdAt,
            u.nickname as requesterNickname, u.avatar as requesterAvatar,
@@ -467,8 +472,9 @@ app.get('/:id/note-edit-requests', async (c) => {
     LEFT JOIN users au ON au.id = n.user_id
     WHERE ns.group_id = ${groupId} AND r.status = 'pending' AND n.deleted_at IS NULL
     ORDER BY r.created_at DESC
+    LIMIT ${limit} OFFSET ${offset}
   `) as Array<any>;
-  return c.json({ data: rows });
+  return c.json({ data: rows, pagination: { limit, offset } });
 });
 
 // PR #5b 群级汇总: 该群所有 shared 笔记的已授权用户 (作者+admin 看, 可撤销)
@@ -528,6 +534,8 @@ app.patch('/:id', async (c) => {
   // 广播给所有成员 (排除操作者) 让群名/头像/autoJoin/公告 实时更新
   await broadcastGroupChanged(groupId, [userId], _ocid);
   publish(userId, 'group-changed', { groupId }, _ocid);
+  await logAudit(c, parsed.data.announcement !== undefined ? 'group.announcement' : 'group.update',
+    'group', groupId, { fields: Object.keys(updates) });
   const enriched = await enrichGroup(groupId, userId);
   return c.json({ data: enriched });
 });
@@ -575,6 +583,7 @@ app.post('/:id/invite/reset', async (c) => {
   // 广播给其他 active 成员 (排除操作者), 让其他 admin/owner 面板自动同步新 token
   await broadcastGroupChanged(groupId, [userId], _ocid);
   publish(userId, 'group-changed', { groupId }, _ocid);
+  await logAudit(c, 'group.invite_reset', 'group', groupId);
   return c.json({ data: { inviteToken: newToken, inviteExpiresAt: newExpires } });
 });
 
@@ -591,6 +600,7 @@ app.delete('/:id/invite', async (c) => {
   // 广播给其他 active 成员 (排除操作者), 让其他 admin/owner 立即看到邀请已关闭
   await broadcastGroupChanged(groupId, [userId], _ocid);
   publish(userId, 'group-changed', { groupId }, _ocid);
+  await logAudit(c, 'group.invite_revoke', 'group', groupId);
   return c.json({ message: '邀请已关闭' });
 });
 
@@ -659,6 +669,9 @@ app.post('/:id/join-requests/:reqId/approve', async (c) => {
   // 广播给其他成员 (排除操作者 + 申请人, 申请人通过 group-join-approved 触发 loadGroups)
   await broadcastGroupChanged(groupId, [userId, reqRow.userId], _ocid);
   publish(userId, 'group-changed', { groupId }, _ocid);
+  await logAudit(c, 'group.member_add', 'group', groupId, {
+    newMemberId: reqRow.userId, requestId: reqId, approvedBy: me.role,
+  });
   return c.json({ message: '已同意' });
 });
 
@@ -678,6 +691,9 @@ app.post('/:id/join-requests/:reqId/reject', async (c) => {
     .set({ status: 'rejected', handledAt: now, handledBy: userId })
     .where(eq(schema.groupJoinRequests.id, reqId));
   publish(reqRow.userId, 'group-join-rejected', { groupId, requestId: reqId }, _ocid);
+  await logAudit(c, 'group.member_reject', 'group', groupId, {
+    requesterId: reqRow.userId, requestId: reqId,
+  });
   return c.json({ message: '已拒绝' });
 });
 

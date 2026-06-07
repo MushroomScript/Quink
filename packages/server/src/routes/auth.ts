@@ -25,8 +25,16 @@ const loginSchema = z.object({
 
 const updateProfileSchema = z.object({
   nickname: z.string().min(1).max(32).optional(),
-  avatar: z.string().optional(),
-  preferences: z.record(z.any()).optional(),
+  avatar: z.string().max(2048).optional(),
+  // 安全审计 M9: preferences 限制 JSON size 32KB 防恶意大 JSON 灌 DB. 字段不收紧 (兼容大量已知字段如 aiBindings/xfyun/shortcuts)
+  // 但 aiPersonaCustom (会拼进 system prompt) 单独限长 1000 字符
+  preferences: z.record(z.any()).refine(
+    (p) => JSON.stringify(p).length <= 32 * 1024,
+    { message: 'preferences 大小不能超过 32KB' },
+  ).refine(
+    (p) => typeof p.aiPersonaCustom !== 'string' || p.aiPersonaCustom.length <= 1000,
+    { message: 'aiPersonaCustom 长度不能超过 1000 字符' },
+  ).optional(),
 });
 
 // POST /api/auth/register

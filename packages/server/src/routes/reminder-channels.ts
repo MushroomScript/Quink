@@ -60,6 +60,8 @@ app.post('/', async (c) => {
   };
   await db.insert(schema.reminderChannels).values(row);
   publish(userId, 'data-changed', { scope: 'reminder-channels' }, _ocid);
+  const { logAudit } = await import('../utils/auditLog.js');
+  await logAudit(c, 'reminder.channel_create', 'reminder_channel', row.id, { type: row.type, name: row.name });
   return c.json({ data: row }, 201);
 });
 
@@ -82,6 +84,8 @@ app.patch('/:id', async (c) => {
   await db.update(schema.reminderChannels).set(updates).where(eq(schema.reminderChannels.id, id));
   const updated = await db.select().from(schema.reminderChannels).where(eq(schema.reminderChannels.id, id)).get();
   publish(userId, 'data-changed', { scope: 'reminder-channels' }, _ocid);
+  const { logAudit: logAudit1 } = await import('../utils/auditLog.js');
+  await logAudit1(c, 'reminder.channel_update', 'reminder_channel', id, { fields: Object.keys(updates) });
   return c.json({ data: updated });
 });
 
@@ -92,6 +96,8 @@ app.delete('/:id', async (c) => {
   await db.delete(schema.reminderChannels)
     .where(and(eq(schema.reminderChannels.id, id), eq(schema.reminderChannels.userId, userId)));
   publish(userId, 'data-changed', { scope: 'reminder-channels' }, _ocid);
+  const { logAudit: logAudit2 } = await import('../utils/auditLog.js');
+  await logAudit2(c, 'reminder.channel_delete', 'reminder_channel', id);
   return c.json({ message: '已删除' });
 });
 

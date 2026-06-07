@@ -17,10 +17,26 @@ function emitPresence(userId: string, online: boolean) {
   }
 }
 
+// 安全审计 L5: 单账号 SSE 连接数上限. 防恶意账号开 100 个连接占内存 + 让 heartbeat 每 15s 写 100 次.
+// 个人使用场景一台机 1-2 连接足够, 10 个上限留缓冲 (跨设备 + 多 tab 并存). 超出最早进入的连接被踢
+const MAX_SUBSCRIBERS_PER_USER = 10;
+
 export function subscribe(userId: string, write: Subscriber): () => void {
   const wasEmpty = !subscribers.has(userId) || subscribers.get(userId)!.size === 0;
   if (!subscribers.has(userId)) subscribers.set(userId, new Set());
-  subscribers.get(userId)!.add(write);
+  const set = subscribers.get(userId)!;
+
+  // 超额时踢最早进入的连接 (Set 迭代序 = 插入序)
+  while (set.size >= MAX_SUBSCRIBERS_PER_USER) {
+    const oldest = set.values().next().value;
+    if (oldest) {
+      set.delete(oldest);
+      // 通知最早的 writer 它被踢 (sse.ts handler 会 cleanup), 失败 swallow
+      try { oldest('connection-superseded', JSON.stringify({ reason: 'sse_limit_exceeded' })); } catch {}
+    } else break;
+  }
+
+  set.add(write);
   if (wasEmpty) emitPresence(userId, true);
   return () => {
     const set = subscribers.get(userId);

@@ -449,38 +449,47 @@ while ($true) {
 - [x] L4 评论根删除子挂死 — 软删根评论同时软删 `parentId=cid` 的子评论
 - [x] 操作日志（蘑菇要求）— audit_logs 表 + `logAudit(c, action, ...)` helper + auth/note/group 关键 endpoint 接入
 
-**未修（视情况后续做）**：
+**已修（第二批）**：
 
-- [ ] M3 note-edit-request SSE _ocid — publish 调用透传 _ocid
-- [ ] M6 edit-history 跨群泄露 — 编辑者只列我同群的，跨群匿名
-- [ ] M7 group edit-requests 不分页 — 加 LIMIT + 分页
-- [ ] M8 edit-request 拒绝后冷却 24h
-- [ ] M9 preferences schema 收紧 — z.record(z.any()) 换成显式字段
-- [ ] M11 content max length — 100k 字符上限 + 巨型笔记跳过 AI
-- [ ] M13 import zip bomb — 限 zip size + 解压总 size
-- [ ] M14 query token 日志泄漏 — 短期一次性下载 token
-- [ ] M16 评论 markdown sanitize — 后端基础 XSS 过滤
-- [ ] L2 PATCH comment SSE 字段
-- [ ] L5 SSE 并发上限 — 每用户 SSE 连接数限制
-- [ ] L6 categories parentId 校验 — 跨用户 / 循环引用
-- [ ] L7 duplicate rate-limit
-- [ ] L8 uploads LIKE 改精确匹配 — markdown link 正则 / URL 索引表
-- [ ] S5 SSE payload sanitize — 同 M16
-- [ ] 前端：改密码后立即手动登出（不依赖 401 回环跳登录）
-- [ ] 前端：群详情页加"隐身"开关 + 自己 chip 显示"隐身中"
+- [x] M3 note-edit-request SSE _ocid — request/approve/reject 都透传
+- [x] M6 edit-history 跨群泄露 — 编辑者匿名化（'群成员' + avatar=null）非作者调用 + 跨群编辑者
+- [x] M7 group edit-requests 不分页 — 加 LIMIT 100 + 分页
+- [x] M8 edit-request 拒绝后冷却 24h — 含 retryAfter 字段
+- [x] M9 preferences schema 收紧 — JSON size 32KB + aiPersonaCustom 1000 字符上限
+- [x] M11 content max length — 1MB 字符上限 + 200k 跳过 AI
+- [x] M13 import zip bomb — 50MB zip + 500MB 解压 + 10MB/文件 + 1万文件
+- [x] M14 query token 日志泄漏 — Authorization header 优先 + 校验 tokenVersion 防旧 token URL 复活
+- [x] M16 评论 markdown sanitize — javascript:/vbscript:/data:(非图片) 链接拦截
+- [x] L2 PATCH comment SSE 字段 — 加 userNickname/userAvatar
+- [x] L5 SSE 并发上限 — 每用户 10 连接 + 超额踢最早
+- [x] L6 categories parentId 校验 — 跨用户校验 + name/icon 长度
+- [x] L7 duplicate rate-limit — 每分钟 30 次
+- [x] L8 uploads LIKE 改精确匹配 — markdown link `(url)` `(url?` `/(url)` `/(url?` 四种模式
+- [x] S5 SSE payload sanitize — 同 M16（申请 message 透传前 sanitize）
+- [x] 前端：改密码后立即清 token 跳登录页（Settings.vue changePassword）
+- [x] 前端：群详情页加"隐身/在线"开关 + chip 状态显示（GroupDetail.vue）
+
+**未修（后续视需要）**：
+
+- [ ] M2 token 吊销机制 - "登出所有设备"按钮（手动触发 tv++）— 改密码已自动触发, 显式按钮属于体验项
+- [ ] 备份 / 数据导出 加密 — 涉及加密体系，超出本审计范围
+- [ ] 审计日志查看面板（/api/admin/audit-logs 拉取 + 前端列表）— 蘑菇用 sqlite-mcp 直接查 DB 也可
 
 **操作日志主路径已覆盖**：
 - `auth.register` / `auth.login` / `auth.login_failed` / `auth.password_change`
 - `note.create` / `note.update` / `note.update_fork` / `note.delete` / `note.duplicate` / `note.restore` / `note.permanent_delete` / `note.permanent_delete_all_trash`
 - `group.create` / `group.dissolve` / `group.kick` / `group.leave` / `group.member_role` / `group.presence_mode`
 
-**未加日志的写 endpoint（次要，后续补）**：
-- note 互动：reaction / comment_create / comment_update / comment_delete
-- note 权限：edit_request / edit_approve / edit_reject / edit_grant_revoke
-- group：member_add（申请审批通过）/ note_pin / note_unpin / announcement / update / invite_reset / invite_revoke
-- file：upload / delete / rename
-- ai：config_create / config_update / config_delete / chat
-- reminder：channel_create / channel_update / channel_delete / channel_test
+**操作日志已全面覆盖**（第二批补全）：
+- note 互动：note.reaction / note.comment_create / note.comment_update / note.comment_delete
+- note 权限：note.edit_request / note.edit_approve / note.edit_reject / note.edit_grant_revoke
+- group：group.member_add（申请审批通过）/ group.member_reject / group.note_pin / group.note_unpin / group.update / group.announcement / group.invite_reset / group.invite_revoke
+- file：file.upload / file.delete / file.rename
+- ai：ai.config_create / ai.config_update / ai.config_delete
+- reminder：reminder.channel_create / reminder.channel_update / reminder.channel_delete
+- categories：category.create / category.rename / category.delete
+
+唯一未加日志：`ai.chat` 流式调用（高频, 日志意义有限, 且消息本身存 ai_messages 表已是审计记录）+ `reminder.channel_test`（用户手动测试通道, 单次操作可忽略）
 
 ---
 

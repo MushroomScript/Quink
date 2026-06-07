@@ -11,6 +11,7 @@ import dayjs from 'dayjs';
 import {
   PhUsersThree, PhCopy, PhArrowsClockwise, PhX, PhCheck, PhTrash,
   PhCaretRight, PhCaretDown, PhPencilSimple, PhCamera, PhNote, PhMegaphone,
+  PhEye, PhEyeSlash,
 } from '@phosphor-icons/vue';
 import NoteCard from './NoteCard.vue';
 import type { Note, GroupNoteEditRequestRow, GroupMemberInfo } from '@/api';
@@ -26,6 +27,29 @@ const groupId = computed(() => props.groupId);
 const detail = computed(() => store.currentDetail);
 const isOwner = computed(() => detail.value?.myRole === 'owner');
 const isOwnerOrAdmin = computed(() => detail.value?.myRole === 'owner' || detail.value?.myRole === 'admin');
+
+// 安全审计 S6: 我在该群的隐身状态 (后端返 members[i].hidePresence 仅对本人非 undefined)
+const myHidePresence = computed(() => {
+  const me = detail.value?.members.find((m: any) => m.userId === auth.user?.id);
+  return !!(me as any)?.hidePresence;
+});
+const togglingPresence = ref(false);
+async function togglePresenceMode() {
+  if (!detail.value || togglingPresence.value) return;
+  togglingPresence.value = true;
+  const next = !myHidePresence.value;
+  try {
+    await api.setGroupPresenceMode(detail.value.id, next);
+    // 本地立刻 mutate 让 UI 立即反映 (SSE 给其他设备由后端 publish 'group-changed' 触发刷新)
+    const me = detail.value.members.find((m: any) => m.userId === auth.user?.id);
+    if (me) (me as any).hidePresence = next;
+    toast.show(next ? '已在该群隐身 (仍能正常收消息)' : '已取消隐身', 'success', 2500);
+  } catch (e: any) {
+    toast.show('切换失败: ' + (e.message || '未知错误'), 'error', 3000);
+  } finally {
+    togglingPresence.value = false;
+  }
+}
 
 // 给子 NoteCard provide 群角色, 让 NoteCard 的"群内置顶"菜单项按 owner/admin 才显示
 provide('groupRole', computed(() => detail.value?.myRole || null));
@@ -484,6 +508,17 @@ async function saveAnnouncement() {
             <div class="text-xs text-gray-400 mt-0.5">{{ detail.memberCount }} 位成员 · {{ isOwner ? '创建者' : detail.myRole === 'admin' ? '管理员' : '成员' }}</div>
           </div>
           <div class="flex items-center gap-2">
+            <!-- 安全审计 S6: 群内隐身切换. 隐身时其他成员看不到我在线, 但我仍能收所有消息提醒 -->
+            <button @click="togglePresenceMode" :disabled="togglingPresence"
+              class="px-3 py-1 text-xs rounded-lg font-medium inline-flex items-center gap-1 transition-colors"
+              :class="myHidePresence
+                ? 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                : 'bg-primary-light text-primary-dark hover:bg-primary/20'"
+              :title="myHidePresence ? '当前隐身中, 点击恢复显示在线' : '点击隐身 (仍能收消息)'">
+              <PhEyeSlash v-if="myHidePresence" size="0.75rem" weight="fill" />
+              <PhEye v-else size="0.75rem" weight="fill" />
+              {{ myHidePresence ? '隐身中' : '在线' }}
+            </button>
             <button v-if="isOwnerOrAdmin" @click="inviteOpen = !inviteOpen"
               class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/20 inline-flex items-center gap-1"
               :class="inviteOpen ? 'ring-1 ring-primary/30' : ''">

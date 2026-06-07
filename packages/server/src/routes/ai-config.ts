@@ -73,6 +73,10 @@ app.post('/configs', async (c) => {
 
   await db.insert(schema.aiConfigs).values(config);
   publish(userId, 'data-changed', { scope: 'ai-configs' }, _ocid);
+  const { logAudit } = await import('../utils/auditLog.js');
+  await logAudit(c, 'ai.config_create', 'ai_config', config.id, {
+    name: config.name, provider: config.provider, model: config.model,
+  });
   return c.json({ data: config }, 201);
 });
 
@@ -112,6 +116,8 @@ app.patch('/configs/:id', async (c) => {
 
   const updated = await db.select().from(schema.aiConfigs).where(eq(schema.aiConfigs.id, id)).get();
   publish(userId, 'data-changed', { scope: 'ai-configs' }, _ocid);
+  const { logAudit } = await import('../utils/auditLog.js');
+  await logAudit(c, 'ai.config_update', 'ai_config', id, { fields: Object.keys(updates) });
   return c.json({ data: updated });
 });
 
@@ -126,6 +132,8 @@ app.delete('/configs/:id', async (c) => {
 
   await db.delete(schema.aiConfigs).where(eq(schema.aiConfigs.id, id));
   publish(userId, 'data-changed', { scope: 'ai-configs' }, _ocid);
+  const { logAudit } = await import('../utils/auditLog.js');
+  await logAudit(c, 'ai.config_delete', 'ai_config', id, { name: existing.name });
   return c.json({ message: '已删除' });
 });
 

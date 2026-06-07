@@ -96,6 +96,12 @@ app.get('/', async (c) => {
 });
 
 // POST /api/import — 导入 ZIP
+// 安全审计 M13: zip bomb 防御. 压缩文件大小上限 + 解压后总大小上限 + 单文件大小上限
+const IMPORT_ZIP_MAX = 50 * 1024 * 1024;          // 50MB 压缩文件
+const IMPORT_UNCOMPRESSED_MAX = 500 * 1024 * 1024; // 500MB 解压总大小 (压缩比 1:10 容限)
+const IMPORT_FILE_MAX = 10 * 1024 * 1024;          // 10MB 单文件
+const IMPORT_FILE_COUNT_MAX = 10000;               // 1 万文件上限
+
 app.post('/', async (c) => {
   const userId = c.get('userId');
   const body = await c.req.parseBody();
@@ -103,6 +109,11 @@ app.post('/', async (c) => {
 
   if (!file || typeof file === 'string') {
     return c.json({ error: '请选择 ZIP 文件' }, 400);
+  }
+
+  // 安全审计 M13: 压缩文件大小检查
+  if (file.size > IMPORT_ZIP_MAX) {
+    return c.json({ error: `ZIP 文件过大 (上限 ${IMPORT_ZIP_MAX / 1024 / 1024} MB)` }, 400);
   }
 
   // 简单导入：解析 ZIP 中的 Markdown 文件
@@ -116,8 +127,23 @@ app.post('/', async (c) => {
     let imported = 0;
     const noteFiles = Object.keys(zip.files).filter(f => f.startsWith('notes/') && f.endsWith('.md'));
 
+    // 安全审计 M13: 文件数 + 解压总大小检查
+    if (noteFiles.length > IMPORT_FILE_COUNT_MAX) {
+      return c.json({ error: `ZIP 内文件过多 (上限 ${IMPORT_FILE_COUNT_MAX})` }, 400);
+    }
+    let uncompressedTotal = 0;
+
     for (const filename of noteFiles) {
       const content = await zip.files[filename].async('string');
+      // 单文件 + 总大小限制 (utf-8 byte length 近似 chars * 3)
+      const fileSize = Buffer.byteLength(content, 'utf-8');
+      if (fileSize > IMPORT_FILE_MAX) {
+        return c.json({ error: `单文件过大: ${filename}` }, 400);
+      }
+      uncompressedTotal += fileSize;
+      if (uncompressedTotal > IMPORT_UNCOMPRESSED_MAX) {
+        return c.json({ error: `解压总大小超限 (上限 ${IMPORT_UNCOMPRESSED_MAX / 1024 / 1024} MB), 疑似 zip bomb` }, 400);
+      }
 
       // 解析 frontmatter
       let noteContent = content;

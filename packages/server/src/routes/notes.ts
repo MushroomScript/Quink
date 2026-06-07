@@ -15,23 +15,28 @@ const app = new Hono();
 // 所有笔记路由都需要登录
 app.use('*', authMiddleware);
 
+// 安全审计 M11: content 上限 1MB (100 万字符约 2-3MB markdown 文件). 防恶意巨型笔记打爆 AI quota + DB.
+// 超大 content 走"跳过 AI" 路径 (processNoteWithAi 内 plainTextLen > MAX 时不调 AI). 实际写入仍保留 (用户可能粘了真材实料的 1MB 文章)
+const NOTE_CONTENT_MAX = 1_000_000;
+const NOTE_AI_SKIP_THRESHOLD = 200_000; // 超过 200k 字符跳过 AI 处理防大账单
+
 const createNoteSchema = z.object({
-  content: z.string().min(1),
+  content: z.string().min(1).max(NOTE_CONTENT_MAX),
   type: z.enum(['quink', 'note', 'todo']).default('quink'),
-  category: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-  todoDue: z.string().optional(), // ISO datetime, 复用为提醒时间
-  todoRemindRrule: z.string().nullable().optional(), // RFC 5545 RRULE
+  category: z.string().max(200).optional(),
+  tags: z.array(z.string().max(50)).max(50).optional(),
+  todoDue: z.string().max(64).optional(), // ISO datetime, 复用为提醒时间
+  todoRemindRrule: z.string().max(512).nullable().optional(), // RFC 5545 RRULE
   // PR #2 群组共享: visibility=private (默认, 仅作者) / visibility=shared 必须给 sharedGroupIds[]
   visibility: z.enum(['private', 'shared']).default('private'),
-  sharedGroupIds: z.array(z.string()).optional(),
+  sharedGroupIds: z.array(z.string().max(32)).max(100).optional(),
 });
 
 const updateNoteSchema = z.object({
-  content: z.string().min(1).optional(),
-  summary: z.string().optional(),
-  category: z.string().optional(),
-  tags: z.array(z.string()).optional(),
+  content: z.string().min(1).max(NOTE_CONTENT_MAX).optional(),
+  summary: z.string().max(2000).optional(),
+  category: z.string().max(200).optional(),
+  tags: z.array(z.string().max(50)).max(50).optional(),
   type: z.enum(['quink', 'note', 'todo']).optional(),
   todoStatus: z.enum(['pending', 'done']).optional(),
   todoDue: z.string().nullable().optional(),
@@ -775,6 +780,24 @@ async function getNoteAuthorityRecipients(noteId: string): Promise<string[]> {
 // PR #5b 编辑权限申请 API (5 个): 申请 / 同意 / 拒绝 / 列待审申请 / 撤销已授权
 // 改 editPermission 走 PATCH /:id 的 editPermission 字段, 不另外加 API. 跟 visibility / sharedGroupIds 同款约定 (仅作者改).
 
+// 安全审计 M8: edit-request rejected 后冷却 24h, 防"循环 rejected 重申请" spam SSE 给作者
+const EDIT_REQUEST_REJECT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+// 安全审计 M16/S5: 评论 + 申请 message 简单 markdown sanitize. 后端深度防御 (前端 Vditor 也会渲染时过滤).
+// 拦截 javascript: / data: / vbscript: 等危险 URI scheme, 含在 markdown link href 里
+function sanitizeUserMarkdown(text: string): string {
+  if (!text) return text;
+  // markdown link / image: [label](url) ![alt](url)
+  return text.replace(/(\!?\[[^\]]*\])\(([^)]+)\)/g, (full, label, url) => {
+    const trimmed = String(url).trim().toLowerCase();
+    if (trimmed.startsWith('javascript:') || trimmed.startsWith('vbscript:') ||
+        (trimmed.startsWith('data:') && !trimmed.startsWith('data:image/'))) {
+      return `${label}(#blocked)`;
+    }
+    return full;
+  });
+}
+
 // POST /api/notes/:id/edit-request - 申请编辑权 (没 write 权的群成员调). 已 pending 返原 request (idempotent).
 app.post('/:id/edit-request', async (c) => {
   const userId = c.get('userId');
@@ -799,15 +822,35 @@ app.post('/:id/edit-request', async (c) => {
     )).get();
   if (existing) return c.json({ data: existing });
 
+  // 安全审计 M8: rejected 后 24h 冷却防 spam
+  const recentRejected = await db.select().from(schema.noteEditRequests)
+    .where(and(
+      eq(schema.noteEditRequests.noteId, id),
+      eq(schema.noteEditRequests.userId, userId),
+      eq(schema.noteEditRequests.status, 'rejected'),
+    )).orderBy(desc(schema.noteEditRequests.handledAt)).get();
+  if (recentRejected?.handledAt) {
+    const cooldownEnd = dayjs(recentRejected.handledAt).add(EDIT_REQUEST_REJECT_COOLDOWN_MS, 'ms');
+    if (cooldownEnd.isAfter(dayjs())) {
+      return c.json({
+        error: 'request_in_cooldown',
+        message: '上次申请被拒绝, 请 24 小时后再申请',
+        retryAfter: cooldownEnd.toISOString(),
+      }, 429);
+    }
+  }
+
   const reqId = nanoid(12);
   const now = dayjs().toISOString();
+  // 安全审计 M16: sanitize 申请 message 防恶意 markdown 注入 (SSE payload 透传给作者前端渲染)
+  const sanitizedMessage = message ? sanitizeUserMarkdown(message) : null;
   const newReq: schema.NewNoteEditRequest = {
-    id: reqId, noteId: id, userId, status: 'pending', message,
+    id: reqId, noteId: id, userId, status: 'pending', message: sanitizedMessage,
     createdAt: now, handledAt: null, handledBy: null,
   };
   await db.insert(schema.noteEditRequests).values(newReq);
 
-  // SSE 推作者 + 群 admin (除申请人自己)
+  // SSE 推作者 + 群 admin (除申请人自己). 安全审计 M3: 透传 _ocid 让同账号其他设备跳过
   const requester = await db.select({ nickname: schema.users.nickname })
     .from(schema.users).where(eq(schema.users.id, userId)).get();
   const recipients = await getNoteAuthorityRecipients(id);
@@ -815,9 +858,10 @@ app.post('/:id/edit-request', async (c) => {
     if (rid === userId) continue;
     publish(rid, 'note-edit-request', {
       requestId: reqId, noteId: id, noteUserId: note.userId,
-      requesterId: userId, requesterNickname: requester?.nickname || '群成员', message,
-    });
+      requesterId: userId, requesterNickname: requester?.nickname || '群成员', message: sanitizedMessage,
+    }, _ocid);
   }
+  await logAudit(c, 'note.edit_request', 'note', id, { requestId: reqId });
   return c.json({ data: newReq }, 201);
 });
 
@@ -851,7 +895,8 @@ app.post('/:id/edit-requests/:reqId/approve', async (c) => {
 
   publish(req.userId, 'note-edit-request-resolved', {
     requestId: reqId, noteId: id, status: 'approved', handledBy: userId,
-  });
+  }, _ocid);
+  await logAudit(c, 'note.edit_approve', 'note', id, { requestId: reqId, granteeId: req.userId });
   return c.json({ data: { message: '已同意, 申请人已获得永久编辑权' } });
 });
 
@@ -879,7 +924,8 @@ app.post('/:id/edit-requests/:reqId/reject', async (c) => {
 
   publish(req.userId, 'note-edit-request-resolved', {
     requestId: reqId, noteId: id, status: 'rejected', handledBy: userId,
-  });
+  }, _ocid);
+  await logAudit(c, 'note.edit_reject', 'note', id, { requestId: reqId, requesterId: req.userId });
   return c.json({ data: { message: '已拒绝' } });
 });
 
@@ -957,11 +1003,14 @@ app.delete('/:id/edit-grants/:userId', async (c) => {
     eq(schema.noteEditGrants.noteId, id),
     eq(schema.noteEditGrants.userId, targetUserId),
   ));
+  await logAudit(c, 'note.edit_grant_revoke', 'note', id, { revokedUserId: targetUserId });
   return c.json({ data: { message: '已撤销编辑权' } });
 });
 
 // PR #7b: GET /api/notes/:id/edit-history - 列编辑历史 (非作者编辑次数). NoteDetail "X 人编辑过" 胶囊 popover 用.
 // 鉴权: getNoteForAccess(read) - 能看到笔记的人都能看历史 (作者 + 共享群 active member). 私有笔记理论上永远空数组但仍能 GET.
+// 安全审计 M6: 跨群信息泄露. 笔记 N 分享给 G1, G2. X 在 G1 改过 → G2 成员通过该 API 知道 X 改过笔记, 即使 X 不在 G2.
+// 修法: 编辑者只列"调用者也在的群里也是成员"的人, 跨群编辑者匿名化 (用 '群成员' 占位 nickname, avatar=null, userId 仍返用于幂等).
 app.get('/:id/edit-history', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
@@ -981,7 +1030,34 @@ app.get('/:id/edit-history', async (c) => {
     .where(eq(schema.noteEditHistory.noteId, id))
     .orderBy(desc(schema.noteEditHistory.editedAt))
     .all();
-  return c.json({ data: rows });
+
+  // 安全审计 M6: 调用者是作者 → 全显示 (作者本来就知道自己的笔记被谁改过)
+  // 否则跨群匿名: 编辑者跟我有共同 active 群才显示 nickname/avatar; 没共同群的匿名为 "群成员"
+  const isAuthor = note.userId === userId;
+  if (isAuthor || rows.length === 0) return c.json({ data: rows });
+  const editorIds = [...new Set(rows.map(r => r.userId))];
+  if (editorIds.length === 0) return c.json({ data: rows });
+  // 一次性查"我所在 active 群" 跟 "编辑者所在 active 群" 的交集, 拿到我跟谁有共同群
+  const sharedSet = new Set<string>();
+  const myGroups = await db.select({ groupId: schema.groupMembers.groupId })
+    .from(schema.groupMembers)
+    .where(and(eq(schema.groupMembers.userId, userId), eq(schema.groupMembers.status, 'active')))
+    .all();
+  if (myGroups.length > 0) {
+    const myGroupIds = myGroups.map(g => g.groupId);
+    const peers = await db.select({ userId: schema.groupMembers.userId })
+      .from(schema.groupMembers)
+      .where(and(
+        inArray(schema.groupMembers.userId, editorIds),
+        inArray(schema.groupMembers.groupId, myGroupIds),
+        eq(schema.groupMembers.status, 'active'),
+      )).all();
+    for (const p of peers) sharedSet.add(p.userId);
+  }
+  const masked = rows.map(r => sharedSet.has(r.userId) ? r : ({
+    ...r, nickname: '群成员', avatar: null,
+  }));
+  return c.json({ data: masked });
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1106,6 +1182,7 @@ app.post('/:id/reactions', async (c) => {
     .catch(e => console.error('[reactions] broadcast failed:', e));
   // 多设备同步: 给操作者本人所有设备 publish (broadcastNoteSocial 排除发起人 userId 同账号其他设备也漏)
   publish(userId, 'note-reaction-changed', { noteId: id, summary }, _ocid);
+  await logAudit(c, 'note.reaction', 'note', id, { emoji, action });
   return c.json({ data: { action, summary } });
 });
 
@@ -1157,9 +1234,11 @@ app.post('/:id/comments', async (c) => {
 
   const cid = nanoid(12);
   const now = dayjs().toISOString();
+  // 安全审计 M16: 评论内容 sanitize 防 javascript: 注入
+  const sanitizedContent = sanitizeUserMarkdown(parsed.data.content);
   const newComment: schema.NewNoteComment = {
     id: cid, noteId: id, userId, parentId: normalizedParentId,
-    content: parsed.data.content, createdAt: now, updatedAt: now, deletedAt: null,
+    content: sanitizedContent, createdAt: now, updatedAt: now, deletedAt: null,
   };
   await db.insert(schema.noteComments).values(newComment);
 
@@ -1172,6 +1251,7 @@ app.post('/:id/comments', async (c) => {
     .catch(e => console.error('[comments] broadcast failed:', e));
   // 多设备同步: CommentThread.onCommentAdded 已有 id 去重防重 push
   publish(userId, 'note-comment-added', { noteId: id, comment: enriched }, _ocid);
+  await logAudit(c, 'note.comment_create', 'comment', cid, { noteId: id, isReply: !!normalizedParentId });
   return c.json({ data: enriched }, 201);
 });
 
@@ -1222,18 +1302,26 @@ app.patch('/:id/comments/:cid', async (c) => {
   if (comment.userId !== userId) return c.json({ error: '只能编辑自己的评论' }, 403);
 
   const now = dayjs().toISOString();
+  // 安全审计 M16: sanitize 评论内容防恶意 markdown
+  const sanitizedContent = sanitizeUserMarkdown(parsed.data.content);
   await db.update(schema.noteComments).set({
-    content: parsed.data.content, updatedAt: now,
+    content: sanitizedContent, updatedAt: now,
   }).where(eq(schema.noteComments.id, cid));
 
+  // 安全审计 L2: SSE payload 加 user nickname/avatar (前端组渲染用)
+  const u = await db.select({ nickname: schema.users.nickname, avatar: schema.users.avatar })
+    .from(schema.users).where(eq(schema.users.id, userId)).get();
   broadcastNoteSocial(id, 'note-comment-updated', {
-    noteId: id, commentId: cid, content: parsed.data.content, updatedAt: now,
+    noteId: id, commentId: cid, content: sanitizedContent, updatedAt: now,
+    userNickname: u?.nickname || '用户', userAvatar: u?.avatar || null,
   }, userId, _ocid).catch(e => console.error('[comments] broadcast failed:', e));
   // 多设备同步: CommentThread.onCommentUpdated 用 findIndex 已是幂等
   publish(userId, 'note-comment-updated', {
-    noteId: id, commentId: cid, content: parsed.data.content, updatedAt: now,
+    noteId: id, commentId: cid, content: sanitizedContent, updatedAt: now,
+    userNickname: u?.nickname || '用户', userAvatar: u?.avatar || null,
   }, _ocid);
-  return c.json({ data: { ...comment, content: parsed.data.content, updatedAt: now } });
+  await logAudit(c, 'note.comment_update', 'comment', cid, { noteId: id });
+  return c.json({ data: { ...comment, content: sanitizedContent, updatedAt: now } });
 });
 
 // DELETE /api/notes/:id/comments/:cid — 软删 (deletedAt). 本人 OR 笔记作者 OR 群 admin 都能删.
@@ -1277,6 +1365,9 @@ app.delete('/:id/comments/:cid', async (c) => {
       .catch(e => console.error('[comments] broadcast failed:', e));
     publish(userId, 'note-comment-deleted', { noteId: id, commentId: did }, _ocid);
   }
+  await logAudit(c, 'note.comment_delete', 'comment', cid, {
+    noteId: id, cascadedCount: deletedCommentIds.length - 1,
+  });
   return c.json({ data: { message: '已删除', deletedCount: deletedCommentIds.length } });
 });
 
@@ -1394,6 +1485,11 @@ app.post('/', async (c) => {
   return c.json({ data: { ...note, sharedGroupIds } }, 201);
 });
 
+// 安全审计 L7: duplicate per-user rate-limit. 防批量复制刷数据库
+const DUPLICATE_RATE_WINDOW_MS = 60 * 1000;
+const DUPLICATE_RATE_MAX = 30; // 每分钟 30 次, 正常用户够用
+const duplicateRateMap = new Map<string, { count: number; resetAt: number }>();
+
 // POST /api/notes/:id/duplicate — PR #9 "另存为" 副本
 // 鉴权: 能读到笔记的人都能复制 (作者 + 共享群 active member). 复制后副本归调用人.
 // 副本: userId = 当前操作人, visibility = 'private', type 同原, content = 引用块 + 原 content
@@ -1403,6 +1499,18 @@ app.post('/:id/duplicate', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
+
+  // 安全审计 L7: rate-limit (per-user) 防批量复制
+  const nowMs = Date.now();
+  const bucket = duplicateRateMap.get(userId);
+  if (bucket && bucket.resetAt > nowMs) {
+    if (bucket.count >= DUPLICATE_RATE_MAX) {
+      return c.json({ error: '复制操作过于频繁, 请稍后再试' }, 429);
+    }
+    bucket.count++;
+  } else {
+    duplicateRateMap.set(userId, { count: 1, resetAt: nowMs + DUPLICATE_RATE_WINDOW_MS });
+  }
 
   const original = await getNoteForAccess(userId, id, 'read');
   if (!original) return c.json({ error: '笔记不存在' }, 404);
@@ -1837,9 +1945,15 @@ app.delete('/:id', async (c) => {
 /**
  * 异步 AI 处理：自动标签 + 自动分类
  * 不阻塞笔记保存，后台静默执行
+ * 安全审计 M11: 巨型 content 跳过 AI 处理防大账单
  */
 async function processNoteWithAi(userId: string, noteId: string, content: string, existingTags: string[]) {
   try {
+    if (content.length > NOTE_AI_SKIP_THRESHOLD) {
+      await db.update(schema.notes).set({ aiProcessed: true }).where(eq(schema.notes.id, noteId));
+      console.log(`[AI] Note ${noteId}: skipped (content too large: ${content.length} chars)`);
+      return;
+    }
     // 读用户偏好:自动标签 / 自动摘要 开关 + 摘要最小字符数
     const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
     const prefs = (user as any)?.preferences || {};

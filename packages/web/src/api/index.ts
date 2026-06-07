@@ -260,8 +260,10 @@ export interface GroupMemberInfo {
   username: string;
   nickname: string;
   avatar: string | null;
-  // SSE 连接活跃即视为在线; bus.ts presence 追踪
+  // SSE 连接活跃即视为在线; bus.ts presence 追踪. 安全审计 S6: 隐身用户对他人 online 永远为 false
   online?: boolean;
+  // 安全审计 S6: 仅本人 server 返此字段 (其他人看不到我隐身/我看不到别人隐身设置)
+  hidePresence?: boolean;
 }
 
 export interface GroupDetail extends Group {
@@ -476,6 +478,14 @@ export const api = {
   // tags / category / pinned / todoStatus / todoDue / parentNoteId 都不复制. 通知原作者 SSE note-duplicated.
   duplicateNote(id: string) {
     return request<{ data: Note }>(`/notes/${id}/duplicate`, { method: 'POST' });
+  },
+
+  // 安全审计 S6: 设置我在某群的隐身状态. 隐身: 我上下线不给群其他成员推 presence-changed (但我仍能收所有事件)
+  setGroupPresenceMode(groupId: string, hidePresence: boolean) {
+    return request<{ data: { hidePresence: boolean } }>(`/groups/${groupId}/members/me/presence-mode`, {
+      method: 'PATCH',
+      body: JSON.stringify({ hidePresence }),
+    });
   },
 
   // PR #5b: 群级汇总 (作者+admin 看), 给群组详情页"编辑申请管理"面板用

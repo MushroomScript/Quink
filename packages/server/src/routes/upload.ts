@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth.js';
 import { publish } from '../reminder/bus.js';
+import { logAudit } from '../utils/auditLog.js';
 import { db, schema } from '../db/index.js';
 import { eq, desc, and, isNull, inArray } from 'drizzle-orm';
 import { resolve } from 'path';
@@ -226,6 +227,9 @@ app.post('/file', async (c) => {
   });
 
   publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  await logAudit(c, 'file.upload', 'file', id, {
+    filename: displayFilename, mime: file.type, size: file.size, category,
+  });
   return c.json({
     data: {
       id,
@@ -306,6 +310,7 @@ app.patch('/files/:id', async (c) => {
   }
 
   publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  await logAudit(c, 'file.rename', 'file', id, { old: oldName, new: newName });
   return c.json({ data: { ...file, filename: newName } });
 });
 
@@ -326,6 +331,7 @@ app.delete('/files/:id', async (c) => {
     if (existsSync(diskPath)) unlinkSync(diskPath);
   } catch {}
   publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  await logAudit(c, 'file.delete', 'file', id, { filename: file.filename });
   return c.json({ message: '已删除' });
 });
 

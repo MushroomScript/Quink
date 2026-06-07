@@ -672,8 +672,13 @@ async function changePassword() {
   saving.value = true;
   try {
     await api.changePassword(oldPwd.value, newPwd.value);
-    pwdMsg.value = '密码修改成功';
+    pwdMsg.value = '密码修改成功, 即将退出登录...';
     oldPwd.value = ''; newPwd.value = '';
+    // 安全审计 M2: 改密码后立即清 token 跳登录页 (后端 tokenVersion++ 已让旧 token 失效, 不主动登出会让本设备所有后续请求 401)
+    setTimeout(() => {
+      localStorage.removeItem('quink_token');
+      window.location.href = '/login';
+    }, 1500);
   } catch (err: any) { pwdMsg.value = err.message; }
   finally { saving.value = false; }
 }
