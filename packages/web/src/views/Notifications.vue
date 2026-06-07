@@ -134,11 +134,11 @@ async function doClear() {
           : 'text-gray-500 hover:bg-gray-100'"
       >
         <span>{{ t.label }}</span>
-        <!-- badge 复用 sidebar 待办整套但 pb 改 1.5px 让字向上 0.5px (蘑菇报告 tab 上下文字偏下) -->
+        <!-- badge 比 sidebar 小一号: 16x16 / text-[10px] / 全 px-1 偶数, 取消多位/单位动态 (蘑菇要求"都弄成偶数").
+             pb 去掉 (10px 字在 16px badge 内 items-center 自然居中, 不需要 top-heavy 补偿) -->
         <span
           v-if="tabUnread(t.key) > 0"
-          class="inline-flex items-center justify-center min-w-[18px] h-[18px] pb-[1.5px] bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full"
-          :class="String(tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key)).length > 1 ? 'pl-[3.5px] pr-[4.5px]' : 'px-1'"
+          class="inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 bg-red-400/70 text-white text-[10px] leading-none font-semibold tabular-nums rounded-full"
         >
           {{ tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key) }}
         </span>
