@@ -116,23 +116,23 @@ async function doClear() {
       </div>
     </div>
 
-    <!-- 4 tab 切换 -->
+    <!-- 4 tab 切换: 复用 Resources 全部那一行风格 (px-3 py-1 + bg-primary-light 选中态 / text-gray-500 默认态) -->
     <div class="px-4 md:px-6 pb-2 flex items-center gap-1 shrink-0">
       <button
         v-for="t in tabs"
         :key="t.key"
         @click="store.setTab(t.key)"
-        class="relative px-3 py-1.5 rounded-lg text-xs transition-colors flex items-center gap-1.5"
+        class="px-3 py-1 rounded-lg text-xs transition-colors flex items-center gap-1.5"
         :class="store.currentTab === t.key
-          ? 'bg-primary text-white'
-          : 'bg-transparent hover:bg-primary-light'"
-        :style="store.currentTab === t.key ? '' : 'color: var(--text-primary)'"
+          ? 'bg-primary-light text-primary-dark font-medium'
+          : 'text-gray-500 hover:bg-gray-100'"
       >
         <span>{{ t.label }}</span>
+        <!-- badge 复用 sidebar 待办那整套 (bg-red-400/70 + text-[11px] font-semibold pb-[1px] + 1位/多位动态 padding) -->
         <span
           v-if="tabUnread(t.key) > 0"
-          class="text-[10px] tabular-nums px-1 rounded-full min-w-[16px] text-center"
-          :class="store.currentTab === t.key ? 'bg-white/30' : 'bg-red-400/70 text-white'"
+          class="inline-flex items-center justify-center min-w-[18px] h-[18px] pb-[1px] bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full"
+          :class="String(tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key)).length > 1 ? 'pl-[3.5px] pr-[4.5px]' : 'px-1'"
         >
           {{ tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key) }}
         </span>
@@ -185,7 +185,7 @@ async function doClear() {
               </div>
               <span v-if="!n.readAt" class="shrink-0 w-2 h-2 rounded-full bg-red-400/90"></span>
             </div>
-            <div v-if="n.body" class="text-xs mt-1 line-clamp-2" style="color: var(--text-secondary)">
+            <div v-if="n.body" class="text-xs mt-1 truncate" style="color: var(--text-secondary)">
               {{ n.body }}
             </div>
             <div class="text-[11px] mt-1 tabular-nums" style="color: var(--text-muted)">
