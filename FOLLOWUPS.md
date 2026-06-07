@@ -20,6 +20,8 @@
 
 ## 待补 (无明确 PR 归属, 等蘑菇拍板)
 
+- [ ] 通知 `comment-added` 点击跳关联笔记没带 commentId / hash anchor, 用户点进去看不到 highlight 哪条评论. 后续加 anchor 跳具体评论 (来源: commit `f02274b`, PR #10c followup)
+
 - [ ] 群提醒按钮限定 `inGroupContext` —— 主视图看共享笔记的群管理员看不到"设置群提醒"按钮, 必须切群组页设. 若想主视图也支持需补 editContext 推断 (来源: commit `649170a`, PR #11b)
 - [ ] 铃铛短文案不区分个人/群 —— 用户同时有个人 + 群提醒时铃铛只显示 personal, 短文案 `reminderText` 没区分来源, 只 hover 看完整 `reminderFullText` 才有"（群提醒）"标. 简化方案; 如果要分要重设 UI (来源: commit `649170a`, PR #11b)
 - [ ] 通知中心 30 天清理周期视情况调 —— 当前硬编码 30 天清已读通知, 看实际用量看要不要砍 14 / 60 (来源: commit `243c363`, PR #10a)
