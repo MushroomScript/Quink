@@ -45,9 +45,22 @@ function toggleBatchType() {
     batchTypePos.value = { top: (r.bottom + 4) + 'px', left: (r.right - 140) + 'px' };
   }
 }
-function pickBatchType(type: 'quink' | 'note' | 'todo') {
-  store.batchUpdateType(type);
+// PR #9: 批量操作 toast 含 skipped 提示 (群管理员多选含别人笔记时按权限筛, 失败的算 skipped)
+function reportBatch(r: { ok: number; skipped: number }, verb: string) {
+  if (r.skipped > 0) toast.show(`已${verb} ${r.ok} 条, 跳过 ${r.skipped} 条无权限`, 'default', 3500);
+  else if (r.ok > 0) toast.show(`已${verb} ${r.ok} 条`, 'success', 2000);
+}
+async function pickBatchType(type: 'quink' | 'note' | 'todo') {
   showBatchType.value = false;
+  const r = await store.batchUpdateType(type);
+  reportBatch(r, '改类型');
+}
+
+// PR #9: 批量删除. 显示 toast (含 skipped)
+async function doBatchDelete() {
+  confirmBatchDelete.value = false;
+  const r = await store.batchDelete();
+  reportBatch(r, '删除');
 }
 
 // 待办页专属批量改 todoStatus: 已是目标状态的项静默跳过 (store 内过滤), toast 只报本次实际改动数
@@ -103,11 +116,12 @@ async function confirmBatchTags() {
   if (!batchTagsSelected.value.length) return;
   // 先把状态快照(store.batchAddTags 内会 exitSelectMode 清空 selectedIds), 再 await; 失败时 console.error 不静默
   const tags = [...batchTagsSelected.value];
+  showBatchTags.value = false;
+  batchTagInput.value = '';
+  batchTagsSelected.value = [];
   try {
-    await store.batchAddTags(tags);
-    showBatchTags.value = false;
-    batchTagInput.value = '';
-    batchTagsSelected.value = [];
+    const r = await store.batchAddTags(tags);
+    reportBatch(r, '加标签');
   } catch (e) {
     console.error('[batchAddTags] failed:', e);
   }
@@ -709,7 +723,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
     <div v-if="showBatchMove" class="fixed z-[var(--z-overlay)]" :style="batchMovePos">
       <div class="bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-40 max-h-48 overflow-y-auto">
         <button v-for="cat in categories" :key="cat.id"
-          @click="store.batchMove(cat.name); showBatchMove = false"
+          @click="(async () => { showBatchMove = false; const r = await store.batchMove(cat.name); reportBatch(r, '移到分类'); })()"
           class="w-full text-left px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 truncate inline-flex items-center gap-1.5 w-full" :title="cat.name">
           <PhFolderOpen size="0.75rem" weight="fill" />
           <span class="truncate">{{ cat.name }}</span>
@@ -786,7 +800,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <p class="text-xs text-gray-400 mb-4">将 {{ store.selectedIds.size }} 条内容移至回收站</p>
           <div class="flex gap-2 justify-center">
             <button @click="confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-            <button @click="store.batchDelete(); confirmBatchDelete = false" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
+            <button @click="doBatchDelete" class="px-4 py-1.5 text-xs rounded-lg text-white font-medium bg-red-500 hover:bg-red-600">删除</button>
           </div>
         </div>
       </div>

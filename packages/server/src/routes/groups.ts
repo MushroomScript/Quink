@@ -641,6 +641,7 @@ app.post('/:id/join-requests/:reqId/reject', async (c) => {
 // 踢人 (owner/admin) 或 自己退群 (任何 member). owner 不能踢自己 (用解散群代替)
 app.delete('/:id/members/:userId', async (c) => {
   const meId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const targetId = c.req.param('userId');
   const me = await getActiveMember(groupId, meId);
@@ -668,7 +669,7 @@ app.delete('/:id/members/:userId', async (c) => {
   if (!isSelf) publish(targetId, 'group-member-removed', { groupId, by: meId, self: false }, _ocid);
   // 广播给剩余成员 (status='removed' 的人不在 active 列表自动排除, 不会通知到自己)
   await broadcastGroupChanged(groupId, [meId], _ocid);
-  publish(userId, 'group-changed', { groupId }, _ocid);
+  publish(meId, 'group-changed', { groupId }, _ocid);
   return c.json({ message: isSelf ? '已退群' : '已移除' });
 });
 
@@ -677,6 +678,7 @@ const roleSchema = z.object({ role: z.enum(['admin', 'member']) });
 // 改成员角色 (owner only, admin/member 互转, 不能转 owner)
 app.patch('/:id/members/:userId', async (c) => {
   const meId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const targetId = c.req.param('userId');
   const me = await getActiveMember(groupId, meId);
@@ -692,7 +694,7 @@ app.patch('/:id/members/:userId', async (c) => {
     .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.userId, targetId)));
   // 广播给所有成员让 chip 颜色实时更新 (排除操作者)
   await broadcastGroupChanged(groupId, [meId], _ocid);
-  publish(userId, 'group-changed', { groupId }, _ocid);
+  publish(meId, 'group-changed', { groupId }, _ocid);
   return c.json({ message: '已更新' });
 });
 

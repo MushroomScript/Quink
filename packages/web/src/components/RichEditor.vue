@@ -48,6 +48,9 @@ const props = withDefaults(defineProps<{
   initialVisibility?: 'private' | 'shared';
   initialSharedGroupIds?: string[];
   showVisibilityChip?: boolean;
+  // PR #9 权限分级: 非作者编辑共享笔记时锁定 type 不可改 + 隐藏 tag 入口 (只让改正文)
+  lockType?: boolean;
+  hideTags?: boolean;
 }>(), {
   initialContent: '',
   initialType: 'quink',
@@ -65,6 +68,8 @@ const props = withDefaults(defineProps<{
   initialVisibility: 'private',
   initialSharedGroupIds: () => [],
   showVisibilityChip: true,
+  lockType: false,
+  hideTags: false,
 });
 
 const isFullscreen = ref(props.initialFullscreen);
@@ -819,11 +824,17 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
     <div class="relative">
     <div class="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border-t border-gray-100 select-none">
       <div class="flex items-center gap-2 flex-wrap min-w-0">
-        <!-- Type selector -->
+        <!-- Type selector. PR #9: lockType=true 时 button disable, 视觉灰显, 点击不响应 (非作者编辑共享笔记) -->
         <div v-if="showTypeSelector" class="flex gap-0.5">
-          <button v-for="t in noteTypes" :key="t.value" @click="noteType = t.value"
+          <button v-for="t in noteTypes" :key="t.value" @click="lockType ? null : (noteType = t.value)"
+            :disabled="lockType && noteType !== t.value"
             class="px-2 py-1 rounded-md text-xs transition-colors inline-flex items-center gap-1"
-            :class="noteType === t.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'">
+            :class="[
+              noteType === t.value ? 'bg-primary-light text-primary-dark font-medium' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600',
+              lockType ? 'cursor-not-allowed' : '',
+              lockType && noteType !== t.value ? 'opacity-40' : '',
+            ]"
+            :title="lockType ? '非作者不能改类型' : ''">
             <component :is="t.icon" size="0.875rem" weight="fill" :style="t.iconStyle" />
             {{ t.label }}
           </button>
@@ -844,8 +855,8 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
           <span class="sep"></span>
         </template>
 
-        <!-- Tags -->
-        <div class="relative">
+        <!-- Tags. PR #9: hideTags=true 时入口隐藏 (非作者编辑共享笔记不能改 tag) -->
+        <div v-if="!hideTags" class="relative">
           <button ref="tagBtnEl" @click.stop="showTagInput = !showTagInput" class="tbtn text-gray-400" title="添加标签"><PhTag size="0.875rem" weight="fill" /></button>
         </div>
         <!-- Reference -->
@@ -945,8 +956,8 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
       </div>
     </div>
 
-    <!-- Tags display -->
-    <div v-if="tags.length" class="flex flex-wrap gap-1 px-4 py-2 border-t border-gray-50">
+    <!-- Tags display. PR #9: hideTags=true 时整行隐藏 (非作者不能改 tag, 显示也无意义) -->
+    <div v-if="tags.length && !hideTags" class="flex flex-wrap gap-1 px-4 py-2 border-t border-gray-50">
       <span v-for="tag in tags" :key="tag" class="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
         #{{ tag }} <button @click="removeTag(tag)" class="text-gray-400 hover:text-red-500">&times;</button>
       </span>

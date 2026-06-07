@@ -24,6 +24,7 @@ import {
   PhBell,
   PhBellRinging,
   PhChatCircleDots,
+  PhCopySimple,
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
@@ -63,6 +64,20 @@ const canPinInGroup = computed(() => inGroupContext.value && (groupRole.value ==
 // PR #7b: 删除按钮可见性. 作者本人永远可删; 别人的笔记仅"群组页 + 我是该群 owner/admin"才显示 ("管理操作" 后端校验同款).
 // 主视图看到别人共享笔记 (sharedDisplay='all'/'others_shared') 默认不显示删除, 让用户去群组页操作
 const canDelete = computed(() => isMyNote.value || canPinInGroup.value);
+// PR #9 字段权限:
+//   主页置顶 = isMyNote && !inGroupContext (仅作者主视图)
+//   标完成 / 设群提醒 = isMyNote || canPinInGroup (作者本人 OR 群组上下文管理员)
+//   多选 = 群组页要群管理员; 主视图作者本人或私人 (排除"别人共享给我看的")
+const canPinInMain = computed(() => isMyNote.value && !inGroupContext.value);
+const canChangeTodoStatus = computed(() => isMyNote.value || canPinInGroup.value);
+const canMultiSelect = computed(() =>
+  inGroupContext.value ? canPinInGroup.value : (isMyNote.value || !isShared.value)
+);
+// PR #9 作者删 fork 版特殊弹窗: 作者主视图列表里看到自己的 fork (parentNoteId 非空) 删除时
+// 显示"由 @B @C 编辑过 N 处修改"提示. 群组上下文删 fork 走通用文案 (canDelete 含群管理员).
+const isAuthorDeletingFork = computed(() => isMyNote.value && !!(props.note as any).parentNoteId);
+const forkEditors = ref<Array<{ userId: string; nickname: string | null }>>([]);
+const forkEditCount = ref(0);
 // 视觉用的"是否置顶": 群组上下文看 groupPinned (独立于作者全局 pinned), 否则看 note.pinned
 const displayPinned = computed(() => inGroupContext.value ? !!props.note.groupPinned : props.note.pinned);
 
@@ -285,9 +300,37 @@ function toggleMenu() {
   showMenu.value = true;
 }
 
-function askDelete() {
+async function askDelete() {
   showMenu.value = false;
+  // PR #9 作者删 fork 版: 拉编辑历史 distinct editor 名字, 弹特殊确认
+  if (isAuthorDeletingFork.value) {
+    try {
+      const res = await api.getNoteEditHistory(props.note.id);
+      const seen = new Map<string, { userId: string; nickname: string | null }>();
+      for (const r of res.data) {
+        if (!seen.has(r.userId)) seen.set(r.userId, { userId: r.userId, nickname: (r as any).nickname || null });
+      }
+      forkEditors.value = Array.from(seen.values());
+      forkEditCount.value = res.data.length;
+    } catch (e) {
+      // 拉失败兜底: 走通用弹窗
+      forkEditors.value = [];
+      forkEditCount.value = 0;
+    }
+  }
   confirmDelete.value = true;
+}
+
+// PR #9 "另存为": 复制成自己的私人副本. 文案按 type 决定
+async function doDuplicate() {
+  showMenu.value = false;
+  try {
+    await api.duplicateNote(props.note.id);
+    const label = props.note.type === 'todo' ? '待办' : (props.note.type === 'note' ? '笔记' : '灵感');
+    toast.show(`已另存为${label}副本`, 'success', 3000);
+  } catch (e: any) {
+    toast.show(e?.message || '另存失败', 'error', 3000);
+  }
 }
 
 async function doDelete() {
@@ -522,30 +565,41 @@ const typeColor: Record<string, string> = {
         leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
         <div v-if="showMenu" class="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[var(--z-overlay)] min-w-[110px] [&_svg]:mt-px"
           :style="menuPos">
-          <button v-if="!inGroupContext || canPinInGroup"
+          <!-- PR #9: 主页置顶 仅作者主视图; 群内置顶 仅群组上下文管理员. canPinInMain / canPinInGroup -->
+          <button v-if="canPinInMain || canPinInGroup"
             @click.stop="handleTogglePin(); showMenu = false"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhPushPin v-if="displayPinned" size="0.875rem" weight="fill" />
             <PhMapPin v-else size="0.875rem" weight="fill" />
             <span>{{ displayPinned ? (inGroupContext ? '取消群内置顶' : '取消置顶') : (inGroupContext ? '群内置顶' : '置顶') }}</span>
           </button>
+          <!-- 编辑: 永远显示. NoteEditModal 内部 acquireLock 失败时弹"申请编辑权"对话框 (PR #9) -->
           <button @click.stop="openEditModal?.(note); showMenu = false"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhPencilSimple size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>编辑</span>
           </button>
-          <button v-if="note.type === 'todo'" @click.stop="store.toggleTodo(note.id); showMenu = false"
+          <!-- PR #9: 标完成 = 作者本人 OR 群组管理员; 普通成员含 grants 不显示 -->
+          <button v-if="note.type === 'todo' && canChangeTodoStatus" @click.stop="store.toggleTodo(note.id); showMenu = false"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhArrowCounterClockwise v-if="note.todoStatus === 'done'" size="0.875rem" weight="fill" style="margin-top: 2px" />
             <PhCheck v-else size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>{{ note.todoStatus === 'done' ? '标记未完成' : '标记已完成' }}</span>
           </button>
+          <!-- 设提醒 (个人): todo 类型所有人都能设 (PR #9 蘑菇拍板:个人提醒不限作者) -->
           <button v-if="note.type === 'todo'" @click.stop="openReminderPicker"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhBell size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>{{ note.todoDue ? '编辑提醒' : '设置提醒' }}</span>
           </button>
-          <button @click.stop="enterSelectMode()"
+          <!-- PR #9 另存为: 所有人可用 (复制成自己的私人副本). 按 type 决定文案 -->
+          <button @click.stop="doDuplicate()"
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+            <PhCopySimple size="0.875rem" weight="fill" style="margin-top: 2px" />
+            <span>另存为{{ typeLabels[note.type] || '副本' }}</span>
+          </button>
+          <!-- PR #9 多选: 群组页要群管理员; 主视图作者本人或非共享 (排除主视图见到的别人共享笔记) -->
+          <button v-if="canMultiSelect" @click.stop="enterSelectMode()"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhCheckSquare size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>多选</span>
@@ -569,18 +623,26 @@ const typeColor: Record<string, string> = {
       @save="saveReminder"
     />
 
-    <!-- 删除确认弹窗 (PR #5b/#7b: 删别人笔记时显示作者名 + 警告, 自己笔记保持简洁) -->
+    <!-- 删除确认弹窗 (PR #5b/#7b: 删别人笔记时显示作者名 + 警告, 自己笔记保持简洁; PR #9: 作者删 fork 版特殊提示) -->
     <Teleport to="body">
       <Transition name="modal">
         <div v-if="confirmDelete" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
           <div class="absolute inset-0 bg-black/30" @click="confirmDelete = false" />
           <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 text-center">
-            <p class="text-sm text-gray-700 mb-1">
-              {{ isMyNote ? '删除内容' : `确认删除 @${(note as any).authorNickname || '某人'} 的笔记？` }}
-            </p>
-            <p class="text-xs text-gray-400 mb-4">
-              {{ isMyNote ? '可在回收站找回' : '群成员将看不到这条笔记 (作者本人仍可恢复)' }}
-            </p>
+            <template v-if="isAuthorDeletingFork && forkEditCount > 0">
+              <p class="text-sm text-gray-700 mb-1">删除群内版本</p>
+              <p class="text-xs text-gray-400 mb-4">
+                这个版本由 {{ forkEditors.map(e => '@' + (e.nickname || '群成员')).join(' ') || '群成员' }} 编辑过, 共 {{ forkEditCount }} 处修改
+              </p>
+            </template>
+            <template v-else>
+              <p class="text-sm text-gray-700 mb-1">
+                {{ isMyNote ? '删除内容' : `确认删除 @${(note as any).authorNickname || '某人'} 的笔记？` }}
+              </p>
+              <p class="text-xs text-gray-400 mb-4">
+                {{ isMyNote ? '可在回收站找回' : '群成员将看不到这条笔记 (作者本人仍可恢复)' }}
+              </p>
+            </template>
             <div class="flex gap-2 justify-center">
               <button @click="confirmDelete = false"
                 class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>

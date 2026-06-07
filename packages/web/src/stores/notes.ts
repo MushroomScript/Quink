@@ -613,26 +613,41 @@ export const useNotesStore = defineStore('notes', () => {
 
   // 批量操作统一走 Promise.all 并发 + 失败 console.error (跟 Trash batch ops / Sidebar.doTrash 同模式)
   // 所有 batch 函数操作前调 exitSelectMode 让 UI 立即退出多选 (await 期间用户看到正常视图)
-  async function batchDelete() {
-    const ids = Array.from(selectedIds.value);
-    exitSelectMode();
-    await Promise.all(ids.map(id => api.deleteNote(id).catch(e => console.error('[batchDelete]', id, e))));
-    await fetchNotes();
+  // PR #9: 返回 { ok, skipped } 让调用方 toast 区分成功/无权限. 群管理员多选含别人笔记时
+  // 后端按字段权限筛 (PATCH 守卫剥字段 / DELETE 仅作者+admin), 失败的算 skipped
+  type BatchResult = { ok: number; skipped: number };
+  async function settleBatch<T>(ids: string[], runner: (id: string) => Promise<T>): Promise<BatchResult> {
+    let ok = 0, skipped = 0;
+    await Promise.all(ids.map(id => runner(id).then(
+      () => { ok++; },
+      (e) => { console.error('[batch]', id, e); skipped++; },
+    )));
+    return { ok, skipped };
   }
 
-  async function batchMove(category: string) {
+  async function batchDelete(): Promise<BatchResult> {
     const ids = Array.from(selectedIds.value);
     exitSelectMode();
-    await Promise.all(ids.map(id => api.updateNote(id, { category } as any).catch(e => console.error('[batchMove]', id, e))));
+    const r = await settleBatch(ids, id => api.deleteNote(id));
     await fetchNotes();
+    return r;
+  }
+
+  async function batchMove(category: string): Promise<BatchResult> {
+    const ids = Array.from(selectedIds.value);
+    exitSelectMode();
+    const r = await settleBatch(ids, id => api.updateNote(id, { category } as any));
+    await fetchNotes();
+    return r;
   }
 
   // 批量改 type: todoStatus 字段不动 (todo→snippet/note 时 DB 仍保留, 转回 todo 时复用)
-  async function batchUpdateType(type: 'quink' | 'note' | 'todo') {
+  async function batchUpdateType(type: 'quink' | 'note' | 'todo'): Promise<BatchResult> {
     const ids = Array.from(selectedIds.value);
     exitSelectMode();
-    await Promise.all(ids.map(id => api.updateNote(id, { type } as any).catch(e => console.error('[batchUpdateType]', id, e))));
+    const r = await settleBatch(ids, id => api.updateNote(id, { type } as any));
     await fetchNotes();
+    return r;
   }
 
   // 批量改 todoStatus: 从 selectedIds 取 id 后复用 setTodoStatus, 返回实际改动数 (UI 用来显示 toast)
@@ -643,19 +658,20 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   // 批量加标签: 合并到现有 tags (去重), 不覆盖
-  async function batchAddTags(tagsToAdd: string[]) {
-    if (!tagsToAdd.length) return;
+  async function batchAddTags(tagsToAdd: string[]): Promise<BatchResult> {
+    if (!tagsToAdd.length) return { ok: 0, skipped: 0 };
     const view = activeView.value;
     const ids = Array.from(selectedIds.value);
     exitSelectMode();
-    await Promise.all(ids.map(id => {
+    const r = await settleBatch(ids, id => {
       const vs = view ? _viewState[view] : null;
       const note = vs?.notes.find(n => n.id === id);
       const existing = note?.tags || [];
       const merged = Array.from(new Set([...existing, ...tagsToAdd]));
-      return api.updateNote(id, { tags: merged } as any).catch(e => console.error('[batchAddTags]', id, e));
-    }));
+      return api.updateNote(id, { tags: merged } as any);
+    });
     await fetchNotes();
+    return r;
   }
 
   return {

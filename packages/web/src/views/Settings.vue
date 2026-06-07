@@ -869,12 +869,12 @@ function goBack() {
           </div>
         </div>
         <!-- PR #7a 群组共享笔记可见范围: 改后清各 view 缓存, 切回主 view 时 onActivated wasEmpty 走 reset 拉新 scope 数据.
-             私密笔记不受此设置影响, 始终显示; 此设置仅决定主页面是否纳入群组共享笔记 -->
+             私人笔记不受此设置影响, 始终显示; 此设置仅决定主页面是否纳入群组共享笔记 -->
         <div class="pt-2 border-t border-gray-100">
           <div class="flex items-center justify-between">
             <div>
               <div class="text-sm text-gray-700 font-medium">群组共享笔记可见范围</div>
-              <div class="text-xs text-gray-400 mt-0.5">私密笔记始终显示, 此设置仅决定主页面纳入哪些群组共享笔记</div>
+              <div class="text-xs text-gray-400 mt-0.5">私人笔记始终显示, 此设置仅决定主页面纳入哪些群组共享笔记</div>
             </div>
             <CustomSelect v-model="prefs.sharedDisplay" size="compact" :options="[
               { value: 'own', label: '仅我发布的' },

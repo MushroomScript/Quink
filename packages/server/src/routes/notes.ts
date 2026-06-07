@@ -1278,6 +1278,70 @@ app.post('/', async (c) => {
   return c.json({ data: { ...note, sharedGroupIds } }, 201);
 });
 
+// POST /api/notes/:id/duplicate — PR #9 "另存为" 副本
+// 鉴权: 能读到笔记的人都能复制 (作者 + 共享群 active member). 复制后副本归调用人.
+// 副本: userId = 当前操作人, visibility = 'private', type 同原, content = 引用块 + 原 content
+// tags / category / pinned / todoStatus / todoDue / parentNoteId / 锁字段 / version 都不复制
+// 通知原作者: SSE 推 'note-duplicated' (前端 toast / PR #10 接通知页)
+app.post('/:id/duplicate', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const { id } = c.req.param();
+
+  const original = await getNoteForAccess(userId, id, 'read');
+  if (!original) return c.json({ error: '笔记不存在' }, 404);
+
+  // 查原作者 nickname 拼引用抬头. 自己复制自己的笔记也加引用块 (语义统一, 蘑菇可后续编辑去掉)
+  const author = await db.select({ nickname: schema.users.nickname }).from(schema.users)
+    .where(eq(schema.users.id, original.userId)).get();
+  const authorName = author?.nickname || '原作者';
+  const originDate = dayjs(original.createdAt).format('YYYY-MM-DD');
+  const quote = `> 原作者: @${authorName} ｜ ${originDate}\n\n`;
+  const newContent = quote + original.content;
+
+  const now = dayjs().toISOString();
+  const newId = nanoid(12);
+  const newNote = {
+    id: newId,
+    userId,
+    content: newContent,
+    contentPinyin: toPinyinSearchable(newContent),
+    type: original.type,
+    category: null,
+    tags: [],
+    todoStatus: original.type === 'todo' ? 'pending' as const : null,
+    todoDue: null,
+    todoRemindRrule: null,
+    todoRemindSentAt: null,
+    summary: null,
+    aiProcessed: false,
+    pinned: false,
+    createdAt: now,
+    updatedAt: now,
+    visibility: 'private' as const,
+  };
+  await db.insert(schema.notes).values(newNote);
+
+  // 异步 AI 处理副本 (新主人的标签 / 分类 / 摘要重新跑一遍)
+  processNoteWithAi(userId, newId, newContent, []).catch(() => {});
+
+  // 多设备同步: 操作者本人所有设备主 view 拉新副本
+  publish(userId, 'note-created', { noteId: newId }, _ocid);
+  // 通知原作者 (不通知自己复制自己; PR #10 接入通知页前先 toast 顶)
+  if (original.userId !== userId) {
+    const dup = await db.select({ nickname: schema.users.nickname }).from(schema.users)
+      .where(eq(schema.users.id, userId)).get();
+    publish(original.userId, 'note-duplicated', {
+      originNoteId: id,
+      newNoteId: newId,
+      duplicatorId: userId,
+      duplicatorNickname: dup?.nickname || '群成员',
+    });
+  }
+
+  return c.json({ data: { ...newNote, sharedGroupIds: [] } }, 201);
+});
+
 // PATCH /api/notes/:id
 app.patch('/:id', async (c) => {
   const userId = c.get('userId');
@@ -1308,6 +1372,21 @@ app.patch('/:id', async (c) => {
   // PR #5: 非作者编辑共享笔记 → 禁止改 visibility / sharedGroupIds / editPermission (这些是分享设置, 仅作者控)
   if (!isAuthor && (data.visibility !== undefined || data.sharedGroupIds !== undefined || data.editPermission !== undefined)) {
     return c.json({ error: '只有作者可以修改共享设置' }, 403);
+  }
+
+  // PR #9 字段权限守卫: 非作者改任何笔记 → 静默剥作者私域字段 (category / tags / pinned) + 改 type / todoStatus
+  // 要先验证我是群组 admin (前端 UI 已隐藏对应入口, 后端兜底防旧客户端 / curl 直调)
+  // - category / tags / pinned: 仅作者能改 (含群主管理员都不能改别人的) → 直接 delete
+  // - type / todoStatus: 作者 + 群主/管理员能改 → 非作者时查 isAdminOfSharedNote, 否则 delete
+  if (!isAuthor) {
+    delete data.category;
+    delete data.tags;
+    delete data.pinned;
+    const isAdmin = existing.visibility === 'shared' && await isAdminOfSharedNote(userId, id);
+    if (!isAdmin) {
+      delete data.type;
+      delete data.todoStatus;
+    }
   }
 
   const now = dayjs().toISOString();

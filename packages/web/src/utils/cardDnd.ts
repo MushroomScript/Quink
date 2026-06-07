@@ -100,6 +100,8 @@ export function startCardDrag(e: PointerEvent, payload: {
   type: string | null;
   category: string;
   text: string;
+  // 单选 ghost 复用 NoteCard.renderedContent (已 md2html). 多选时不传, cardDnd 从选中卡片 DOM 拿
+  html?: string;
 }) {
   if (e.button !== 0) return;
   if (!payload.ids.length) return;

@@ -28,8 +28,8 @@
 | **#7a Phase A + 偏好生效** | notes.parent_note_id + note_edit_history 表 (仅存储, 7b 接入 fork) + sharedDisplay 偏好 4 选 (own/others/none/all) + 后端 scope 加 'private' / 'others_shared' / 'all' 3 个新分支 + Settings 下拉 + store/App.vue 同步链 | ✅ done | ~150 行 |
 | **#7b fork 写入 + UI 标记** | forkNote helper + PATCH /:id fork 决策 (editContext.groupId 触发) + 资源跟随 (note_shares / group_note_pins / note_edit_grants) + note_edit_history 非作者写入 + loadEditorCountMap + GET /:id/edit-history API + Note type 加 parentNoteId/editorCount + store updateNote 处理 forked 标志 + NoteEditModal editContext 透传 + 版本标 + NoteCard 版本胶囊 + editorCount 显示 + NoteDetail 编辑历史 popover | ✅ done | ~430 行 |
 | **#7c AI/导出/孤儿收尾** | 已**拆解到** #8 / #9 / #13. 孤儿处理已在 7b 用 "改私密 + 软删" 落地 (Corner #4 改决策). 作者删 fork 版提示 → 进 #9. AI chat update_note 适配 fork + shared→private 转换约束 + 统计按 origin + 导出按 sharedDisplay → 进 #13 | 拆解 | — |
-| **#8 命名重整** | 字段值改名 (`note`→`inspiration`, `snippet`→`note`, 删 `link`) + 路由改名 (`/`→`/inspiration` + 旧 `/` 重定向) + AI prompts 同步 + DB 自动迁移 | pending | ~500 行 (估) |
-| **#9 权限重整** | 字段权限细分 (B 类作者私域字段非作者禁改) + NoteCard 三点菜单按钮 v-if / 编辑器界面非作者只显示正文 / 后端 PATCH 守卫 / "另存为灵感/笔记/待办" (副本 userId=操作人, 正文加引用原作者) / 申请编辑权点编辑改弹窗 / 作者删 fork 版给提示 / "私密"字面改 "私人" / 群组批量操作权限筛选 (普通成员隐藏多选按钮) | pending | ~700 行 (估) |
+| **#8 命名重整** | 字段值改名 (`snippet`→`note`, `note`→`quink`, 删 `link`) + 路由改名 (`/`→`/quink` + 旧 `/` 重定向) + AI prompts 同步 + DB 自动迁移 | ✅ done (0eea943) | ~670 行 |
+| **#9 权限重整** | 字段权限细分 (B 类作者私域字段非作者禁改) + NoteCard 三点菜单按钮 v-if / 编辑器界面非作者只显示正文 / 后端 PATCH 守卫 / "另存为灵感/笔记/待办" (副本 userId=操作人, 正文加引用原作者) / 申请编辑权点编辑改弹窗 / 作者删 fork 版给提示 / "私密"字面改 "私人" / 群组批量操作权限筛选 (普通成员隐藏多选按钮) | ✅ done | ~400 行 |
 | **#10 通知中心** | 新通知表 + 通知 view (4 tab: 全部/内容/提醒/群组) + 入口 (头像列表传输按钮上方) + SSE 推送 + 接入: 另存为通知 / 申请编辑权通知 / 提醒到点 / 群组变更通知 / 评论从 toast 搬到通知页 (reaction 仍卡片) | pending | ~700 行 (估) |
 | **#11 提醒分家** | 个人提醒 (todoDue, 每人自管, 删了内容也响) + 群提醒新表 (群管理员设, 群所有人收) + 群组提醒接收开关 (每人自己控该群提醒) | pending | ~500 行 (估) |
 | **#12 群组回收站 + 审计** | 每群一个回收站 (从群组页进, 标题"X 群的回收站") + 7 天强制清 + 群主+管理员都能恢复, 仅群主能永久删 + 后端所有改/删存内容快照 (审计表 + 服务器主人管理界面留 #12+ 单独做) | pending | ~700 行 (估) |
@@ -607,7 +607,7 @@ CREATE INDEX idx_note_edit_history_note ON note_edit_history(note_id, edited_at 
 
 ---
 
-## PR #8 命名重整 (next, pending)
+## PR #8 命名重整 (✅ done, 0eea943)
 
 **目标**: 把项目早期遗留的"type 字段值跟 UI 名字对不上 + 路由不对称 + link 类型遗留"这 3 个技术债一次性清理. 命名干净后 #9 起 PR 不在乱命名上叠 bug.
 
@@ -690,7 +690,7 @@ Schema enum 同步: notes.type 从 `['note', 'todo', 'snippet', 'link']` 改 `['
 
 ---
 
-## PR #9 权限重整 (pending)
+## PR #9 权限重整 (✅ done)
 
 **目标**: 把"谁能改笔记什么字段"按 5 类细分, 前后端守卫一致. UI 按角色隐藏对应按钮. 加"另存为"功能让无权限的人也能保留内容副本.
 

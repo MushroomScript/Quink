@@ -302,6 +302,25 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] note-edit-request parse failed:', e); }
   });
 
+  // PR #9: note-duplicated - 别人复制了你的笔记, 给原作者 toast + 桌面通知
+  es.addEventListener('note-duplicated', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as {
+        originNoteId: string; newNoteId: string; duplicatorNickname: string;
+      };
+      if (isMyEvent(data)) return;
+      import('@/composables/useToast').then(({ useToast }) => {
+        useToast().show(`${data.duplicatorNickname} 复制了你的笔记`, { kind: 'success', duration: 3500 });
+      });
+      showNotification({
+        title: '笔记被复制',
+        body: `${data.duplicatorNickname} 复制了你的笔记`,
+        tag: `note-duplicated-${data.newNoteId}`,
+        path: `/note/${data.originNoteId}`,
+      });
+    } catch (e) { console.error('[sse] note-duplicated parse failed:', e); }
+  });
+
   // PR #5b: note-edit-request-resolved - 申请人收到处理结果 (approved/rejected)
   es.addEventListener('note-edit-request-resolved', (ev) => {
     try {

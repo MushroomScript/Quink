@@ -17,9 +17,9 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: { visibility: 'private' |
 
 const groupsStore = useGroupsStore();
 
-// chip 文案: private="私密" / shared="已选择 N 个群"
+// chip 文案: private="私人" / shared="已选择 N 个群"
 const chipLabel = computed(() => {
-  if (props.modelValue.visibility === 'private') return '私密';
+  if (props.modelValue.visibility === 'private') return '私人';
   const n = props.modelValue.sharedGroupIds.length;
   return n === 0 ? '已分享' : `已选择 ${n} 个群`;
 });
@@ -143,7 +143,7 @@ onUnmounted(() => {
       <div v-if="open" ref="popoverEl"
         class="fixed z-[var(--z-overlay)] w-64 bg-white rounded-xl shadow-xl py-2 origin-bottom"
         :style="{ border: '1px solid var(--sb-border)', top: popoverTop, left: popoverLeft }">
-        <!-- 私密选项: 单独一行, 单击切到 private -->
+        <!-- 私人选项: 单独一行, 单击切到 private -->
         <button type="button" @click="setPrivate"
           class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-gray-50"
           :class="!isShared ? 'bg-primary/5' : ''">

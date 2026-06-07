@@ -39,6 +39,28 @@ const lockToken = ref<string | null>(null);
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 const showInner = ref(false);
 
+// PR #9: 申请编辑权弹窗 (无 write 权限的人点编辑 → 不进编辑器, 弹申请理由对话框)
+const showRequestPerm = ref(false);
+const requestPermLabel = ref<'admin' | 'all'>('admin');
+const requestPermMessage = ref('');
+const submittingRequest = ref(false);
+async function submitEditRequest() {
+  if (submittingRequest.value) return;
+  submittingRequest.value = true;
+  try {
+    await api.requestNoteEditPermission(props.note.id, requestPermMessage.value.trim() || undefined);
+    toast.show('已提交申请, 等待作者或管理员审批', 'success', 3000);
+    showRequestPerm.value = false;
+    emit('close');
+  } catch (e: any) {
+    toast.show('申请失败: ' + (e.message || '未知错误'), 'error', 3000);
+  } finally { submittingRequest.value = false; }
+}
+function cancelEditRequest() {
+  showRequestPerm.value = false;
+  emit('close');
+}
+
 async function acquireLock(): Promise<boolean> {
   if (!isSharedNote.value) return true;
   // PR #5b (蘑菇 2026-06-07 修订): 唯一免锁场景 = 作者主视图改 root 多群. 其它都申锁:
@@ -63,23 +85,11 @@ async function acquireLock(): Promise<boolean> {
       if (res.status === 409 && body.error === 'locked') {
         toast.show(`「${body.lockByNickname}」正在编辑此笔记，稍后再试`, 'error', 3500);
       } else if (res.status === 403 && body.error === 'no_write_permission') {
-        // PR #5b: 没编辑权 → 弹"申请编辑权"按钮
-        const permLabel = body.editPermission === 'admin' ? '仅管理员可改' : '所有人可改';
-        toast.show(`你没有编辑权限（${permLabel}）`, {
-          kind: 'error',
-          duration: 4000,
-          action: {
-            label: '申请编辑权限',
-            onClick: async () => {
-              try {
-                await api.requestNoteEditPermission(props.note.id);
-                toast.show('已提交申请，等待作者或管理员审批', 'success', 3000);
-              } catch (e: any) {
-                toast.show('申请失败：' + (e.message || '未知错误'), 'error', 3000);
-              }
-            },
-          },
-        });
+        // PR #9: 没编辑权 → 弹申请编辑权对话框 (输入理由 + 提交申请/取消). 不进编辑器
+        requestPermLabel.value = body.editPermission === 'admin' ? 'admin' : 'all';
+        requestPermMessage.value = '';
+        showRequestPerm.value = true;
+        return false;
       } else {
         toast.show('无法获取编辑锁：' + (body.error || res.statusText), 'error', 3000);
       }
@@ -140,8 +150,8 @@ function releaseLockOnUnmount() {
 onMounted(async () => {
   const ok = await acquireLock();
   if (!ok) {
-    // 拿不到锁直接 emit close, 不走 enter 动画
-    emit('close');
+    // 拿不到锁: 申请编辑权弹窗已弹时不关, 用户点取消/提交后才关; 其他失败 (lock 409 / 网络错) 直接 close
+    if (!showRequestPerm.value) emit('close');
     return;
   }
   nextTick(() => { showInner.value = true; });
@@ -309,6 +319,8 @@ onBeforeUnmount(() => {
             :initial-shared-group-ids="(note as any).sharedGroupIds || []"
             :focus-end="true"
             :max-height="450"
+            :lock-type="!isMyNote"
+            :hide-tags="!isMyNote"
             submit-label="保存"
             @submit="onSubmit"
           />
@@ -337,6 +349,31 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </Transition>
+    </div>
+    </Transition>
+
+    <!-- PR #9 申请编辑权对话框: 没 write 权限的人点编辑触发, 不显示编辑器内容 -->
+    <Transition name="modal-fade">
+    <div v-if="showRequestPerm" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/30" @click="cancelEditRequest" />
+      <div class="relative bg-white rounded-xl shadow-xl p-6 w-96">
+        <p class="text-sm text-gray-700 font-medium mb-1">申请编辑权限</p>
+        <p class="text-xs text-gray-400 mb-3">
+          {{ requestPermLabel === 'admin' ? '这条笔记仅管理员可编辑' : '这条笔记所有人可编辑' }}, 提交申请后由作者或群管理员审批
+        </p>
+        <textarea v-model="requestPermMessage" rows="3" maxlength="500"
+          placeholder="附上申请理由 (可选, 最多 500 字)"
+          spellcheck="false"
+          class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs leading-relaxed outline-none focus:border-primary resize-none text-gray-600" />
+        <div class="flex gap-2 justify-end mt-4">
+          <button @click="cancelEditRequest"
+            class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">取消</button>
+          <button @click="submitEditRequest" :disabled="submittingRequest"
+            class="px-4 py-1.5 text-xs rounded-lg bg-primary-light text-primary-dark hover:bg-primary/20 disabled:opacity-50 transition-colors font-medium">
+            {{ submittingRequest ? '提交中...' : '提交申请' }}
+          </button>
+        </div>
+      </div>
     </div>
     </Transition>
   </Teleport>

@@ -469,6 +469,12 @@ export const api = {
     return request<{ data: NoteEditHistoryRow[] }>(`/notes/${id}/edit-history`);
   },
 
+  // PR #9: 另存为副本. 复制 content + 引用原作者抬头 + 归属操作人 + visibility=private.
+  // tags / category / pinned / todoStatus / todoDue / parentNoteId 都不复制. 通知原作者 SSE note-duplicated.
+  duplicateNote(id: string) {
+    return request<{ data: Note }>(`/notes/${id}/duplicate`, { method: 'POST' });
+  },
+
   // PR #5b: 群级汇总 (作者+admin 看), 给群组详情页"编辑申请管理"面板用
   listGroupEditRequests(groupId: string) {
     return request<{ data: GroupNoteEditRequestRow[] }>(`/groups/${groupId}/note-edit-requests`);

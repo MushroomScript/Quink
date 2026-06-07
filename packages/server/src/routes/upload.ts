@@ -96,6 +96,8 @@ function nameFromOriginal(originalName: string): string {
 
 // POST /api/upload/avatar — upload avatar image
 app.post('/avatar', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const body = await c.req.parseBody();
   const file = body['file'];
 
