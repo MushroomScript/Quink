@@ -138,7 +138,7 @@ async function doClear() {
              pb 去掉 (10px 字在 16px badge 内 items-center 自然居中, 不需要 top-heavy 补偿) -->
         <span
           v-if="tabUnread(t.key) > 0"
-          class="inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 bg-red-400/70 text-white text-[10px] leading-none font-semibold tabular-nums rounded-full"
+          class="inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 pb-[0.5px] bg-red-400/70 text-white text-[10px] leading-none font-semibold tabular-nums rounded-full"
         >
           {{ tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key) }}
         </span>
@@ -172,8 +172,8 @@ async function doClear() {
           class="notif-item group p-3 rounded-lg cursor-pointer transition-all duration-150"
           :style="
             n.readAt
-              ? 'background: var(--bg-secondary); border-left: 3px solid transparent'
-              : 'background: var(--bg-primary-light); border-left: 3px solid rgb(var(--c-accent))'
+              ? 'background-color: var(--bg-secondary); border-left: 3px solid transparent'
+              : 'background-color: var(--bg-primary-light); border-left: 3px solid rgb(var(--c-accent))'
           "
         >
           <!-- 第一行: icon + title + 未读小圆点 + 删除按钮. icon 跟 title 都用 items-center 单行天然居中 (复用 sidebar 待办 link 模式) -->
