@@ -410,10 +410,11 @@ onUnmounted(() => {
                 translate-y-[1px] 整体下移 1px 让圆点跟"待办"文字 baseline 视觉对齐 (icon size 1.125rem 比 text 14px 略高).
              2. 横向 (2 位数+): "1" 在 em-square 里 ink 偏右半 (左边大段空白让 "1" 看着窄), "10"/"99+" 等多位数视觉重心偏右,
                 技术上 padding 完全对称但视觉看着"左空多右空少". 1 位数 (1-9) "0/2/3..." 字符本身对称, 不调.
-                多位数用 pl-[3px] pr-[5px] 让内容向左挤 1px 视觉居中 (蘑菇 2026-06-08 报告"10 左空白多 1px") -->
+                多位数用 pl-[3.5px] pr-[4.5px] 让内容向左挤 0.5px sub-pixel (蘑菇 2026-06-08 在 badge-test.html 6 方案对比定稿: 整 1px 偏左过头, 0.5px 半步刚好).
+                注: zoom=1.5 时 0.5 CSS px = 0.75 物理像素, 浏览器 sub-pixel antialiasing 渲染. zoom=1 时 0.5px round 但 letter glyph 仍能感知微偏 -->
         <span v-if="!sidebarCollapsed && item.label === '待办' && stats.pendingTodos > 0 && auth.user?.preferences?.showTodoBadge !== false"
           class="ml-auto translate-y-[1px] inline-flex items-center justify-center min-w-[18px] h-[18px] pb-[1px] bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full"
-          :class="String(stats.pendingTodos > 99 ? '99+' : stats.pendingTodos).length > 1 ? 'pl-[3px] pr-[5px]' : 'px-1'">
+          :class="String(stats.pendingTodos > 99 ? '99+' : stats.pendingTodos).length > 1 ? 'pl-[3.5px] pr-[4.5px]' : 'px-1'">
           {{ stats.pendingTodos > 99 ? '99+' : stats.pendingTodos }}
         </span>
         <!-- 折叠态: 小红点 (统一暗红跟群组列表折叠态视觉一致) -->
