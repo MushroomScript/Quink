@@ -859,7 +859,7 @@ function goBack() {
           <div class="absolute inset-0 bg-black/30" @click="confirmLogoutAll = false" />
           <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 text-center">
             <p class="text-sm text-gray-700 mb-1">登出所有设备</p>
-            <p class="text-xs text-gray-400 mb-4">这会让你在其他所有地方 (含本机) 立即退出登录</p>
+            <p class="text-xs text-gray-400 mb-4">将使本账号所有登录设备立即登出</p>
             <div class="flex gap-2 justify-center">
               <button @click="confirmLogoutAll = false" :disabled="logoutAllSaving"
                 class="px-4 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50">取消</button>
