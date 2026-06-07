@@ -301,6 +301,46 @@ export const groupNotePins = sqliteTable('group_note_pins', {
   pk: primaryKey({ columns: [table.groupId, table.noteId] }),
 }));
 
+// PR #11 个人提醒 (替代 notes.todo_due / todo_remind_rrule / todo_remind_sent_at 三列):
+// 任何用户对任何笔记都能设. (user_id, note_id) UNIQUE 保证一对一. 笔记被作者删后仍扫得到, 改发"失效"通知.
+// 旧 notes.todo_* 三列保留 (避免破坏老客户端读), 启动一次性迁移到此表后新版后端不再写它们
+export const notePersonalReminders = sqliteTable('note_personal_reminders', {
+  id: text('id').primaryKey(), // nanoid
+  userId: text('user_id').notNull().references(() => users.id),
+  noteId: text('note_id').notNull().references(() => notes.id),
+  dueAt: text('due_at').notNull(), // ISO datetime
+  rrule: text('rrule'), // RFC 5545 RRULE 字符串, null = 单次
+  remindSentAt: text('remind_sent_at'), // 防重发. 单次发完即清行; RRULE 发完推算下次 + 清 sent_at
+  createdAt: text('created_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.noteId] }), // 一个用户对一个笔记最多 1 条
+}));
+
+// PR #11 群提醒: 群主/管理员对群内 shared 笔记设. (note_id, group_id) UNIQUE.
+// 群所有 active 成员 (且开启接收开关的) 都收. created_by 给通知里显示"X 设置了提醒"
+export const noteGroupReminders = sqliteTable('note_group_reminders', {
+  id: text('id').primaryKey(),
+  noteId: text('note_id').notNull().references(() => notes.id),
+  groupId: text('group_id').notNull().references(() => groups.id),
+  dueAt: text('due_at').notNull(),
+  rrule: text('rrule'),
+  remindSentAt: text('remind_sent_at'),
+  createdBy: text('created_by').notNull().references(() => users.id),
+  createdAt: text('created_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.noteId, table.groupId] }),
+}));
+
+// PR #11 群提醒接收开关: 每用户每群最多 1 条. 缺行 = 默认接收 (enabled=1).
+// 用户主动关闭时 INSERT enabled=0; 重开时改回 1
+export const groupReminderSubscriptions = sqliteTable('group_reminder_subscriptions', {
+  userId: text('user_id').notNull().references(() => users.id),
+  groupId: text('group_id').notNull().references(() => groups.id),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.groupId] }),
+}));
+
 // PR #10 通知中心: 集中所有"用户该被告知"的事件 (申请编辑权 / 另存为 / 提醒到点 / 群组变更 / 评论等),
 // 不再依赖 toast 一闪而过. category 对应 UI 3 tab, type 是具体事件名 (字符串不 enum 防后续扩字段时全表 ALTER).
 // payload 存 JSON 给"点击通知跳关联资源"用 (noteId / groupId / fromUserId 等). read_at NULL=未读, 标已读时填 ISO datetime
@@ -359,3 +399,9 @@ export type ReminderChannelType = ReminderChannel['type'];
 export type Notification = typeof notifications.$inferSelect;
 export type NewNotification = typeof notifications.$inferInsert;
 export type NotificationCategory = Notification['category'];
+export type NotePersonalReminder = typeof notePersonalReminders.$inferSelect;
+export type NewNotePersonalReminder = typeof notePersonalReminders.$inferInsert;
+export type NoteGroupReminder = typeof noteGroupReminders.$inferSelect;
+export type NewNoteGroupReminder = typeof noteGroupReminders.$inferInsert;
+export type GroupReminderSubscription = typeof groupReminderSubscriptions.$inferSelect;
+export type NewGroupReminderSubscription = typeof groupReminderSubscriptions.$inferInsert;

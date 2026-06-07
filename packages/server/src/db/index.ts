@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
 import { resolve } from 'path';
 import { toPinyinSearchable } from '../utils/pinyin.js';
+import { nanoid } from 'nanoid';
 
 const DB_PATH = process.env.QUINK_DB_PATH || resolve(process.cwd(), 'quink.db');
 
@@ -379,6 +380,71 @@ try { sqlite.exec(`
 `); } catch {}
 try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC)'); } catch {}
 try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, read_at) WHERE read_at IS NULL'); } catch {}
+
+// PR #11 提醒分家 (个人提醒 + 群提醒 + 接收开关). 启动一次性迁移 notes.todo_due → note_personal_reminders.
+// 旧 notes.todo_* 三列保留 (避免破坏老客户端读), 新版后端 scheduler 不再扫它们 (统一从两张提醒表扫).
+// 复合主键 (user_id, note_id) / (note_id, group_id) / (user_id, group_id) 保证一对一
+try { sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS note_personal_reminders (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    note_id TEXT NOT NULL REFERENCES notes(id),
+    due_at TEXT NOT NULL,
+    rrule TEXT,
+    remind_sent_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (user_id, note_id)
+  );
+`); } catch {}
+// scheduler 扫 "due_at <= now AND remind_sent_at IS NULL" → partial index 节省扫描行数
+try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_personal_reminders_due ON note_personal_reminders(due_at) WHERE remind_sent_at IS NULL'); } catch {}
+// 给 NoteCard 拉某用户对某笔记的提醒用 (UNIQUE 索引自带支持, 不需额外)
+
+try { sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS note_group_reminders (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL REFERENCES notes(id),
+    group_id TEXT NOT NULL REFERENCES groups(id),
+    due_at TEXT NOT NULL,
+    rrule TEXT,
+    remind_sent_at TEXT,
+    created_by TEXT NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    UNIQUE (note_id, group_id)
+  );
+`); } catch {}
+try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_group_reminders_due ON note_group_reminders(due_at) WHERE remind_sent_at IS NULL'); } catch {}
+
+try { sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS group_reminder_subscriptions (
+    user_id TEXT NOT NULL REFERENCES users(id),
+    group_id TEXT NOT NULL REFERENCES groups(id),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, group_id)
+  );
+`); } catch {}
+
+// PR #11 一次性迁移: notes.todo_due NOT NULL → note_personal_reminders 表.
+// config flag 防重复跑 (反复跑会把已删的个人提醒又复活). 保持 deleted_at IS NULL 过滤
+// (回收站待办的提醒迁不迁差别不大, 反正 scheduler 旧版也不发, 简化只迁 active)
+try {
+  const row = sqlite.prepare("SELECT value FROM config WHERE key = 'personal_reminder_migration_v1'").get() as { value: string } | undefined;
+  if (!row) {
+    const pending = sqlite.prepare(`SELECT id, user_id, todo_due, todo_remind_rrule, todo_remind_sent_at
+      FROM notes WHERE todo_due IS NOT NULL AND deleted_at IS NULL`).all() as Array<{ id: string; user_id: string; todo_due: string; todo_remind_rrule: string | null; todo_remind_sent_at: string | null }>;
+    if (pending.length > 0) {
+      const ins = sqlite.prepare(`INSERT OR IGNORE INTO note_personal_reminders (id, user_id, note_id, due_at, rrule, remind_sent_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`);
+      const now = new Date().toISOString();
+      const tx = sqlite.transaction((rows: typeof pending) => {
+        for (const r of rows) ins.run(nanoid(12), r.user_id, r.id, r.todo_due, r.todo_remind_rrule, r.todo_remind_sent_at, now);
+      });
+      tx(pending);
+      console.log(`[personal reminder migration v1] migrated ${pending.length} notes.todo_due → note_personal_reminders`);
+    }
+    sqlite.prepare("INSERT INTO config (key, value) VALUES (?, ?)").run('personal_reminder_migration_v1', JSON.stringify(true));
+  }
+} catch (e) { console.error('[personal reminder migration v1] failed:', e); }
 // 一次性回填 + 升级重算: PINYIN_SCHEMA_VERSION 每次 toPinyinSearchable 算法升级时 +1,
 // 启动检测 config 表里存的版本号,低于当前版本就把所有 content_pinyin 清空让下面回填重算。
 // v1: 全拼 + 单读音首字母. v2: 多音字首字母穷举. v3: 多音字只取前 2 读音. v4: 加罕用读音黑名单.

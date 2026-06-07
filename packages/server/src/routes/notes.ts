@@ -2036,4 +2036,154 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
   }
 }
 
+// =========================================================
+//  PR #11 提醒分家: 个人提醒 + 群提醒
+// =========================================================
+// 个人提醒: 任何 read 权限用户都能设 (自己或别人共享的笔记). UNIQUE (user, note) 自动覆盖旧值.
+// 群提醒: 群 owner/admin 对群内 shared 笔记设 (笔记必须 share 到指定 group_id). UNIQUE (note, group).
+// 旧 notes.todo_due 不再由这些 endpoint 写, PATCH /:id 加 shim 同步双写到 personal_reminder 保持兼容
+const reminderSchema = z.object({
+  dueAt: z.string().min(1).max(64),
+  rrule: z.string().max(512).nullable().optional(),
+});
+const groupReminderSchema = reminderSchema.extend({
+  groupId: z.string().min(1).max(32),
+});
+
+// POST /api/notes/:id/personal-reminder — 设/更新个人提醒
+app.post('/:id/personal-reminder', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const { id } = c.req.param();
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  const parsed = reminderSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const now = dayjs().toISOString();
+  await db.insert(schema.notePersonalReminders).values({
+    id: nanoid(12),
+    userId,
+    noteId: id,
+    dueAt: parsed.data.dueAt,
+    rrule: parsed.data.rrule ?? null,
+    remindSentAt: null,
+    createdAt: now,
+  }).onConflictDoUpdate({
+    target: [schema.notePersonalReminders.userId, schema.notePersonalReminders.noteId],
+    set: { dueAt: parsed.data.dueAt, rrule: parsed.data.rrule ?? null, remindSentAt: null },
+  });
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, _ocid);
+  await logAudit(c, 'note.personal_reminder_set', 'note', id, { dueAt: parsed.data.dueAt, rrule: parsed.data.rrule });
+  return c.json({ data: { noteId: id, dueAt: parsed.data.dueAt, rrule: parsed.data.rrule ?? null } });
+});
+
+// DELETE /api/notes/:id/personal-reminder — 删个人提醒 (idempotent)
+app.delete('/:id/personal-reminder', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const { id } = c.req.param();
+  await db.delete(schema.notePersonalReminders).where(and(
+    eq(schema.notePersonalReminders.userId, userId),
+    eq(schema.notePersonalReminders.noteId, id),
+  ));
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, _ocid);
+  await logAudit(c, 'note.personal_reminder_delete', 'note', id);
+  return c.json({ message: '已删除' });
+});
+
+// POST /api/notes/:id/group-reminder — 设/更新群提醒. body { groupId, dueAt, rrule? }
+// 校验: 1) note 分享到 groupId 2) userId 在 groupId 是 owner/admin
+app.post('/:id/group-reminder', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const { id } = c.req.param();
+  const parsed = groupReminderSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const { groupId, dueAt, rrule } = parsed.data;
+  const note = await db.select().from(schema.notes).where(eq(schema.notes.id, id)).get();
+  if (!note || note.deletedAt) return c.json({ error: '笔记不存在' }, 404);
+  if (note.visibility !== 'shared') return c.json({ error: '私有笔记不支持群提醒' }, 400);
+  const share = await db.select({ noteId: schema.noteShares.noteId }).from(schema.noteShares)
+    .where(and(eq(schema.noteShares.noteId, id), eq(schema.noteShares.groupId, groupId))).get();
+  if (!share) return c.json({ error: '该笔记未分享到此群' }, 400);
+  const me = await db.select({ role: schema.groupMembers.role }).from(schema.groupMembers)
+    .where(and(
+      eq(schema.groupMembers.groupId, groupId),
+      eq(schema.groupMembers.userId, userId),
+      eq(schema.groupMembers.status, 'active'),
+    )).get();
+  if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
+    return c.json({ error: '仅群主或管理员可设群提醒' }, 403);
+  }
+  const now = dayjs().toISOString();
+  await db.insert(schema.noteGroupReminders).values({
+    id: nanoid(12),
+    noteId: id,
+    groupId,
+    dueAt,
+    rrule: rrule ?? null,
+    remindSentAt: null,
+    createdBy: userId,
+    createdAt: now,
+  }).onConflictDoUpdate({
+    target: [schema.noteGroupReminders.noteId, schema.noteGroupReminders.groupId],
+    set: { dueAt, rrule: rrule ?? null, remindSentAt: null, createdBy: userId },
+  });
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id, groupId }, _ocid);
+  await logAudit(c, 'note.group_reminder_set', 'note', id, { groupId, dueAt, rrule });
+  return c.json({ data: { noteId: id, groupId, dueAt, rrule: rrule ?? null } });
+});
+
+// DELETE /api/notes/:id/group-reminder?groupId= — 删群提醒
+app.delete('/:id/group-reminder', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const { id } = c.req.param();
+  const groupId = c.req.query('groupId');
+  if (!groupId) return c.json({ error: 'groupId 缺失' }, 400);
+  const me = await db.select({ role: schema.groupMembers.role }).from(schema.groupMembers)
+    .where(and(
+      eq(schema.groupMembers.groupId, groupId),
+      eq(schema.groupMembers.userId, userId),
+      eq(schema.groupMembers.status, 'active'),
+    )).get();
+  if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
+    return c.json({ error: '仅群主或管理员可删群提醒' }, 403);
+  }
+  await db.delete(schema.noteGroupReminders).where(and(
+    eq(schema.noteGroupReminders.noteId, id),
+    eq(schema.noteGroupReminders.groupId, groupId),
+  ));
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id, groupId }, _ocid);
+  await logAudit(c, 'note.group_reminder_delete', 'note', id, { groupId });
+  return c.json({ message: '已删除' });
+});
+
+// GET /api/notes/:id/reminders — 拉某笔记我可见的所有提醒 (我的个人 + 我所在群的群提醒)
+// 用于 NoteCard 显示提醒铃铛 + 设提醒 modal 回填
+app.get('/:id/reminders', async (c) => {
+  const userId = c.get('userId');
+  const { id } = c.req.param();
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  const personal = await db.select().from(schema.notePersonalReminders)
+    .where(and(
+      eq(schema.notePersonalReminders.userId, userId),
+      eq(schema.notePersonalReminders.noteId, id),
+    )).get();
+  // 我所在 active 群 ∩ 笔记分享群 (跟 noteShares.note_shares 交集)
+  const myGroupIds = (await db.select({ groupId: schema.groupMembers.groupId })
+    .from(schema.groupMembers).where(and(
+      eq(schema.groupMembers.userId, userId),
+      eq(schema.groupMembers.status, 'active'),
+    )).all()).map(g => g.groupId);
+  const groupReminders = myGroupIds.length === 0 ? [] : await db.select()
+    .from(schema.noteGroupReminders)
+    .where(and(
+      eq(schema.noteGroupReminders.noteId, id),
+      inArray(schema.noteGroupReminders.groupId, myGroupIds),
+    )).all();
+  return c.json({ data: { personal: personal ?? null, group: groupReminders } });
+});
+
 export default app;
