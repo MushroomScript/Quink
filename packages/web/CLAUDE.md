@@ -58,6 +58,37 @@ helper 内部 Electron 端 zoom 返回 1, 行为不变 (跟直接用 r.bottom �
 
 如果未来 CSS zoom 替换成 `transform: scale()` 实现"显示比例" (long-term plan), helper 可以一行改成 `getCssZoom() → 1` 全部回退. 当前架构兼容这条退路。
 
+### setAppHeight 跟 zoom 互相搞: --app-height 双倍计算坑（蘑菇 2026-06-08 修）
+
+`main.ts` 的 `setAppHeight` 用 `window.innerHeight` 设 `--app-height` CSS 变量, `#app { height: var(--app-height) }`. **CSS zoom > 1 时这串会双倍计算让 #app 比视口高**.
+
+**症状**: 蘑菇 zoom=1.5 时登录页 `.login-card` 距屏幕底端只有 57px (正常应该 ~250px). 卡片"快挨着底端"几乎贴底.
+
+**根因链**:
+1. `innerHeight` 在 CSS zoom 下返回 zoomed value (zoom=1.5 时 = 1271, 跟真实视口物理像素一致)
+2. `--app-height: 1271px` 是 CSS px 不是物理像素
+3. `#app` 渲染时 CSS zoom 把 1271 CSS px × 1.5 = **1906.5 物理像素** (超过视口 1271)
+4. `flex items-center` 居中的是 #app (1906.5 物理像素) 中心 = 953
+5. 视口只能看到前 1271 px → 卡片中心在视口外 → 显示出来的是卡片下半被挤到屏幕底端
+
+**修法**: `cssHeight = innerHeight / zoom`, 让 CSS px 值乘 zoom 后等于真实视口.
+
+```ts
+// packages/web/src/main.ts
+function setAppHeight() {
+  const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+  const cssHeight = window.innerHeight / zoom;
+  document.documentElement.style.setProperty('--app-height', `${cssHeight}px`);
+}
+(window as any).__quink_setAppHeight = setAppHeight;
+```
+
+`App.vue applyZoomLevel` 改完 CSS zoom 后调 `__quink_setAppHeight()` 重算 (innerHeight 不变但 zoom 变, 公式必须重跑).
+
+**为啥之前没暴露**: 主界面 `#app` 内是 `<div class="flex flex-col h-full overflow-hidden">`, 超高的内容被 overflow hidden 截掉视觉看不出来. 只有登录页 `flex items-center` 才暴露 #app 实际高度问题. 同理任何**用 `min-h-full` / `h-full` 撑高 + flex 居中**的全屏布局都受影响 — 加新这种页面前回顾这条.
+
+**unzoom helper 跟 setAppHeight 的关系**: `utils/zoom.ts` 的 `unzoomViewport()` 返回的 vw/vh 也是 unzoomed CSS px, 跟修复后的 `--app-height` 同单位. 加 popover 时算位置可以放心用.
+
 **密码框光标偏移 corner case**: 跟 zoom 无关但同源 ("`mirror` 里字符宽度跟 input 视觉宽度不一致"). `useCustomCaret.ts` 已用 `-webkit-text-security: disc` + `CSS.supports` fallback `'•'.repeat(n)` 跨浏览器修. 详见该文件注释.
 
 ## 主题系统

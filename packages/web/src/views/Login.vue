@@ -1,4 +1,8 @@
 <script setup lang="ts">
+// TODO: 蘑菇 2026-06-08 计划重写登录界面
+// 当前是占位实现 (Quink logo + 卡片 + 输入框), 太"一眼 AI", 缺少品牌特色.
+// 重写时记得保留: 主题图标 (quink-{theme}-192.png) + zoom 修正兼容 (--app-height / zoom 公式) + dark 默认背景
+// 重写参考: 不要再用 flex items-center 简单居中 + 普通输入框. 考虑斜分割 / 大字 hero / 配图等更有性格的设计
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
@@ -38,7 +42,8 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
 </script>
 
 <template>
-  <div class="login-page min-h-full flex items-center justify-center px-4 relative overflow-hidden">
+  <!-- pb-[12vh]: flex items-center 居中 [logo + card] 后整体上移 6vh, 让视觉重心略偏上 (蘑菇要求 2026-06-08) -->
+  <div class="login-page min-h-full flex items-center justify-center px-4 pb-[12vh] relative overflow-hidden">
     <!-- Background glow -->
     <div class="absolute top-1/4 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none" style="background: rgb(var(--c-accent) / 0.15)"></div>
 
