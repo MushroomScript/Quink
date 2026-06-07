@@ -624,8 +624,8 @@ const typeColor: Record<string, string> = {
             <PhBell size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>{{ note.todoDue ? '编辑提醒' : '设置提醒' }}</span>
           </button>
-          <!-- PR #9 另存为: 所有人可用 (复制成自己的私人副本). 按 type 决定文案 -->
-          <button @click.stop="doDuplicate()"
+          <!-- PR #9 另存为: 仅 shared 笔记显示 (主视图私人笔记不显示, 蘑菇 2026-06-07 修订). 按 type 决定文案 -->
+          <button v-if="isShared" @click.stop="doDuplicate()"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhCopySimple size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>另存为我的{{ typeLabels[note.type] || '副本' }}</span>

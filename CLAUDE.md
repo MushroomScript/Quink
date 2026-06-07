@@ -112,6 +112,35 @@ pnpm run dev:desktop
 - 笔记软删除（`deleted_at` 字段），30 天后自动彻底清除。
 - 端口：后端 38999，前端 24888。配置在 `vite.config.ts` 和 `server/src/index.ts`。
 
+## 变更操作刷新约定（跨包全局）
+
+**核心约定**：任何导致服务器数据变更的操作（创建 / 修改 / 删除 / 状态切换 等），**操作发起方必须负责本地立即刷新 UI** + **后端必须 publish SSE 通知同账号其他设备 + 受影响的其他用户**。两件事缺一不可，否则操作完成后某个端"看不到变化"。
+
+**链路（蘑菇 2026-06-07 拍板）**：
+
+1. **前端发起** —— `api/index.ts` request 函数自动给所有 fetch 加 `X-Quink-Client-Id` header（sessionStorage 每 tab 唯一）
+2. **后端 handler 顶部** —— `const _ocid = c.req.header('X-Quink-Client-Id')` 拿到本次请求的设备 id
+3. **后端写入完成后** —— 必须 `publish(userId, eventName, payload, _ocid)` 给操作者本人所有 SSE 连接，`_ocid` 透传让前端去重。涉及群成员 / 笔记其他读者时同时调 `broadcastNoteShared` / `broadcastNoteSocial` / `broadcastGroupChanged` 之类的群播 helper（这些也带 `_ocid` 参数）
+4. **前端发起方** —— 不等 SSE 自己回环，**立即本地 mutate / 拉单条插入**让本设备 UI 即时反映（典型：`store.updateNote` Object.assign / `store.syncNoteCreated` 拉单条 / NoteCard 直接 mutate props.note）
+5. **前端 sse.ts handler** —— 收到事件用 `isMyEvent(data)` 检查 `_originClientId` 是否本设备，是则跳过（本设备已直接 mutate 过了），不是则触发刷新（同账号其他设备 / 其他用户）
+
+**新加写 endpoint 必做清单**：
+
+1. handler 顶部 `const _ocid = c.req.header('X-Quink-Client-Id');`
+2. 成功路径加 `publish(userId, 'xxx-changed', payload, _ocid)`（或专用事件名，如 `note-created` / `note-updated` / `note-deleted`）
+3. 跨群 / 跨笔记的影响 → 同步调 `broadcastNoteShared(groupIds, userId, _ocid)` 等 helper
+4. 前端 view setup 内加 `useSseSync('xxx', loadXxx)` composable 监听，或者复用现有事件 handler（详见 `packages/server/CLAUDE.md` "多设备 SSE 同步约定"）
+5. 前端发起方（操作发起的 NoteCard / NoteEditModal / Settings 等）必须本地 mutate 不靠 SSE 回环 —— SSE 给本设备会被 `isMyEvent` 跳过
+
+**反例（坑过的）**：
+
+- doDuplicate 只 toast 不调 `store.syncNoteCreated` → 副本不出现在列表头（PR #9 followup 修）
+- NoteCard 切 `editPermission` 只调 store.updateNote，但 GroupDetail 的 `groupNotes` 是本地 ref → 必须同时 mutate `props.note.editPermission` 让 reactive UI 立刻反映（PR #5b 修）
+- `store.updateNote` in-place 路径之前只 fork 时派 `quink-group-notes-changed` → in-place 改自己笔记群组页不刷（PR #7b 修）
+- 删除按钮 toast 没 try-catch 兜底 → 后端 403 时静默"什么都不提示"（PR #7b 修）
+
+如果操作本身只影响发起者（如保存编辑器草稿到 localStorage），可以跳过 SSE 通知但本地必须刷新。其他场景统统两件事都做。
+
 ## UI 交互约定（跨 view 通用）
 
 - **危险操作必须弹窗确认**（删除/清空/永久删除等），禁止在按钮原地切换文字。使用 `confirmXxxId` ref + Teleport 居中弹窗 + 取消/确认双按钮。
