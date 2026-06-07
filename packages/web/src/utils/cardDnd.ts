@@ -11,16 +11,26 @@ import { useToast } from '@/composables/useToast';
 
 const DRAG_THRESHOLD = 4;
 
+// 多选拖动: ghosts 的几何中心 = 鼠标位置, 每张 ghost 相对中心的偏移用 relCenterX/Y. 保留 ghost 之间的相对位置 (按原卡片几何) 但整组集中到鼠标周围, 不再绑在原始位置上.
+// 单选: 用 ghostHtml + ghostX/Y (鼠标位置) 显示一个紧跟鼠标的 ghost.
+interface GhostItem {
+  id: string;
+  html: string;        // 从 .note-content .vditor-reset innerHTML 直接拿
+  relCenterX: number;  // 拖动启动时算: (origCardCenterX - allGhostsAvgCenterX). DragGhost 用 mouseX + relCenterX 算位置, transform translate(-50%,-50%) 让 ghost 中心对齐
+  relCenterY: number;
+}
+
 interface DragState {
   active: boolean;
   ids: string[];
   fromType: string | null;       // 仅单条拖动时有值, 多条 null (用于 same-type 跳过判断)
   fromCategory: string;          // 同上
   hoverTarget: string | null;    // 当前 elementFromPoint 命中的 [data-drop-target] 值
-  ghostX: number;                // 鼠标位置 (ghost 跟着鼠标)
+  ghostX: number;                // 鼠标位置 (单选 / 多选 ghosts 中心都用)
   ghostY: number;
   ghostText: string;             // ghost 上显示的文字 ("X 条" 多选 / 兜底文本)
-  ghostHtml: string;             // 单选时复用 NoteCard.renderedContent (零开销, 已 Vditor.md2html 渲染好), DragGhost 用 v-html 渲染; 多选时为空走 ghostText
+  ghostHtml: string;             // 单选时复用 NoteCard.renderedContent (零开销, 已 Vditor.md2html 渲染好), DragGhost 用 v-html 渲染
+  ghosts: GhostItem[];           // 多选时: 每张选中卡片一个 GhostItem (relCenterX/Y) → DragGhost v-for 渲染. 单选时为空数组
 }
 
 export const dragState = reactive<DragState>({
@@ -33,6 +43,7 @@ export const dragState = reactive<DragState>({
   ghostY: 0,
   ghostText: '',
   ghostHtml: '',
+  ghosts: [],
 });
 
 interface PendingStart {
@@ -111,20 +122,51 @@ function onMove(e: PointerEvent) {
     dragState.fromType = pendingStart.type;
     dragState.fromCategory = pendingStart.category;
     dragState.ghostText = pendingStart.text;
-    // ghostHtml: 调用方显式传 (单选且就是本卡片) → 直接用; 否则从 DOM 拿对应 [data-note-id] 内的 .vditor-reset innerHTML 串联.
-    // 串联用 <hr> 分隔, 让用户看出是多张卡片. CSS 限高 + fade-mask 截断.
-    // 零开销: NoteCard watchEffect 已渲染好, querySelector 直接读 DOM
-    if (pendingStart.html) {
-      dragState.ghostHtml = pendingStart.html;
-    } else if (pendingStart.ids.length > 0) {
-      const htmls: string[] = [];
-      for (const id of pendingStart.ids) {
-        const reset = document.querySelector(`[data-note-id="${id}"] .note-content .vditor-reset`);
-        if (reset?.innerHTML) htmls.push(reset.innerHTML);
+    // 单选 (ids.length === 1): 走 ghostHtml + ghostX/Y (鼠标位置) 紧跟鼠标. 优先用调用方传的 html, 否则从 DOM 拿.
+    // 多选 (ids.length > 1): 走 ghosts 数组 (每张选中卡片在原位置渲染, 整体跟随鼠标), 不用 ghostHtml.
+    if (pendingStart.ids.length === 1) {
+      dragState.ghosts = [];
+      if (pendingStart.html) {
+        dragState.ghostHtml = pendingStart.html;
+      } else {
+        const reset = document.querySelector(`[data-note-id="${pendingStart.ids[0]}"] .note-content .vditor-reset`);
+        dragState.ghostHtml = reset?.innerHTML || '';
       }
-      dragState.ghostHtml = htmls.join('<hr class="ghost-divider" />');
     } else {
+      // 多选: 遍历选中卡片算各自相对所有卡片中心的偏移 (relCenterX/Y). 拖动时 ghosts 的几何中心跟随鼠标, ghosts 之间相对位置按原始几何保留 → 拖起几张卡片集中在鼠标附近但保留原 layout 形状
       dragState.ghostHtml = '';
+      type Raw = { id: string; html: string; cx: number; cy: number };
+      const raw: Raw[] = [];
+      for (const id of pendingStart.ids) {
+        const card = document.querySelector(`[data-note-id="${id}"]`) as HTMLElement | null;
+        if (!card) continue;
+        const reset = card.querySelector('.note-content .vditor-reset');
+        const rect = card.getBoundingClientRect();
+        raw.push({
+          id,
+          html: reset?.innerHTML || '',
+          cx: rect.left + rect.width / 2,
+          cy: rect.top + rect.height / 2,
+        });
+      }
+      if (raw.length > 0) {
+        const avgCx = raw.reduce((s, r) => s + r.cx, 0) / raw.length;
+        const avgCy = raw.reduce((s, r) => s + r.cy, 0) / raw.length;
+        // 原始相对中心偏移直接用容易让 ghosts 散得太开 (跨列卡片相距 500+px 视觉飞出鼠标可见范围).
+        // 用 sqrt 缩: 保留方向 + 距离顺序, 但远距离衰减更明显. 100px → ~30px, 400px → ~60px, 1000px → ~95px.
+        // SCALE=3 是手调值, 让 ghosts 集中在鼠标 ~120px 内可见, MAX_OFFSET 兜底防极端情况.
+        const SCALE = 3;
+        const MAX_OFFSET = 120;
+        const shrink = (v: number) => Math.sign(v) * Math.min(Math.sqrt(Math.abs(v)) * SCALE, MAX_OFFSET);
+        dragState.ghosts = raw.map(r => ({
+          id: r.id,
+          html: r.html,
+          relCenterX: shrink(r.cx - avgCx),
+          relCenterY: shrink(r.cy - avgCy),
+        }));
+      } else {
+        dragState.ghosts = [];
+      }
     }
     pendingStart = null;
   }
@@ -225,6 +267,7 @@ function reset() {
   dragState.hoverTarget = null;
   dragState.ghostText = '';
   dragState.ghostHtml = '';
+  dragState.ghosts = [];
   pendingStart = null;
   clearHoverNavTimer();
   navigatedTarget = null;

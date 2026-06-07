@@ -38,10 +38,11 @@ drop 目标 DOM 元素加 `data-drop-target="xxx"`，值约定：
 **视觉**：`dragState.hoverTarget` 给 dropzone 加 `drop-target-active` class；`<DragGhost />`（App.vue 全局挂载）fixed 跟随鼠标。
 
 **Ghost markdown 渲染**：
-- 单选 + 拖的就是本卡片 → NoteCard 传 `html: renderedContent.value`（复用 watchEffect 已 Vditor.md2html 渲染好的 HTML，零开销，不重新调 md2html）。
-- 多选 / 拖别的卡片 → 不传 html。`cardDnd.ts onMove` 启动拖动时遍历 ids 用 `document.querySelector('[data-note-id="X"] .note-content .vditor-reset').innerHTML` 从 DOM 拿已渲染的 HTML 串联，用 `<hr class="ghost-divider" />` 虚线分隔。
-- DragGhost 模板 `v-if="ghostHtmlClean"` 单选 md 分支 + 兜底 `ghostText` 分支（无内容时显纯文字）。`ghostHtmlClean` computed 清掉元素间 `\n` text node（`/>\s+</g` → `><`）+ 末尾 `\n / br`，否则 ghost 内 inline context 下 \n 会形成 anonymous inline box (line-height ~18px) 多出"一行白边"。
-- CSS 注意：**不要**给 ghost-md-preview 加 `::after` linear-gradient fade-mask，内容未触发 max-height 截断时 mask 会把最后一段 P 覆盖压白看起来像"底部空白边"。用纯 `overflow: hidden` 硬截断即可。
+- **单选**: NoteCard `onPointerDown` 传 `html: renderedContent.value`（复用 watchEffect 已 Vditor.md2html 渲染好的 HTML，零开销）→ DragGhost 单 ghost 紧跟鼠标位置 (`ghostX/Y`)。
+- **多选** (蘑菇 2026-06-07): cardDnd `onMove` 启动拖动时遍历 selectedIds 用 `document.querySelector('[data-note-id="X"] .note-content .vditor-reset').innerHTML` 拿已渲染 HTML, 同时算每张卡片的 viewport 中心 → 算 ghosts 整体的几何中心 → 每张 ghost 记 `relCenterX/Y = origCenter - allGhostsAvgCenter`。**用 sqrt 缩放** `relCenter = sign(rel) * min(sqrt(|rel|) * SCALE, MAX_OFFSET)` (SCALE=3, MAX_OFFSET=120) 让 ghosts 集中在鼠标 120px 内、保留原始相对方向 + 距离顺序、但远距离衰减更明显 (100px→30px, 400px→60px, 900px→90px, 2500px→cap 120)。
+- **多选 ghost 渲染位置**: DragGhost 模板 `:style="multiGhostStyle(g, dragState.ghostX, dragState.ghostY)"`, `mouseX/Y` 必须当参数传入 (Vue 不 track 跨函数 reactive)。`left = mouseX + relCenterX`, `top = mouseY + relCenterY`, `transform: translate(-50%, -50%)` 让 ghost 中心对齐目标位置。所有 ghost 复用单选同款 `.ghost-md-preview` 紧凑样式 (`bg-white + border + shadow-lg + rounded-lg + min-w 160 / max-w 320 / max-h 140 + opacity-90`)。
+- **HTML 清理**: `ghostHtmlClean` / `cleanHtmlStr` 用 `/>\s+</g` → `><` 清元素间 `\n` text node + `/(\s|<br\s*\/?>)+$/i` 剥末尾。否则 ghost 内 inline context 下 `\n` 形成 anonymous inline box (line-height ~18px) 多出"一行白边"。
+- **CSS 坑**: 不要给 ghost-md-preview 加 `::after` linear-gradient fade-mask, 内容未触发 max-height 截断时 mask 会把最后一段 P 覆盖压白看起来像"底部空白边"。用纯 `overflow: hidden` 硬截断即可。
 
 ## 多个边界
 
