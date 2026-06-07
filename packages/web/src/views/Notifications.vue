@@ -301,9 +301,14 @@ async function doClear() {
 </template>
 
 <style scoped>
-/* hover 视觉反馈: brightness 提亮 + primary 半透明 ring 边框, 避免鼠标移上去不知道在哪行 (蘑菇报告"删除可能窜行") */
+/* hover 整行被选取的感觉 (蘑菇报告: 之前 brightness + 1px ring 太弱). 用 3 层叠加:
+   1. background-image linear-gradient 叠一层半透明 primary 紫色覆盖 (整行被"染色"感)
+   2. box-shadow inset 1.5px primary ring (边框感)
+   3. brightness 1.1 微提亮 (避免太重)
+   background-color 仍由 inline style 控制 (已读灰 / 未读紫底), background-image 跟它叠加不冲突 */
 .notif-item:hover {
-  filter: brightness(1.2);
-  box-shadow: inset 0 0 0 1px rgba(var(--c-accent), 0.45);
+  background-image: linear-gradient(rgba(var(--c-accent), 0.22), rgba(var(--c-accent), 0.22));
+  box-shadow: inset 0 0 0 1.5px rgba(var(--c-accent), 0.7);
+  filter: brightness(1.1);
 }
 </style>
