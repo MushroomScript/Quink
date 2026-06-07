@@ -188,7 +188,6 @@ async function doClear() {
             <div class="font-medium text-sm truncate flex-1" style="color: var(--text-primary)">
               {{ n.title }}
             </div>
-            <span v-if="!n.readAt" class="shrink-0 w-2 h-2 rounded-full bg-red-400/90"></span>
             <!-- 标已读: 仅未读时显示, 只 markRead 不跳转 (整条 click 已包含跳转) -->
             <button
               v-if="!n.readAt"
