@@ -310,6 +310,6 @@ async function doClear() {
   /* hover 整行淡紫色背景 (蘑菇要求: 不要框 / 只要 bg 跟主题色呼应).
      用 background-image linear-gradient 叠一层半透明 primary 跟 inline style 的 background-color 共存.
      Quink --c-accent 是 "116 143 252" 空格 channel 格式, 必须用 rgb(var() / alpha) 现代语法 (rgba 不支持空格 channel) */
-  background-image: linear-gradient(rgb(var(--c-accent) / 0.22), rgb(var(--c-accent) / 0.22));
+  background-image: linear-gradient(rgb(var(--c-accent) / 0.12), rgb(var(--c-accent) / 0.12));
 }
 </style>
