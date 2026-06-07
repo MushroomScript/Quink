@@ -134,10 +134,10 @@ async function doClear() {
           : 'text-gray-500 hover:bg-gray-100'"
       >
         <span>{{ t.label }}</span>
-        <!-- badge 复用 sidebar 待办那整套 (bg-red-400/70 + text-[11px] font-semibold pb-[1px] + 1位/多位动态 padding) -->
+        <!-- badge 复用 sidebar 待办整套但 pb 改 1.5px 让字向上 0.5px (蘑菇报告 tab 上下文字偏下) -->
         <span
           v-if="tabUnread(t.key) > 0"
-          class="inline-flex items-center justify-center min-w-[18px] h-[18px] pb-[1px] bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full"
+          class="inline-flex items-center justify-center min-w-[18px] h-[18px] pb-[1.5px] bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full"
           :class="String(tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key)).length > 1 ? 'pl-[3.5px] pr-[4.5px]' : 'px-1'"
         >
           {{ tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key) }}
@@ -307,8 +307,10 @@ async function doClear() {
    3. brightness 1.1 微提亮 (避免太重)
    background-color 仍由 inline style 控制 (已读灰 / 未读紫底), background-image 跟它叠加不冲突 */
 .notif-item:hover {
-  background-image: linear-gradient(rgba(var(--c-accent), 0.22), rgba(var(--c-accent), 0.22));
-  box-shadow: inset 0 0 0 1.5px rgba(var(--c-accent), 0.7);
+  /* Quink --c-accent 是 "116 143 252" 空格 channel 格式, 必须用 rgb(var() / alpha) 现代语法.
+     之前用 rgba(var(--c-accent), 0.22) 是错的 (rgba 不支持空格 channel), 整段被浏览器 ignore. */
+  background-image: linear-gradient(rgb(var(--c-accent) / 0.22), rgb(var(--c-accent) / 0.22));
+  box-shadow: inset 0 0 0 1.5px rgb(var(--c-accent) / 0.7);
   filter: brightness(1.1);
 }
 </style>
