@@ -75,6 +75,12 @@ async function onDelete(id: string, e: MouseEvent) {
   await store.deleteOne(id);
 }
 
+// 仅标已读不跳转, 区别于整条点击 (后者既已读又跳关联资源)
+async function onMarkRead(id: string, e: MouseEvent) {
+  e.stopPropagation();
+  await store.markRead(id);
+}
+
 async function doReadAll() {
   confirmReadAll.value = false;
   await store.markReadAll();
@@ -163,7 +169,7 @@ async function doClear() {
           v-for="n in store.items"
           :key="n.id"
           @click="onItemClick(n.id)"
-          class="group p-3 rounded-lg cursor-pointer transition-colors"
+          class="notif-item group p-3 rounded-lg cursor-pointer transition-all duration-150"
           :style="
             n.readAt
               ? 'background: var(--bg-secondary); border-left: 3px solid transparent'
@@ -183,6 +189,16 @@ async function doClear() {
               {{ n.title }}
             </div>
             <span v-if="!n.readAt" class="shrink-0 w-2 h-2 rounded-full bg-red-400/90"></span>
+            <!-- 标已读: 仅未读时显示, 只 markRead 不跳转 (整条 click 已包含跳转) -->
+            <button
+              v-if="!n.readAt"
+              @click="onMarkRead(n.id, $event)"
+              class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-primary-light"
+              style="color: var(--text-muted)"
+              title="标已读"
+            >
+              <PhCheck size="1rem" weight="bold" />
+            </button>
             <button
               @click="onDelete(n.id, $event)"
               class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-100 hover:text-red-500"
@@ -283,3 +299,11 @@ async function doClear() {
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+/* hover 视觉反馈: brightness 提亮 + primary 半透明 ring 边框, 避免鼠标移上去不知道在哪行 (蘑菇报告"删除可能窜行") */
+.notif-item:hover {
+  filter: brightness(1.2);
+  box-shadow: inset 0 0 0 1px rgba(var(--c-accent), 0.45);
+}
+</style>
