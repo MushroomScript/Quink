@@ -309,10 +309,12 @@ function updateCaret() {
   const zoom = getCssZoom();
   const markerRect = marker.getBoundingClientRect();
   const markerLeft = markerRect.left / zoom;
-  // 垂直位置用 mirror 自身的 rect.top (= input 内容区 top = line box top, 跟字体无关).
-  // 不能用 markerRect.top: 那是 ZWSP marker inline-rect.top, 受字体 ascent 影响,
-  // 同 lineHeight 下 SimHei vs YaHei 差 3px → 跨字体场景 caret 垂直偏移.
-  const mirrorTop = mirror.getBoundingClientRect().top / zoom;
+  // 垂直位置基准 = mirror 容器 top (= input 内容区 top = 第一行 line-box top, 跟字体无关).
+  // 不能用 markerRect.top 当 caret base: 那是 ZWSP marker inline-rect.top, 受 baseline half-leading 影响, 跟 line-box top 差 ~3px.
+  // 多行 textarea 的"换行跟随"在下面用 lineNum 公式补偏移, 不依赖 markerRect.top.
+  const isTextarea = el instanceof HTMLTextAreaElement;
+  const mirrorRect = mirror.getBoundingClientRect();
+  const mirrorTop = mirrorRect.top / zoom;
   const cs = getComputedStyle(el);
   const fontSize = parseFloat(cs.fontSize);
   const baseHeight = fontSize * CARET_HEIGHT_RATIO;
@@ -327,10 +329,18 @@ function updateCaret() {
   let caretLeft = markerLeft - scrollLeft + CARET_LEFT_OFFSET;
   let lineHeight = parseFloat(cs.lineHeight);
   if (isNaN(lineHeight)) lineHeight = fontSize * 1.2;
-  // 几何居中(用 baseHeight, 让 caret 顶部位置跟原 baseHeight 时一致) + 1 蘑菇视觉偏好
-  // (跟 contenteditable 路径的 verticalPadding 偏移保持一致, 两个场景 caret 对齐感受相同)
-  const verticalPadding = Math.max(0, (lineHeight - baseHeight) / 2) + 1;
-  let caretTop = mirrorTop - scrollTop + verticalPadding;
+  // 几何居中(用 baseHeight, 让 caret 顶部位置跟原 baseHeight 时一致)
+  // PR #13 followup (蘑菇 2026-06-08): input/textarea 路径 +1 → -0.5, 比 Vditor 路径 (+1) 高 1.5px,
+  // 因为 Vditor 走 contenteditable Range API 拿位置, 跟 mirror 算 inline 偏移有微差; 蘑菇视觉拍板"input/textarea 这样对"
+  const verticalPadding = Math.max(0, (lineHeight - baseHeight) / 2) - 0.5;
+  // PR #13 followup (蘑菇 2026-06-08): textarea 多行换行跟随. marker 在第 N 行 (N≥0),
+  // 用 marker 相对 mirror 第一行的纵向偏移除以 lineHeight 算行号, 不依赖 baseline 偏移估算. 单行 input N=0 跟原行为一致.
+  let lineNum = 0;
+  if (isTextarea) {
+    const offsetInMirror = (markerRect.top - mirrorRect.top) / zoom;
+    lineNum = Math.max(0, Math.round(offsetInMirror / lineHeight));
+  }
+  let caretTop = mirrorTop + lineNum * lineHeight - scrollTop + verticalPadding;
 
   // 边界裁切：caret 必须在 input 内容区内（不越出 padding 边界）
   const inputRect = el.getBoundingClientRect();

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick, computed, watch } from 'vue';
 import { backendBaseUrl } from '@/utils/backendUrl';
 import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
@@ -45,6 +45,24 @@ const showRequestPerm = ref(false);
 const requestPermLabel = ref<'admin' | 'all'>('admin');
 const requestPermMessage = ref('');
 const submittingRequest = ref(false);
+const requestPermInputEl = ref<HTMLTextAreaElement | null>(null);
+// PR #13 followup (蘑菇 2026-06-08): 弹窗 v-if true → 自动 focus textarea, 不用用户手点.
+// watch + nextTick + requestAnimationFrame 三层兜底 (Teleport + Transition 让 ref 绑/visible 时机复杂,
+// nextTick 单独不够, setTimeout 80ms 仍偶发失败 → 用 rAF 等 Transition 第一帧绘制完再 focus)
+// 跟 NoteCard 同款修法: focus + 等 Transition 完成 dispatch input event 让 customCaret 重算位置 (蘑菇 reported click 后才出 caret)
+watch(showRequestPerm, async (v) => {
+  if (!v) return;
+  await nextTick();
+  requestAnimationFrame(() => {
+    const el = requestPermInputEl.value;
+    el?.focus();
+    setTimeout(() => {
+      if (el && document.activeElement === el) {
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }, 250);
+  });
+});
 async function submitEditRequest() {
   if (submittingRequest.value) return;
   submittingRequest.value = true;
@@ -90,6 +108,7 @@ async function acquireLock(): Promise<boolean> {
         requestPermLabel.value = body.editPermission === 'admin' ? 'admin' : 'all';
         requestPermMessage.value = '';
         showRequestPerm.value = true;
+        // autofocus 由上面 watch(showRequestPerm) 处理, 这里只 set state
         return false;
       } else {
         toast.show('无法获取编辑锁：' + (body.error || res.statusText), 'error', 3000);
@@ -362,7 +381,7 @@ onBeforeUnmount(() => {
         <p class="text-xs text-gray-400 mb-3">
           {{ requestPermLabel === 'admin' ? '这条笔记仅管理员可编辑' : '这条笔记所有人可编辑' }}, 提交申请后由作者或群管理员审批
         </p>
-        <textarea v-model="requestPermMessage" rows="3" maxlength="500"
+        <textarea ref="requestPermInputEl" v-model="requestPermMessage" rows="3" maxlength="500"
           placeholder="附上申请理由 (可选, 最多 500 字)"
           spellcheck="false"
           class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs leading-relaxed outline-none focus:border-primary resize-none text-gray-600" />

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, inject, onMounted, watchEffect, type ComputedRef } from 'vue';
+import { ref, computed, inject, onMounted, nextTick, watch, watchEffect, type ComputedRef } from 'vue';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useRouter, useRoute } from 'vue-router';
 import dayjs from 'dayjs';
@@ -85,6 +85,23 @@ const canEdit = computed(() => isMyNote.value || !isShared.value || !!(props.not
 const showRequestPerm = ref(false);
 const requestPermMessage = ref('');
 const submittingRequest = ref(false);
+const requestPermInputEl = ref<HTMLTextAreaElement | null>(null);
+// PR #13 followup (蘑菇 2026-06-08): 弹窗 v-if true 自动 focus textarea + 等 Transition 完成 dispatch input event 让 customCaret 重算 caret 位置.
+// 蘑菇 reported: 焦点正常 (能打字), 但 customCaret 接管时 modal-fade Transition (opacity 0→1) enter 阶段算位置出错 → display=none → 看不到 caret.
+// 用户 click textarea 后, customCaret 的 click listener → scheduleUpdate → 重算位置 OK. 我们用 dispatchEvent('input') 模拟同款重算.
+watch(showRequestPerm, async (v) => {
+  if (!v) return;
+  await nextTick();
+  requestAnimationFrame(() => {
+    const el = requestPermInputEl.value;
+    el?.focus();
+    setTimeout(() => {
+      if (el && document.activeElement === el) {
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }, 250);
+  });
+});
 async function submitEditRequest() {
   if (submittingRequest.value) return;
   submittingRequest.value = true;
@@ -106,6 +123,7 @@ function handleEditClick() {
   } else {
     requestPermMessage.value = '';
     showRequestPerm.value = true;
+    // autofocus 由上面 watch(showRequestPerm) 处理
   }
 }
 // 视觉用的"是否置顶": 群组上下文看 groupPinned (独立于作者全局 pinned), 否则看 note.pinned
@@ -767,7 +785,7 @@ const typeColor: Record<string, string> = {
             <p class="text-xs text-gray-400 mb-3">
               {{ (note.editPermission || 'admin') === 'admin' ? '这条笔记仅管理员可编辑' : '这条笔记所有人可编辑' }}, 提交后由作者或群管理员审批
             </p>
-            <textarea v-model="requestPermMessage" rows="3" maxlength="500"
+            <textarea ref="requestPermInputEl" v-model="requestPermMessage" rows="3" maxlength="500"
               placeholder="附上申请理由 (可选, 最多 500 字)"
               spellcheck="false"
               class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs leading-relaxed outline-none focus:border-primary resize-none text-gray-600" />
