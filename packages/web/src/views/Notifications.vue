@@ -140,8 +140,8 @@ async function doClear() {
       </div>
     </div>
 
-    <!-- 列表 -->
-    <div class="flex-1 overflow-y-auto px-4 md:px-6 pb-4">
+    <!-- 列表 (pt-3 让第一个 item 跟 sticky toolbar 有间距) -->
+    <div class="flex-1 overflow-y-auto px-4 md:px-6 pt-3 pb-4">
       <div
         v-if="store.loading && store.items.length === 0"
         class="py-12 text-center text-sm"
