@@ -380,7 +380,7 @@ onUnmounted(() => {
             <PhBell size="1rem" weight="fill" /><span>消息通知</span>
             <!-- badge 样式复用待办那套 (蘑菇 2026-06-08 之前精调过 padding/字号/颜色). translate-y-[1.5px] 让 badge 含字整体下移 1.5px 跟 PhBell icon baseline 对齐 -->
             <span v-if="notificationsStore.unread.total > 0"
-              class="ml-auto translate-y-[1.5px] inline-flex items-center justify-center min-w-[18px] h-[18px] pb-[1px] bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full"
+              class="ml-auto translate-y-[0.75px] inline-flex items-center justify-center min-w-[18px] h-[18px] pb-[1px] bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full"
               :class="String(notificationsStore.unread.total > 99 ? '99+' : notificationsStore.unread.total).length > 1 ? 'pl-[3.5px] pr-[4.5px]' : 'px-1'">
               {{ notificationsStore.unread.total > 99 ? '99+' : notificationsStore.unread.total }}
             </span>
