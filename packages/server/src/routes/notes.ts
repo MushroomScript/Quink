@@ -966,6 +966,7 @@ app.get('/:id/edit-grants', async (c) => {
 // DELETE /api/notes/:id/edit-grants/:userId - 撤销某用户的编辑权 (作者+群 admin)
 app.delete('/:id/edit-grants/:userId', async (c) => {
   const me = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const targetUserId = c.req.param('userId');
 
@@ -980,6 +981,8 @@ app.delete('/:id/edit-grants/:userId', async (c) => {
     eq(schema.noteEditGrants.noteId, id),
     eq(schema.noteEditGrants.userId, targetUserId),
   ));
+  // PR #13 补丁: 推 SSE 给被撤销人让他前端刷 canWrite (NoteCard 预判 / NoteEditModal 进 modal 前判断)
+  publish(targetUserId, 'note-edit-grant-revoked', { noteId: id }, _ocid);
   await logAudit(c, 'note.edit_grant_revoke', 'note', id, { revokedUserId: targetUserId });
   return c.json({ data: { message: '已撤销编辑权' } });
 });
@@ -1624,7 +1627,9 @@ app.patch('/:id', async (c) => {
   //   - 作者改 root 单群: 单群 root 等价 fork
   //   - 作者改 root 多群 + 群组页: 该路径会触发 fork (创建该群专属版本), 跟非作者改 root 触发 fork 同款流程
   // 锁主要防"群成员协作时撞改". 作者主视图改多群 root 多设备同步靠 version 乐观锁兜底
-  const needLock = existing.visibility === 'shared' && (
+  // PR #13 bug 修: 加 isContentChange 前置 - 改管理字段 (editPermission / pinned / visibility / sharedGroupIds) 时不走锁,
+  //                跟 L1656 注释一致. 之前蘑菇切"管理员可编辑" 胶囊报"需要先申请锁" 就是漏了这层判断
+  const needLock = isContentChange && existing.visibility === 'shared' && (
     !isAuthor ||                                       // 非作者必锁
     existing.parentNoteId !== null ||                  // 作者改 fork 必锁
     currentShareGroupIds.length <= 1 ||                // 单群必锁 (单群 root 等价 fork)

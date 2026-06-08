@@ -86,21 +86,28 @@ const showRequestPerm = ref(false);
 const requestPermMessage = ref('');
 const submittingRequest = ref(false);
 const requestPermInputEl = ref<HTMLTextAreaElement | null>(null);
-// PR #13 followup (蘑菇 2026-06-08): 弹窗 v-if true 自动 focus textarea + 等 Transition 完成 dispatch input event 让 customCaret 重算 caret 位置.
-// 蘑菇 reported: 焦点正常 (能打字), 但 customCaret 接管时 modal-fade Transition (opacity 0→1) enter 阶段算位置出错 → display=none → 看不到 caret.
-// 用户 click textarea 后, customCaret 的 click listener → scheduleUpdate → 重算位置 OK. 我们用 dispatchEvent('input') 模拟同款重算.
+// PR #13 followup (蘑菇 2026-06-08): 弹窗 v-if true 自动 focus textarea + dispatch input event 让 customCaret 重算 caret 位置.
+// 蘑菇 reported (web 端 2026-06-08 二次报告): 网页浏览器在 modal-fade Transition (opacity:0→1) opacity:0 时 focus()
+// 不真 focus, document.activeElement 不变 → customCaret 的 focusin listener 不触发 → 无 attach → caret 永远不显.
+// Electron Chromium 对 opacity:0 元素 focus 比标准浏览器宽松, 所以 PC 端没问题.
+// 修法: 等 modal-fade Transition (180ms) 完成后再 focus, 同时多次 dispatch input 兜底 caret 位置计算
 watch(showRequestPerm, async (v) => {
   if (!v) return;
   await nextTick();
-  requestAnimationFrame(() => {
+  // 等 modal-fade Transition 180ms 完成 (opacity 到 1 + scale 到 1) 再 focus, 防 opacity:0 时 web 浏览器拒绝 focus
+  setTimeout(() => {
     const el = requestPermInputEl.value;
-    el?.focus();
-    setTimeout(() => {
-      if (el && document.activeElement === el) {
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    }, 250);
-  });
+    if (!el) return;
+    el.focus();
+    // 多次 dispatch input 兜底 customCaret 在 web 端 Transition 期间算位置可能反复出错
+    [0, 150, 350].forEach(delay => {
+      setTimeout(() => {
+        if (el && document.activeElement === el) {
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }, delay);
+    });
+  }, 200);
 });
 async function submitEditRequest() {
   if (submittingRequest.value) return;

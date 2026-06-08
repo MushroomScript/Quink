@@ -6,7 +6,7 @@ import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
 import { publish, isOnline } from '../reminder/bus.js';
-import { loadSocialMetaMaps, loadEditorCountMap } from './notes.js';
+import { loadSocialMetaMaps, loadEditorCountMap, loadCanWriteMap } from './notes.js';
 import { logAudit } from '../utils/auditLog.js';
 import { createNotification } from '../utils/notifications.js';
 import { purgeNote, GROUP_TRASH_RETENTION_DAYS } from '../cleanup.js';
@@ -173,16 +173,22 @@ inviteApp.post('/:token/apply', authMiddleware, async (c) => {
   if (existing && existing.status === 'active') {
     return c.json({ data: { status: 'already_member', groupId: g.id } });
   }
-  // 之前被踢过 / 主动退群过 (status='removed'): 重新申请强制走 pending 审批,
-  // 即使群是 autoJoin 模式 — 防被踢的人在 autoJoin 群直接绕过审核重新加. 管理员同意时
-  // approve 路由把 status=removed 改回 active (复用同一条 group_members 记录, 历史保留)
+  // 之前被踢过 / 主动退群过 (status='removed') 重新申请: 蘑菇 2026-06-08 拍板 autoJoin 群一律直接加 (含被踢的人).
+  // trade-off: 群主踢人后该用户用 autoJoin 链接能秒回, 但蘑菇接受这个个人项目场景. 非 autoJoin 群仍走 pending 审批
   const wasRemoved = existing?.status === 'removed';
   const now = dayjs().toISOString();
-  // autoJoin 模式 + 没被踢过: 直接加成员
-  if (g.autoJoin && !wasRemoved) {
-    await db.insert(schema.groupMembers).values({
-      groupId: g.id, userId, role: 'member', status: 'active', joinedAt: now,
-    });
+  // autoJoin 模式: 直接加成员 (含被踢过的复用同一行 update status='active')
+  if (g.autoJoin) {
+    if (wasRemoved) {
+      // 复用 existing row update 防主键冲突, 历史 joined_at 重置为 now
+      await db.update(schema.groupMembers)
+        .set({ status: 'active', joinedAt: now })
+        .where(and(eq(schema.groupMembers.groupId, g.id), eq(schema.groupMembers.userId, userId)));
+    } else {
+      await db.insert(schema.groupMembers).values({
+        groupId: g.id, userId, role: 'member', status: 'active', joinedAt: now,
+      });
+    }
     // 通知 owner 有新成员加入 (SSE) + 广播给其他成员 (排除新加入的人, 他不需要刷新)
     publish(g.ownerId, 'group-member-joined', { groupId: g.id, userId }, _ocid);
     await broadcastGroupChanged(g.id, [userId, g.ownerId], _ocid);
@@ -389,9 +395,15 @@ app.get('/:id/notes', async (c) => {
 
   // PR #6: 拼 reaction summary + comment count (群 feed NoteCard 底部显示). 群里都是 shared 笔记, 不分支
   // PR #7b: 拼 editorCount + parentNoteId (NoteCard 显示"X 人编辑过" + "本群独占版/N 群共享版"标)
-  const [{ reactionMap, commentCountMap }, editorCountMap] = await Promise.all([
+  // PR #13 bug 修: 加 canWriteMap (群 feed 漏 enrich 让 NoteCard.canWrite=undefined → 有权限用户点编辑误弹申请窗)
+  const sharedForCanWrite = rows.map(r => ({
+    id: r.id as string, userId: r.user_id as string, editPermission: r.edit_permission as string | null,
+    sharedGroupIds: sharesMap.get(r.id as string) || [],
+  }));
+  const [{ reactionMap, commentCountMap }, editorCountMap, canWriteMap] = await Promise.all([
     loadSocialMetaMaps(noteIds, userId),
     loadEditorCountMap(noteIds),
+    loadCanWriteMap(sharedForCanWrite, userId),
   ]);
 
   // raw SQL 返回 snake_case, 手动映射成 camelCase (跟其他 endpoint 返回格式一致)
@@ -405,9 +417,7 @@ app.get('/:id/notes', async (c) => {
     tags: typeof r.tags === 'string' ? JSON.parse(r.tags) : r.tags,
     type: r.type,
     todoStatus: r.todo_status,
-    todoDue: r.todo_due,
-    todoRemindSentAt: r.todo_remind_sent_at,
-    todoRemindRrule: r.todo_remind_rrule,
+    // PR #13: todoDue / todoRemindSentAt / todoRemindRrule 三列已删, 不再返回
     aiProcessed: !!r.ai_processed,
     pinned: !!r.pinned,
     createdAt: r.created_at,
@@ -420,6 +430,7 @@ app.get('/:id/notes', async (c) => {
     authorNickname: r.authorNickname,
     authorAvatar: r.authorAvatar,
     groupPinned: !!r.groupPinnedAt, // 群内独立置顶状态 (跟 pinned 作者全局置顶分离)
+    canWrite: canWriteMap.get(r.id as string) ?? false, // PR #9 编辑预判, 群 feed 漏 enrich 是 PR #13 bug 后补
     reactionSummary: reactionMap.get(r.id) || [],
     commentCount: commentCountMap.get(r.id) || 0,
     editorCount: editorCountMap.get(r.id) || 0, // PR #7b: 非作者编辑次数, NoteCard "X 人编辑过" 显示

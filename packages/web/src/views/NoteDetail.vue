@@ -125,6 +125,8 @@ async function setEditPermission(perm: 'admin' | 'all') {
 const confirmRevokeGrant = ref<{ userId: string; nickname: string } | null>(null);
 useEscToClose(confirmRevokeGrant, null);
 function askRevokeGrant(userId: string, nickname: string) {
+  // PR #13 bug 修: 同时关 grants popover, 防 popover (z=9999) 浮在 modal (z=200) 之上挡住确认按钮
+  showGrantsPopup.value = false;
   confirmRevokeGrant.value = { userId, nickname };
 }
 async function doRevokeGrant() {

@@ -340,7 +340,27 @@ export function startReminderSse() {
         tag: `note-edit-resolved-${data.noteId}`,
         path: `/note/${data.noteId}`,
       });
+      // PR #13 补丁: approved 时刷该笔记 canWrite. 三处需同步: (1) 主 view store viewState (2) 打开的 GroupDetail 群 feed (3) 申请审批面板.
+      // 主 view 用 refreshSingleNote 拉单条; GroupDetail 不在 store, 用 window event quink-edit-request-changed (现有 listener 调 loadEditRequests, 蘑菇 2026-06-08 二次报告 canWrite 没刷 → 同时刷 groupNotes)
+      if (approved) {
+        import('@/stores/notes').then(({ useNotesStore }) => {
+          useNotesStore().refreshSingleNote(data.noteId);
+        });
+      }
+      window.dispatchEvent(new CustomEvent('quink-edit-request-changed', { detail: { noteId: data.noteId, status: data.status } }));
     } catch (e) { console.error('[sse] note-edit-request-resolved parse failed:', e); }
+  });
+
+  // PR #13 补丁: note-edit-grant-revoked - 我的编辑权被撤销 → 刷该笔记 canWrite (后端 enrich 现在返 false)
+  es.addEventListener('note-edit-grant-revoked', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { noteId: string };
+      if (isMyEvent(data)) return;
+      import('@/stores/notes').then(({ useNotesStore }) => {
+        useNotesStore().refreshSingleNote(data.noteId);
+      });
+      window.dispatchEvent(new CustomEvent('quink-edit-request-changed', { detail: { noteId: data.noteId, status: 'revoked' } }));
+    } catch (e) { console.error('[sse] note-edit-grant-revoked parse failed:', e); }
   });
 
 // PR #6: 共享笔记 reaction / 评论增删改事件. server publish 给该笔记所属群所有 active member + 作者.

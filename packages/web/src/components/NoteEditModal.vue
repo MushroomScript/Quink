@@ -46,22 +46,26 @@ const requestPermLabel = ref<'admin' | 'all'>('admin');
 const requestPermMessage = ref('');
 const submittingRequest = ref(false);
 const requestPermInputEl = ref<HTMLTextAreaElement | null>(null);
-// PR #13 followup (蘑菇 2026-06-08): 弹窗 v-if true → 自动 focus textarea, 不用用户手点.
+// PR #13 followup (蘑菇 2026-06-08): 弹窗 v-if true → 自动 focus textarea. Web 浏览器 modal-fade opacity:0 时拒绝 focus, 等 Transition 完成 (180ms) 后再 focus + 多次 dispatch input 兜底 customCaret 位置算错
 // watch + nextTick + requestAnimationFrame 三层兜底 (Teleport + Transition 让 ref 绑/visible 时机复杂,
 // nextTick 单独不够, setTimeout 80ms 仍偶发失败 → 用 rAF 等 Transition 第一帧绘制完再 focus)
 // 跟 NoteCard 同款修法: focus + 等 Transition 完成 dispatch input event 让 customCaret 重算位置 (蘑菇 reported click 后才出 caret)
 watch(showRequestPerm, async (v) => {
   if (!v) return;
   await nextTick();
-  requestAnimationFrame(() => {
+  // 等 modal-fade Transition 180ms 完成再 focus, 防 web 浏览器 opacity:0 时拒绝 focus
+  setTimeout(() => {
     const el = requestPermInputEl.value;
-    el?.focus();
-    setTimeout(() => {
-      if (el && document.activeElement === el) {
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    }, 250);
-  });
+    if (!el) return;
+    el.focus();
+    [0, 150, 350].forEach(delay => {
+      setTimeout(() => {
+        if (el && document.activeElement === el) {
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }, delay);
+    });
+  }, 200);
 });
 async function submitEditRequest() {
   if (submittingRequest.value) return;

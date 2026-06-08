@@ -307,6 +307,32 @@ function updateCaret() {
   // 全部走 layout 坐标 (rect / zoom). transform 给 fixed caret 时直接用 layout 值,
   // fixed 子元素渲染时被祖先 zoom 乘回 → 视觉对齐。Electron 端 zoom=1 行为不变。详见 utils/zoom.ts
   const zoom = getCssZoom();
+  // 提前算 cs / fontSize / caretHeight 让空 textarea 快路径用得上 (原本在 markerRect 之后定义, 快路径需提前)
+  const cs = getComputedStyle(el);
+  const fontSize = parseFloat(cs.fontSize);
+  const baseHeight = fontSize * CARET_HEIGHT_RATIO;
+  const caretHeight = baseHeight + CARET_BOTTOM_EXTEND;
+  // PR #13 followup (蘑菇 2026-06-08 二次报): web 浏览器空 textarea + ZWSP marker.getBoundingClientRect 可能全 0
+  // / Teleport modal-fade Transition opacity 期间 mirror 没真定位 → markerLeft 远小于 minLeft → 边界检查 display=none
+  // → click textarea 看不到 caret. Electron Chromium 处理不同, PC 端没问题.
+  // 专用快路径: selStart=0 + value=='' 时, 用 textarea 自身 rect + padding 算 caret 在 content area 左上角, 不依赖 mirror.
+  // 输入字符后走原 mirror 路径 (mirror 不空时 markerRect 正常)
+  if (selStart === 0 && el.value === '') {
+    const inputRectFast = el.getBoundingClientRect();
+    const padLF = parseFloat(cs.paddingLeft);
+    const padTF = parseFloat(cs.paddingTop);
+    const borLF = parseFloat(cs.borderLeftWidth);
+    const borTF = parseFloat(cs.borderTopWidth);
+    const lineHeightFast = parseFloat(cs.lineHeight) || fontSize * 1.5;
+    const vpadFast = Math.max(0, (lineHeightFast - baseHeight) / 2) - 0.5;
+    const cl = inputRectFast.left / zoom + borLF + padLF + CARET_LEFT_OFFSET;
+    const ct = inputRectFast.top / zoom + borTF + padTF + vpadFast;
+    caret.style.width = CARET_WIDTH + 'px';
+    caret.style.height = caretHeight + 'px';
+    caret.style.display = 'block';
+    caret.style.transform = `translate(${cl}px, ${ct}px)`;
+    return;
+  }
   const markerRect = marker.getBoundingClientRect();
   const markerLeft = markerRect.left / zoom;
   // 垂直位置基准 = mirror 容器 top (= input 内容区 top = 第一行 line-box top, 跟字体无关).
@@ -315,10 +341,6 @@ function updateCaret() {
   const isTextarea = el instanceof HTMLTextAreaElement;
   const mirrorRect = mirror.getBoundingClientRect();
   const mirrorTop = mirrorRect.top / zoom;
-  const cs = getComputedStyle(el);
-  const fontSize = parseFloat(cs.fontSize);
-  const baseHeight = fontSize * CARET_HEIGHT_RATIO;
-  const caretHeight = baseHeight + CARET_BOTTOM_EXTEND; // 底部往下延 0.5
 
   // input scroll 偏移 (scrollLeft/Top 本身是 CSS px = layout 单位)
   const scrollLeft = el.scrollLeft;

@@ -173,6 +173,9 @@ onUnmounted(() => {
 
 function onEditRequestChanged() {
   loadEditRequests();
+  // PR #13 补丁: 申请审批 / 撤销授权后 NoteCard 的 canWrite 字段变 (后端 enrich 重算).
+  // GroupDetail 用本地 ref groupNotes (不在 store viewState), 必须重拉才能让 NoteCard 拿到新 canWrite
+  loadGroupNotes(true);
 }
 
 function onGroupNotesChanged(e: Event) {
