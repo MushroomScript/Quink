@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, watchEffect, inject, type Ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
+import { useNotificationsStore } from '@/stores/notifications';
 import { api, type Category } from '@/api';
 import { markRaw } from 'vue';
 import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen, PhCalendarBlank, PhCheck, PhCaretRight } from '@phosphor-icons/vue';
@@ -180,7 +181,10 @@ const title = computed(() => {
   if (['inspiration', 'notes', 'todos'].includes(route.name as string) && store.total > 0) return base;
   return base;
 });
+const notificationsStore = useNotificationsStore();
 const titleCount = computed(() => {
+  // /notifications: 显示未读总数 (view 内 provide 传不到 TopBar - 兄弟关系, 这里直接接 store)
+  if (route.name === 'notifications' && notificationsStore.unread.total > 0) return notificationsStore.unread.total;
   if (pageCount.value >= 0) return pageCount.value;
   if (['inspiration', 'notes', 'todos'].includes(route.name as string) && store.total > 0) return store.total;
   return -1;

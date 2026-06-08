@@ -94,45 +94,20 @@ async function doClear() {
 
 <template>
   <div class="flex flex-col h-full overflow-hidden">
-    <!-- 顶部: 标题 + 未读 chip + 操作 -->
-    <div class="px-4 md:px-6 pt-3 pb-2 flex items-center gap-3 shrink-0">
-      <div class="text-base font-medium" style="color: var(--sb-text)">
-        消息通知
-        <span v-if="store.unread.total > 0" class="ml-2 text-xs text-red-500 tabular-nums">
-          {{ store.unread.total > 99 ? '99+' : store.unread.total }} 未读
-        </span>
-      </div>
-      <div class="ml-auto flex items-center gap-2">
+    <!-- sticky toolbar: tabs 左 + 操作右. 复用 Resources toolbar 同款 (高度统一 py-1), 未读数写到 TopBar 标题旁 (N) -->
+    <div class="sticky top-0 z-[var(--z-sticky)] px-4 md:px-6 pt-2 pb-2 flex items-center justify-between gap-3 shrink-0"
+      style="background: var(--c-body); box-shadow: 0 1px 0 var(--sb-border)">
+      <!-- 左: 4 tab 切换 -->
+      <div class="flex items-center gap-1 flex-wrap">
         <button
-          @click="confirmReadAll = true"
-          :disabled="store.unread.total === 0"
-          class="px-3 py-1.5 rounded-lg text-xs bg-primary-light text-primary-dark hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity flex items-center gap-1"
+          v-for="t in tabs"
+          :key="t.key"
+          @click="store.setTab(t.key)"
+          class="px-3 py-1 rounded-lg text-xs transition-colors flex items-center gap-1.5"
+          :class="store.currentTab === t.key
+            ? 'bg-primary-light text-primary-dark font-medium'
+            : 'text-gray-500 hover:bg-gray-100'"
         >
-          <PhCheck size="0.9rem" weight="bold" />
-          <span>全标已读</span>
-        </button>
-        <button
-          @click="confirmClear = true"
-          :disabled="store.items.length === 0"
-          class="px-3 py-1.5 rounded-lg text-xs bg-red-50 text-red-500 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
-        >
-          <PhTrash size="0.9rem" weight="bold" />
-          <span>清空当前</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- 4 tab 切换: 复用 Resources 全部那一行风格 (px-3 py-1 + bg-primary-light 选中态 / text-gray-500 默认态) -->
-    <div class="px-4 md:px-6 pb-2 flex items-center gap-1 shrink-0">
-      <button
-        v-for="t in tabs"
-        :key="t.key"
-        @click="store.setTab(t.key)"
-        class="px-3 py-1 rounded-lg text-xs transition-colors flex items-center gap-1.5"
-        :class="store.currentTab === t.key
-          ? 'bg-primary-light text-primary-dark font-medium'
-          : 'text-gray-500 hover:bg-gray-100'"
-      >
         <span>{{ t.label }}</span>
         <!-- badge 蘑菇 2026-06-08 badge-test.html 定稿: 14.5 size, font 10, px-[4.5px], 红点 translate-y-[0.5px] 下移半步,
              字内 wrap span 加 transform translate(-0.25, -0.25) sub-pixel 微调 (1.5x zoom 下视觉居中) -->
@@ -143,6 +118,26 @@ async function doClear() {
           <span class="inline-block" style="transform: translate(-0.25px, -0.25px)">{{ tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key) }}</span>
         </span>
       </button>
+      </div>
+      <!-- 右: 操作按钮 (全标已读 + 清空当前). 高度统一 py-1 跟 tab 一致 -->
+      <div class="flex items-center gap-2">
+        <button
+          @click="confirmReadAll = true"
+          :disabled="store.unread.total === 0"
+          class="px-3 py-1 rounded-lg text-xs bg-primary-light text-primary-dark hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity flex items-center gap-1"
+        >
+          <PhCheck size="0.85rem" weight="bold" />
+          <span>全标已读</span>
+        </button>
+        <button
+          @click="confirmClear = true"
+          :disabled="store.items.length === 0"
+          class="px-3 py-1 rounded-lg text-xs bg-red-50 text-red-500 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+        >
+          <PhTrash size="0.85rem" weight="bold" />
+          <span>清空当前</span>
+        </button>
+      </div>
     </div>
 
     <!-- 列表 -->
