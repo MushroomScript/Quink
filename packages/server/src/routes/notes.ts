@@ -29,17 +29,17 @@ app.use('*', authMiddleware);
 const NOTE_CONTENT_MAX = 1_000_000;
 const NOTE_AI_SKIP_THRESHOLD = 200_000; // 超过 200k 字符跳过 AI 处理防大账单
 
+// PR #13 strict 模式: 未知字段直接 400, 不静默 strip. 防老前端调 todoDue 等已删字段 200 静默忽略
 const createNoteSchema = z.object({
   content: z.string().min(1).max(NOTE_CONTENT_MAX),
   type: z.enum(['quink', 'note', 'todo']).default('quink'),
   category: z.string().max(200).optional(),
   tags: z.array(z.string().max(50)).max(50).optional(),
-  todoDue: z.string().max(64).optional(), // ISO datetime, 复用为提醒时间
-  todoRemindRrule: z.string().max(512).nullable().optional(), // RFC 5545 RRULE
+  // PR #13: todoDue / todoRemindRrule 已移除. 设提醒走 POST /:id/personal-reminder 单独接口
   // PR #2 群组共享: visibility=private (默认, 仅作者) / visibility=shared 必须给 sharedGroupIds[]
   visibility: z.enum(['private', 'shared']).default('private'),
   sharedGroupIds: z.array(z.string().max(32)).max(100).optional(),
-});
+}).strict();
 
 const updateNoteSchema = z.object({
   content: z.string().min(1).max(NOTE_CONTENT_MAX).optional(),
@@ -48,8 +48,7 @@ const updateNoteSchema = z.object({
   tags: z.array(z.string().max(50)).max(50).optional(),
   type: z.enum(['quink', 'note', 'todo']).optional(),
   todoStatus: z.enum(['pending', 'done']).optional(),
-  todoDue: z.string().nullable().optional(),
-  todoRemindRrule: z.string().nullable().optional(),
+  // PR #13: todoDue / todoRemindRrule 已移除. 设提醒走 personal-reminder 接口
   pinned: z.boolean().optional(),
   // PR #2: 改可见性 / 重写分享群列表. sharedGroupIds 传值时整批替换 (delete all + insert new)
   visibility: z.enum(['private', 'shared']).optional(),
@@ -66,7 +65,7 @@ const updateNoteSchema = z.object({
   editContext: z.object({
     groupId: z.string().optional(),
   }).optional(),
-});
+}).strict();
 
 // PR #2 阶段 5c: 广播 'group-notes-changed' 给目标群所有 active 成员 (除操作者).
 // POST/PATCH 共享笔记 / 永久删除 共享笔记时调用, 前端在群详情页时自动 reload group feed
@@ -454,9 +453,6 @@ function forkNote(
     tags: original.tags as any,
     type: original.type,
     todoStatus: original.todoStatus,
-    todoDue: original.todoDue,
-    todoRemindSentAt: original.todoRemindSentAt,
-    todoRemindRrule: original.todoRemindRrule,
     aiProcessed: original.aiProcessed,
     pinned: original.pinned,
     createdAt: original.createdAt, // fork 不是"新建", 沿用 root 创建时间 (按创建时间排序时新老版本挨在一起)
@@ -1440,9 +1436,6 @@ app.post('/', async (c) => {
     category: parsed.data.category ?? null,
     tags: parsed.data.tags ?? [],
     todoStatus: parsed.data.type === 'todo' ? 'pending' as const : null,
-    todoDue: parsed.data.todoDue ?? null,
-    todoRemindRrule: parsed.data.todoRemindRrule ?? null,
-    todoRemindSentAt: null,
     summary: null,
     aiProcessed: false,
     pinned: false,
@@ -1523,9 +1516,6 @@ app.post('/:id/duplicate', async (c) => {
     category: null,
     tags: [],
     todoStatus: original.type === 'todo' ? 'pending' as const : null,
-    todoDue: null,
-    todoRemindRrule: null,
-    todoRemindSentAt: null,
     summary: null,
     aiProcessed: false,
     pinned: false,
@@ -1621,9 +1611,7 @@ app.patch('/:id', async (c) => {
     data.category !== undefined ||
     data.tags !== undefined ||
     data.type !== undefined ||
-    data.todoStatus !== undefined ||
-    data.todoDue !== undefined ||
-    data.todoRemindRrule !== undefined
+    data.todoStatus !== undefined
   );
   const ctxGroupId = data.editContext?.groupId;
   const currentShareGroupIds = (await db.select({ groupId: schema.noteShares.groupId })
@@ -1683,12 +1671,7 @@ app.patch('/:id', async (c) => {
     updates.todoStatus = 'pending';
   }
   if (data.todoStatus !== undefined) updates.todoStatus = data.todoStatus;
-  // 改 todoDue 视作"重新设提醒", 必须把 sent_at 重置, 否则 scheduler 看 sent_at 不为 null 会跳过
-  if (data.todoDue !== undefined) {
-    updates.todoDue = data.todoDue;
-    updates.todoRemindSentAt = null;
-  }
-  if (data.todoRemindRrule !== undefined) updates.todoRemindRrule = data.todoRemindRrule;
+  // PR #13: todoDue / todoRemindRrule 字段已删, 改提醒走 personal-reminder 接口
   if (data.pinned !== undefined) updates.pinned = data.pinned;
   // PR #5b: 改编辑权限. 仅作者能改 (上面已校验非作者传过来直接 403)
   if (data.editPermission !== undefined) updates.editPermission = data.editPermission;
@@ -1780,6 +1763,25 @@ app.patch('/:id', async (c) => {
     if (newVisibility === 'private' && newSharedGroupIds && newSharedGroupIds.length > 0) {
       return c.json({ error: 'visibility=private 不能带 sharedGroupIds' }, 400);
     }
+    // PR #13: shared → private 转换约束 - 仅 root 笔记 + 无 fork 子节点能转 (有 fork = 已被群编辑过, 转 private 会孤立 fork)
+    if (existing.visibility === 'shared' && newVisibility === 'private') {
+      if (existing.parentNoteId !== null) {
+        return c.json({ error: 'fork 笔记不能转 private (它是某群的独占副本)', code: 'fork_cannot_privatize' }, 409);
+      }
+      const forks = await db.select({ id: schema.notes.id })
+        .from(schema.notes)
+        .where(and(
+          eq(schema.notes.parentNoteId, existing.id),
+          sql`${schema.notes.deletedAt} IS NULL`,
+        )).all();
+      if (forks.length > 0) {
+        return c.json({
+          error: `不能转 private: 这条笔记已有 ${forks.length} 个 fork 子版本 (被某群编辑过). 请先到对应群清理 fork 笔记`,
+          code: 'has_forks',
+          forkCount: forks.length,
+        }, 409);
+      }
+    }
     if (newSharedGroupIds && newSharedGroupIds.length > 0) {
       const err = await validateSharedGroups(userId, newSharedGroupIds);
       if (err) return c.json({ error: err }, 403);
@@ -1843,6 +1845,20 @@ app.patch('/:id', async (c) => {
     await logAudit(c, 'note.update_fork', 'note', newNoteId, {
       originNoteId: id, groupId: effectiveGroupId, isAuthor,
     });
+
+    // PR #13: fork-by-other 通知 - 非作者改 root 触发 fork 时, 给原作者写一条让他知道笔记在 X 群被 @Y fork 走
+    if (!isAuthor && effectiveGroupId) {
+      const [group, actor] = await Promise.all([
+        db.select({ name: schema.groups.name }).from(schema.groups).where(eq(schema.groups.id, effectiveGroupId)).get(),
+        db.select({ nickname: schema.users.nickname }).from(schema.users).where(eq(schema.users.id, userId)).get(),
+      ]);
+      await createNotification(
+        existing.userId, 'content', 'fork-by-other',
+        '你的笔记在群组被 fork',
+        `${actor?.nickname || '某人'}在「${group?.name || '群组'}」编辑了你的笔记, 生成了该群独占副本: ${noteSnippet(existing.content)}`,
+        { noteId: newNoteId, originNoteId: id, groupId: effectiveGroupId, forkedByUserId: userId },
+      );
+    }
 
     const newNote = await db.select().from(schema.notes).where(eq(schema.notes.id, newNoteId)).get();
     return c.json({

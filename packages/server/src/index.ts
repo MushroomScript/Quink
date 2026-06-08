@@ -142,38 +142,47 @@ app.get('/api/health', (c) => {
 app.get('/api/stats', authMiddleware, async (c) => {
   const userId = c.get('userId');
 
+  // PR #13: 统计按 origin 维度 - fork 不算新笔记 (parent_note_id IS NULL 才是 origin root, 用户实际创建的)
   const totalNotes = db.select({ count: sql<number>`count(*)` })
-    .from(schema.notes).where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NULL`)).get();
+    .from(schema.notes).where(and(
+      eq(schema.notes.userId, userId),
+      sql`${schema.notes.deletedAt} IS NULL AND ${schema.notes.parentNoteId} IS NULL`,
+    )).get();
   const totalTodos = db.select({ count: sql<number>`count(*)` })
-    .from(schema.notes).where(and(eq(schema.notes.userId, userId), eq(schema.notes.type, 'todo'), sql`${schema.notes.deletedAt} IS NULL`)).get();
+    .from(schema.notes).where(and(
+      eq(schema.notes.userId, userId),
+      eq(schema.notes.type, 'todo'),
+      sql`${schema.notes.deletedAt} IS NULL AND ${schema.notes.parentNoteId} IS NULL`,
+    )).get();
   const pendingTodos = db.select({ count: sql<number>`count(*)` })
     .from(schema.notes).where(
-      and(eq(schema.notes.userId, userId), sql`${schema.notes.type} = 'todo' AND ${schema.notes.todoStatus} = 'pending' AND ${schema.notes.deletedAt} IS NULL`)
+      and(eq(schema.notes.userId, userId), sql`${schema.notes.type} = 'todo' AND ${schema.notes.todoStatus} = 'pending' AND ${schema.notes.deletedAt} IS NULL AND ${schema.notes.parentNoteId} IS NULL`)
     ).get();
 
   // 每日记录数（热力图）+ 按 type 分组(tooltip 显示当天灵感/笔记/待办各几条)
   // PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删除
+  // PR #13: parent_note_id IS NULL 过滤 fork (按 origin 维度统计)
   const dailyCounts = db.all(sql`
     SELECT substr(${schema.notes.createdAt}, 1, 10) as date,
       count(*) as count,
       sum(case when ${schema.notes.type} = 'quink' then 1 else 0 end) as quinkCount,
       sum(case when ${schema.notes.type} = 'note' then 1 else 0 end) as noteCount,
       sum(case when ${schema.notes.type} = 'todo' then 1 else 0 end) as todoCount
-    FROM notes WHERE user_id = ${userId} AND deleted_at IS NULL
+    FROM notes WHERE user_id = ${userId} AND deleted_at IS NULL AND parent_note_id IS NULL
     GROUP BY date ORDER BY date
   `) as { date: string; count: number; quinkCount: number; noteCount: number; todoCount: number }[];
 
   // 分类分布（饼图）
   const categoryDist = db.all(sql`
     SELECT COALESCE(${schema.notes.category}, '未分类') as category, count(*) as count
-    FROM notes WHERE user_id = ${userId} AND deleted_at IS NULL
+    FROM notes WHERE user_id = ${userId} AND deleted_at IS NULL AND parent_note_id IS NULL
     GROUP BY category ORDER BY count DESC
   `) as { category: string; count: number }[];
 
   // 类型分布
   const typeDist = db.all(sql`
     SELECT ${schema.notes.type} as type, count(*) as count
-    FROM notes WHERE user_id = ${userId} AND deleted_at IS NULL
+    FROM notes WHERE user_id = ${userId} AND deleted_at IS NULL AND parent_note_id IS NULL
     GROUP BY type
   `) as { type: string; count: number }[];
 

@@ -749,13 +749,19 @@ ipcMain.on('show-notification', (_e, payload: { title: string; body: string; not
   });
   n.on('click', () => {
     // 激活主窗口 + 跳转: path 优先 (群组等通用场景), noteId 老 reminder 兼容
+    // PR #13 (蘑菇 2026-06-08 报"有时候点击不激活"): 加强防御 - 100ms→250ms 给 OS 更长完成时间, webContents.focus() 让 Chromium DOM 也接 OS 激活
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       if (!mainWindow.isVisible()) mainWindow.show();
-      // Win32 SetForegroundWindow lock 防御: setAlwaysOnTop 临时拉到顶 + 100ms 后取消, 让 OS 接受 focus
+      // Win32 SetForegroundWindow lock 防御:
+      //   1. setAlwaysOnTop(true) 临时拉到顶绕开 foreground lock
+      //   2. focus() 让 OS hwnd 激活
+      //   3. webContents.focus() 让 Chromium 内部对 DOM focus 触发 OS hwnd 二次激活 (跟持久窗口 hide→show 同款救活)
+      //   4. 250ms 后取消 alwaysOnTop (100ms 在低端机 / Win11 任务繁忙时不够, 偶发不激活)
       mainWindow.setAlwaysOnTop(true);
       mainWindow.focus();
-      setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false); }, 100);
+      mainWindow.webContents.focus();
+      setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false); }, 250);
       if (payload.path) {
         mainWindow.webContents.send('open-path', payload.path);
       } else if (payload.noteId) {

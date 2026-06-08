@@ -96,9 +96,7 @@ export interface Note {
   // PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
   type: 'quink' | 'note' | 'todo';
   todoStatus: 'pending' | 'done' | null;
-  todoDue: string | null; // ISO datetime, 复用为"提醒时间"
-  todoRemindSentAt: string | null; // 上次发送时间 (前端只读, 改 todoDue 时后端自动重置)
-  todoRemindRrule: string | null; // RFC 5545 RRULE, null=单次
+  // PR #13: todoDue / todoRemindSentAt / todoRemindRrule 三字段已删. 提醒走 note_personal_reminders / note_group_reminders
   aiProcessed: boolean;
   pinned: boolean;
   createdAt: string;

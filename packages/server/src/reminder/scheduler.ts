@@ -185,60 +185,10 @@ async function tick() {
     }
   }
 
-  // ── 3) 老 notes.todo_due 路径 (PR #11a 兼容期, 11c 移除) ──
-  // 11a 后端 ship 但 11b 前端没 ship 时, 老前端仍 PATCH notes.todo_due. 这里继续扫保持兼容.
-  // 蘑菇规则: 11b 切完前端走新接口后, scheduler 此分支可删 (注释里标 TODO)
-  const legacyRows = await db.select().from(schema.notes).where(and(
-    eq(schema.notes.type, 'todo'),
-    sql`${schema.notes.deletedAt} IS NULL`,
-    sql`${schema.notes.todoStatus} IS NOT 'done'`,
-    isNotNull(schema.notes.todoDue),
-    sql`${schema.notes.todoDue} <= ${nowIso}`,
-    sql`${schema.notes.todoRemindSentAt} IS NULL`,
-  )).all();
-
-  for (const note of legacyRows) {
-    // 同步迁移到新表 (按 user_id+note_id 主键 upsert), 让数据慢慢汇拢
-    // 如已存在 personal_reminders (新接口先创建过) → 跳过避免 conflict 覆盖新值
-    const exists = await db.select({ id: schema.notePersonalReminders.id }).from(schema.notePersonalReminders)
-      .where(and(
-        eq(schema.notePersonalReminders.userId, note.userId),
-        eq(schema.notePersonalReminders.noteId, note.id),
-      )).get();
-    if (exists) {
-      // 已有新表条目 - 标老的 sent 防重复扫, 不再发 (新表已经处理过 / 即将处理)
-      await db.update(schema.notes)
-        .set({ todoRemindSentAt: dayjs().toISOString() })
-        .where(eq(schema.notes.id, note.id));
-      continue;
-    }
-
-    const preview = extractPreview(note.content);
-    const payload: ReminderPayload = {
-      noteId: note.id,
-      title: '待办提醒',
-      body: preview || '(无内容)',
-      remindAt: note.todoDue!,
-    };
-    const sentAt = dayjs().toISOString();
-    await db.update(schema.notes)
-      .set({ todoRemindSentAt: sentAt })
-      .where(eq(schema.notes.id, note.id));
-
-    await deliverToUser(note.userId, note, payload, 'personal');
-
-    if (note.todoRemindRrule) {
-      const nextDue = computeNextDue(note.todoRemindRrule, new Date(note.todoDue!));
-      if (nextDue) {
-        await db.update(schema.notes)
-          .set({ todoDue: nextDue, todoRemindSentAt: null })
-          .where(eq(schema.notes.id, note.id));
-      }
-    }
-  }
-
-  const total = personalRows.length + groupRows.length + legacyRows.length;
-  if (total > 0) console.log(`[reminder/scheduler] tick: personal=${personalRows.length}, group=${groupRows.length}, legacy=${legacyRows.length}`);
+  // PR #13: 老 notes.todo_due legacy 扫描路径已移除. 前端 PR #11b 切完 personal_reminders 接口,
+  // 启动迁移 personal_reminder_migration_v1 把 notes.todo_due 全量迁过去 (db/index.ts), 没漏网.
+  const total = personalRows.length + groupRows.length;
+  if (total > 0) console.log(`[reminder/scheduler] tick: personal=${personalRows.length}, group=${groupRows.length}`);
 }
 
 export function startReminderScheduler() {

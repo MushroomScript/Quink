@@ -363,6 +363,12 @@ try { sqlite.exec(`
 try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_audit_logs_user_created ON audit_logs(user_id, created_at DESC)'); } catch {}
 try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)'); } catch {}
 
+// PR #13 legacy cleanup: notes.todo_due / todo_remind_rrule / todo_remind_sent_at 三列已迁到 note_personal_reminders 表 (PR #11a migration v1).
+// SQLite 3.35+ 支持 DROP COLUMN, better-sqlite3 默认 3.45+. try-catch 防老 sqlite + 字段已删时 ALTER 失败
+try { sqlite.exec('ALTER TABLE notes DROP COLUMN todo_due'); } catch {}
+try { sqlite.exec('ALTER TABLE notes DROP COLUMN todo_remind_rrule'); } catch {}
+try { sqlite.exec('ALTER TABLE notes DROP COLUMN todo_remind_sent_at'); } catch {}
+
 // PR #12 群组回收站: admin 删别人共享笔记时填 deleted_by_user_id + deleted_in_group_id,
 // 群 owner/admin 通过 deleted_in_group_id 查群回收站. NULL = 作者自己删 (走个人回收站).
 // ALTER TABLE 不支持加 FK, 跟 edit_lock_by / parent_note_id 同款弱约束业务保证.

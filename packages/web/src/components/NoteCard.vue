@@ -444,8 +444,8 @@ const timeAgo = computed(() => dayjs(props.note.createdAt).fromNow());
 const fullTime = computed(() => dayjs(props.note.createdAt).format('YYYY-MM-DD HH:mm'));
 
 // PR #11 提醒分家: 我的个人提醒 + 我所在群的群提醒 (onMounted 拉, saveReminder 后本地 mutate)
-// 兼容: 拉失败 / 还没拉到 / 老笔记没新表条目 → fallback 到 props.note.todoDue/todoRemindRrule
-// 优先级 (用于铃铛 + 设置按钮显示): 我的个人提醒 > 我所在群的最早一条群提醒 > 老 todoDue
+// 优先级 (用于铃铛 + 设置按钮显示): 我的个人提醒 > 我所在群的最早一条群提醒
+// PR #13: 老 todoDue 字段 fallback 已删 (notes.todo_due 列移除)
 const myPersonalReminder = ref<PersonalReminderRow | null>(null);
 const myGroupReminders = ref<GroupReminderRow[]>([]);
 const remindersLoaded = ref(false);
@@ -465,14 +465,13 @@ onMounted(() => {
   if (props.note.type === 'todo') loadReminders();
 });
 
-// effectiveReminder: 给铃铛 / 提醒文案 / "设置/编辑" 按钮文案用. 优先 personal > group > 老 todoDue
-const effectiveReminder = computed<{ dueAt: string | null; rrule: string | null; source: 'personal' | 'group' | 'legacy' | null }>(() => {
+// effectiveReminder: 给铃铛 / 提醒文案 / "设置/编辑" 按钮文案用. 优先 personal > group
+const effectiveReminder = computed<{ dueAt: string | null; rrule: string | null; source: 'personal' | 'group' | null }>(() => {
   if (myPersonalReminder.value) return { dueAt: myPersonalReminder.value.dueAt, rrule: myPersonalReminder.value.rrule, source: 'personal' };
   if (myGroupReminders.value.length > 0) {
     const g = myGroupReminders.value[0];
     return { dueAt: g.dueAt, rrule: g.rrule, source: 'group' };
   }
-  if (props.note.todoDue) return { dueAt: props.note.todoDue, rrule: props.note.todoRemindRrule ?? null, source: 'legacy' };
   return { dueAt: null, rrule: null, source: null };
 });
 
@@ -528,7 +527,7 @@ const reminderPickerInitial = computed(() => {
   if (reminderPickerMode.value === 'group') {
     return { remindAt: currentGroupReminder.value?.dueAt ?? null, rrule: currentGroupReminder.value?.rrule ?? null };
   }
-  return { remindAt: myPersonalReminder.value?.dueAt ?? (props.note.todoDue ?? null), rrule: myPersonalReminder.value?.rrule ?? (props.note.todoRemindRrule ?? null) };
+  return { remindAt: myPersonalReminder.value?.dueAt ?? null, rrule: myPersonalReminder.value?.rrule ?? null };
 });
 
 async function saveReminder(payload: { remindAt: string | null; rrule: string | null }) {

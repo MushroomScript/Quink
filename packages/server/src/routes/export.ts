@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { db, schema } from '../db/index.js';
-import { eq, sql } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { authMiddleware } from '../auth.js';
 import archiver from 'archiver';
 import { resolve } from 'path';
@@ -12,14 +12,66 @@ const UPLOAD_DIR = resolve(process.cwd(), 'uploads');
 const app = new Hono();
 app.use('*', authMiddleware);
 
-// GET /api/export — 导出所有笔记为 ZIP（Markdown + 附件）
+// GET /api/export — 导出笔记为 ZIP（Markdown + 附件）
+// PR #13: 按 user.preferences.sharedDisplay 偏好决定范围 (own/others/none/all). 默认 own (仅作者本人)
+// fork 不导出 (parent_note_id IS NULL 过滤, 跟统计同款 origin 维度)
 app.get('/', async (c) => {
   const userId = c.get('userId');
 
-  // 获取所有未删除的笔记
-  const notes = await db.select().from(schema.notes)
-    .where(eq(schema.notes.userId, userId))
-    .all();
+  const user = await db.select({ preferences: schema.users.preferences })
+    .from(schema.users).where(eq(schema.users.id, userId)).get();
+  const sharedDisplay = (user?.preferences as any)?.sharedDisplay || 'own';
+
+  // 拉笔记按 scope 分支
+  let notes: Array<typeof schema.notes.$inferSelect>;
+  const baseCondition = sql`${schema.notes.deletedAt} IS NULL AND ${schema.notes.parentNoteId} IS NULL`;
+  if (sharedDisplay === 'all' || sharedDisplay === 'others') {
+    // 我所在的 active 群列表 (导出 shared 笔记必须先确定我能看到哪些群)
+    const myGroups = await db.select({ groupId: schema.groupMembers.groupId })
+      .from(schema.groupMembers)
+      .where(and(eq(schema.groupMembers.userId, userId), eq(schema.groupMembers.status, 'active'))).all();
+    const myGroupIds = myGroups.map(g => g.groupId);
+    if (sharedDisplay === 'others') {
+      if (myGroupIds.length === 0) {
+        notes = [];
+      } else {
+        const sharedNoteIds = await db.selectDistinct({ noteId: schema.noteShares.noteId })
+          .from(schema.noteShares).where(inArray(schema.noteShares.groupId, myGroupIds)).all();
+        const ids = sharedNoteIds.map(s => s.noteId);
+        notes = ids.length === 0 ? [] : await db.select().from(schema.notes).where(and(
+          inArray(schema.notes.id, ids),
+          sql`${schema.notes.userId} != ${userId}`,
+          eq(schema.notes.visibility, 'shared'),
+          baseCondition,
+        )).all();
+      }
+    } else {
+      // all = own + others
+      let sharedIds: string[] = [];
+      if (myGroupIds.length > 0) {
+        const sharedNotes = await db.selectDistinct({ noteId: schema.noteShares.noteId })
+          .from(schema.noteShares).where(inArray(schema.noteShares.groupId, myGroupIds)).all();
+        sharedIds = sharedNotes.map(s => s.noteId);
+      }
+      notes = await db.select().from(schema.notes).where(and(
+        sql`(${schema.notes.userId} = ${userId} OR ${schema.notes.id} IN (${sharedIds.length === 0 ? sql`NULL` : sql.join(sharedIds.map(i => sql`${i}`), sql`, `)}))`,
+        baseCondition,
+      )).all();
+    }
+  } else if (sharedDisplay === 'none') {
+    // 仅 private 笔记 (没有任何共享相关)
+    notes = await db.select().from(schema.notes).where(and(
+      eq(schema.notes.userId, userId),
+      eq(schema.notes.visibility, 'private'),
+      baseCondition,
+    )).all();
+  } else {
+    // own (默认): 作者本人的笔记 (含 private + 自己发的 shared)
+    notes = await db.select().from(schema.notes).where(and(
+      eq(schema.notes.userId, userId),
+      baseCondition,
+    )).all();
+  }
 
   // 获取所有文件记录
   const files = await db.select().from(schema.files)
@@ -185,7 +237,6 @@ app.post('/', async (c) => {
         category: meta.category || null,
         tags,
         todoStatus: meta.todoStatus || null,
-        todoDue: null,
         summary: null,
         aiProcessed: false,
         pinned: meta.pinned === 'true',

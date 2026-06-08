@@ -139,7 +139,7 @@ export const TOOL_DEFINITIONS = [
     type: 'function' as const,
     function: {
       name: 'update_note',
-      description: '更新一条笔记的内容、分类、标签、待办状态或置顶状态。',
+      description: '更新一条笔记的内容、分类、标签、待办状态或置顶状态。PR #13: 若笔记分享到多个群 (root 多群 share), 默认会拒绝并返回提问, 需用户确认后传 confirmMultiGroupSync=true 才真改 (改后所有群同步).',
       parameters: {
         type: 'object',
         properties: {
@@ -149,6 +149,7 @@ export const TOOL_DEFINITIONS = [
           tags: { type: 'array', items: { type: 'string' }, description: '新标签' },
           todoStatus: { type: 'string', enum: ['pending', 'done'], description: '待办状态' },
           pinned: { type: 'boolean', description: '是否置顶' },
+          confirmMultiGroupSync: { type: 'boolean', description: '笔记是 root 多群 share 时必须显式传 true 才执行 (默认 false 仅返回提问让用户确认)' },
         },
         required: ['id'],
       },
@@ -447,6 +448,21 @@ export async function executeTool(userId: string, name: string, args: any): Prom
           const lockUser = await db.select({ nickname: schema.users.nickname })
             .from(schema.users).where(eq(schema.users.id, note.editLockBy)).get();
           return { result: `这条笔记正被「${lockUser?.nickname || '其他用户'}」编辑中, 暂不能修改, 请稍后再试。`, noteIds };
+        }
+      }
+
+      // PR #13: 若笔记是 root + 多群 share, 改会让所有群同步. 没显式 confirm 时返回提问让用户拍板.
+      // (单群 / fork 笔记 / private 直接改, 跟前端 PATCH needLock 判断同款; fork 该群独占走前端 GroupDetail 改更顺手)
+      if (note.visibility === 'shared' && note.parentNoteId === null && !args.confirmMultiGroupSync) {
+        const shareGroups = await db.select({ groupId: schema.noteShares.groupId, name: schema.groups.name })
+          .from(schema.noteShares).leftJoin(schema.groups, eq(schema.groups.id, schema.noteShares.groupId))
+          .where(eq(schema.noteShares.noteId, args.id)).all();
+        if (shareGroups.length > 1) {
+          const names = shareGroups.map(g => `「${g.name || '群组'}」`).join('、');
+          return {
+            result: `这条笔记 (root 版本) 分享到 ${shareGroups.length} 个群: ${names}, 改它会让所有群同步看到. 如果你想仅给某个群一份独占副本 (fork), 请到该群页面编辑这条笔记. 如果确认要 root 多群同步更新, 请告诉我"确认"或"同步所有群", 我再调用工具时会带 confirmMultiGroupSync=true.`,
+            noteIds,
+          };
         }
       }
 

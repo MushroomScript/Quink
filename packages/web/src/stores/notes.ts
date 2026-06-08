@@ -271,7 +271,7 @@ export const useNotesStore = defineStore('notes', () => {
     if (data.version === undefined) {
       const isContentChange = data.content !== undefined || data.summary !== undefined ||
         data.category !== undefined || data.tags !== undefined || data.type !== undefined ||
-        data.todoStatus !== undefined || data.todoDue !== undefined || data.todoRemindRrule !== undefined;
+        data.todoStatus !== undefined;
       if (isContentChange) {
         for (const k of Object.keys(_viewState) as ViewKey[]) {
           const cached = _viewState[k].notes.find((n) => n.id === id);

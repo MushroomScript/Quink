@@ -8,7 +8,7 @@ import { useToast } from '@/composables/useToast';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import { unzoomRect, unzoomViewport } from '@/utils/zoom';
-import { api, type Note, type NoteEditGrant, type NoteEditHistoryRow } from '@/api';
+import { api, type Note, type NoteEditGrant, type NoteEditHistoryRow, type NoteEditRequest } from '@/api';
 import Vditor from 'vditor';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -22,6 +22,7 @@ import {
   PhMapPin,
   PhTrash,
   PhCheck,
+  PhX,
   PhArrowCounterClockwise,
   PhLightbulb,
   PhCheckSquare,
@@ -67,6 +68,46 @@ async function loadEditGrants() {
     const res = await api.listNoteEditGrants(note.value.id);
     editGrants.value = res.data;
   } catch { editGrants.value = []; }
+}
+
+// PR #13 补丁 3: 待审编辑申请 section (仅 shared + 作者本人 + 有 pending 申请). 复用 GroupDetail 同款 API
+const editRequests = ref<NoteEditRequest[]>([]);
+const dismissedEditRequestIds = ref<Set<string>>(new Set());
+const visibleEditRequests = computed(() => editRequests.value.filter(r => !dismissedEditRequestIds.value.has(r.id)));
+async function loadEditRequests() {
+  if (!note.value || !isShared.value || !isMyNote.value) {
+    editRequests.value = [];
+    return;
+  }
+  try {
+    const res = await api.listNoteEditRequests(note.value.id);
+    // 仅 pending 状态进 UI (后端可能返历史含 approved/rejected/canceled)
+    editRequests.value = (res.data || []).filter(r => r.status === 'pending');
+  } catch { editRequests.value = []; }
+}
+async function approveEditRequest(requestId: string) {
+  if (!note.value) return;
+  try {
+    await api.approveNoteEditRequest(note.value.id, requestId);
+    editRequests.value = editRequests.value.filter(r => r.id !== requestId);
+    toast.show('已同意, 申请人获得编辑权限', 'success');
+  } catch (e: any) {
+    toast.show(e?.message || '操作失败', 'error');
+  }
+}
+async function rejectEditRequest(requestId: string) {
+  if (!note.value) return;
+  try {
+    await api.rejectNoteEditRequest(note.value.id, requestId);
+    editRequests.value = editRequests.value.filter(r => r.id !== requestId);
+    toast.show('已拒绝申请', 'success');
+  } catch (e: any) {
+    toast.show(e?.message || '操作失败', 'error');
+  }
+}
+function dismissEditRequest(requestId: string) {
+  // 忽略 = 仅本地从 UI 隐藏, 不调 API (申请仍 pending, server 状态不变, 下次刷新仍显示)
+  dismissedEditRequestIds.value.add(requestId);
 }
 async function setEditPermission(perm: 'admin' | 'all') {
   if (!note.value) return;
@@ -149,6 +190,10 @@ async function renderContent(content: string): Promise<string> {
   }
 }
 
+async function loadNoteAndReminder() {
+  await loadNote();
+  await Promise.all([loadReminder(), loadEditRequests()]);
+}
 async function loadNote() {
   const id = route.params.id as string;
   try {
@@ -269,24 +314,32 @@ async function toggleTodo() {
   showMenu.value = false;
 }
 
-// 待办提醒: 点菜单"设置/编辑提醒" → 弹 ReminderPicker, 保存走 store.updateNote (与 NoteCard 同模式)
+// 待办提醒: 点菜单"设置/编辑提醒" → 弹 ReminderPicker. PR #13 切到 personal-reminder 接口.
 const reminderPickerOpen = ref(false);
+const myPersonalReminder = ref<{ dueAt: string; rrule: string | null } | null>(null);
+async function loadReminder() {
+  if (!note.value || note.value.type !== 'todo') return;
+  try {
+    const res = await api.getNoteReminders(note.value.id);
+    myPersonalReminder.value = res.data.personal;
+  } catch (e) {
+    console.error('[NoteDetail] loadReminder failed:', e);
+  }
+}
 function openReminderPicker() {
   showMenu.value = false;
   reminderPickerOpen.value = true;
 }
 async function saveReminder(payload: { remindAt: string | null; rrule: string | null }) {
   if (!note.value) return;
+  // PR #13: 切到 personal-reminder 接口 (老 todoDue/todoRemindRrule schema 列已删)
   try {
-    const res = await store.updateNote(note.value.id, {
-      todoDue: payload.remindAt,
-      todoRemindRrule: payload.rrule,
-      version: note.value.version,
-    } as any);
-    if (res && note.value) {
-      note.value.todoDue = res.todoDue ?? payload.remindAt;
-      note.value.todoRemindRrule = res.todoRemindRrule ?? payload.rrule;
-      if (res.version != null) note.value.version = res.version;
+    if (payload.remindAt) {
+      await api.setPersonalReminder(note.value.id, { dueAt: payload.remindAt, rrule: payload.rrule });
+      myPersonalReminder.value = { dueAt: payload.remindAt, rrule: payload.rrule };
+    } else {
+      await api.deletePersonalReminder(note.value.id);
+      myPersonalReminder.value = null;
     }
     toast.show(payload.remindAt ? '已设置提醒' : '已清除提醒', 'success');
   } catch (e) {
@@ -367,11 +420,11 @@ watch(() => note.value?.reactionSummary, (newSum) => {
 onMounted(() => {
   document.addEventListener('keydown', onKeydown);
   window.addEventListener('quink-note-reaction-changed' as any, onReactionChangedSSE);
-  loadNote();
+  loadNoteAndReminder();
 });
 
 
-watch(() => route.params.id, () => { loadNote(); });
+watch(() => route.params.id, () => { loadNoteAndReminder(); });
 onUnmounted(() => {
   if (detailTitle) detailTitle.value = '';
   document.removeEventListener('keydown', onKeydown);
@@ -432,7 +485,7 @@ onUnmounted(() => {
             <button v-if="note.type === 'todo'" @click.stop="openReminderPicker"
               class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
               <PhBell size="0.875rem" weight="fill" />
-              <span>{{ note.todoDue ? '编辑提醒' : '设置提醒' }}</span>
+              <span>{{ myPersonalReminder ? '编辑提醒' : '设置提醒' }}</span>
             </button>
             <div class="border-t border-gray-100 my-0.5"></div>
             <!-- 移至类型 (PR #8 命名重整: quink=灵感, note=笔记): 当前 type 不显示, 避免"移至自身"无效项 -->
@@ -467,8 +520,8 @@ onUnmounted(() => {
       <!-- 提醒设置弹窗 -->
       <ReminderPicker
         v-model:open="reminderPickerOpen"
-        :remind-at="note?.todoDue ?? null"
-        :rrule="note?.todoRemindRrule ?? null"
+        :remind-at="myPersonalReminder?.dueAt ?? null"
+        :rrule="myPersonalReminder?.rrule ?? null"
         @save="saveReminder"
       />
 
@@ -559,6 +612,46 @@ onUnmounted(() => {
         <div v-if="showSharedGroupsPopup || showGrantsPopup" class="fixed inset-0 z-[var(--z-overlay-backdrop)]"
           @click="showSharedGroupsPopup = false; showGrantsPopup = false" />
       </div>
+
+      <!-- PR #13 补丁 3: 待审编辑申请 section (仅 shared + 作者本人 + 有 pending). 同意/拒绝调 API, 忽略仅本地隐藏 -->
+      <section v-if="isShared && isMyNote && visibleEditRequests.length > 0"
+        class="mb-4 bg-gray-50 rounded-xl p-4">
+        <h3 class="text-sm font-medium mb-3">待审编辑申请 ({{ visibleEditRequests.length }})</h3>
+        <div class="space-y-2">
+          <div v-for="req in visibleEditRequests" :key="req.id"
+            class="bg-white rounded-lg p-3 space-y-2">
+            <div class="flex items-center gap-2">
+              <img v-if="req.avatar" :src="resolveFileThumbUrl(req.avatar)"
+                @error="thumbErrorFallback($event, resolveFileUrl(req.avatar))"
+                alt="" class="w-7 h-7 rounded-full object-cover shrink-0" />
+              <div v-else class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold shrink-0">
+                {{ (req.nickname || '?').charAt(0).toUpperCase() }}
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm">
+                  <span class="font-medium">{{ req.nickname || '群成员' }}</span>
+                  <span class="text-gray-400 text-xs ml-2">{{ dayjs(req.createdAt).format('MM-DD HH:mm') }}</span>
+                </div>
+                <div class="text-[11px] text-gray-500">申请编辑这条笔记</div>
+              </div>
+              <button @click="approveEditRequest(req.id)"
+                class="px-2 py-1 text-xs rounded-lg bg-primary-light text-primary-dark hover:bg-primary/20 inline-flex items-center gap-1">
+                <PhCheck size="0.75rem" weight="bold" /> 同意
+              </button>
+              <button @click="rejectEditRequest(req.id)"
+                class="px-2 py-1 text-xs rounded-lg bg-red-50 text-red-500 hover:bg-red-100 inline-flex items-center gap-1">
+                <PhX size="0.75rem" weight="bold" /> 拒绝
+              </button>
+              <button @click="dismissEditRequest(req.id)"
+                class="px-2 py-1 text-xs rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200 inline-flex items-center gap-1"
+                title="仅本地隐藏, 申请仍 pending">
+                忽略
+              </button>
+            </div>
+            <div v-if="req.message" class="text-xs text-gray-500 pl-9 italic">"{{ req.message }}"</div>
+          </div>
+        </div>
+      </section>
 
       <!-- PR #7b: 编辑历史行 (shared 笔记 + editorCount > 0 时显示). 跟分享设置行分开避免破坏 isMyNote 条件. -->
       <div v-if="isShared && editorCount > 0" class="mb-4 flex items-center gap-2 text-xs relative flex-wrap">

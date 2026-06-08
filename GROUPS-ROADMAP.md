@@ -33,7 +33,7 @@
 | **#10 通知中心** | 新通知表 + 通知 view (4 tab: 全部/内容/提醒/群组) + 入口 (头像列表传输按钮上方) + SSE 推送 + 接入: 另存为通知 / 申请编辑权通知 / 提醒到点 / 群组变更通知 / 评论从 toast 搬到通知页 (reaction 仍卡片) | ✅ done (10a/10b/10c) | ~850 行 (实际) |
 | **#11 提醒分家** | 个人提醒 (todoDue, 每人自管, 删了内容也响) + 群提醒新表 (群管理员设, 群所有人收) + 群组提醒接收开关 (每人自己控该群提醒) | ✅ done (11a 后端 + 11b 前端) | ~675 行 (实际) |
 | **#12 群组回收站 + 审计** | 每群一个回收站 (从群组页进, 标题"X 群的回收站") + 7 天强制清 + 群主+管理员都能恢复, 仅群主能永久删 + 后端所有改/删存内容快照 (审计表 + 服务器主人管理界面留 #12+ 单独做) | ✅ done (12a 后端 + 12b 前端 一起 ship) | ~720 行 (实际, 含观察 6 个) |
-| **#13 收尾** | AI chat update_note 适配 fork (主动问用户改哪一版) + shared→private 转换约束 (仅未被任何群修改过能转) + 统计按 origin 维度 (fork 算 1 条, parent_note_id 链追溯) + 导出按 sharedDisplay | pending | ~500 行 (估) |
+| **#13 收尾** | AI chat update_note 适配 fork (主动问用户改哪一版) + shared→private 转换约束 (仅未被任何群修改过能转) + 统计按 origin 维度 (fork 算 1 条, parent_note_id 链追溯) + 导出按 sharedDisplay + legacy todo_due 三列清理 + 砍重叠 toast | ✅ done (PR #13 一次 ship + 5 补丁) | ~280 行 (实际, 净改动小因 legacy 清理跟 toast 砍占大量 - 行) |
 
 总量预估 ~6900 行 (含已 ship 跟 6 个新 PR). 每个 PR 独立 ship 不破坏现有功能.
 
@@ -1028,6 +1028,47 @@ FROM notes WHERE todo_due IS NOT NULL;
 
 - 服务器主人管理界面 (跨群审计 / 配额管理 / 全局 audit log 浏览) 留 PR #12+ 单独做
 - AI chat 适配 fork / 统计按 origin / 导出按 sharedDisplay → 进 PR #13
+
+---
+
+## PR #13 收尾 (✅ ship)
+
+**目标**: 完成 fork 模型相关全套收尾 (AI / 统计 / 导出 / 通知 / 约束) + PR #11 legacy todo_due 三列彻底清理 + 评估砍 toast 重叠.
+
+**实际**: 一个 PR ship, 含 9 个 FOLLOWUPS 项目 + 5 个补丁. 净 +132 行 / -144 行 (legacy 清理 + toast 砍占大量 - 行).
+
+### legacy todo_due 三列清理
+- `scheduler.ts` 移除老 `notes.todo_due` 扫描分支 (-58 行)
+- `notes.ts` PATCH / POST / fork 复制 / snapshot 全清 `todoDue` / `todoRemindRrule` / `todoRemindSentAt` 引用
+- `schema.ts` notes 移除三字段, `db/index.ts` `ALTER TABLE DROP COLUMN` 物理删 (SQLite 3.35+)
+- web `Note` interface 三字段, `NoteCard` legacy fallback 链 (老 todoDue 优先级最低), `NoteDetail.saveReminder` 切到 `personal-reminder` API
+- followup【PR #11a sent_at race】legacy 路径已删自然消失
+
+### AI / 约束 / 通知
+- **AI fork 适配**: `tools.ts` `update_note` 加 `confirmMultiGroupSync` 参数. 笔记是 root + 多群 share 时, AI 默认拒绝并返回提问让用户拍板 ("同步所有群 / 去 GroupDetail fork 独占")
+- **shared→private 转换约束**: PATCH `visibility=private` 时检测 root 有 fork 子节点 → 拒 (409 `has_forks`); fork 笔记不能转 private → 拒 (409 `fork_cannot_privatize`)
+- **fork-by-other 通知**: PATCH fork 路径 (非作者改 root) 给原作者写 `fork-by-other` 通知, body 含群名 + fork 操作人 + 笔记预览
+
+### 统计 / 导出 按 origin 维度
+- **/api/stats**: 6 个查询全加 `parent_note_id IS NULL` 过滤 (totalNotes / totalTodos / pendingTodos / dailyCounts / categoryDist / typeDist). fork 不算 origin 维度
+- **/api/data export**: 读 `user.preferences.sharedDisplay` (own/others/none/all 默认 own) 决定笔记范围 + `parent_note_id IS NULL` 过滤
+
+### toast 重叠砍 (蘑菇拍板"全砍")
+- `sse.ts` 7 处协作类 toast 全清: group-join-request / group-joined / group-join-rejected / group-dissolved / note-duplicated / note-edit-request-resolved (note-edit-request 后来补回保留同意 quick-action)
+- OS 通知 + 通知中心保留双渠道, 不影响信息送达
+
+### 5 补丁 (ship 前蘑菇提)
+
+- **补丁 1**: `createNoteSchema` / `updateNoteSchema` 加 `.strict()`. 老前端调 todoDue 等已删字段 400 而非静默 strip, 调用方能看错
+- **补丁 2**: `note-edit-request` toast 加回 (反悔 砍 7 处), 仅【同意】quick-action 按钮. 拒绝/忽略走 NoteDetail section / 通知中心 (避免 toast 误点)
+- **补丁 3**: `NoteDetail.vue` 加「待审编辑申请」section, 仅 shared + 作者本人 + 有 pending 时显示. 每条三按钮: 同意 (调 approve API) / 拒绝 (调 reject API) / 忽略 (仅本地隐藏不调 API)
+- **补丁 4**: 非作者访问 private / 已删笔记 → 404 "笔记不存在" (现状已达标, 验收通过). 作者本人保留评论可见 (评论 row 不删)
+- **补丁 5**: Windows 通知点击不激活防御加强 - `main.ts` 加 `webContents.focus()` (让 Chromium DOM 接 OS 激活) + `setAlwaysOnTop` 100ms → 250ms (低端机/任务繁忙时 100ms 不够)
+
+### 留待后续 PR / 长期 followup
+
+- 服务器主人管理界面 (跨群审计 / 配额管理 / 全局 audit log 浏览) 留 PR #14+ 单独做
+- 【待补】段保留: comment-added 通知带 commentId anchor / 群提醒按钮限定 inGroupContext / 铃铛短文案区分个人群 / 通知中心保留期调整 / notifications 操作审计 — 都不在 PR #13 范围
 
 ---
 

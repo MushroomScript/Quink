@@ -159,10 +159,9 @@ export function startReminderSse() {
         requestId: string; groupId: string; groupName: string;
         applicant: { id: string; username: string; nickname: string; avatar: string | null };
       };
-      Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
+      // PR #13: toast 砍掉, 通知中心 + OS 通知双渠道已覆盖 (group-join-request 通知 + showNotification L168)
+      import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onJoinRequest(data.groupId);
-        // 5 秒 (默认 1.6s 太短易错过) + success 风格高亮重要事件
-        useToast().show(`${data.applicant.nickname} 申请加入「${data.groupName}」`, { kind: 'success', duration: 5000 });
       });
       // OS 桌面通知 (任务栏闪 + Win 通知中心收纳). 点击跳群组详情页直接看待审申请
       showNotification({
@@ -179,9 +178,9 @@ export function startReminderSse() {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
       if (isMyEvent(data)) return;
-      Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
+      // PR #13: toast 砍掉, 通知中心 + OS 通知双渠道已覆盖 (group-joined 通知 + showNotification L186)
+      import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onJoinApproved();
-        useToast().show('申请已通过, 加入群组成功', 'success');
       });
       showNotification({
         title: '加群成功',
@@ -192,11 +191,8 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] group-join-approved parse failed:', e); }
   });
 
-  // group-join-rejected: 我被拒绝 → toast + 桌面通知
+  // group-join-rejected: 我被拒绝 → 桌面通知 (PR #13 砍 toast, 通知中心 group-join-rejected 已覆盖)
   es.addEventListener('group-join-rejected', (_ev) => {
-    import('@/composables/useToast').then(({ useToast }) => {
-      useToast().show('管理员拒绝了你的申请', 'error');
-    });
     showNotification({
       title: '申请被拒绝',
       body: '管理员拒绝了你的申请',
@@ -208,9 +204,9 @@ export function startReminderSse() {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
       if (isMyEvent(data)) return;
-      Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
+      // PR #13: toast 砍掉, 通知中心 + OS 通知双渠道已覆盖 (group-dissolved 通知 + showNotification L215)
+      import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onDissolved(data.groupId);
-        useToast().show('群组已被解散', 'default');
       });
       showNotification({
         title: '群组已解散',
@@ -283,6 +279,8 @@ export function startReminderSse() {
       const data = JSON.parse((ev as MessageEvent).data) as {
         requestId: string; noteId: string; requesterId: string; requesterNickname: string; message: string | null;
       };
+      // PR #13 (蘑菇 2026-06-08 反悔): note-edit-request toast 加回, 只显示「同意」quick-action 按钮.
+      // 「拒绝」/「忽略」不放 toast (避免误点), 走通知中心或 NoteDetail 的"待审申请" section 操作.
       Promise.all([import('@/composables/useToast'), import('@/api')]).then(([{ useToast }, { api }]) => {
         const toast = useToast();
         toast.show(`${data.requesterNickname} 申请编辑你的笔记`, {
@@ -319,9 +317,7 @@ export function startReminderSse() {
         originNoteId: string; newNoteId: string; duplicatorNickname: string;
       };
       if (isMyEvent(data)) return;
-      import('@/composables/useToast').then(({ useToast }) => {
-        useToast().show(`${data.duplicatorNickname} 复制了你的笔记`, { kind: 'success', duration: 3500 });
-      });
+      // PR #13: toast 砍掉, 通知中心 duplicated + OS 通知双渠道已覆盖
       showNotification({
         title: '笔记被复制',
         body: `${data.duplicatorNickname} 复制了你的笔记`,
@@ -337,13 +333,7 @@ export function startReminderSse() {
       const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; status: 'approved' | 'rejected' };
       if (isMyEvent(data)) return;
       const approved = data.status === 'approved';
-      import('@/composables/useToast').then(({ useToast }) => {
-        useToast().show(
-          approved ? '你的编辑权限申请已通过' : '你的编辑权限申请被拒绝',
-          approved ? 'success' : 'error',
-          3500,
-        );
-      });
+      // PR #13: toast 砍掉, 通知中心 edit-request-resolved + OS 通知双渠道已覆盖
       showNotification({
         title: approved ? '编辑权限申请通过' : '编辑权限申请被拒',
         body: approved ? '现在可以编辑这条笔记了' : '作者或管理员拒绝了你的申请',

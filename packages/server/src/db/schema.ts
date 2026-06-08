@@ -26,9 +26,7 @@ export const notes = sqliteTable('notes', {
   // quink=灵感页 (原'note'), note=笔记页 (原'snippet'), todo=待办页 (不变). link 类型废弃删除.
   type: text('type', { enum: ['quink', 'note', 'todo'] }).notNull().default('quink'),
   todoStatus: text('todo_status', { enum: ['pending', 'done'] }),
-  todoDue: text('todo_due'), // ISO datetime, 复用为"提醒时间"。到此刻 scheduler 触发推送。
-  todoRemindSentAt: text('todo_remind_sent_at'), // 上次发送时间, 防重发。改 todoDue 时由 PATCH 重置为 null
-  todoRemindRrule: text('todo_remind_rrule'), // RFC 5545 RRULE 字符串, null = 单次提醒
+  // PR #13: todoDue / todoRemindSentAt / todoRemindRrule 三列已移除. 提醒走 note_personal_reminders / note_group_reminders 两表
   aiProcessed: integer('ai_processed', { mode: 'boolean' }).notNull().default(false),
   pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull(),
