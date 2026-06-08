@@ -183,7 +183,7 @@ async function doClear() {
               size="1.125rem"
               weight="fill"
               class="shrink-0"
-              :style="n.readAt ? 'color: var(--text-muted)' : 'color: rgb(var(--c-accent))'"
+              :style="n.readAt ? 'color: var(--sb-dim)' : 'color: rgb(var(--c-accent))'"
             />
             <div class="font-medium text-sm truncate flex-1" style="color: var(--text-primary)">
               {{ n.title }}
