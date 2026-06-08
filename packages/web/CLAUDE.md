@@ -220,9 +220,9 @@ helper 行为:
 - **dev**: 根据 `window.location.hostname` 推断 backend URL (`http://{hostname}:38999`). 同时兼容 PC localhost 跟手机连 PC 局域网 IP (vite host:true 模式). 前置: PC 防火墙放行 38999 入站
 - **prod**: 返回空字符串, 调用方拼出来还是 `/api/xxx` 相对路径走同 origin (nginx 反代 / Docker 一体化容器 / K8s ingress 等). 同 origin 没 vite proxy 那种 bug
 
-加新长连接 endpoint 时套这个 helper, 不要写死 `/api/xxx`. 普通短 fetch (GET 一次性响应) 不需要套, 仍走 vite proxy 没问题. 跨 origin fetch 触发 OPTIONS preflight 但 hono cors() 默认放行常用 header, 长流场景多 ~50ms 可忽略.
+**更新 (蘑菇 2026-06-08 commit `e483aa1`)**: **api/index.ts `request()` 函数已默认所有 API 都套 backendBaseUrl**, 短 fetch 也直连 backend (不再走 vite proxy). 因为蘑菇报告即使长连接绕了, 短 API 仍偶发累积 socket 泄漏让所有 view 卡死必须重启 Electron. 现在所有走 api.xxx() 的请求 dev 时全直连 38999, 彻底绕开 vite proxy. 加新 endpoint 默认套 `api.xxx()` 即可, 不需要再特意套 helper. 极少数地方 (NoteEditModal 锁相关 / 文件上传 xhr / 数据导入导出) 不走 api.xxx() 走裸 fetch 的, 也都已改成拼 `${backendBaseUrl()}/api/...`.
 
-接入位置: `utils/sse.ts` (reminder SSE) / `views/AI.vue` (AI chat 流式) / `views/AiChat.vue` (快捷窗口 AI chat).
+接入位置: `api/index.ts` `request()` (所有标准 API) / `utils/sse.ts` (reminder SSE) / `views/AI.vue` (AI chat 流式) / `views/AiChat.vue` (快捷窗口 AI chat) / `components/NoteEditModal.vue` (lock/heartbeat/release).
 
 ## 文件 url helper（裸名约定）
 
