@@ -8,7 +8,7 @@ import { authMiddleware } from '../auth.js';
 import { publish, isOnline } from '../reminder/bus.js';
 import { loadSocialMetaMaps, loadEditorCountMap, loadCanWriteMap } from './notes.js';
 import { logAudit } from '../utils/auditLog.js';
-import { createNotification } from '../utils/notifications.js';
+import { createNotification, markRequestNotificationsRead } from '../utils/notifications.js';
 import { purgeNote, GROUP_TRASH_RETENTION_DAYS } from '../cleanup.js';
 import { broadcastNoteShared } from '../utils/broadcast.js';
 
@@ -737,6 +737,8 @@ app.post('/:id/join-requests/:reqId/approve', async (c) => {
     `你已加入「${approvedGroup?.name || '群组'}」`,
     '审批通过', { groupId },
   ).catch(() => {});
+  // PR #13 补丁: 申请已处理, 标已读所有 owner+admin 收到的 group-join-request 通知
+  markRequestNotificationsRead(['group-join-request'], reqId).catch(() => {});
   await logAudit(c, 'group.member_add', 'group', groupId, {
     newMemberId: reqRow.userId, requestId: reqId, approvedBy: me.role,
   });
@@ -766,6 +768,8 @@ app.post('/:id/join-requests/:reqId/reject', async (c) => {
     `加入「${rejGroup?.name || '群组'}」的申请被拒绝`,
     null, { groupId },
   ).catch(() => {});
+  // PR #13 补丁: 申请已处理, 标已读所有 owner+admin 收到的 group-join-request 通知
+  markRequestNotificationsRead(['group-join-request'], reqId).catch(() => {});
   await logAudit(c, 'group.member_reject', 'group', groupId, {
     requesterId: reqRow.userId, requestId: reqId,
   });

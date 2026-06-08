@@ -9,7 +9,7 @@ import { autoTag, autoClassify, autoSummary } from '../ai/client.js';
 import { toPinyinSearchable } from '../utils/pinyin.js';
 import { publish } from '../reminder/bus.js';
 import { logAudit } from '../utils/auditLog.js';
-import { createNotification } from '../utils/notifications.js';
+import { createNotification, markRequestNotificationsRead } from '../utils/notifications.js';
 import { purgeNote } from '../cleanup.js';
 import { broadcastNoteShared } from '../utils/broadcast.js';
 
@@ -868,6 +868,8 @@ app.post('/:id/edit-requests/:reqId/approve', async (c) => {
     '编辑权限申请已通过', noteSnippet(note.content),
     { noteId: id, requestId: reqId },
   ).catch(() => {});
+  // PR #13 补丁: 申请已处理, 标已读所有作者+admin 收到的 edit-request 通知 (不让通知中心仍显红点)
+  markRequestNotificationsRead(['edit-request'], reqId).catch(() => {});
   await logAudit(c, 'note.edit_approve', 'note', id, { requestId: reqId, granteeId: req.userId });
   return c.json({ data: { message: '已同意, 申请人已获得永久编辑权' } });
 });
@@ -902,6 +904,8 @@ app.post('/:id/edit-requests/:reqId/reject', async (c) => {
     '编辑权限申请被拒绝', noteSnippet(note.content),
     { noteId: id, requestId: reqId },
   ).catch(() => {});
+  // PR #13 补丁: 申请已处理, 标已读所有作者+admin 收到的 edit-request 通知
+  markRequestNotificationsRead(['edit-request'], reqId).catch(() => {});
   await logAudit(c, 'note.edit_reject', 'note', id, { requestId: reqId, requesterId: req.userId });
   return c.json({ data: { message: '已拒绝' } });
 });

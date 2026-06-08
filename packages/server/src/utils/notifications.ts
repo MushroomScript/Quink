@@ -14,6 +14,7 @@
 //             'group-demoted' / 'group-dissolved'
 
 import { db, schema } from '../db/index.js';
+import { sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { publish } from '../reminder/bus.js';
@@ -54,5 +55,30 @@ export async function createNotification(
     });
   } catch (e) {
     console.error('[notifications] createNotification failed:', { userId, category, type, title }, e);
+  }
+}
+
+// 申请类通知 (edit-request / group-join-request) 被某 admin/作者从其他入口同意/拒绝后,
+// 标已读所有相关收件人的对应通知 (作者+所有群 admin 都收到的同一条申请通知), 不让通知中心仍显红点.
+// SQLite json_extract 按 payload.requestId 精确匹配. 同步给受影响 user 派 notification-changed SSE 让通知页/徽章实时更新.
+export async function markRequestNotificationsRead(types: string[], requestId: string): Promise<void> {
+  try {
+    const affected = db.all(sql`
+      SELECT id, user_id FROM notifications
+      WHERE type IN (${sql.join(types.map(t => sql`${t}`), sql`, `)})
+        AND json_extract(payload, '$.requestId') = ${requestId}
+        AND read_at IS NULL
+    `) as Array<{ id: string; user_id: string }>;
+    if (affected.length === 0) return;
+    const now = dayjs().toISOString();
+    db.run(sql`
+      UPDATE notifications SET read_at = ${now}
+      WHERE id IN (${sql.join(affected.map(a => sql`${a.id}`), sql`, `)})
+    `);
+    for (const a of affected) {
+      publish(a.user_id, 'notification-changed', { scope: 'read', id: a.id });
+    }
+  } catch (e) {
+    console.error('[notifications] markRequestNotificationsRead failed:', { types, requestId }, e);
   }
 }
