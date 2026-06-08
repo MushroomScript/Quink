@@ -21,30 +21,62 @@
     font-size: 14px;
   }
 
-  /* ── 顶部控制面板 (sticky, 自身不缩放) ── */
-  .panel {
-    position: sticky; top: 0; z-index: 10;
-    background: #1a1c28;
-    padding: 14px 24px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-  }
+  .panel { position: sticky; top: 0; z-index: 10; background: #1a1c28; padding: 14px 24px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  .panel-shared { padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px dashed rgba(255,255,255,0.1); }
   .panel-row { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
-  .panel-col { flex: 1; min-width: 320px; }
-  .panel-col h3 { margin: 0 0 8px 0; font-size: 12px; color: rgb(192,175,250); text-transform: uppercase; letter-spacing: 0.5px; }
-  .panel-shared { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1); }
+  .panel-col { flex: 1; min-width: 360px; }
+  .panel-col h3 { margin: 0 0 10px 0; font-size: 12px; color: rgb(192,175,250); text-transform: uppercase; letter-spacing: 0.5px; }
 
   .ctrl { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 4px; }
-  .ctrl label { width: 130px; color: var(--text-dim); }
+  .ctrl label { width: 90px; color: var(--text-dim); }
   .ctrl input[type=number] { width: 60px; background: #0f1018; color: var(--text-sb); border: 1px solid rgba(255,255,255,0.12); border-radius: 4px; padding: 3px 6px; font-family: inherit; font-size: 12px; }
-  .ctrl input[type=range] { flex: 1; min-width: 80px; }
+  .ctrl input[type=range] { flex: 1; min-width: 60px; }
   .ctrl .unit { color: var(--text-gray); font-size: 11px; width: 18px; }
 
-  /* ── 示例容器 (受 zoom 影响) ── */
+  /* size 三连 (minW / h / fs 同一行) */
+  .size-row { display: flex; gap: 12px; margin-bottom: 12px; }
+  .size-row .ctrl { margin-bottom: 0; flex: 1; }
+  .size-row .ctrl label { width: auto; }
+  .size-row .ctrl input[type=range] { display: none; }
+
+  /* 方向盘 */
+  .pads-row { display: flex; gap: 16px; align-items: flex-start; }
+  .pad-group { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .pad-title { font-size: 11px; color: var(--text-dim); }
+  .pad {
+    position: relative;
+    width: 100px; height: 100px;
+    background: #0f1018;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    cursor: crosshair;
+    touch-action: none;
+    user-select: none;
+  }
+  .pad::before, .pad::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.08); pointer-events: none;
+  }
+  .pad::before { left: 0; right: 0; top: 50%; height: 1px; transform: translateY(-0.5px); }
+  .pad::after { top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-0.5px); }
+  .pad-dot {
+    position: absolute;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: rgb(167,139,250);
+    box-shadow: 0 0 8px rgba(167,139,250,0.6);
+    left: calc(50% - 5px); top: calc(50% - 5px);
+    pointer-events: none;
+  }
+  .pad-readout { font-size: 11px; color: var(--text-sb); font-family: monospace; }
+  .pad-readout input { width: 42px; background: #0f1018; color: var(--text-sb); border: 1px solid rgba(255,255,255,0.12); border-radius: 3px; padding: 2px 4px; font-family: monospace; font-size: 11px; text-align: center; }
+  .pad-reset { font-size: 10px; color: var(--text-gray); cursor: pointer; padding: 2px 6px; border-radius: 3px; }
+  .pad-reset:hover { background: rgba(255,255,255,0.06); color: var(--text-sb); }
+
+  /* 示例区 (受 zoom) */
   .container { padding: 24px; }
   .section { margin-bottom: 40px; }
   .section-title { color: var(--text-dim); font-size: 12px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
 
-  /* ── 示例 A: 头像菜单 ── */
   .sample-menu { display: flex; flex-direction: column; width: 240px; background: var(--bg-sidebar); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 4px 0; }
   .menu-item { display: flex; align-items: center; gap: 8px; padding: 10px 16px; font-size: 14px; color: var(--text-sb); cursor: pointer; }
   .menu-item:hover { background: rgba(255,255,255,0.04); }
@@ -52,13 +84,11 @@
   .menu-item .label { flex: 1; }
   .menu-item .row-label { color: var(--text-gray); font-size: 11px; min-width: 32px; }
 
-  /* ── 示例 B: 4 tab ── */
   .sample-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
   .tab { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 8px; font-size: 12px; color: var(--text-gray); cursor: pointer; background: transparent; }
   .tab.active { background: var(--bg-tab-active); color: rgb(192, 175, 250); font-weight: 500; }
   .tab:hover:not(.active) { background: rgba(255,255,255,0.04); }
 
-  /* ── badge 核心 (size/字/padding/transform 全 inline 控制) ── */
   .badge {
     display: inline-flex; align-items: center; justify-content: center;
     background: rgba(248, 113, 113, 0.7);
@@ -68,62 +98,94 @@
     font-variant-numeric: tabular-nums;
     border-radius: 9999px;
     box-sizing: border-box;
+    padding: 0 4px; /* 基础左右 padding 让多位字符有呼吸 */
   }
+  .badge-text { display: inline-block; line-height: 1; }
   .menu-item .badge { margin-left: auto; }
 </style>
 </head>
 <body>
 
 <div class="panel">
-  <!-- 共用控制: CSS zoom (模拟 Quink 显示比例) -->
+
   <div class="panel-shared">
     <div class="ctrl">
       <label>显示比例 (CSS zoom)</label>
       <input type="range" id="zoom" min="0.5" max="3" step="0.05" value="1">
       <input type="number" id="zoomNum" value="1" step="0.05">
       <span class="unit">×</span>
-      <span style="color:var(--text-gray); font-size:11px; margin-left:8px;">只缩放下面示例区, 控制面板不动. 跟 Quink html zoom 同款</span>
+      <span style="color:var(--text-gray); font-size:11px; margin-left:8px;">只缩放下方示例区, 跟 Quink html zoom 同款</span>
     </div>
   </div>
 
   <div class="panel-row">
-    <!-- A 控制 -->
+
+    <!-- ── A 控制 ── -->
     <div class="panel-col">
-      <h3>A · 头像菜单 "消息通知" badge</h3>
-      <div class="ctrl"><label>min-w</label><input type="range" id="a-minW" min="10" max="24" step="0.25" value="18"><input type="number" id="a-minWNum" value="18" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>height</label><input type="range" id="a-h" min="10" max="24" step="0.25" value="18"><input type="number" id="a-hNum" value="18" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>font-size</label><input type="range" id="a-fs" min="7" max="14" step="0.25" value="11"><input type="number" id="a-fsNum" value="11" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>translateY</label><input type="range" id="a-ty" min="-3" max="3" step="0.25" value="0.25"><input type="number" id="a-tyNum" value="0.25" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>padding-top</label><input type="range" id="a-pt" min="0" max="4" step="0.25" value="0"><input type="number" id="a-ptNum" value="0" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>padding-bottom</label><input type="range" id="a-pb" min="0" max="4" step="0.25" value="1"><input type="number" id="a-pbNum" value="1" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>1位 px (左右均)</label><input type="range" id="a-px1" min="0" max="8" step="0.25" value="4"><input type="number" id="a-px1Num" value="4" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>多位 pl</label><input type="range" id="a-plM" min="0" max="8" step="0.25" value="3.5"><input type="number" id="a-plMNum" value="3.5" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>多位 pr</label><input type="range" id="a-prM" min="0" max="8" step="0.25" value="4.5"><input type="number" id="a-prMNum" value="4.5" step="0.25"><span class="unit">px</span></div>
+      <h3>A · 头像菜单"消息通知" badge</h3>
+
+      <div class="size-row">
+        <div class="ctrl"><label>min-w</label><input type="number" id="a-minW" value="18" step="0.25" min="6" max="32"><span class="unit">px</span></div>
+        <div class="ctrl"><label>height</label><input type="number" id="a-h" value="18" step="0.25" min="6" max="32"><span class="unit">px</span></div>
+        <div class="ctrl"><label>font-size</label><input type="number" id="a-fs" value="11" step="0.25" min="6" max="20"><span class="unit">px</span></div>
+        <div class="ctrl"><label>padding x</label><input type="number" id="a-px" value="4" step="0.25" min="0" max="8"><span class="unit">px</span></div>
+      </div>
+
+      <div class="pads-row">
+        <div class="pad-group">
+          <div class="pad-title">红点位置 (上下左右)</div>
+          <div class="pad" data-pad="a-badge"><div class="pad-dot"></div></div>
+          <div class="pad-readout">X <input type="number" id="a-badge-x" value="0" step="0.25" min="-5" max="5"> Y <input type="number" id="a-badge-y" value="0.25" step="0.25" min="-5" max="5"></div>
+          <div class="pad-reset" data-reset="a-badge">归零</div>
+        </div>
+        <div class="pad-group">
+          <div class="pad-title">字位置 (上下左右)</div>
+          <div class="pad" data-pad="a-text"><div class="pad-dot"></div></div>
+          <div class="pad-readout">X <input type="number" id="a-text-x" value="0" step="0.25" min="-5" max="5"> Y <input type="number" id="a-text-y" value="-0.5" step="0.25" min="-5" max="5"></div>
+          <div class="pad-reset" data-reset="a-text">归零</div>
+        </div>
+      </div>
     </div>
 
-    <!-- B 控制 -->
+    <!-- ── B 控制 ── -->
     <div class="panel-col">
-      <h3>B · 4 tab "全部" badge</h3>
-      <div class="ctrl"><label>min-w</label><input type="range" id="b-minW" min="10" max="24" step="0.25" value="14"><input type="number" id="b-minWNum" value="14" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>height</label><input type="range" id="b-h" min="10" max="24" step="0.25" value="14"><input type="number" id="b-hNum" value="14" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>font-size</label><input type="range" id="b-fs" min="7" max="14" step="0.25" value="10"><input type="number" id="b-fsNum" value="10" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>translateY</label><input type="range" id="b-ty" min="-3" max="3" step="0.25" value="0"><input type="number" id="b-tyNum" value="0" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>padding-top</label><input type="range" id="b-pt" min="0" max="4" step="0.25" value="0.5"><input type="number" id="b-ptNum" value="0.5" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>padding-bottom</label><input type="range" id="b-pb" min="0" max="4" step="0.25" value="0"><input type="number" id="b-pbNum" value="0" step="0.25"><span class="unit">px</span></div>
-      <div class="ctrl"><label>padding 左右</label><input type="range" id="b-px" min="0" max="8" step="0.25" value="4"><input type="number" id="b-pxNum" value="4" step="0.25"><span class="unit">px</span></div>
+      <h3>B · 4 tab"全部" badge</h3>
+
+      <div class="size-row">
+        <div class="ctrl"><label>min-w</label><input type="number" id="b-minW" value="14" step="0.25" min="6" max="32"><span class="unit">px</span></div>
+        <div class="ctrl"><label>height</label><input type="number" id="b-h" value="14" step="0.25" min="6" max="32"><span class="unit">px</span></div>
+        <div class="ctrl"><label>font-size</label><input type="number" id="b-fs" value="10" step="0.25" min="6" max="20"><span class="unit">px</span></div>
+        <div class="ctrl"><label>padding x</label><input type="number" id="b-px" value="4" step="0.25" min="0" max="8"><span class="unit">px</span></div>
+      </div>
+
+      <div class="pads-row">
+        <div class="pad-group">
+          <div class="pad-title">红点位置 (上下左右)</div>
+          <div class="pad" data-pad="b-badge"><div class="pad-dot"></div></div>
+          <div class="pad-readout">X <input type="number" id="b-badge-x" value="0" step="0.25" min="-5" max="5"> Y <input type="number" id="b-badge-y" value="0" step="0.25" min="-5" max="5"></div>
+          <div class="pad-reset" data-reset="b-badge">归零</div>
+        </div>
+        <div class="pad-group">
+          <div class="pad-title">字位置 (上下左右)</div>
+          <div class="pad" data-pad="b-text"><div class="pad-dot"></div></div>
+          <div class="pad-readout">X <input type="number" id="b-text-x" value="0" step="0.25" min="-5" max="5"> Y <input type="number" id="b-text-y" value="-0.5" step="0.25" min="-5" max="5"></div>
+          <div class="pad-reset" data-reset="b-text">归零</div>
+        </div>
+      </div>
     </div>
+
   </div>
 </div>
 
 <div id="exampleContainer" class="container">
 
   <div class="section">
-    <div class="section-title">示例 A · 头像菜单"消息通知"风格 (text-sm 14px · 🔔 · 文字 · 右侧 badge · 1:1 复刻当前 Quink)</div>
+    <div class="section-title">示例 A · 头像菜单"消息通知"风格 (text-sm 14px · 🔔 · 文字 · 右侧 badge)</div>
     <div class="sample-menu" id="sampleMenu"></div>
   </div>
 
   <div class="section">
-    <div class="section-title">示例 B · 4 tab"全部"风格 (text-xs 12px · 主题底 + badge · 1:1 复刻当前 Quink · 第一个 active)</div>
+    <div class="section-title">示例 B · 4 tab"全部"风格 (text-xs 12px · 主题底 + badge · 第一个 active)</div>
     <div class="sample-tabs" id="sampleTabs"></div>
   </div>
 
@@ -131,6 +193,7 @@
 
 <script>
   const TEST_NUMBERS = ['1', '2', '5', '7', '9', '10', '11', '23', '56', '88', '99', '99+'];
+  const PAD_RANGE = 5; // 方向盘满程映射到 ±5px
 
   function renderMenu() {
     const root = document.getElementById('sampleMenu');
@@ -138,83 +201,137 @@
     TEST_NUMBERS.forEach(n => {
       const item = document.createElement('div');
       item.className = 'menu-item';
-      item.innerHTML = `<span class="icon">🔔</span><span class="label">消息通知</span><span class="badge" data-kind="a">${n}</span><span class="row-label">"${n}"</span>`;
+      item.innerHTML = `<span class="icon">🔔</span><span class="label">消息通知</span><span class="badge" data-kind="a"><span class="badge-text">${n}</span></span><span class="row-label">"${n}"</span>`;
       root.appendChild(item);
     });
   }
-
   function renderTabs() {
     const root = document.getElementById('sampleTabs');
     root.innerHTML = '';
     TEST_NUMBERS.forEach((n, i) => {
       const t = document.createElement('div');
       t.className = 'tab' + (i === 0 ? ' active' : '');
-      t.innerHTML = `<span>全部</span><span class="badge" data-kind="b">${n}</span>`;
+      t.innerHTML = `<span>全部</span><span class="badge" data-kind="b"><span class="badge-text">${n}</span></span>`;
       root.appendChild(t);
     });
   }
-
   function val(id) { return parseFloat(document.getElementById(id).value); }
 
-  function applyA() {
-    const minW = val('a-minW'), h = val('a-h'), fs = val('a-fs'), ty = val('a-ty');
-    const pt = val('a-pt'), pb = val('a-pb');
-    const px1 = val('a-px1'), plM = val('a-plM'), prM = val('a-prM');
-    document.querySelectorAll('.badge[data-kind="a"]').forEach(b => {
-      const n = b.textContent;
+  function applyKind(kind) {
+    const minW = val(kind + '-minW');
+    const h = val(kind + '-h');
+    const fs = val(kind + '-fs');
+    const px = val(kind + '-px');
+    const bx = val(kind + '-badge-x');
+    const by = val(kind + '-badge-y');
+    const tx = val(kind + '-text-x');
+    const ty = val(kind + '-text-y');
+    document.querySelectorAll(`.badge[data-kind="${kind}"]`).forEach(b => {
       b.style.minWidth = minW + 'px';
       b.style.height = h + 'px';
       b.style.fontSize = fs + 'px';
-      b.style.transform = `translateY(${ty}px)`;
-      b.style.paddingTop = pt + 'px';
-      b.style.paddingBottom = pb + 'px';
-      if (n.length > 1) {
-        b.style.paddingLeft = plM + 'px';
-        b.style.paddingRight = prM + 'px';
-      } else {
-        b.style.paddingLeft = px1 + 'px';
-        b.style.paddingRight = px1 + 'px';
-      }
-    });
-  }
-
-  function applyB() {
-    const minW = val('b-minW'), h = val('b-h'), fs = val('b-fs'), ty = val('b-ty');
-    const pt = val('b-pt'), pb = val('b-pb'), px = val('b-px');
-    document.querySelectorAll('.badge[data-kind="b"]').forEach(b => {
-      b.style.minWidth = minW + 'px';
-      b.style.height = h + 'px';
-      b.style.fontSize = fs + 'px';
-      b.style.transform = `translateY(${ty}px)`;
-      b.style.paddingTop = pt + 'px';
-      b.style.paddingBottom = pb + 'px';
       b.style.paddingLeft = px + 'px';
       b.style.paddingRight = px + 'px';
+      b.style.transform = `translate(${bx}px, ${by}px)`;
+      const t = b.querySelector('.badge-text');
+      if (t) t.style.transform = `translate(${tx}px, ${ty}px)`;
     });
   }
-
+  function applyA() { applyKind('a'); }
+  function applyB() { applyKind('b'); }
   function applyZoom() {
     const z = val('zoom');
     document.getElementById('exampleContainer').style.zoom = z;
   }
 
-  function bindAll(ids, fn) {
-    ids.forEach(([r, n]) => {
-      const rEl = document.getElementById(r), nEl = document.getElementById(n);
-      rEl.addEventListener('input', () => { nEl.value = rEl.value; fn(); });
-      nEl.addEventListener('input', () => { rEl.value = nEl.value; fn(); });
+  // ── 方向盘 (2D drag pad) ──
+  function bindPad(padEl, xId, yId, onChange) {
+    const dot = padEl.querySelector('.pad-dot');
+    let dragging = false;
+    function setDotFromValues() {
+      const rect = padEl.getBoundingClientRect();
+      const max = rect.width/2 - 6;
+      const x = parseFloat(document.getElementById(xId).value) || 0;
+      const y = parseFloat(document.getElementById(yId).value) || 0;
+      const dx = Math.max(-max, Math.min(max, x / PAD_RANGE * max));
+      const dy = Math.max(-max, Math.min(max, y / PAD_RANGE * max));
+      dot.style.left = `calc(50% + ${dx}px - 5px)`;
+      dot.style.top  = `calc(50% + ${dy}px - 5px)`;
+    }
+    function updateFromEvent(e) {
+      const rect = padEl.getBoundingClientRect();
+      const cx = rect.left + rect.width/2;
+      const cy = rect.top + rect.height/2;
+      let dx = e.clientX - cx;
+      let dy = e.clientY - cy;
+      const max = rect.width/2 - 6;
+      dx = Math.max(-max, Math.min(max, dx));
+      dy = Math.max(-max, Math.min(max, dy));
+      dot.style.left = `calc(50% + ${dx}px - 5px)`;
+      dot.style.top  = `calc(50% + ${dy}px - 5px)`;
+      const x = Math.round(dx / max * PAD_RANGE * 4) / 4;
+      const y = Math.round(dy / max * PAD_RANGE * 4) / 4;
+      document.getElementById(xId).value = x;
+      document.getElementById(yId).value = y;
+      onChange();
+    }
+    padEl.addEventListener('pointerdown', (e) => { dragging = true; padEl.setPointerCapture(e.pointerId); updateFromEvent(e); });
+    padEl.addEventListener('pointermove', (e) => { if (dragging) updateFromEvent(e); });
+    padEl.addEventListener('pointerup', () => { dragging = false; });
+    padEl.addEventListener('pointercancel', () => { dragging = false; });
+
+    // 数值输入也同步
+    document.getElementById(xId).addEventListener('input', () => { setDotFromValues(); onChange(); });
+    document.getElementById(yId).addEventListener('input', () => { setDotFromValues(); onChange(); });
+
+    setDotFromValues();
+  }
+
+  function bindReset(resetEl, xId, yId, onChange) {
+    resetEl.addEventListener('click', () => {
+      document.getElementById(xId).value = 0;
+      document.getElementById(yId).value = 0;
+      const padEl = document.querySelector(`[data-pad="${resetEl.dataset.reset}"]`);
+      const dot = padEl.querySelector('.pad-dot');
+      dot.style.left = 'calc(50% - 5px)';
+      dot.style.top  = 'calc(50% - 5px)';
+      onChange();
     });
   }
 
-  bindAll([['a-minW','a-minWNum'],['a-h','a-hNum'],['a-fs','a-fsNum'],['a-ty','a-tyNum'],['a-pt','a-ptNum'],['a-pb','a-pbNum'],['a-px1','a-px1Num'],['a-plM','a-plMNum'],['a-prM','a-prMNum']], applyA);
-  bindAll([['b-minW','b-minWNum'],['b-h','b-hNum'],['b-fs','b-fsNum'],['b-ty','b-tyNum'],['b-pt','b-ptNum'],['b-pb','b-pbNum'],['b-px','b-pxNum']], applyB);
-  bindAll([['zoom','zoomNum']], applyZoom);
+  // ── 普通 input 绑定 ──
+  function bindInput(id, onChange) {
+    document.getElementById(id).addEventListener('input', onChange);
+  }
+  function bindRange(rId, nId, onChange) {
+    const r = document.getElementById(rId), n = document.getElementById(nId);
+    r.addEventListener('input', () => { n.value = r.value; onChange(); });
+    n.addEventListener('input', () => { r.value = n.value; onChange(); });
+  }
 
+  // 渲染示例
   renderMenu();
   renderTabs();
-  applyA();
-  applyB();
-  applyZoom();
+
+  // 绑定 A
+  ['a-minW','a-h','a-fs','a-px'].forEach(id => bindInput(id, applyA));
+  bindPad(document.querySelector('[data-pad="a-badge"]'), 'a-badge-x', 'a-badge-y', applyA);
+  bindPad(document.querySelector('[data-pad="a-text"]'),  'a-text-x',  'a-text-y',  applyA);
+  bindReset(document.querySelector('[data-reset="a-badge"]'), 'a-badge-x', 'a-badge-y', applyA);
+  bindReset(document.querySelector('[data-reset="a-text"]'),  'a-text-x',  'a-text-y',  applyA);
+
+  // 绑定 B
+  ['b-minW','b-h','b-fs','b-px'].forEach(id => bindInput(id, applyB));
+  bindPad(document.querySelector('[data-pad="b-badge"]'), 'b-badge-x', 'b-badge-y', applyB);
+  bindPad(document.querySelector('[data-pad="b-text"]'),  'b-text-x',  'b-text-y',  applyB);
+  bindReset(document.querySelector('[data-reset="b-badge"]'), 'b-badge-x', 'b-badge-y', applyB);
+  bindReset(document.querySelector('[data-reset="b-text"]'),  'b-text-x',  'b-text-y',  applyB);
+
+  // zoom
+  bindRange('zoom','zoomNum', applyZoom);
+
+  // 初始 apply
+  applyA(); applyB(); applyZoom();
 </script>
 
 </body>
