@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Badge Test - Quink</title>
+<style>
+  :root {
+    --c-accent: 167 139 250; /* lavender primary */
+    --bg-page: #0f1018;
+    --bg-sidebar: rgba(255,255,255,0.04);
+    --bg-tab-active: rgba(167,139,250,0.18);
+    --text-sb: rgba(255,255,255,0.88);
+    --text-dim: rgba(255,255,255,0.55);
+    --text-gray: rgba(255,255,255,0.45);
+  }
+  body {
+    margin: 0;
+    background: var(--bg-page);
+    color: var(--text-sb);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+  }
+
+  /* ── 控制面板 (固定顶部, 不滚动) ── */
+  .panel {
+    position: sticky; top: 0; z-index: 10;
+    background: #1a1c28;
+    padding: 14px 24px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px 24px;
+  }
+  .ctrl { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .ctrl label { width: 110px; color: var(--text-dim); }
+  .ctrl input[type=number] { width: 70px; background: #0f1018; color: var(--text-sb); border: 1px solid rgba(255,255,255,0.12); border-radius: 4px; padding: 3px 6px; font-family: inherit; font-size: 12px; }
+  .ctrl input[type=range] { flex: 1; min-width: 80px; }
+
+  /* ── 主体两组示例 ── */
+  .container { padding: 24px; }
+  .section { margin-bottom: 40px; }
+  .section-title { color: var(--text-dim); font-size: 12px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* ── 示例 A: 头像菜单 "消息通知" 风格 (sidebar 内 text-sm 按钮) ── */
+  .sample-menu {
+    display: flex;
+    flex-direction: column;
+    width: 240px;
+    background: var(--bg-sidebar);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 4px 0;
+  }
+  .menu-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px;
+    font-size: 14px;
+    color: var(--text-sb);
+    cursor: pointer;
+  }
+  .menu-item:hover { background: rgba(255,255,255,0.04); }
+  .menu-item .icon { font-size: 16px; line-height: 1; }
+  .menu-item .label { flex: 1; }
+
+  /* ── 示例 B: 4 tab "全部 / 内容 / ..." 风格 (text-xs button) ── */
+  .sample-tabs {
+    display: flex; gap: 4px; flex-wrap: wrap;
+  }
+  .tab {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--text-gray);
+    cursor: pointer;
+    background: transparent;
+  }
+  .tab.active { background: var(--bg-tab-active); color: rgb(192, 175, 250); font-weight: 500; }
+  .tab:hover:not(.active) { background: rgba(255,255,255,0.04); }
+
+  /* ── badge 核心样式 (动态由 JS 控制 size/字/偏移) ── */
+  .badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: rgba(248, 113, 113, 0.7);
+    color: #fff;
+    line-height: 1;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    border-radius: 9999px;
+    box-sizing: border-box;
+  }
+  .menu-item .badge { margin-left: auto; }
+
+  /* ── 数字标签 (供蘑菇看每个 sample 的字符) ── */
+  .row-label { color: var(--text-gray); font-size: 11px; min-width: 32px; margin-left: 12px; }
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <div class="ctrl"><label>Badge 宽 (min-w)</label><input type="range" id="badgeMin" min="10" max="24" step="1" value="14"><input type="number" id="badgeMinNum" value="14" step="1"></div>
+  <div class="ctrl"><label>Badge 高 (h)</label><input type="range" id="badgeH" min="10" max="24" step="1" value="14"><input type="number" id="badgeHNum" value="14" step="1"></div>
+  <div class="ctrl"><label>字号 (font)</label><input type="range" id="fontSize" min="7" max="14" step="0.5" value="10"><input type="number" id="fontSizeNum" value="10" step="0.5"></div>
+  <div class="ctrl"><label>Badge translateY</label><input type="range" id="translateY" min="-3" max="3" step="0.25" value="0"><input type="number" id="translateYNum" value="0" step="0.25"></div>
+  <div class="ctrl"><label>字 padding-top</label><input type="range" id="pt" min="0" max="4" step="0.25" value="0"><input type="number" id="ptNum" value="0" step="0.25"></div>
+  <div class="ctrl"><label>字 padding-bottom</label><input type="range" id="pb" min="0" max="4" step="0.25" value="0"><input type="number" id="pbNum" value="0" step="0.25"></div>
+  <div class="ctrl"><label>字 padding-left</label><input type="range" id="pl" min="0" max="8" step="0.5" value="4"><input type="number" id="plNum" value="4" step="0.5"></div>
+  <div class="ctrl"><label>字 padding-right</label><input type="range" id="pr" min="0" max="8" step="0.5" value="4"><input type="number" id="prNum" value="4" step="0.5"></div>
+  <div class="ctrl"><label>背景色 alpha</label><input type="range" id="bgA" min="0.3" max="1.0" step="0.05" value="0.7"><input type="number" id="bgANum" value="0.7" step="0.05"></div>
+</div>
+
+<div class="container">
+
+  <div class="section">
+    <div class="section-title">示例 A · 头像菜单 "消息通知" 风格 (text-sm 14px + 🔔 + 文字 + 右侧 badge)</div>
+    <div class="sample-menu" id="sampleMenu"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">示例 B · 4 tab "全部" 风格 (text-xs 12px + 主题底 + 数字 badge). 第一个是 active 态</div>
+    <div class="sample-tabs" id="sampleTabs"></div>
+  </div>
+
+</div>
+
+<script>
+  // 各种特征数字
+  const TEST_NUMBERS = ['1', '2', '5', '7', '9', '10', '11', '23', '56', '88', '99', '99+'];
+
+  // 渲染示例 A: 菜单条 (一行一条数字)
+  function renderMenu() {
+    const root = document.getElementById('sampleMenu');
+    root.innerHTML = '';
+    TEST_NUMBERS.forEach(n => {
+      const item = document.createElement('div');
+      item.className = 'menu-item';
+      item.innerHTML = `<span class="icon">🔔</span><span class="label">消息通知</span><span class="badge">${n}</span><span class="row-label">"${n}"</span>`;
+      root.appendChild(item);
+    });
+  }
+
+  // 渲染示例 B: tab (扁平排列)
+  function renderTabs() {
+    const root = document.getElementById('sampleTabs');
+    root.innerHTML = '';
+    TEST_NUMBERS.forEach((n, i) => {
+      const t = document.createElement('div');
+      t.className = 'tab' + (i === 0 ? ' active' : '');
+      t.innerHTML = `<span>全部</span><span class="badge">${n}</span>`;
+      root.appendChild(t);
+    });
+  }
+
+  // 应用控制面板的值到所有 badge
+  function apply() {
+    const minW = parseFloat(document.getElementById('badgeMin').value);
+    const h = parseFloat(document.getElementById('badgeH').value);
+    const fs = parseFloat(document.getElementById('fontSize').value);
+    const ty = parseFloat(document.getElementById('translateY').value);
+    const pt = parseFloat(document.getElementById('pt').value);
+    const pb = parseFloat(document.getElementById('pb').value);
+    const pl = parseFloat(document.getElementById('pl').value);
+    const pr = parseFloat(document.getElementById('pr').value);
+    const a = parseFloat(document.getElementById('bgA').value);
+
+    document.querySelectorAll('.badge').forEach(b => {
+      b.style.minWidth = minW + 'px';
+      b.style.height = h + 'px';
+      b.style.fontSize = fs + 'px';
+      b.style.transform = `translateY(${ty}px)`;
+      b.style.paddingTop = pt + 'px';
+      b.style.paddingBottom = pb + 'px';
+      b.style.paddingLeft = pl + 'px';
+      b.style.paddingRight = pr + 'px';
+      b.style.background = `rgba(248, 113, 113, ${a})`;
+    });
+  }
+
+  // 同步 range 跟 number input 双向绑定
+  function bind(rangeId, numId) {
+    const r = document.getElementById(rangeId);
+    const n = document.getElementById(numId);
+    r.addEventListener('input', () => { n.value = r.value; apply(); });
+    n.addEventListener('input', () => { r.value = n.value; apply(); });
+  }
+  bind('badgeMin', 'badgeMinNum');
+  bind('badgeH', 'badgeHNum');
+  bind('fontSize', 'fontSizeNum');
+  bind('translateY', 'translateYNum');
+  bind('pt', 'ptNum');
+  bind('pb', 'pbNum');
+  bind('pl', 'plNum');
+  bind('pr', 'prNum');
+  bind('bgA', 'bgANum');
+
+  renderMenu();
+  renderTabs();
+  apply();
+</script>
+
+</body>
+</html>
