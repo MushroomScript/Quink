@@ -434,6 +434,10 @@ export function startReminderSse() {
   // PR #10 通知中心 SSE.
   // notification-new: 后端 createNotification helper 推给收件人 (本人所有设备). 不带 _originClientId
   // (不是发起人触发的事件, 多设备都该收到). store handler 头插 + 未读数 +1
+  // 蘑菇 2026-06-08: 高优先级 type 额外弹 OS 通知 (跟通知中心并存, 防群成员漏看).
+  // 设计原则: 协作场景"我必须知道"的事件才弹 OS, 避免低频事件 (评论/fork) spam. 列白名单维护.
+  // 其他 group-* 等事件走专用 SSE handler 弹 OS (跟 createNotification 并行), 不靠这里
+  const OS_NOTIFY_TYPES = new Set(['group-reminder-set']);
   es.addEventListener('notification-new', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as {
@@ -457,6 +461,15 @@ export function startReminderSse() {
           createdAt: data.createdAt,
         });
       });
+      if (OS_NOTIFY_TYPES.has(data.type)) {
+        const noteId = data.payload?.noteId;
+        showNotification({
+          title: data.title,
+          body: data.body || '',
+          tag: `${data.type}-${data.id}`,
+          path: noteId ? `/note/${noteId}` : undefined,
+        });
+      }
     } catch (e) { console.error('[sse] notification-new parse failed:', e); }
   });
 
