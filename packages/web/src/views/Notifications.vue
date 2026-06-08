@@ -172,7 +172,7 @@ async function doClear() {
           class="notif-item group p-3 rounded-lg cursor-pointer transition-all duration-150"
           :style="
             n.readAt
-              ? 'background-color: var(--bg-secondary); border-left: 3px solid var(--text-muted)'
+              ? 'background-color: var(--bg-secondary); border-left: 3px solid var(--sb-dim)'
               : 'background-color: var(--bg-primary-light); border-left: 3px solid rgb(var(--c-accent))'
           "
         >
