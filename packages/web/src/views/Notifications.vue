@@ -134,13 +134,13 @@ async function doClear() {
           : 'text-gray-500 hover:bg-gray-100'"
       >
         <span>{{ t.label }}</span>
-        <!-- badge 比 sidebar 小一号: 16x16 / text-[10px] / 全 px-1 偶数, 取消多位/单位动态 (蘑菇要求"都弄成偶数").
-             pb 去掉 (10px 字在 16px badge 内 items-center 自然居中, 不需要 top-heavy 补偿) -->
+        <!-- badge 蘑菇 2026-06-08 badge-test.html 定稿: 14.5 size, font 10, px-[4.5px], 红点 translate-y-[0.5px] 下移半步,
+             字内 wrap span 加 transform translate(-0.25, -0.25) sub-pixel 微调 (1.5x zoom 下视觉居中) -->
         <span
           v-if="tabUnread(t.key) > 0"
-          class="inline-flex items-center justify-center min-w-[14px] h-[14px] px-1 pt-[0.5px] bg-red-400/70 text-white text-[10px] leading-none font-semibold tabular-nums rounded-full"
+          class="inline-flex items-center justify-center min-w-[14.5px] h-[14.5px] px-[4.5px] translate-y-[0.5px] bg-red-400/70 text-white text-[10px] leading-none font-semibold tabular-nums rounded-full"
         >
-          {{ tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key) }}
+          <span class="inline-block" style="transform: translate(-0.25px, -0.25px)">{{ tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key) }}</span>
         </span>
       </button>
     </div>

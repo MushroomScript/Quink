@@ -25,6 +25,7 @@
 | 根 `Z-INDEX-SCALE.md` | z-index 体系（CSS 变量 scale 总表 / 用法 / 现存 quirks） | 手动（加新弹层 / popup / modal / overlay 时来读） |
 | 根 `GROUPS-ROADMAP.md` | 群组共享 6 个 PR 拆分 + 已拍板决策 + 扩展点子（PR #1 已 ship, PR #2-#6 pending） | 手动（做群组任何 PR / 想接群组扩展前来读） |
 | 根 `FOLLOWUPS.md` | 集中收录【观察里说过但暂未做】的延期项, 按"进 PR #X" / "待补"分类. **/ship skill 已强制 ship 前后必读 + 同步** | 手动（每次 ship / 选下一个任务前必读 - 看跟当前改动重叠的能不能顺手做） |
+| 根 `badge-test.html` | Badge 微调可视化测试页 (双击浏览器打开, 不依赖项目). 两组上下文 (sidebar 头像菜单 / 4 tab) + 12 个特征数字 + 两个方向盘 (红点位置 / 字位置 sub-pixel 微调) + CSS zoom 滑块模拟显示比例. 用于精调 badge size / padding / 字位置等 sub-pixel 视觉效果 | 手动（加新 badge / 红点 / 类似可视化微调需求时来读 - 改下默认值跟标签即可复用） |
 | `packages/server/CLAUDE.md` | 后端专属（认证 / 数据库 / 文件上传后端逻辑 / 重命名同步） | 在该 package 工作时自动 |
 | `packages/server/src/ai/CLAUDE.md` | AI 系统（多配置 / FC v2 / 自动处理 / `{categories}` 占位 / 弱模型适配 / chat prompt / label 透传） | 在该子目录工作时自动 |
 | `packages/web/CLAUDE.md` | 前端专属（主题系统 / 移动端 / Vditor 静态文件 / 笔记类型→view 映射 / 文件 url helper） | 在该 package 工作时自动 |
