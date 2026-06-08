@@ -263,16 +263,30 @@ function createMainWindow() {
     // - .note-content 内 → 列表卡片 / 详情笔记的正文卡 → 弹
     // - 详情页 main 灰区 (main 子树含 .note-detail-content) → 弹 (详情卡片可能很短, 灰区也算"内容详情里")
     // - 有 selection (无论命中) → 弹 (用户选完字鼠标移到任何位置都可复制)
+    // - audio/image anchor 区域: 跳过 (web 端 MediaContextMenu 接管, 弹"下载/播放" 菜单)
     mainWindow!.webContents.executeJavaScript(`
       (function() {
         var el = document.elementFromPoint(${params.x}, ${params.y});
-        if (!el) return false;
-        if (el.closest('.note-content')) return true;
-        var main = el.closest('main');
-        if (main && main.querySelector('.note-detail-content')) return true;
-        return false;
+        if (!el) return { inArea: false, isMedia: false };
+        // audio anchor / 图片: 让 web 端 MediaContextMenu 接管 (弹自定义"下载音频/播放/重新播放" 菜单)
+        var a = el.closest && el.closest('a');
+        if (a) {
+          var href = a.getAttribute('href') || '';
+          if (/\\.(m4a|mp3|wav|webm|ogg)(\\?|$)/i.test(href)) return { inArea: false, isMedia: true };
+        }
+        if (el.tagName === 'IMG' && el.closest('.note-content')) return { inArea: false, isMedia: true };
+        var inArea = false;
+        if (el.closest('.note-content')) inArea = true;
+        else {
+          var main = el.closest('main');
+          if (main && main.querySelector('.note-detail-content')) inArea = true;
+        }
+        return { inArea: inArea, isMedia: false };
       })()
-    `).then((inArea: boolean) => {
+    `).then((result: { inArea: boolean; isMedia: boolean }) => {
+      // isMedia: web 端菜单接管, Electron 不弹 (防双菜单重叠用户看不到下载选项)
+      if (result.isMedia) return;
+      const inArea = result.inArea;
       if (!hasSelection && !inArea) return;
       Menu.buildFromTemplate([
         { label: '复制', role: 'copy', enabled: hasSelection },
@@ -524,6 +538,20 @@ function createTray() {
 // ──────────────────────────────────
 //  IPC
 // ──────────────────────────────────
+// PR fix: 资源页/右键下载文件 → 走 Electron webContents.downloadURL 主动下载,
+// 不依赖 programmatic <a download> click 的 user activation (audio/video/pdf INLINE mime 后, await fetch 让 user activation 过期, a.click() 不 trusted)
+// URL 必须 absolute (浏览器解析相对路径靠 location.origin, Electron API 直接传入相对路径不可靠)
+ipcMain.on('download-url', (event, url: string) => {
+  const wc = BrowserWindow.fromWebContents(event.sender)?.webContents;
+  if (wc) wc.downloadURL(url);
+});
+
+// PR fix: dock "打开所在文件夹" 按钮 → shell.showItemInFolder(savePath). url 作 key 查 task.savePath
+ipcMain.on('show-in-folder', (_event, url: string) => {
+  const savePath = attachmentTasksStore.getSavePathByUrl(url);
+  if (savePath && fs.existsSync(savePath)) shell.showItemInFolder(savePath);
+});
+
 ipcMain.handle('save-note', async (_event, content: string, type: string) => {
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -1110,6 +1138,23 @@ app.whenReady().then(() => {
     }
     try { fs.mkdirSync(targetDir, { recursive: true }); } catch {}
     item.setSavePath(savePath);
+    // PR fix: 跟 attachmentTasksStore 关联让 dock 显示进度. url 跟 web 端 addDownloadTask 传的一致 (item.getURL() = absolute URL)
+    const url = item.getURL();
+    attachmentTasksStore.markSavePathByUrl(url, savePath);
+    item.on('updated', (_e, state) => {
+      if (state === 'progressing' && !item.isPaused()) {
+        attachmentTasksStore.updateProgressByUrl(url, item.getReceivedBytes(), item.getTotalBytes());
+      }
+    });
+    item.on('done', (_e, state) => {
+      if (state === 'completed') {
+        attachmentTasksStore.markSuccessByUrl(url);
+      } else if (state === 'interrupted') {
+        attachmentTasksStore.markFailedByUrl(url, '下载中断');
+      } else if (state === 'cancelled') {
+        attachmentTasksStore.removeByUrl(url);
+      }
+    });
   });
 
   // 必须在 createMainWindow / createTray 之前,这俩都用 currentTheme 决定图标

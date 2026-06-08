@@ -5,13 +5,14 @@ import { api, isLoggedIn } from '@/api';
 import { useNotesStore } from '@/stores/notes';
 import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
 import { useImagePreview } from '@/composables/useImagePreview';
+import { addTask as addAttachmentTask } from '@/composables/useAttachmentTasks';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import { pinyinMatch } from '@/utils/pinyin';
 import AudioPlayer from '@/components/AudioPlayer.vue';
 import PdfThumbnail from '@/components/PdfThumbnail.vue';
 import HeicImage from '@/components/HeicImage.vue';
+// PR #13 hotfix: heicCache.ts 已删, HEIC thumb 走 resolveFileThumbUrl 统一处理 query (无重复)
 import VideoThumbnail from '@/components/VideoThumbnail.vue';
-import { heicThumbUrl } from '@/utils/heicCache';
 import { preconvert as pdfPreconvert } from '@/utils/pdfCache';
 import { useVideoPreview } from '@/composables/useVideoPreview';
 import { useSseSync } from '@/utils/sseSync';
@@ -242,9 +243,9 @@ const viewMode = ref<'grid' | 'list'>(((localStorage.getItem(VIEW_KEY) as any) =
 watch(viewMode, (v) => localStorage.setItem(VIEW_KEY, v));
 
 function onImageClick(f: FileItem) {
-  // imageFiles 含 HEIC. HEIC 用后端生成的 <basename>.thumb.jpg, 其他 image 用原 URL
+  // imageFiles 含 HEIC. HEIC 用后端生成的 <basename>.thumb.jpg (浏览器不能直接解 .heic), 其他 image 用原 URL
   const imgs = imageFiles.value.map((x) => ({
-    url: isHeic(x) ? heicThumbUrl(resolveFileUrl(x.url)) : resolveFileUrl(x.url),
+    url: isHeic(x) ? resolveFileThumbUrl(x.url) : resolveFileUrl(x.url),
     filename: x.filename,
   }));
   const idx = imageFiles.value.findIndex(x => x.id === f.id);
@@ -708,6 +709,29 @@ async function downloadFolder(f: FolderItem) {
   }
 }
 
+// PR fix: 文件下载. Electron 端走 desk.downloadUrl IPC → webContents.downloadURL → will-download 稳触发.
+// (audio/video/pdf 改 INLINE mime 后 <a download> programmatic click + await fetch 让 user activation 过期, a.click() 不再 trusted 触发下载)
+// Web fallback: 同步 <a href download> click (不 await fetch, 保 user activation 有效让浏览器原生 download 触发)
+async function downloadFile(f: FileItem) {
+  const url = resolveFileUrl(f.url);
+  const desk = (window as any).quinkDesktop;
+  if (desk?.downloadUrl) {
+    // webContents.downloadURL 要 absolute URL. 同步 addAttachmentTask 让 dock 出现 task,
+    // main 端 will-download fired 后按 url 找 task 推 progress + markSuccessByUrl
+    const absUrl = new URL(url, location.origin).toString();
+    await addAttachmentTask(absUrl, f.filename);
+    desk.downloadUrl(absUrl);
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = f.filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => document.body.removeChild(a), 100);
+}
+
 function enterFolder(f: FolderItem) {
   if (selectMode.value) return; // 选择模式下点击文件夹也只是 toggle 选中 (但暂不支持选文件夹, 直接返回)
   currentFolderId.value = f.id;
@@ -1109,7 +1133,7 @@ onUnmounted(() => {
                 </svg>
               </div>
               <!-- HEIC 独立判断(OS 经常把 .heic mime 标成 octet-stream 不走 isImage), 用 heic2any 转 jpeg -->
-              <HeicImage v-if="isHeic(f)" :src="resolveFileUrl(f.url)" :alt="f.filename" />
+              <HeicImage v-if="isHeic(f)" :url="f.url" :alt="f.filename" />
               <!-- 缩略图: src 走后端 sharp thumb (长边 600), thumb 没生成时 @error 一次性降级原图 -->
               <img v-else-if="isImage(f)" :src="resolveFileThumbUrl(f.url)" :alt="f.filename"
                 @error="thumbErrorFallback($event, resolveFileUrl(f.url))"
@@ -1222,7 +1246,7 @@ onUnmounted(() => {
               </svg>
             </div>
             <div class="w-9 h-9 shrink-0 bg-gray-50 rounded flex items-center justify-center overflow-hidden">
-              <HeicImage v-if="isHeic(f)" :src="resolveFileUrl(f.url)" :alt="f.filename" />
+              <HeicImage v-if="isHeic(f)" :url="f.url" :alt="f.filename" />
               <img v-else-if="isImage(f)" :src="resolveFileThumbUrl(f.url)" :alt="f.filename"
                 @error="thumbErrorFallback($event, resolveFileUrl(f.url))"
                 class="w-full h-full object-cover" :class="!selectMode ? 'cursor-zoom-in' : ''" />
@@ -1248,10 +1272,10 @@ onUnmounted(() => {
                   class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
                   <PhFolderOpen size="0.875rem" weight="bold" />
                 </button>
-                <a :href="resolveFileUrl(f.url)" download @click.stop title="下载"
+                <button @click.stop="downloadFile(f)" title="下载"
                   class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
                   <PhDownloadSimple size="0.875rem" weight="bold" />
-                </a>
+                </button>
                 <button @click.stop="startRename(f)" title="重命名"
                   class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
                   <PhPencilSimple size="0.875rem" weight="bold" />

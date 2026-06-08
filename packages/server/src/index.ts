@@ -99,9 +99,30 @@ app.use('/api/uploads/*', async (c, next) => {
 
   return next();
 });
-// 安全审计 H11: 静态文件响应加 X-Content-Type-Options: nosniff 防 MIME sniff 绕过, 非图片强制 attachment 让浏览器下载不渲染.
-// IMAGE_INLINE_EXT 跟 upload.ts BLOCKED_EXT 配套 (svg/html 上传已拒, 历史遗留文件经此 disposition=attachment 兜底)
-const IMAGE_INLINE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'heif']);
+// 安全审计 H11: 静态文件响应加 X-Content-Type-Options: nosniff 防 MIME sniff 绕过, 非白名单类型强制 attachment 让浏览器下载不渲染.
+// INLINE_EXT 跟 upload.ts BLOCKED_EXT 配套 (svg/html/脚本 上传已拒, 历史遗留经此 disposition=attachment 兜底).
+// 必须 inline 的: 图片 + 音频 + 视频 + PDF (浏览器原生可播放/打开, attachment 会让 <audio>/<video>/PDF viewer 失效)
+const INLINE_EXT = new Set([
+  // 图片
+  'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'heif',
+  // 音频 (audio element 不能加载 attachment 资源)
+  'mp3', 'wav', 'm4a', 'ogg', 'oga', 'opus', 'flac',
+  // 视频 (video element 同上)
+  'mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v',
+  // PDF (浏览器内置 viewer)
+  'pdf',
+]);
+// nosniff + 默认 application/octet-stream 会让浏览器拒绝当 audio/video/pdf 加载 (mime 不匹配元素).
+// serveStatic 不识别 m4a/heic 等扩展名, 必须手动注入正确 Content-Type. 跟 INLINE_EXT 一对一覆盖
+const EXT_TO_MIME: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+  webp: 'image/webp', avif: 'image/avif', heic: 'image/heic', heif: 'image/heif',
+  mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg', oga: 'audio/ogg',
+  opus: 'audio/opus', flac: 'audio/flac',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
+  avi: 'video/x-msvideo', m4v: 'video/mp4',
+  pdf: 'application/pdf',
+};
 app.use('/api/uploads/*', async (c, next) => {
   await next();
   // 总是加 nosniff (无论浏览器从哪个 MIME 渲染都不再嗅探, 防 .png 实际是 html 等绕过)
@@ -110,8 +131,14 @@ app.use('/api/uploads/*', async (c, next) => {
   const ext = (path.split('.').pop() || '').toLowerCase();
   // 缩略图 .thumb.jpg 也算图片
   const isThumb = path.endsWith('.thumb.jpg');
-  if (!IMAGE_INLINE_EXT.has(ext) && !isThumb) {
-    // 非图片: 强制 attachment 让浏览器下载. 防 SVG/HTML/JS 等历史文件在浏览器内执行
+  if (isThumb) {
+    c.res.headers.set('Content-Type', 'image/jpeg');
+  } else if (INLINE_EXT.has(ext)) {
+    // 白名单: 注入正确 mime, 让浏览器 <audio>/<video>/PDF viewer 跟 <img> 都能 inline
+    const mime = EXT_TO_MIME[ext];
+    if (mime) c.res.headers.set('Content-Type', mime);
+  } else {
+    // 非白名单: 强制 attachment 让浏览器下载. 防 SVG/HTML/JS 等历史文件在浏览器内执行
     const filename = decodeURIComponent(path.split('/').pop() || 'download');
     c.res.headers.set('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`);
   }

@@ -130,6 +130,8 @@ Windows 上单纯 `BrowserWindow.show() + .focus()` 对 hide → show 切换的�
 | `window-shown` | main → renderer (send) | 通知 renderer 窗口刚显示（用于聚焦输入框、同步主题等） |
 | `window-hidden` | main → renderer (send) | 通知 renderer 窗口被隐藏 |
 | `open-attachment` | renderer → main (invoke) | 用系统默认应用打开附件 URL（fetch 到 OS 临时目录 → `shell.openPath`）。原因：直接让浏览器跟随 `<a href="/api/uploads/xxx.md">` 跳走时，Electron 内嵌 chromium 对 `text/markdown` 等 mime 显示空白页 |
+| `download-url` | renderer → main (send) | 主动触发 `webContents.downloadURL(url)` 走 `will-download`. URL 必须 absolute (相对路径不可靠). Resources 下载按钮 / MediaContextMenu "下载音频" 都用. 配合 web 端先 `addAttachmentTask(absUrl, filename)` 让 dock 出 task; main 端 `will-download` 按 url 找 task 推 progress + `markSuccessByUrl`. 不依赖 `<a download>` programmatic click (audio/video INLINE mime 后 user activation 过期 a.click 不 trusted) |
+| `show-in-folder` | renderer → main (send) | dock 内 download success task 点"打开所在文件夹"按钮调. main 按 url 查 `attachmentTasksStore.getSavePathByUrl(url)` → `shell.showItemInFolder(savePath)`. 历史 task 没 savePath (旧版没记录), 不显示按钮 |
 | `cancel-attachment` | renderer → main (invoke) | 取消正在下载的附件。main 端在 `attachmentControllers: Map<url, AbortController>` 找到对应 controller 调 `abort()`，被取消的 `open-attachment` 走 catch 分支返回 `{ success: false, cancelled: true }`（区别于停滞超时 → `{ success: false, error: '下载停滞...' }`）。renderer 据此决定是否弹 toast（cancelled 不弹） |
 | `pdf-thumb-cache:get` | renderer → main (invoke) | 查 PDF 首页缩略图持久化缓存。返回 `Buffer` 或 `null`。目录 `userData/pdf-thumb-cache/<basename(url)>.jpg` |
 | `video-thumb-cache:get` | renderer → main (invoke) | 查视频首帧缩略图持久化缓存。返回 `Buffer` 或 `null`。目录 `userData/video-thumb-cache/<basename(url)>.jpg` |

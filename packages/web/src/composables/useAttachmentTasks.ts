@@ -21,6 +21,8 @@ export interface AttachmentTask {
   total: number;
   status: AttachmentStatus;
   error?: string;
+  // PR fix: 下载完成后的本地绝对路径. 给 dock "打开所在文件夹" 按钮显隐 + 触发 desk.showInFolder
+  savePath?: string;
   // upload 任务的 abort controller, 取消时调 abort(). main 端 attachmentTasksStore 不存它 (跨进程无法序列化),
   // 仅本地 ref 维护. download 走 main 端的 cancel-attachment IPC, 不用这个
   abortController?: AbortController;

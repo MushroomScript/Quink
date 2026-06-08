@@ -18,6 +18,8 @@ export interface PersistedTask {
   total: number;
   status: AttachmentStatus;
   error?: string;
+  // PR fix: 下载完成后保存到的本地绝对路径. 给 dock"打开所在文件夹"按钮用 (shell.showItemInFolder)
+  savePath?: string;
 }
 
 // lazy getter: 不能在 module load 时调 app.getPath('userData'). ES module 的 import 是 hoisted,
@@ -134,6 +136,20 @@ export function markSuccessByUrl(url: string): void {
   const t = tasks.find((x) => x.url === url && x.status === 'downloading');
   if (!t) return;
   markSuccessById(t.id);
+}
+
+// 标记 task 的本地 savePath (will-download item.setSavePath 后调). 不影响 status, 只补字段
+export function markSavePathByUrl(url: string, savePath: string): void {
+  const t = tasks.find((x) => x.url === url);
+  if (!t) return;
+  t.savePath = savePath;
+  persist();
+  broadcastSync();
+}
+
+// 查 task savePath 给 show-in-folder IPC 用
+export function getSavePathByUrl(url: string): string | undefined {
+  return tasks.find((x) => x.url === url)?.savePath;
 }
 
 export function markFailedById(id: string, error: string): void {

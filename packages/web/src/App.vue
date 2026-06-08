@@ -316,7 +316,8 @@ onMounted(async () => {
     // .thumb.jpg 404 不等于"文件不存在": 后端 sharp 未生成 thumb 是常见情况(老文件 / sharp 失败 / 刚上传).
     // 让局部 @error="thumbErrorFallback" 把 src 切回原图, 原图也 404 时浏览器会再次触发 error,
     // 那次 src 已是原图(不带 .thumb.jpg), capture listener 接管显示占位
-    if (src.endsWith('.thumb.jpg')) return;
+    // 注意: src 含 ?token=... query 时 endsWith 会被 token 后缀挡, 必须剥 query 再判断 (老 PNG/HEIC thumb 404 fallback 时被这条挡住误替换为 missing span)
+    if (src.split('?')[0].endsWith('.thumb.jpg')) return;
     if (img.dataset.quinkMissingDone === '1') return;
     img.dataset.quinkMissingDone = '1';
     const alt = img.getAttribute('alt') || '图片';
@@ -358,11 +359,13 @@ onMounted(async () => {
       window.open(href, '_blank', 'noopener,noreferrer');
       return;
     }
-    if (href.includes('/api/uploads/') && !/\.(png|jpg|jpeg|gif|webp|svg|webm|mp3|wav|ogg|m4a)$/i.test(href)) {
+    // PR fix: 正则容忍 ?token=... query (PR #3 加 query 后 .m4a 不匹配 $ → 音频误进下载分支 → 巨长 toast + 下载文件)
+    if (href.includes('/api/uploads/') && !/\.(png|jpg|jpeg|gif|webp|svg|webm|mp3|wav|ogg|m4a)(\?.*)?$/i.test(href)) {
       e.preventDefault();
       e.stopImmediatePropagation();
       const fullUrl = new URL(href, location.origin).toString();
-      const filename = decodeURIComponent(href.split('/').pop() || '附件');
+      // 剥 ?token=... query 防 task.filename 显示成 'xxx.m4a?token=eyJ...EACs' 巨长 (hover tooltip / dock title 都用 filename)
+      const filename = decodeURIComponent((href.split('/').pop() || '附件').split('?')[0]);
 
       // 统一先 HEAD 检查 → 404 / 网络错误直接 toast, 不进传输 dock (避免 dock 闪一下 failed 状态留个垃圾记录).
       // 缓存命中 (之前成功打开过) 跳过 HEAD: main 端会直接 openPath 临时文件, 不再 fetch.

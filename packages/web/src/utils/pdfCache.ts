@@ -1,4 +1,4 @@
-// PDF 首页缩略图缓存 helper, 跟 heicCache 同 pattern (内存 Map + Electron 持久化磁盘 IPC).
+// PDF 首页缩略图缓存 helper (内存 Map + Electron 持久化磁盘 IPC).
 // 转码用 pdfjs 渲染 PDF 第一页 → canvas → jpeg blob.
 // 用 legacy build: pdfjs-dist 5.x 用 BigInt.prototype.toHex (Chromium 138+), Electron 内嵌 Chromium 版本不够
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';

@@ -3,6 +3,8 @@ import { ref, onMounted, onUnmounted, computed, markRaw } from 'vue';
 import { PhDownloadSimple, PhPlay, PhArrowCounterClockwise, PhEye, PhSpeakerHigh, PhSpeakerLow, PhSpeakerSlash } from '@phosphor-icons/vue';
 import { AUDIO_EXTS, playVoiceAt, getVoiceVolume, getVoiceMuted, setVoiceVolume, toggleVoiceMute } from '@/utils/audio';
 import { useImagePreview, type PreviewImage } from '@/composables/useImagePreview';
+import { unzoomViewport } from '@/utils/zoom';
+import { addTask as addAttachmentTask } from '@/composables/useAttachmentTasks';
 
 const { open: openImagePreview } = useImagePreview();
 
@@ -26,23 +28,23 @@ const menu = ref<MenuState>({
 });
 
 async function triggerDownload(url: string, name: string) {
-  // 用 fetch + blob URL 触发下载(同源安全 + 任何 click handler 都没机会拦截)
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = name;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-  } catch (e) {
-    console.error('[MediaContextMenu] download failed:', e);
+  // PR fix: Electron 端走 webContents.downloadURL IPC, 不依赖 <a download> programmatic click 的 user activation.
+  // 同时 addAttachmentTask 让 dock 显示进度 (main 端 will-download 按 url 找 task 推 progress + markSuccessByUrl)
+  const desk = (window as any).quinkDesktop;
+  if (desk?.downloadUrl) {
+    const absUrl = new URL(url, location.origin).toString();
+    await addAttachmentTask(absUrl, name);
+    desk.downloadUrl(absUrl);
+    return;
   }
+  // Web fallback: 同步 <a href download> click (不 await 保 user activation 有效让浏览器原生 download 生效)
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => document.body.removeChild(a), 100);
 }
 
 function show(kind: 'image' | 'audio', url: string, filename: string, x: number, y: number,
@@ -51,7 +53,12 @@ function show(kind: 'image' | 'audio', url: string, filename: string, x: number,
   // 音频: 顶部音量行 ~40 + 分割线 + 1-2 个播放控制 + 分割线 + 下载 ~ 130-170px; 图片 ~ 90px
   const W = 180;
   const H = kind === 'audio' ? (audioState === 'paused' ? 170 : 130) : 90;
-  const vw = window.innerWidth, vh = window.innerHeight;
+  // CSS zoom 坑: clientX/Y 跟 innerWidth/Height 都是 zoomed (screen px); inline left/top px 设到 fixed element
+  // 又被 zoom 乘一次, 视觉飞到错位. 全部除以 zoom 归一为 unzoomed CSS px (跟 utils/zoom.ts helper 同款)
+  const { vw, vh } = unzoomViewport();
+  const zoom = vw > 0 ? window.innerWidth / vw : 1;
+  x = x / zoom;
+  y = y / zoom;
   if (x + W > vw - 8) x = vw - W - 8;
   if (y + H > vh - 8) y = vh - H - 8;
   menu.value = { visible: true, x, y, kind, url, filename, audioEl, audioState, imgEl };

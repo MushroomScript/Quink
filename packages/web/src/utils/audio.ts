@@ -225,8 +225,19 @@ function onPointerDown(e: PointerEvent) {
   if (e.button !== 0) return;
   const a = findAudioAnchor(e.target);
   if (!a) return;
+  // 双保险: 鼠标按下时立刻禁 anchor draggable, 防 dragstart 还没触发就被浏览器锁进 drag preview (mousedown→ Chromium drag init 极快, dragstart preventDefault 偶发拦不住)
+  // .draggable 跟 setAttribute('draggable', 'false') 都设, 兼容 vditor 重渲染重置
+  a.draggable = false;
+  a.setAttribute('draggable', 'false');
   dragStart = { el: a, startX: e.clientX, src: a.getAttribute('href') || '', rect: a.getBoundingClientRect() };
   dragging = false;
+}
+
+// 阻止浏览器对 audio anchor 触发 HTML5 file drag (anchor 元素默认 draggable=true, 拖时显示 not-allowed
+// + 选中文件态干扰我们自己的 pointermove seek). 跟其他 <img draggable="false"> 一个性质, 但这里走全局 listener
+// 不要求 markdown 渲染时给每个 <a> 加属性
+function onDragStart(e: DragEvent) {
+  if (findAudioAnchor(e.target)) e.preventDefault();
 }
 
 function onPointerMove(e: PointerEvent) {
@@ -314,13 +325,63 @@ const HMR_KEY = '__quinkAudioClickHandler';
 const HMR_PD_KEY = '__quinkAudioPointerDownHandler';
 const HMR_PM_KEY = '__quinkAudioPointerMoveHandler';
 const HMR_PU_KEY = '__quinkAudioPointerUpHandler';
+const HMR_DS_KEY = '__quinkAudioDragStartHandler';
+const HMR_MO_KEY = '__quinkAudioMutationObserver';
 const _w = window as any;
+
+// 所有 audio anchor 加入 DOM 时立刻设 draggable=false. 解决 vditor 重渲染后 anchor 默认 draggable=true 让浏览器
+// 拖动时直接走 HTML5 URL drag (没 dragstart 触发就锁进 drag mode, dragstart preventDefault 来不及拦)
+function neutralizeAudioAnchor(a: HTMLAnchorElement) {
+  a.draggable = false;
+  a.setAttribute('draggable', 'false');
+}
+function scanAndNeutralizeAll() {
+  const all = document.querySelectorAll('.note-content a, .vditor-reset a') as NodeListOf<HTMLAnchorElement>;
+  for (const a of all) {
+    const href = a.getAttribute('href') || '';
+    if (AUDIO_EXTS.test(href)) neutralizeAudioAnchor(a);
+  }
+}
+function startAudioAnchorObserver(): MutationObserver {
+  // 已有节点先扫一遍 (init 时 DOM 已 mount audio anchor 的情况)
+  scanAndNeutralizeAll();
+  const mo = new MutationObserver((muts) => {
+    for (const m of muts) {
+      for (const node of m.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        const el = node as Element;
+        if (el.tagName === 'A') {
+          const href = el.getAttribute('href') || '';
+          if (AUDIO_EXTS.test(href) && (el.closest('.note-content') || el.closest('.vditor-reset'))) {
+            neutralizeAudioAnchor(el as HTMLAnchorElement);
+          }
+        } else {
+          // 容器更新: 递归查内含 audio anchor (vditor 通常整段重渲)
+          const anchors = el.querySelectorAll?.('.note-content a, .vditor-reset a, a');
+          if (anchors) {
+            for (const a of anchors) {
+              const href = a.getAttribute('href') || '';
+              if (AUDIO_EXTS.test(href) && (a.closest('.note-content') || a.closest('.vditor-reset'))) {
+                neutralizeAudioAnchor(a as HTMLAnchorElement);
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+  return mo;
+}
 
 export function initAudioBubbleHandler() {
   if (_w[HMR_KEY]) document.removeEventListener('click', _w[HMR_KEY], true);
   if (_w[HMR_PD_KEY]) document.removeEventListener('pointerdown', _w[HMR_PD_KEY], true);
   if (_w[HMR_PM_KEY]) document.removeEventListener('pointermove', _w[HMR_PM_KEY], true);
   if (_w[HMR_PU_KEY]) document.removeEventListener('pointerup', _w[HMR_PU_KEY], true);
+  if (_w[HMR_DS_KEY]) document.removeEventListener('dragstart', _w[HMR_DS_KEY], true);
+  if (_w[HMR_MO_KEY]) (_w[HMR_MO_KEY] as MutationObserver).disconnect();
+  _w[HMR_MO_KEY] = startAudioAnchorObserver();
 
   const clickHandler = (e: MouseEvent) => {
     const a = findAudioAnchor(e.target);
@@ -341,9 +402,11 @@ export function initAudioBubbleHandler() {
   document.addEventListener('pointerdown', onPointerDown, true);
   document.addEventListener('pointermove', onPointerMove, true);
   document.addEventListener('pointerup', onPointerUp, true);
+  document.addEventListener('dragstart', onDragStart, true);
 
   _w[HMR_KEY] = clickHandler;
   _w[HMR_PD_KEY] = onPointerDown;
   _w[HMR_PM_KEY] = onPointerMove;
   _w[HMR_PU_KEY] = onPointerUp;
+  _w[HMR_DS_KEY] = onDragStart;
 }

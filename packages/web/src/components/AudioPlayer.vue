@@ -2,7 +2,7 @@
 // 紧凑音频播放器: 替代 <audio controls> 在窄卡片里的丑布局.
 // 单行: [▶/⏸] 进度条(可点 seek) 时间 [🔊];
 // 音量 popover Teleport 到 body, 避免被祖先 overflow-hidden 截断.
-import { ref, computed, markRaw } from 'vue';
+import { ref, computed, markRaw, onUnmounted } from 'vue';
 import { PhPlay, PhPause, PhSpeakerHigh, PhSpeakerLow, PhSpeakerSlash } from '@phosphor-icons/vue';
 import { unzoomRect } from '@/utils/zoom';
 
@@ -91,6 +91,42 @@ function syncFromAudio() {
   volume.value = audioEl.value.volume;
   muted.value = audioEl.value.muted;
 }
+
+// 进度条更新走 rAF (~60Hz) 替代 timeupdate (浏览器 ~4Hz 250ms 一次, 视觉一秒就几帧很卡).
+// 跟 utils/audio.ts 的 voice-bubble 同款. play 时启动 rAF, pause/ended 停止
+let rafId: number | null = null;
+function startRaf() {
+  function tick() {
+    if (!audioEl.value || audioEl.value.paused || audioEl.value.ended) {
+      rafId = null;
+      return;
+    }
+    currentTime.value = audioEl.value.currentTime;
+    rafId = requestAnimationFrame(tick);
+  }
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(tick);
+}
+function stopRaf() {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+}
+onUnmounted(stopRaf);
+
+function onPlay() {
+  isPlaying.value = true;
+  startRaf();
+}
+function onPause() {
+  isPlaying.value = false;
+  stopRaf();
+  // pause/ended 时 rAF 已停, 主动同步一次最终位置 (防止 rAF tick 没追上停止瞬间的 currentTime)
+  if (audioEl.value) currentTime.value = audioEl.value.currentTime;
+}
+function onEnded() {
+  isPlaying.value = false;
+  stopRaf();
+  currentTime.value = 0;
+}
 </script>
 
 <template>
@@ -107,11 +143,10 @@ function syncFromAudio() {
 
   <div class="flex items-center gap-2 w-full bg-white rounded-full border border-gray-200 px-2 py-1">
     <audio ref="audioEl" :src="src" preload="metadata"
-      @timeupdate="currentTime = audioEl?.currentTime || 0"
       @durationchange="duration = audioEl?.duration || 0"
-      @play="isPlaying = true"
-      @pause="isPlaying = false"
-      @ended="isPlaying = false; currentTime = 0"
+      @play="onPlay"
+      @pause="onPause"
+      @ended="onEnded"
       @volumechange="syncFromAudio" />
 
     <button @click="togglePlay"
@@ -121,7 +156,8 @@ function syncFromAudio() {
     </button>
 
     <div @click="onSeek" class="flex-1 h-1 bg-gray-200 rounded-full cursor-pointer relative min-w-0">
-      <div class="absolute left-0 top-0 h-full bg-primary rounded-full transition-[width] duration-100"
+      <!-- 不加 transition: rAF 每帧 (~60Hz) 直接 mutate width, transition 跟 rAF 高频更新插值会反而看起来"延迟跟不上" -->
+      <div class="absolute left-0 top-0 h-full bg-primary rounded-full"
         :style="{ width: progressPct + '%' }" />
     </div>
 

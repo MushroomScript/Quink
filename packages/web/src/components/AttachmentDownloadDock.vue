@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { PhX, PhCheck, PhWarning, PhArrowDown, PhArrowUp, PhBroom } from '@phosphor-icons/vue';
+import { PhX, PhCheck, PhWarning, PhArrowDown, PhArrowUp, PhBroom, PhFolderOpen } from '@phosphor-icons/vue';
 import {
   tasks,
   dockVisible,
@@ -61,10 +61,42 @@ function onTaskAction(t: AttachmentTask): void {
 function canReopen(t: AttachmentTask): boolean {
   return t.kind === 'download' && t.status === 'success';
 }
+// 防御性: 历史 task 的 filename 字段可能含 ?token=... query 后缀 (App.vue 老 bug 写入的). 渲染前剥掉
+function cleanFilename(name: string): string {
+  return name.split('?')[0];
+}
+
+// "打开所在文件夹" 按钮仅 Electron 端可用 (web 无 desk IPC)
+const hasShowInFolder = !!(window as any).quinkDesktop?.showInFolder;
+function onShowInFolder(t: AttachmentTask): void {
+  const desk = (window as any).quinkDesktop;
+  if (desk?.showInFolder) desk.showInFolder(t.url);
+}
+
+// PR fix: 截断 + 友好化错误 (原 raw e.message 含完整 URL+token / Node error stack 拼到 toast 整屏宽都不够显示)
+function friendlyOpenError(err: string | undefined): string {
+  if (!err) return '未知错误';
+  if (/HTTP 404/i.test(err)) return '文件不存在';
+  if (/HTTP 401|登录|无权/i.test(err)) return '无权访问';
+  if (/abort|cancel/i.test(err)) return '已取消';
+  if (/下载停滞/.test(err)) return err;
+  // 截 60 字符防 stack trace / 完整 URL 撑爆 toast
+  return err.length > 60 ? err.slice(0, 60) + '...' : err;
+}
 async function onReopenTask(t: AttachmentTask): Promise<void> {
   if (!canReopen(t)) return;
   const desk = (window as any).quinkDesktop;
-  if (!desk?.openAttachment) return;
+  if (!desk?.openAttachment) {
+    // Web 端没 Electron IPC, 用浏览器原生下载 fallback (同 origin <a download>)
+    const a = document.createElement('a');
+    a.href = t.url;
+    a.download = t.filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => document.body.removeChild(a), 100);
+    return;
+  }
   // await: 等 main 端 store reset task 状态 (downloading) 再 invoke open-attachment, 否则 main 内部 markSuccessByUrl 可能比 add 先到 store 找不到 task
   await addDownloadTask(t.url, t.filename);
   try {
@@ -72,10 +104,10 @@ async function onReopenTask(t: AttachmentTask): Promise<void> {
     if (result?.success) {
       toast.show(`已打开 ${t.filename}`);
     } else if (!result?.cancelled) {
-      toast.show(`打开失败: ${result?.error || '未知错误'}`, 'error');
+      toast.show(`打开失败: ${friendlyOpenError(result?.error)}`, 'error');
     }
   } catch (e: any) {
-    toast.show(`打开失败: ${e?.message || '未知错误'}`, 'error');
+    toast.show(`打开失败: ${friendlyOpenError(e?.message)}`, 'error');
   }
 }
 </script>
@@ -136,9 +168,17 @@ async function onReopenTask(t: AttachmentTask): Promise<void> {
             <div class="flex-1 min-w-0 flex items-center gap-1.5">
               <PhArrowUp v-if="t.kind === 'upload'" size="0.75rem" weight="bold" class="text-blue-500 shrink-0" />
               <PhArrowDown v-else size="0.75rem" weight="bold" class="text-primary shrink-0" />
-              <span class="text-sm text-gray-700 truncate" :title="t.filename">{{ t.filename }}</span>
+              <span class="text-sm text-gray-700 truncate" :title="cleanFilename(t.filename)">{{ cleanFilename(t.filename) }}</span>
             </div>
-            <!-- 状态指示 + 操作按钮 -->
+            <!-- 状态指示 + 操作按钮. 文件夹按钮放对勾左边 (蘑菇要求) -->
+            <button
+              v-if="t.kind === 'download' && t.status === 'success' && t.savePath && hasShowInFolder"
+              @click.stop="onShowInFolder(t)"
+              class="shrink-0 p-1 rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              title="打开所在文件夹"
+            >
+              <PhFolderOpen size="0.875rem" weight="bold" />
+            </button>
             <span v-if="t.status === 'success'" class="shrink-0 p-1 text-green-600" title="完成">
               <PhCheck size="0.875rem" weight="bold" />
             </span>
