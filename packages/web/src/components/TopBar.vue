@@ -168,8 +168,15 @@ watch(() => route.path, () => {
   showMobileSearch.value = false;
   showTagSuggestions.value = false;
   if (store.selectMode) store.toggleSelectMode();
-  // 有分类过滤时保持筛选面板开启
-  showFilters.value = !!store.filterCategory;
+  // 切到不用筛选的 view (消息通知 / 群组 / AI / 设置 等 hideSearch=true 的) 时彻底清掉 filterCategory + 关筛选面板
+  // 之前漏清, 蘑菇报告"进 /notifications /groups 等还能看到旧筛选 chip" — 因为 filterCategory 残留 + showFilters 跟着自动开
+  if (route.meta.hideSearch) {
+    store.filterCategory = '';
+    showFilters.value = false;
+  } else {
+    // 有分类过滤时保持筛选面板开启
+    showFilters.value = !!store.filterCategory;
+  }
 });
 
 const detailTitle = inject<Ref<string>>('detailTitle', ref(''));
