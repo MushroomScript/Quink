@@ -138,7 +138,7 @@ async function doClear() {
              pb 去掉 (10px 字在 16px badge 内 items-center 自然居中, 不需要 top-heavy 补偿) -->
         <span
           v-if="tabUnread(t.key) > 0"
-          class="inline-flex items-center justify-center min-w-[14px] h-[14px] px-1 pb-[0.5px] bg-red-400/70 text-white text-[10px] leading-none font-semibold tabular-nums rounded-full"
+          class="inline-flex items-center justify-center min-w-[14px] h-[14px] px-1 pt-[0.5px] bg-red-400/70 text-white text-[10px] leading-none font-semibold tabular-nums rounded-full"
         >
           {{ tabUnread(t.key) > 99 ? '99+' : tabUnread(t.key) }}
         </span>
