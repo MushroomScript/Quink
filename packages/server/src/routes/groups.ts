@@ -423,7 +423,10 @@ app.get('/:id/notes', async (c) => {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     visibility: r.visibility,
+    version: r.version, // PR #5 乐观锁版本, NoteEditModal PATCH 时必须带. 漏返会让前端 fallback 1 → version_conflict
     editPermission: r.edit_permission,
+    editLockBy: r.edit_lock_by, // PR #5 编辑锁状态 (前端按钮可能根据这个判断是否能进编辑器)
+    editLockExpiresAt: r.edit_lock_expires_at,
     parentNoteId: r.parent_note_id, // PR #7b: fork 出来的 note 指向 root id, root 自己为 null
     sharedGroupIds: sharesMap.get(r.id) || [],
     sharedAt: r.sharedAt,
