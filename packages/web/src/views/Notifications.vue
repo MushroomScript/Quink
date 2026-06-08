@@ -96,7 +96,7 @@ async function doClear() {
   <div class="flex flex-col h-full overflow-hidden">
     <!-- 顶部: 标题 + 未读 chip + 操作 -->
     <div class="px-4 md:px-6 pt-3 pb-2 flex items-center gap-3 shrink-0">
-      <div class="text-base font-medium" style="color: var(--text-primary)">
+      <div class="text-base font-medium" style="color: var(--sb-text)">
         消息通知
         <span v-if="store.unread.total > 0" class="ml-2 text-xs text-red-500 tabular-nums">
           {{ store.unread.total > 99 ? '99+' : store.unread.total }} 未读
@@ -150,14 +150,14 @@ async function doClear() {
       <div
         v-if="store.loading && store.items.length === 0"
         class="py-12 text-center text-sm"
-        style="color: var(--text-muted)"
+        style="color: var(--sb-dim)"
       >
         加载中…
       </div>
       <div
         v-else-if="store.items.length === 0"
         class="py-16 text-center text-sm"
-        style="color: var(--text-muted)"
+        style="color: var(--sb-dim)"
       >
         <div class="mb-2">
           <PhBell size="2rem" weight="duotone" class="inline-block opacity-50" />
@@ -172,8 +172,8 @@ async function doClear() {
           class="notif-item group p-3 rounded-lg cursor-pointer transition-all duration-150"
           :style="
             n.readAt
-              ? 'background-color: var(--bg-secondary); border-left: 3px solid var(--sb-dim)'
-              : 'background-color: var(--bg-primary-light); border-left: 3px solid rgb(var(--c-accent))'
+              ? 'background-color: var(--sb-hover); border-left: 3px solid var(--sb-dim)'
+              : 'background-color: rgb(var(--c-accent) / 0.12); border-left: 3px solid rgb(var(--c-accent))'
           "
         >
           <!-- 第一行: icon + title + 未读小圆点 + 删除按钮. icon 跟 title 都用 items-center 单行天然居中 (复用 sidebar 待办 link 模式) -->
@@ -185,7 +185,7 @@ async function doClear() {
               class="shrink-0"
               :style="n.readAt ? 'color: var(--sb-dim)' : 'color: rgb(var(--c-accent))'"
             />
-            <div class="font-medium text-sm truncate flex-1" style="color: var(--text-primary)">
+            <div class="font-medium text-sm truncate flex-1" style="color: var(--sb-text)">
               {{ n.title }}
             </div>
             <!-- 标已读: 仅未读时显示, 只 markRead 不跳转 (整条 click 已包含跳转) -->
@@ -193,7 +193,7 @@ async function doClear() {
               v-if="!n.readAt"
               @click="onMarkRead(n.id, $event)"
               class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-primary-light"
-              style="color: var(--text-muted)"
+              style="color: var(--sb-dim)"
               title="标已读"
             >
               <PhCheck size="1rem" weight="bold" />
@@ -201,7 +201,7 @@ async function doClear() {
             <button
               @click="onDelete(n.id, $event)"
               class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-100 hover:text-red-500"
-              style="color: var(--text-muted)"
+              style="color: var(--sb-dim)"
               title="删除"
             >
               <PhTrash size="1rem" weight="bold" />
@@ -209,10 +209,10 @@ async function doClear() {
           </div>
           <!-- 第二行: body + time, 缩进 icon (1.125rem = 18px) + gap (gap-3 = 12px) = 30px 跟 title 起点对齐 -->
           <div class="mt-1 space-y-0.5" style="padding-left: 30px">
-            <div v-if="n.body" class="text-xs truncate" style="color: var(--text-secondary)">
+            <div v-if="n.body" class="text-xs truncate" style="color: var(--sb-dim)">
               {{ n.body }}
             </div>
-            <div class="text-[11px] tabular-nums" style="color: var(--text-muted)">
+            <div class="text-[11px] tabular-nums" style="color: var(--sb-dim)">
               {{ timeAgo(n.createdAt) }}
             </div>
           </div>
@@ -237,18 +237,18 @@ async function doClear() {
         style="background: rgba(0, 0, 0, 0.4)"
         @click.self="confirmReadAll = false"
       >
-        <div class="rounded-2xl p-5 max-w-sm w-full mx-4 shadow-xl" style="background: var(--bg-primary)">
-          <div class="text-base font-medium mb-2" style="color: var(--text-primary)">
+        <div class="rounded-2xl p-5 max-w-sm w-full mx-4 shadow-xl" style="background: rgb(var(--c-sidebar-light))">
+          <div class="text-base font-medium mb-2" style="color: var(--sb-text)">
             全部标为已读？
           </div>
-          <div class="text-sm mb-4" style="color: var(--text-secondary)">
+          <div class="text-sm mb-4" style="color: var(--sb-dim)">
             {{ store.currentTab === '' ? '将清除所有 tab 的未读标记' : '将清除当前 tab 的未读标记' }}
           </div>
           <div class="flex justify-end gap-2">
             <button
               @click="confirmReadAll = false"
               class="px-3 py-1.5 rounded-lg text-sm transition-colors"
-              style="background: var(--bg-secondary); color: var(--text-primary)"
+              style="background: var(--sb-hover); color: var(--sb-text)"
             >
               取消
             </button>
@@ -271,18 +271,18 @@ async function doClear() {
         style="background: rgba(0, 0, 0, 0.4)"
         @click.self="confirmClear = false"
       >
-        <div class="rounded-2xl p-5 max-w-sm w-full mx-4 shadow-xl" style="background: var(--bg-primary)">
-          <div class="text-base font-medium mb-2" style="color: var(--text-primary)">
+        <div class="rounded-2xl p-5 max-w-sm w-full mx-4 shadow-xl" style="background: rgb(var(--c-sidebar-light))">
+          <div class="text-base font-medium mb-2" style="color: var(--sb-text)">
             清空通知？
           </div>
-          <div class="text-sm mb-4" style="color: var(--text-secondary)">
+          <div class="text-sm mb-4" style="color: var(--sb-dim)">
             {{ store.currentTab === '' ? '将清空所有通知, 不可恢复' : '将清空当前 tab 通知, 不可恢复' }}
           </div>
           <div class="flex justify-end gap-2">
             <button
               @click="confirmClear = false"
               class="px-3 py-1.5 rounded-lg text-sm transition-colors"
-              style="background: var(--bg-secondary); color: var(--text-primary)"
+              style="background: var(--sb-hover); color: var(--sb-text)"
             >
               取消
             </button>
