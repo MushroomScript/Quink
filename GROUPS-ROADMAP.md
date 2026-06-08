@@ -1029,6 +1029,17 @@ FROM notes WHERE todo_due IS NOT NULL;
 - 服务器主人管理界面 (跨群审计 / 配额管理 / 全局 audit log 浏览) 留 PR #12+ 单独做
 - AI chat 适配 fork / 统计按 origin / 导出按 sharedDisplay → 进 PR #13
 
+### Post-PR #13 fix (蘑菇 2026-06-08 拍板设计调整)
+
+原设计"admin 删别人 → 群回收站, 作者删自己 → 个人回收站" 漏掉了"作者删自己共享笔记群里 admin 也想恢复" 场景. 蘑菇规则:
+
+- **群回收站**: 任何人删共享笔记都进 (该笔记所有共享群都能看). query 从 `WHERE deleted_in_group_id=?` 改成 INNER JOIN `note_shares` 判断"该群有这条 + deleted_at NOT NULL". `deleted_in_group_id` schema 列保留但弃用 (老数据兼容, 不动)
+- **个人回收站**: 仅 "root 最后一份留存" 才显示 (`parent_note_id IS NULL` 且无活跃 fork 子节点). fork 笔记被删 / 有 fork 的 root 被删 都不进个人 trash (避免作者从个人 trash 恢复 root 撞已存在 fork)
+- **DELETE /api/notes/:id 简化**: 不再要求 admin 必传 `?groupId=` 来 fallback 第一个共享群. 任何人删都广播 `group-trash-changed` 给该笔记所有共享群的 owner+admin (走 note_shares JOIN)
+- **影响 5 处 query**: enrichGroup trashCount / GET `/:id/trash` / restore 校验 / permanent 校验 / empty / cleanGroupTrash 7 天 cron / GET `/trash` 个人
+
+后续做群回收站相关改动**走 note_shares JOIN, 不用 deleted_in_group_id 字段** (那列已不可靠, 历史数据多为 NULL).
+
 ---
 
 ## PR #13 收尾 (✅ ship)

@@ -36,17 +36,16 @@ export function cleanTrashForUser(userId: string, days: number) {
   for (const e of expired) purgeNote(e.id);
 }
 
-// PR #12 群组回收站 7 天清扫: 扫所有 deleted_in_group_id 不为 NULL 且 deleted_at < now-7d 的笔记, 走完整 purgeNote
+// PR #12 + PR #13 fix 群组回收站 7 天清扫: 扫所有"共享笔记被删超过 7 天" (走 note_shares JOIN, 不依赖 deleted_in_group_id 单字段)
+// 跟个人 trash 30 天 cleanup 重叠时, 7 天先命中 → 共享笔记实际寿命被群 cleanup 截到 7 天 (蘑菇规则)
 export function cleanGroupTrash() {
   try {
     const cutoff = dayjs().subtract(GROUP_TRASH_RETENTION_DAYS, 'day').toISOString();
-    const expired = db.select({ id: schema.notes.id })
-      .from(schema.notes)
-      .where(and(
-        sql`${schema.notes.deletedInGroupId} IS NOT NULL`,
-        sql`${schema.notes.deletedAt} IS NOT NULL`,
-        sql`${schema.notes.deletedAt} < ${cutoff}`,
-      )).all();
+    const expired = db.all(sql`
+      SELECT DISTINCT n.id FROM notes n
+      INNER JOIN note_shares ns ON ns.note_id = n.id
+      WHERE n.deleted_at IS NOT NULL AND n.deleted_at < ${cutoff}
+    `) as Array<{ id: string }>;
     for (const e of expired) purgeNote(e.id);
     if (expired.length > 0) console.log(`[cleanGroupTrash] purged ${expired.length} notes older than ${GROUP_TRASH_RETENTION_DAYS}d`);
   } catch (e) { console.error('[cleanGroupTrash]', e); }

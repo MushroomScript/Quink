@@ -75,15 +75,15 @@ async function enrichGroup(groupId: string, viewerId?: string) {
       .from(schema.users).where(eq(schema.users.id, g.announcementUpdatedBy)).get();
     announcementUpdatedByNickname = author?.nickname ?? null;
   }
-  // PR #12: owner+admin 才看群回收站 + count, 普通成员不返
+  // PR #12 + PR #13 fix: owner+admin 才看群回收站 + count, 普通成员不返
+  // 蘑菇规则: 任何人删共享笔记都进该群回收站, 走 note_shares JOIN 判断 (不依赖 deleted_in_group_id 单字段)
   let trashCount: number | null = null;
   if (myRole === 'owner' || myRole === 'admin') {
-    const trashRow = db.select({ count: sql<number>`count(*)` })
-      .from(schema.notes)
-      .where(and(
-        eq(schema.notes.deletedInGroupId, groupId),
-        sql`${schema.notes.deletedAt} IS NOT NULL`,
-      )).get();
+    const trashRow = db.get(sql`
+      SELECT COUNT(*) as count FROM notes n
+      INNER JOIN note_shares ns ON ns.note_id = n.id
+      WHERE ns.group_id = ${groupId} AND n.deleted_at IS NOT NULL
+    `) as { count: number } | undefined;
     trashCount = trashRow?.count ?? 0;
   }
   return { ...g, memberCount, myRole, announcementUpdatedByNickname, trashCount };
@@ -992,18 +992,20 @@ app.get('/:id/trash', async (c) => {
   if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
     return c.json({ error: '只有群管理员可以查看群回收站' }, 403);
   }
-  // 手写 SQL JOIN 拿作者 + 删除者 nickname. drizzle 链式 join 也行但 SQL 直观 (跟 note-edit-requests 同款风格)
-  // 安全审计: LIMIT 200 防大群灌爆请求. 7 天 retention 下不太可能超
+  // 蘑菇规则 (PR #13 fix): 任何人删共享笔记都进该群回收站. 走 note_shares INNER JOIN 判断"该群有这条 + deleted_at NOT NULL"
+  // LIMIT 200 防大群灌爆. 7 天 retention 下不太可能超
   const rows = db.all(sql`
     SELECT n.id, n.user_id as userId, n.content, n.summary, n.category, n.tags, n.type, n.todo_status as todoStatus,
            n.pinned, n.created_at as createdAt, n.updated_at as updatedAt, n.deleted_at as deletedAt,
-           n.visibility, n.deleted_by_user_id as deletedByUserId, n.deleted_in_group_id as deletedInGroupId,
+           n.visibility, n.parent_note_id as parentNoteId,
+           n.deleted_by_user_id as deletedByUserId, n.deleted_in_group_id as deletedInGroupId,
            au.nickname as authorNickname, au.avatar as authorAvatar,
            du.nickname as deletedByNickname
     FROM notes n
+    INNER JOIN note_shares ns ON ns.note_id = n.id
     LEFT JOIN users au ON au.id = n.user_id
     LEFT JOIN users du ON du.id = n.deleted_by_user_id
-    WHERE n.deleted_in_group_id = ${groupId} AND n.deleted_at IS NOT NULL
+    WHERE ns.group_id = ${groupId} AND n.deleted_at IS NOT NULL
     ORDER BY n.deleted_at DESC
     LIMIT 200
   `) as Array<any>;
@@ -1015,7 +1017,7 @@ app.get('/:id/trash', async (c) => {
 });
 
 // POST /:id/trash/:noteId/restore — 恢复 (owner+admin)
-// 清 deletedAt + deletedByUserId + deletedInGroupId 三列, 笔记回到原作者主 view 跟群 feed
+// 蘑菇规则 (PR #13 fix): 校验"笔记 deletedAt + 在该群 note_shares 关联", 不再用 deletedInGroupId 单字段
 app.post('/:id/trash/:noteId/restore', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id');
@@ -1026,9 +1028,13 @@ app.post('/:id/trash/:noteId/restore', async (c) => {
     return c.json({ error: '只有群管理员可以恢复' }, 403);
   }
   const note = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId)).get();
-  if (!note || note.deletedInGroupId !== groupId || !note.deletedAt) {
-    return c.json({ error: '笔记不在该群回收站' }, 404);
-  }
+  if (!note || !note.deletedAt) return c.json({ error: '笔记不在回收站' }, 404);
+  const shareRow = await db.select({ noteId: schema.noteShares.noteId })
+    .from(schema.noteShares).where(and(
+      eq(schema.noteShares.noteId, noteId),
+      eq(schema.noteShares.groupId, groupId),
+    )).get();
+  if (!shareRow) return c.json({ error: '笔记不在该群' }, 404);
   await db.update(schema.notes)
     .set({ deletedAt: null, deletedByUserId: null, deletedInGroupId: null })
     .where(eq(schema.notes.id, noteId));
@@ -1067,9 +1073,13 @@ app.delete('/:id/trash/:noteId', async (c) => {
     return c.json({ error: '只有群主可以永久删除' }, 403);
   }
   const note = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId)).get();
-  if (!note || note.deletedInGroupId !== groupId || !note.deletedAt) {
-    return c.json({ error: '笔记不在该群回收站' }, 404);
-  }
+  if (!note || !note.deletedAt) return c.json({ error: '笔记不在回收站' }, 404);
+  const shareRow = await db.select({ noteId: schema.noteShares.noteId })
+    .from(schema.noteShares).where(and(
+      eq(schema.noteShares.noteId, noteId),
+      eq(schema.noteShares.groupId, groupId),
+    )).get();
+  if (!shareRow) return c.json({ error: '笔记不在该群' }, 404);
   // 永久删前拍最终快照 (delete-by-admin 时已存一份, 这里追加一份"永久删时刻"快照防 cron 自清后无回溯)
   const snapshot = {
     content: note.content, tags: note.tags, category: note.category, type: note.type,
@@ -1090,10 +1100,13 @@ app.delete('/:id/trash', async (c) => {
   if (!me || me.role !== 'owner') {
     return c.json({ error: '只有群主可以清空' }, 403);
   }
-  const trashed = await db.select({ id: schema.notes.id, userId: schema.notes.userId, content: schema.notes.content })
-    .from(schema.notes)
-    .where(and(eq(schema.notes.deletedInGroupId, groupId), sql`${schema.notes.deletedAt} IS NOT NULL`))
-    .all();
+  // 蘑菇规则 (PR #13 fix): 清空该群回收站 = 永久删该群所有 deleted 共享笔记 (走 note_shares JOIN)
+  const trashed = db.all(sql`
+    SELECT DISTINCT n.id, n.user_id as userId, n.content
+    FROM notes n
+    INNER JOIN note_shares ns ON ns.note_id = n.id
+    WHERE ns.group_id = ${groupId} AND n.deleted_at IS NOT NULL
+  `) as Array<{ id: string; userId: string; content: string }>;
   if (trashed.length === 0) return c.json({ message: '已清空', count: 0 });
   for (const t of trashed) purgeNote(t.id);
   await broadcastGroupTrashChanged(groupId, _ocid);

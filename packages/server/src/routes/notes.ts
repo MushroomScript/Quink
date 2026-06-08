@@ -285,8 +285,15 @@ app.get('/', async (c) => {
 app.get('/trash', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
+  // 蘑菇规则 (PR #13 fix): 仅"root 最后一份留存"进个人回收站. 必须是 root (parent_note_id IS NULL)
+  // 且没有活跃的 fork 子节点 (有 fork = 内容已分流到群独占副本, 作者不该再恢复原版撞 fork)
   const results = await db.select().from(schema.notes)
-    .where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`))
+    .where(and(
+      eq(schema.notes.userId, userId),
+      sql`${schema.notes.deletedAt} IS NOT NULL`,
+      sql`${schema.notes.parentNoteId} IS NULL`,
+      sql`NOT EXISTS (SELECT 1 FROM notes c WHERE c.parent_note_id = ${schema.notes.id} AND c.deleted_at IS NULL)`,
+    ))
     .orderBy(desc(schema.notes.deletedAt))
     .all();
   // PR #2: 拼 sharedGroupIds 让 Trash 删除确认窗显示 "已分享到 N 群组"
@@ -1933,9 +1940,10 @@ app.patch('/:id', async (c) => {
 });
 
 // DELETE /api/notes/:id — 软删除（移入回收站）
-// PR #12: 加 ?groupId= 参数 (admin 删别人笔记时前端从群组上下文传, 用来确定进哪个群的回收站).
-// 不传时兼容老前端 = fallback 取该 admin 所在的第一个共享群当 trashGroupId.
-// 作者删自己笔记忽略 groupId, 走个人回收站 (deletedInGroupId=NULL)
+// PR #13 fix (蘑菇规则): 任何人删共享笔记都进所有相关群的回收站 (群 trash query 走 note_shares JOIN).
+// 个人 trash 仅 "root 最后一份留存 (parent_note_id IS NULL + 无 fork 子节点)" 显示 (查询时过滤, 写入端不区分).
+// admin 删别人笔记仍写 deletedByUserId (审计 + 通知), 但路径不再依赖 deletedInGroupId.
+// ?groupId= 仍可选传 (audit 记录哪个群上下文发起), 不影响进哪个回收站
 app.delete('/:id', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
@@ -1952,8 +1960,7 @@ app.delete('/:id', async (c) => {
     }
   }
 
-  // PR #7b: 先拉 sharedGroupIds 给前端 (操作者自己的 GroupDetail 用本地 ref 自管, 收不到 SSE,
-  // 前端 store.deleteNote 收到这个数组后派 quink-group-notes-changed 给每个群刷新)
+  // PR #7b: 拉 sharedGroupIds 给前端 (操作者自己的 GroupDetail 用本地 ref 自管, 收不到 SSE)
   let sharedGroupIds: string[] = [];
   if (existing.visibility === 'shared') {
     const shares = await db.select({ groupId: schema.noteShares.groupId })
@@ -1961,40 +1968,7 @@ app.delete('/:id', async (c) => {
     sharedGroupIds = shares.map(s => s.groupId);
   }
 
-  // PR #12: admin 删共享笔记时确定 trashGroupId (进哪个群的回收站).
-  // 优先用前端传的 groupId (校验是该笔记的共享群 + 我在该群是 owner/admin);
-  // 没传时 fallback 取我在的第一个共享群 (admin/owner)
-  let trashGroupId: string | null = null;
-  if (!isAuthor) {
-    if (groupIdQuery) {
-      if (!sharedGroupIds.includes(groupIdQuery)) {
-        return c.json({ error: '该群未共享此笔记' }, 400);
-      }
-      const m = await db.select({ role: schema.groupMembers.role })
-        .from(schema.groupMembers)
-        .where(and(
-          eq(schema.groupMembers.groupId, groupIdQuery),
-          eq(schema.groupMembers.userId, userId),
-          eq(schema.groupMembers.status, 'active'),
-        )).get();
-      if (!m || (m.role !== 'owner' && m.role !== 'admin')) {
-        return c.json({ error: '只有该群管理员可删除' }, 403);
-      }
-      trashGroupId = groupIdQuery;
-    } else {
-      const adminGroups = await db.select({ groupId: schema.groupMembers.groupId })
-        .from(schema.groupMembers)
-        .where(and(
-          eq(schema.groupMembers.userId, userId),
-          eq(schema.groupMembers.status, 'active'),
-          inArray(schema.groupMembers.groupId, sharedGroupIds),
-          sql`${schema.groupMembers.role} IN ('owner', 'admin')`,
-        )).all();
-      trashGroupId = adminGroups[0]?.groupId ?? null;
-    }
-  }
-
-  // PR #12: 删除前拍内容快照 (审计 + 7 天内回收站恢复用. 7 天后永久删时快照仍留 audit_logs 给追溯)
+  // PR #12 + PR #13 fix: 内容快照 (审计 + 7 天内回收站恢复用. 7 天后永久删时快照仍留 audit_logs)
   const snapshot = {
     content: existing.content,
     tags: existing.tags,
@@ -2006,7 +1980,10 @@ app.delete('/:id', async (c) => {
   await db.update(schema.notes)
     .set({
       deletedAt: dayjs().toISOString(),
-      ...(trashGroupId ? { deletedByUserId: userId, deletedInGroupId: trashGroupId } : {}),
+      // admin 删别人时写 deletedByUserId 审计 + 通知用; 作者删自己不写 (deletedByUserId=NULL 表示作者本人删)
+      // deletedInGroupId 写一下 groupIdQuery 当审计标记 (新设计不依赖此字段做业务判断, 但留作"操作发起群"记录)
+      ...(!isAuthor ? { deletedByUserId: userId } : {}),
+      ...(groupIdQuery && sharedGroupIds.includes(groupIdQuery) ? { deletedInGroupId: groupIdQuery } : {}),
     })
     .where(eq(schema.notes.id, id));
 
@@ -2017,32 +1994,42 @@ app.delete('/:id', async (c) => {
   // 多设备同步: 作者本人所有设备主 view 移除该 id
   publish(userId, 'note-deleted', { noteId: id }, _ocid);
 
-  // PR #12: admin 删别人笔记 → 通知作者 + publish group-trash-changed 给该群 owner/admin 刷群回收站
-  if (!isAuthor && trashGroupId) {
+  // PR #13 fix: 任何人删共享笔记都给所有相关群 owner+admin 发 group-trash-changed 让群回收站 view 刷
+  if (existing.visibility === 'shared' && sharedGroupIds.length > 0) {
+    const admins = await db.select({ userId: schema.groupMembers.userId, groupId: schema.groupMembers.groupId })
+      .from(schema.groupMembers)
+      .where(and(
+        inArray(schema.groupMembers.groupId, sharedGroupIds),
+        eq(schema.groupMembers.status, 'active'),
+        sql`${schema.groupMembers.role} IN ('owner', 'admin')`,
+      )).all();
+    const seen = new Set<string>();
+    for (const a of admins) {
+      const k = a.userId + '|' + a.groupId;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      publish(a.userId, 'group-trash-changed', { groupId: a.groupId }, _ocid);
+    }
+  }
+
+  // PR #12: admin 删别人笔记 → 通知作者. 只在非作者删时发, 作者删自己不通知自己
+  if (!isAuthor && sharedGroupIds.length > 0) {
+    // 通知 body 提哪个群: 优先 groupIdQuery (前端从上下文传的), fallback 第一个共享群
+    const notifyGroupId = (groupIdQuery && sharedGroupIds.includes(groupIdQuery)) ? groupIdQuery : sharedGroupIds[0];
     const [group, actor] = await Promise.all([
-      db.select({ name: schema.groups.name }).from(schema.groups).where(eq(schema.groups.id, trashGroupId)).get(),
+      db.select({ name: schema.groups.name }).from(schema.groups).where(eq(schema.groups.id, notifyGroupId)).get(),
       db.select({ nickname: schema.users.nickname }).from(schema.users).where(eq(schema.users.id, userId)).get(),
     ]);
     await createNotification(
       existing.userId, 'content', 'note-deleted-by-admin',
       '你的笔记被管理员删除',
       `${actor?.nickname || '管理员'}在「${group?.name || '群组'}」删除了你的笔记: ${noteSnippet(existing.content)}`,
-      { noteId: id, groupId: trashGroupId, deletedByUserId: userId },
+      { noteId: id, groupId: notifyGroupId, deletedByUserId: userId },
     );
-    const admins = await db.select({ userId: schema.groupMembers.userId })
-      .from(schema.groupMembers)
-      .where(and(
-        eq(schema.groupMembers.groupId, trashGroupId),
-        eq(schema.groupMembers.status, 'active'),
-        sql`${schema.groupMembers.role} IN ('owner', 'admin')`,
-      )).all();
-    for (const a of admins) {
-      publish(a.userId, 'group-trash-changed', { groupId: trashGroupId }, _ocid);
-    }
   }
 
   await logAudit(c, isAuthor ? 'note.delete' : 'note.delete_by_admin', 'note', id, {
-    visibility: existing.visibility, sharedGroupIds, isAuthor, trashGroupId, snapshot,
+    visibility: existing.visibility, sharedGroupIds, isAuthor, groupIdQuery, snapshot,
   });
   return c.json({ message: '已移入回收站', sharedGroupIds });
 });
