@@ -472,6 +472,12 @@ function clearContent() {
   vditor?.setValue('');
   tags.value = [];
   noteType.value = props.initialType;
+  // 蘑菇 2026-06-08: 发布后 visibility / sharedGroupIds 也重置回初始 (默认 private + 空群), 跟新编辑器一致
+  // 防止用户连续发同一类型笔记时, 上次选的群残留到下一条 (用户得手动取消才能改私人)
+  visibilityModel.value = {
+    visibility: props.initialVisibility,
+    sharedGroupIds: [...props.initialSharedGroupIds],
+  };
   dirty.value = false;
 }
 

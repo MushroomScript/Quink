@@ -26,6 +26,8 @@ async function submit() {
   try {
     const note = await store.createNote(text, props.defaultType, undefined, visibilityModel.value.visibility, visibilityModel.value.sharedGroupIds);
     content.value = '';
+    // 蘑菇 2026-06-08: 发布后 visibility 重置成 private (跟 RichEditor clearContent 同款), 防上次选的群残留下一条
+    visibilityModel.value = { visibility: 'private', sharedGroupIds: [] };
     showToast.value = true;
     setTimeout(() => (showToast.value = false), 1500);
     // AI 异步打标签/分类/摘要, 后台轮询单条直到 aiProcessed=true 后 mutate 进本地 (不触发 rebuild)

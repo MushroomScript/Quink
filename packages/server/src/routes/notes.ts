@@ -285,14 +285,17 @@ app.get('/', async (c) => {
 app.get('/trash', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
-  // 蘑菇规则 (PR #13 fix): 仅"root 最后一份留存"进个人回收站. 必须是 root (parent_note_id IS NULL)
-  // 且没有活跃的 fork 子节点 (有 fork = 内容已分流到群独占副本, 作者不该再恢复原版撞 fork)
+  // 个人回收站: 作者自己的所有软删 root 笔记 (fork 不进回收站, fork 是某群独占副本不属于作者主视图概念)
+  // PR #12: deletedInGroupId IS NULL 排除群回收站项 (admin 删别人共享笔记走群回收站, 不进作者个人 trash)
+  // 蘑菇 2026-06-08 bug fix: 之前加 "NOT EXISTS active fork" 排除了 root 孤儿场景 (root 最后一份 share 被 fork 走时 root
+  // 被孤儿处理软删 + visibility=private, 但同时有 fork active → 永远不在作者回收站, 作者找不回原版). 去掉这个条件让孤儿能恢复.
+  // 恢复后 root 仍 private, 不撞群里 fork (fork 在群里继续 active 不变)
   const results = await db.select().from(schema.notes)
     .where(and(
       eq(schema.notes.userId, userId),
       sql`${schema.notes.deletedAt} IS NOT NULL`,
       sql`${schema.notes.parentNoteId} IS NULL`,
-      sql`NOT EXISTS (SELECT 1 FROM notes c WHERE c.parent_note_id = ${schema.notes.id} AND c.deleted_at IS NULL)`,
+      sql`${schema.notes.deletedInGroupId} IS NULL`,
     ))
     .orderBy(desc(schema.notes.deletedAt))
     .all();
@@ -1809,6 +1812,7 @@ app.patch('/:id', async (c) => {
   // 不改 original (除 note_shares + group_note_pins 已在 forkNote 内调整). 广播给该群 + 仍连原 note 的其它群.
   if (shouldFork) {
     let newNoteId = '';
+    let orphanedRoot = false;
     db.transaction((tx) => {
       newNoteId = forkNote(tx, existing, effectiveGroupId!, now);
       // 把 updates 套到 fork 出的新 note. version / 锁字段在 forkNote 里已重置为 1/null, 不要再 set 进去.
@@ -1834,7 +1838,8 @@ app.patch('/:id', async (c) => {
       // 让作者可恢复. 锁字段顺便清 (作者 fork 上面没清, 这里补一致性).
       const remaining = tx.select({ count: sql<number>`count(*)` })
         .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).get() as { count: number } | undefined;
-      if ((remaining?.count ?? 0) === 0) {
+      orphanedRoot = (remaining?.count ?? 0) === 0;
+      if (orphanedRoot) {
         tx.update(schema.notes).set({
           visibility: 'private',
           deletedAt: now,
@@ -1858,6 +1863,11 @@ app.patch('/:id', async (c) => {
     broadcastNoteShared(allGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
     // 多设备同步: 给作者本人所有设备 publish 让其他设备 store 拉 fork 新版本
     publish(userId, 'note-updated', { noteId: newNoteId }, _ocid);
+    // 蘑菇 2026-06-08 bug fix: 孤儿处理软删 root 时 publish 'note-deleted' for root id 给原作者, 让其他设备主 view splice 出 root
+    // (本设备 _ocid 跳过, 非作者触发时操作者 clientId 跟作者无关, 作者所有设备都收到)
+    if (orphanedRoot) {
+      publish(existing.userId, 'note-deleted', { noteId: id }, _ocid);
+    }
     await logAudit(c, 'note.update_fork', 'note', newNoteId, {
       originNoteId: id, groupId: effectiveGroupId, isAuthor,
     });
@@ -2184,7 +2194,30 @@ app.post('/:id/group-reminder', async (c) => {
     set: { dueAt, rrule: rrule ?? null, remindSentAt: null, createdBy: userId },
   });
   publish(userId, 'data-changed', { scope: 'reminders', noteId: id, groupId }, _ocid);
-  await logAudit(c, 'note.group_reminder_set', 'note', id, { groupId, dueAt, rrule });
+  // 蘑菇 2026-06-08: 设/更新群提醒时给该群所有 active 成员 (除发起人) 发通知, 之前是静默写表群成员只能进待办看
+  // category=reminder 落到通知中心"提醒"tab. group_reminder_subscriptions 接收开关只控"到点 OS 弹", 设置事件本身一律通知
+  const members = await db.select({ userId: schema.groupMembers.userId })
+    .from(schema.groupMembers)
+    .where(and(
+      eq(schema.groupMembers.groupId, groupId),
+      eq(schema.groupMembers.status, 'active'),
+    )).all();
+  const [group, actor] = await Promise.all([
+    db.select({ name: schema.groups.name }).from(schema.groups).where(eq(schema.groups.id, groupId)).get(),
+    db.select({ nickname: schema.users.nickname }).from(schema.users).where(eq(schema.users.id, userId)).get(),
+  ]);
+  const dueLabel = dayjs(dueAt).format('YYYY-MM-DD HH:mm');
+  const preview = noteSnippet(note.content);
+  await Promise.all(members
+    .filter(m => m.userId !== userId)
+    .map(m => createNotification(
+      m.userId, 'reminder', 'group-reminder-set',
+      `「${group?.name || '群组'}」多了一条群提醒`,
+      `${actor?.nickname || '管理员'}设置了「${preview}」的群提醒, 到点 ${dueLabel} 提醒大家`,
+      { noteId: id, groupId, dueAt, rrule: rrule ?? null, createdByUserId: userId },
+    ))
+  );
+  await logAudit(c, 'note.group_reminder_set', 'note', id, { groupId, dueAt, rrule, notifiedMembers: members.length - 1 });
   return c.json({ data: { noteId: id, groupId, dueAt, rrule: rrule ?? null } });
 });
 
