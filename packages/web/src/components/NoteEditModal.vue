@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue';
+import { backendBaseUrl } from '@/utils/backendUrl';
 import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import { useAuthStore } from '@/stores/auth';
@@ -76,7 +77,7 @@ async function acquireLock(): Promise<boolean> {
   }
   const tok = localStorage.getItem('quink_token');
   try {
-    const res = await fetch(`/api/notes/${props.note.id}/lock`, {
+    const res = await fetch(`${backendBaseUrl()}/api/notes/${props.note.id}/lock`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
     });
@@ -112,7 +113,7 @@ function startHeartbeat() {
     if (!lockToken.value) return;
     const tok = localStorage.getItem('quink_token');
     try {
-      const res = await fetch(`/api/notes/${props.note.id}/lock/heartbeat`, {
+      const res = await fetch(`${backendBaseUrl()}/api/notes/${props.note.id}/lock/heartbeat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
         body: JSON.stringify({ lockToken: lockToken.value }),
@@ -138,7 +139,7 @@ function stopHeartbeat() {
 function releaseLockOnUnmount() {
   if (!lockToken.value) return;
   const tok = localStorage.getItem('quink_token');
-  fetch(`/api/notes/${props.note.id}/lock`, {
+  fetch(`${backendBaseUrl()}/api/notes/${props.note.id}/lock`, {
     method: 'DELETE',
     keepalive: true,
     headers: { Authorization: `Bearer ${tok}` },

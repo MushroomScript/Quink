@@ -1,4 +1,12 @@
+import { backendBaseUrl } from '@/utils/backendUrl';
+
+// dev: backendBaseUrl() 返回 http://localhost:38999 → 所有 API 直连 backend, 绕开 vite proxy 防 socket 池泄漏
+// prod: backendBaseUrl() 返回 '' → 走相对路径 /api/* 同 origin (nginx 反代 / 一体化容器)
+// 之前只让 SSE / AI chat 长连接绕 proxy, 普通 API 走 proxy. 但 Vite http-proxy 偶发 socket 泄漏会让所有 API 卡死,
+// 必须关 Electron 重启才能救. 现在普通 API 也直连, 彻底告别"用户每次卡都重启"体验.
+// 代价: 跨 origin + Authorization header 触发 OPTIONS preflight, 每请求 +50ms RTT. hono cors() 已放行, 不会报错.
 const BASE = '/api';
+function fullUrl(path: string) { return `${backendBaseUrl()}${BASE}${path}`; }
 
 function getToken(): string | null {
   return localStorage.getItem('quink_token');
@@ -35,7 +43,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
   let res: Response;
   try {
-    res = await fetch(`${BASE}${url}`, { headers, ...options, signal: controller.signal });
+    res = await fetch(fullUrl(url), { headers, ...options, signal: controller.signal });
   } catch (err: any) {
     clearTimeout(timeout);
     if (err.name === 'AbortError') throw new Error('请求超时');
@@ -581,7 +589,7 @@ export const api = {
     // 用 XMLHttpRequest 因为只有 XHR 才能监听 upload 进度. fetch + FormData 拿不到上传 byte 数
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${BASE}/upload/${endpoint}`);
+      xhr.open('POST', fullUrl(`/upload/${endpoint}`));
       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
       // 注意是 xhr.upload.onprogress 不是 xhr.onprogress(后者是下载进度)
@@ -695,7 +703,7 @@ export const api = {
   // signal 可选: 调用方传 AbortController.signal 让 view unmount 时取消进行中的下载
   async downloadFolder(folder: { id: string; name: string }, signal?: AbortSignal): Promise<void> {
     const token = getToken();
-    const res = await fetch(`${BASE}/upload/folders/${folder.id}/download`, {
+    const res = await fetch(fullUrl(`/upload/folders/${folder.id}/download`), {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       signal,
     });
@@ -758,7 +766,7 @@ export const api = {
               : 'webm';
     formData.append('file', audioBlob, `audio.${ext}`);
     const token = getToken();
-    const res = await fetch('/api/ai/transcribe', {
+    const res = await fetch(fullUrl('/ai/transcribe'), {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
@@ -774,7 +782,7 @@ export const api = {
   // Export / Import
   async exportData(): Promise<void> {
     const token = getToken();
-    const res = await fetch(`${BASE}/data`, {
+    const res = await fetch(fullUrl('/data'), {
       headers: token ? { 'Authorization': `Bearer ${token}` } : {},
     });
     if (!res.ok) throw new Error('导出失败');
@@ -791,7 +799,7 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
     const token = getToken();
-    const res = await fetch(`${BASE}/data`, {
+    const res = await fetch(fullUrl('/data'), {
       method: 'POST',
       headers: token ? { 'Authorization': `Bearer ${token}` } : {},
       body: formData,
