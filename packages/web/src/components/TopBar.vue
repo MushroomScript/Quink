@@ -6,7 +6,7 @@ import { useNotificationsStore } from '@/stores/notifications';
 import { sharedPageCount as pageCount } from '@/composables/usePageCount';
 import { api, type Category } from '@/api';
 import { markRaw } from 'vue';
-import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen, PhCalendarBlank, PhCheck, PhCaretRight } from '@phosphor-icons/vue';
+import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen, PhCalendarBlank, PhCheck, PhCaretRight, PhArrowLeft } from '@phosphor-icons/vue';
 import { pinyinMatch } from '@/utils/pinyin';
 import { useToast } from '@/composables/useToast';
 import DatePicker from '@/components/DatePicker.vue';
@@ -513,6 +513,11 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <button v-if="!hideRefresh" @click="refresh" class="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors hidden md:block" title="刷新">
           <!-- 用 CSS animation 一次完整 360° 旋转 (跟 spinning state 同步 600ms); 之前用 transition transform 在 fetchNotes 极快返回时只看到一瞬抖动 -->
           <PhArrowsClockwise size="0.875rem" weight="fill" :class="{ 'refresh-spin': spinning }" />
+        </button>
+        <!-- PR #13 fix (蘑菇 2026-06-08): 群回收站路由下的返回按钮, 紧跟刷新后面让"刷新 返回 标题(N)" 同行 -->
+        <button v-if="route.name === 'group-trash'" @click="$router.push(`/groups/${route.params.id}`)"
+          class="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors" title="返回群详情">
+          <PhArrowLeft size="0.875rem" weight="bold" />
         </button>
         <h1 class="text-sm md:text-base font-semibold text-gray-800 whitespace-nowrap">{{ title }}<span v-if="titleCount >= 0" class="text-xs text-gray-400 font-normal tabular-nums">（{{ titleCount }}）</span></h1>
         <!-- 资源页面包屑: 在"资源"标题后渲染. 进入子目录时 "资源 > 根目录 > 文件夹A > 子B" 含可点的"根目录" 起点 -->

@@ -2,7 +2,7 @@
 // PR #12b 群组回收站 view. 路由 /groups/:id/trash, 仅 owner+admin 可进, 仅 owner 可永久删/清空.
 // 仿 Trash.vue 80%, 差异: 数据源 group API / 显示"被 @X 删除" / retentionDays 来自 response (7天) /
 // 监听 quink-group-trash-changed window event / 顶栏显示"「群名」的回收站" + 返回按钮.
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, inject, type Ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { sharedPageCount } from '@/composables/usePageCount';
 import { api, isLoggedIn } from '@/api';
@@ -10,7 +10,7 @@ import Vditor from 'vditor';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
-import { PhTrash, PhArrowLeft } from '@phosphor-icons/vue';
+import { PhTrash } from '@phosphor-icons/vue';
 import { fadeOutLeave, flyToNavLeave, snapshotCards } from '@/utils/cardLeave';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import { useMasonry } from '@/composables/useMasonry';
@@ -53,6 +53,14 @@ const group = computed(() => groupsStore.groups.find(g => g.id === groupId.value
 const myRole = computed(() => (group.value as any)?.myRole as string | undefined);
 const isOwner = computed(() => myRole.value === 'owner');
 const canEnter = computed(() => myRole.value === 'owner' || myRole.value === 'admin');
+
+// PR #13 fix (蘑菇 2026-06-08): 走 detailTitle inject 让 TopBar 显示"「群名」的回收站(数量)",
+// view 顶部只留返回按钮, 跟 NoteDetail 同款模式. 不再 view 内 H2 重复标题
+const detailTitle = inject<Ref<string>>('detailTitle');
+function syncDetailTitle() {
+  if (detailTitle) detailTitle.value = `「${group.value?.name || '群组'}」的回收站`;
+}
+watch(() => group.value?.name, syncDetailTitle);
 
 const hoveredId = ref<string | null>(null);
 const allNotes = ref<TrashNote[]>([]);
@@ -295,11 +303,13 @@ onMounted(async () => {
     router.replace(`/groups/${groupId.value}`);
     return;
   }
+  syncDetailTitle();
   load();
   window.addEventListener('quink-refresh', onRefresh);
   window.addEventListener('quink-group-trash-changed', onGroupTrashChanged);
 });
 onUnmounted(() => {
+  if (detailTitle) detailTitle.value = '';
   window.removeEventListener('quink-refresh', onRefresh);
   window.removeEventListener('quink-group-trash-changed', onGroupTrashChanged);
 });
@@ -312,9 +322,7 @@ function onLeave(el: Element, done: () => void) {
   else fadeOutLeave(el, done);
 }
 
-function goBack() {
-  router.push(`/groups/${groupId.value}`);
-}
+// 返回按钮挪到 TopBar (TopBar.vue group-trash 路由专属), goBack 函数已废, view 内无入口
 
 // PR #12 观察 2: 操作完成派事件让 GroupDetail 刷 trashCount 胶囊 (SSE 派的同款 event 复用 listener)
 function notifyGroupTrashChanged() {
@@ -324,15 +332,8 @@ function notifyGroupTrashChanged() {
 
 <template>
   <div class="px-4 md:px-8 pb-6">
-    <!-- 顶部标题行: 返回按钮 + 「群名」回收站 -->
-    <div class="flex items-center gap-3 pt-4 pb-3">
-      <button @click="goBack" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors" title="返回群详情">
-        <PhArrowLeft size="1.125rem" weight="bold" />
-      </button>
-      <h2 class="text-base font-medium text-gray-700">
-        「{{ group?.name || '群组' }}」的回收站
-      </h2>
-    </div>
+    <!-- PR #13 fix: 标题"「群名」的回收站(数量)" + 返回按钮 全走 TopBar (TopBar.vue 加 group-trash 路由专属返回按钮).
+         view 内不再有标题行也不再有返回按钮 -->
 
     <!-- toolbar 同 Trash.vue 风格. 仅 owner 才显示"清空" 和 "批量永久删除". -->
     <div v-if="allNotes.length > 0"
