@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, provide, watch } from 'vue';
+import { sharedPageCount } from '@/composables/usePageCount';
 import { api, isLoggedIn, type Note } from '@/api';
 import Vditor from 'vditor';
 import dayjs from 'dayjs';
@@ -28,7 +29,11 @@ const hoveredId = ref<string | null>(null);
 const allNotes = ref<Note[]>([]);
 const notes = ref<Note[]>([]);
 const pageCount = computed(() => notes.value.length);
-provide('pageCount', pageCount);
+onMounted(() => {
+  sharedPageCount.value = pageCount.value;
+  watch(pageCount, (v) => { sharedPageCount.value = v; });
+});
+onUnmounted(() => { sharedPageCount.value = -1; });
 
 // 搜索: TopBar 把搜索词写入 store.searchQuery (trash 路径不走 fetchNotes), view 自己 watch 过滤;
 // 过滤维度 = content + category + tag, 走 pinyinMatch 支持拼音 (跟 Tags / Resources 一致)

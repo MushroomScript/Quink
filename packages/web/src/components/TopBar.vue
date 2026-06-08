@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, watchEffect, inject, type
 import { useRoute } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import { useNotificationsStore } from '@/stores/notifications';
+import { sharedPageCount as pageCount } from '@/composables/usePageCount';
 import { api, type Category } from '@/api';
 import { markRaw } from 'vue';
 import { PhList, PhArrowsClockwise, PhMagnifyingGlass, PhXCircle, PhFunnel, PhLightbulb, PhNotePencil, PhCheckSquare, PhTag, PhFolderOpen, PhCalendarBlank, PhCheck, PhCaretRight } from '@phosphor-icons/vue';
@@ -172,7 +173,6 @@ watch(() => route.path, () => {
 });
 
 const detailTitle = inject<Ref<string>>('detailTitle', ref(''));
-const pageCount = inject<Ref<number>>('pageCount', ref(-1));
 // 资源页面包屑: 因 Resources view 跟 TopBar 是 flex sibling 不是父子链, provide/inject 不通, 用 module-level ref 共享
 import { resourceBreadcrumb, resourceBreadcrumbGoTo } from '@/composables/useResourceBreadcrumb';
 const title = computed(() => {

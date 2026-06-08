@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, provide, watch, nextTick } from 'vue';
+import { sharedPageCount } from '@/composables/usePageCount';
 import { api, isLoggedIn } from '@/api';
 import { useNotesStore } from '@/stores/notes';
 import { fadeOutLeave, snapshotCards } from '@/utils/cardLeave';
@@ -84,7 +85,14 @@ const folders = ref<FolderItem[]>([]);
 const currentFolderId = ref<string | null>(null);
 
 const pageCount = computed(() => filtered.value.length + filteredFolders.value.length);
-provide('pageCount', pageCount);
+// view 给 TopBar banner "（N）" 显示页面计数. 用 module-level ref 因为 TopBar 跟 RouterView 是兄弟, provide/inject 走不通.
+// 注意: watch 注册时立即 access computed 触发依赖跟踪, 这行位置 filtered/filteredFolders 还没初始化会 ReferenceError.
+// 把 watch + 初设全放进 onMounted (此时所有 ref 已 ready)
+onMounted(() => {
+  sharedPageCount.value = pageCount.value;
+  watch(pageCount, (v) => { sharedPageCount.value = v; });
+});
+onUnmounted(() => { sharedPageCount.value = -1; });
 const loading = ref(true);
 const confirmDeleteId = ref('');
 const confirmBatchDelete = ref(false);

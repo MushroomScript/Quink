@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, provide, watch } from 'vue';
+import { sharedPageCount } from '@/composables/usePageCount';
 import { api, isLoggedIn } from '@/api';
 import { useNotesStore } from '@/stores/notes';
 import { useRouter } from 'vue-router';
@@ -19,7 +20,11 @@ const visibleTags = computed(() => {
   return allTags.value.filter(t => pinyinMatch(t, q));
 });
 const pageCount = computed(() => visibleTags.value.length);
-provide('pageCount', pageCount);
+onMounted(() => {
+  sharedPageCount.value = pageCount.value;
+  watch(pageCount, (v) => { sharedPageCount.value = v; });
+});
+onUnmounted(() => { sharedPageCount.value = -1; });
 const loading = ref(true);
 const editingTag = ref('');
 const newName = ref('');
