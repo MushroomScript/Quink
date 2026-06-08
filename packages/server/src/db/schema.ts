@@ -53,6 +53,11 @@ export const notes = sqliteTable('notes', {
   // SQLite 层一致弱约束 (业务保证只往 root 指, 不构造循环).
   // 7a 阶段仅加字段不动 PATCH 逻辑, 等 7b fork 写入逻辑接入.
   parentNoteId: text('parent_note_id'),
+  // PR #12 群组回收站: admin 在群组上下文删笔记时填这两列. NULL = 作者自己删 (走个人回收站).
+  // deletedInGroupId NOT NULL = 群回收站, 群 owner/admin 看得到 + 能恢复 (仅 owner 永久删).
+  // 7 天后自动永久删, 详见 reminder/scheduler.ts startGroupTrashCleanup
+  deletedByUserId: text('deleted_by_user_id').references(() => users.id),
+  deletedInGroupId: text('deleted_in_group_id').references(() => groups.id),
 });
 
 // PR #2 群组共享: 笔记 → 群组多对多. 一条笔记可分享到多个群, 删 group_members 不影响共享

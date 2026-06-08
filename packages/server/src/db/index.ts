@@ -363,6 +363,14 @@ try { sqlite.exec(`
 try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_audit_logs_user_created ON audit_logs(user_id, created_at DESC)'); } catch {}
 try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)'); } catch {}
 
+// PR #12 群组回收站: admin 删别人共享笔记时填 deleted_by_user_id + deleted_in_group_id,
+// 群 owner/admin 通过 deleted_in_group_id 查群回收站. NULL = 作者自己删 (走个人回收站).
+// ALTER TABLE 不支持加 FK, 跟 edit_lock_by / parent_note_id 同款弱约束业务保证.
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN deleted_by_user_id TEXT'); } catch {}
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN deleted_in_group_id TEXT'); } catch {}
+// 群回收站查询: WHERE deleted_in_group_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC
+try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_notes_group_trash ON notes(deleted_in_group_id, deleted_at DESC) WHERE deleted_in_group_id IS NOT NULL'); } catch {}
+
 // PR #10 通知中心. payload 默认 '{}' 跟 drizzle .default({}) 对齐, 老行 readAt 默认 NULL (= 未读).
 // 两个 INDEX: 列通知按 (user, created_at DESC); 未读数走 partial index (sqlite 支持) 只索引未读行省空间
 try { sqlite.exec(`

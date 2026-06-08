@@ -10,6 +10,8 @@ import { toPinyinSearchable } from '../utils/pinyin.js';
 import { publish } from '../reminder/bus.js';
 import { logAudit } from '../utils/auditLog.js';
 import { createNotification } from '../utils/notifications.js';
+import { purgeNote } from '../cleanup.js';
+import { broadcastNoteShared } from '../utils/broadcast.js';
 
 // 笔记 markdown 内容截 30 字符作为通知 title 后缀, 去 markdown 标记+换行. 太长前端 truncate
 function noteSnippet(content: string, max = 30): string {
@@ -72,45 +74,7 @@ const updateNoteSchema = z.object({
 // 安全审计 S1: per-user per-group 1 次/秒去抖, 防 A 高频 PATCH 让群里 99 人客户端炸开 (每秒 990 API).
 // 取舍: 同账号内连续 PATCH 后 SSE 合并到下一秒一次推送, 用户体验上"延迟 ≤1s" 但能挡住 DoS.
 // in-memory map, 进程重启清空 (用单进程模式, 多 worker 部署改 Redis)
-const SSE_THROTTLE_WINDOW_MS = 1000;
-const broadcastShareThrottle = new Map<string, number>(); // key=`${actorId}|${groupId}`, value=last broadcast ms
-
-setInterval(() => {
-  const cutoff = Date.now() - SSE_THROTTLE_WINDOW_MS * 5;
-  for (const [k, ts] of broadcastShareThrottle) {
-    if (ts < cutoff) broadcastShareThrottle.delete(k);
-  }
-}, 30 * 1000);
-
-async function broadcastNoteShared(groupIds: string[], exceptUserId: string, originClientId?: string) {
-  if (groupIds.length === 0) return;
-  // 按 (actorUserId, groupId) 节流: 同一发起人对同一群在 1s 内仅推一次
-  const now = Date.now();
-  const allowedGroupIds = groupIds.filter(gid => {
-    const key = exceptUserId + '|' + gid;
-    const last = broadcastShareThrottle.get(key) || 0;
-    if (now - last < SSE_THROTTLE_WINDOW_MS) return false;
-    broadcastShareThrottle.set(key, now);
-    return true;
-  });
-  if (allowedGroupIds.length === 0) return;
-
-  const members = await db.select({ userId: schema.groupMembers.userId, groupId: schema.groupMembers.groupId })
-    .from(schema.groupMembers)
-    .where(and(
-      inArray(schema.groupMembers.groupId, allowedGroupIds),
-      eq(schema.groupMembers.status, 'active'),
-    )).all();
-  // dedup userId+groupId, 一个用户在多个目标群里也只一条事件
-  const seen = new Set<string>();
-  for (const m of members) {
-    if (m.userId === exceptUserId) continue;
-    const key = m.userId + '|' + m.groupId;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    publish(m.userId, 'group-notes-changed', { groupId: m.groupId }, originClientId);
-  }
-}
+// broadcastNoteShared 抽到 utils/broadcast.ts, 这里只 import. 节流 + dedup 逻辑跟着挪.
 
 // 校验所有 groupIds 都是 userId 的 active member 的群. 任一不符返回 error string, 全过返回 null
 async function validateSharedGroups(userId: string, groupIds: string[]): Promise<string | null> {
@@ -377,12 +341,8 @@ app.delete('/trash/:id', async (c) => {
     ? (await db.select({ groupId: schema.noteShares.groupId })
         .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all()).map(s => s.groupId)
     : [];
-  // PR #2: 永久删除事务清 note_shares + group_note_pins (防 FK constraint 阻 delete notes)
-  db.transaction((tx) => {
-    tx.delete(schema.groupNotePins).where(eq(schema.groupNotePins.noteId, id)).run();
-    tx.delete(schema.noteShares).where(eq(schema.noteShares.noteId, id)).run();
-    tx.delete(schema.notes).where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId))).run();
-  });
+  // PR #12: purgeNote 走完整 cascade (清 9 张子表 + notes), 修原只清 noteShares/groupNotePins 漏 noteEditGrants / notePersonalReminders 等 FK
+  if (existing) purgeNote(id);
   // 多设备 + 群成员同步: 作者其他设备的回收站列表移除该 id; 群成员 feed 也确认彻底清
   publish(userId, 'note-deleted', { noteId: id }, _ocid);
   if (shareGroupIds.length > 0) {
@@ -402,11 +362,8 @@ app.delete('/trash', async (c) => {
     .all();
   if (trashed.length === 0) return c.json({ message: '已清空' });
   const ids = trashed.map(t => t.id);
-  db.transaction((tx) => {
-    tx.delete(schema.groupNotePins).where(inArray(schema.groupNotePins.noteId, ids)).run();
-    tx.delete(schema.noteShares).where(inArray(schema.noteShares.noteId, ids)).run();
-    tx.delete(schema.notes).where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`)).run();
-  });
+  // PR #12: 走完整 cascade purgeNote (修原只清 noteShares/groupNotePins 漏其他 FK 子表)
+  for (const tid of ids) purgeNote(tid);
   // 多设备同步: 作者本人所有设备清空回收站界面 + 主 view cache 标 dirty
   publish(userId, 'trash-cleared', { count: ids.length }, _ocid);
   await logAudit(c, 'note.permanent_delete_all_trash', 'note', null, { count: ids.length });
@@ -1927,9 +1884,20 @@ app.patch('/:id', async (c) => {
   }
   // 多设备同步: 给作者本人所有设备 publish 让其他设备 store 拉单条 refreshSingleNote (复用 scheduler 那条线已有的 note-updated SSE 事件)
   publish(userId, 'note-updated', { noteId: id }, _ocid);
+  // PR #12: 内容变化时拍 before 快照存 audit (跟 delete 时的 snapshot 一致, 让审计可完整回溯任意时刻笔记状态).
+  // 仅 isContentChange 存 (pinned/visibility/sharedGroupIds 等管理操作不影响内容, 无快照意义)
   await logAudit(c, 'note.update', 'note', id, {
     fields: Object.keys(updates).filter(k => k !== 'updatedAt'),
     isAuthor,
+    ...(isContentChange ? {
+      snapshot: {
+        content: existing.content,
+        tags: existing.tags,
+        category: existing.category,
+        type: existing.type,
+        visibility: existing.visibility,
+      },
+    } : {}),
   });
 
   const updated = await db.select().from(schema.notes).where(eq(schema.notes.id, id)).get();
@@ -1940,10 +1908,14 @@ app.patch('/:id', async (c) => {
 });
 
 // DELETE /api/notes/:id — 软删除（移入回收站）
+// PR #12: 加 ?groupId= 参数 (admin 删别人笔记时前端从群组上下文传, 用来确定进哪个群的回收站).
+// 不传时兼容老前端 = fallback 取该 admin 所在的第一个共享群当 trashGroupId.
+// 作者删自己笔记忽略 groupId, 走个人回收站 (deletedInGroupId=NULL)
 app.delete('/:id', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
+  const groupIdQuery = c.req.query('groupId');
 
   // PR #5b: 扩到群 admin 可删共享笔记 (普通成员有 write 权限也不能删, 删除是管理操作)
   const existing = await getNoteForAccess(userId, id, 'read');
@@ -1964,8 +1936,53 @@ app.delete('/:id', async (c) => {
     sharedGroupIds = shares.map(s => s.groupId);
   }
 
+  // PR #12: admin 删共享笔记时确定 trashGroupId (进哪个群的回收站).
+  // 优先用前端传的 groupId (校验是该笔记的共享群 + 我在该群是 owner/admin);
+  // 没传时 fallback 取我在的第一个共享群 (admin/owner)
+  let trashGroupId: string | null = null;
+  if (!isAuthor) {
+    if (groupIdQuery) {
+      if (!sharedGroupIds.includes(groupIdQuery)) {
+        return c.json({ error: '该群未共享此笔记' }, 400);
+      }
+      const m = await db.select({ role: schema.groupMembers.role })
+        .from(schema.groupMembers)
+        .where(and(
+          eq(schema.groupMembers.groupId, groupIdQuery),
+          eq(schema.groupMembers.userId, userId),
+          eq(schema.groupMembers.status, 'active'),
+        )).get();
+      if (!m || (m.role !== 'owner' && m.role !== 'admin')) {
+        return c.json({ error: '只有该群管理员可删除' }, 403);
+      }
+      trashGroupId = groupIdQuery;
+    } else {
+      const adminGroups = await db.select({ groupId: schema.groupMembers.groupId })
+        .from(schema.groupMembers)
+        .where(and(
+          eq(schema.groupMembers.userId, userId),
+          eq(schema.groupMembers.status, 'active'),
+          inArray(schema.groupMembers.groupId, sharedGroupIds),
+          sql`${schema.groupMembers.role} IN ('owner', 'admin')`,
+        )).all();
+      trashGroupId = adminGroups[0]?.groupId ?? null;
+    }
+  }
+
+  // PR #12: 删除前拍内容快照 (审计 + 7 天内回收站恢复用. 7 天后永久删时快照仍留 audit_logs 给追溯)
+  const snapshot = {
+    content: existing.content,
+    tags: existing.tags,
+    category: existing.category,
+    type: existing.type,
+    visibility: existing.visibility,
+  };
+
   await db.update(schema.notes)
-    .set({ deletedAt: dayjs().toISOString() })
+    .set({
+      deletedAt: dayjs().toISOString(),
+      ...(trashGroupId ? { deletedByUserId: userId, deletedInGroupId: trashGroupId } : {}),
+    })
     .where(eq(schema.notes.id, id));
 
   // PR #2 阶段 5c: 软删共享笔记 → 通知群成员 (note_shares 保留但 deletedAt 过滤让 feed 看不到)
@@ -1974,8 +1991,33 @@ app.delete('/:id', async (c) => {
   }
   // 多设备同步: 作者本人所有设备主 view 移除该 id
   publish(userId, 'note-deleted', { noteId: id }, _ocid);
-  await logAudit(c, 'note.delete', 'note', id, {
-    visibility: existing.visibility, sharedGroupIds, isAuthor,
+
+  // PR #12: admin 删别人笔记 → 通知作者 + publish group-trash-changed 给该群 owner/admin 刷群回收站
+  if (!isAuthor && trashGroupId) {
+    const [group, actor] = await Promise.all([
+      db.select({ name: schema.groups.name }).from(schema.groups).where(eq(schema.groups.id, trashGroupId)).get(),
+      db.select({ nickname: schema.users.nickname }).from(schema.users).where(eq(schema.users.id, userId)).get(),
+    ]);
+    await createNotification(
+      existing.userId, 'content', 'note-deleted-by-admin',
+      '你的笔记被管理员删除',
+      `${actor?.nickname || '管理员'}在「${group?.name || '群组'}」删除了你的笔记: ${noteSnippet(existing.content)}`,
+      { noteId: id, groupId: trashGroupId, deletedByUserId: userId },
+    );
+    const admins = await db.select({ userId: schema.groupMembers.userId })
+      .from(schema.groupMembers)
+      .where(and(
+        eq(schema.groupMembers.groupId, trashGroupId),
+        eq(schema.groupMembers.status, 'active'),
+        sql`${schema.groupMembers.role} IN ('owner', 'admin')`,
+      )).all();
+    for (const a of admins) {
+      publish(a.userId, 'group-trash-changed', { groupId: trashGroupId }, _ocid);
+    }
+  }
+
+  await logAudit(c, isAuthor ? 'note.delete' : 'note.delete_by_admin', 'note', id, {
+    visibility: existing.visibility, sharedGroupIds, isAuthor, trashGroupId, snapshot,
   });
   return c.json({ message: '已移入回收站', sharedGroupIds });
 });

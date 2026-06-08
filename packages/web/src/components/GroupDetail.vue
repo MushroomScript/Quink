@@ -161,12 +161,14 @@ onMounted(() => {
   load();
   window.addEventListener('quink-group-notes-changed', onGroupNotesChanged);
   window.addEventListener('quink-edit-request-changed', onEditRequestChanged);
+  window.addEventListener('quink-group-trash-changed', onGroupTrashChanged);
 });
 onUnmounted(() => {
   store.currentDetail = null;
   store.currentJoinRequests = [];
   window.removeEventListener('quink-group-notes-changed', onGroupNotesChanged);
   window.removeEventListener('quink-edit-request-changed', onEditRequestChanged);
+  window.removeEventListener('quink-group-trash-changed', onGroupTrashChanged);
 });
 
 function onEditRequestChanged() {
@@ -176,6 +178,13 @@ function onEditRequestChanged() {
 function onGroupNotesChanged(e: Event) {
   const detail = (e as CustomEvent).detail;
   if (detail?.groupId === groupId.value) loadGroupNotes(true);
+}
+
+// PR #12: 群回收站变化 (admin 删别人 / 恢复 / 永久删 / 清空) → 重拉 group detail 刷 trashCount.
+// 事件源: 本设备发起方 NoteCard.doDelete / GroupTrash 4 操作 dispatch + 其他设备 SSE handler (sse.ts) 派
+function onGroupTrashChanged(e: Event) {
+  const detail = (e as CustomEvent).detail;
+  if (detail?.groupId === groupId.value) store.loadGroup(groupId.value);
 }
 
 // PR #5b 待审编辑申请 (跨笔记汇总, 折叠 >3 条)
@@ -549,6 +558,12 @@ async function saveAnnouncement() {
               :class="inviteOpen ? 'ring-1 ring-primary/30' : ''">
               邀请
               <PhCaretDown size="0.75rem" weight="bold" :class="['transition-transform', inviteOpen ? 'rotate-180' : '']" />
+            </button>
+            <!-- PR #12: 回收站胶囊, 仅 owner+admin 可见. 点跳 /groups/:id/trash. trashCount 为 0 时仍显示让 admin 知道入口在 -->
+            <button v-if="isOwnerOrAdmin" @click="$router.push(`/groups/${groupId}/trash`)"
+              class="px-3 py-1 text-xs rounded-lg font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 inline-flex items-center gap-1">
+              <PhTrash size="0.75rem" weight="fill" />
+              回收站<span v-if="(detail as any)?.trashCount" class="tabular-nums">({{ (detail as any).trashCount }})</span>
             </button>
             <button v-if="isOwner" @click="confirmDissolve = true"
               class="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 inline-flex items-center gap-1">

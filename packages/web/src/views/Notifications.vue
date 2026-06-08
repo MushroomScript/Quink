@@ -64,8 +64,12 @@ async function onItemClick(id: string) {
   const n = store.items.find((x) => x.id === id);
   if (!n) return;
   await store.markRead(id);
-  // 跳关联资源 (按 payload.noteId / groupId). 后续接入点 PR #10c 改造时可扩更多字段
+  // 跳关联资源. PR #12: 'note-deleted-by-admin' / 'note-restored-by-admin' 跳群回收站 (笔记已不在主 view)
   const p = n.payload || {};
+  if ((n.type === 'note-deleted-by-admin' || n.type === 'note-restored-by-admin') && p.groupId) {
+    router.push(`/groups/${p.groupId}/trash`);
+    return;
+  }
   if (p.noteId) router.push(`/note/${p.noteId}`);
   else if (p.groupId) router.push(`/groups/${p.groupId}`);
 }

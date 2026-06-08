@@ -370,8 +370,14 @@ async function doDelete() {
   // 留个 snapshot 给撤销用: store.deleteNote 走 splice 会让 props.note 引用失效, 必须先拷贝
   const snapshot = { ...props.note };
   // PR #7b: try-catch 兜底 — 后端 403 / 网络错时之前会静默(toast.show 不执行 = "什么都不提示")
+  // PR #12: 群组上下文 admin 删别人笔记时透传 groupId, 让后端写 deletedInGroupId 进群回收站
+  const groupId = !isMyNote.value && inGroupContext.value ? groupIdFromRoute.value : null;
   try {
-    await store.deleteNote(props.note.id);
+    await store.deleteNote(props.note.id, groupId ? { groupId } : undefined);
+    // PR #12: admin 删别人笔记进群回收站 → 派事件让 GroupDetail 刷新 trashCount 胶囊
+    if (groupId) {
+      window.dispatchEvent(new CustomEvent('quink-group-trash-changed', { detail: { groupId } }));
+    }
   } catch (e: any) {
     toast.show(e?.message || '删除失败', 'error', 3000);
     return;

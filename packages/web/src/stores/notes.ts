@@ -373,8 +373,9 @@ export const useNotesStore = defineStore('notes', () => {
     return res.data;
   }
 
-  async function deleteNote(id: string) {
-    const res = await api.deleteNote(id);
+  async function deleteNote(id: string, opts?: { groupId?: string }) {
+    // PR #12: groupId 可选, admin 删别人共享笔记时从群组上下文传, 后端写 deletedInGroupId 进群回收站
+    const res = await api.deleteNote(id, opts);
     // PR #7b: 删共享笔记后给每个所在群派 quink-group-notes-changed 让操作者自己的 GroupDetail 重拉
     // (GroupDetail 用本地 ref 自管收不到自己的 SSE; 别人通过后端 broadcastNoteShared 收 SSE 已自动刷)
     for (const gid of res.sharedGroupIds ?? []) {
@@ -490,9 +491,15 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   // SSE 收到 note-updated 时调 (scheduler 触发提醒后端更新 todoDue/todoRemindSentAt, 前端立刻反映).
+  // PR #12: 加 fallback - 所有 viewState 都没该 id 时走 syncNoteCreated 按 type 插入 (群回收站 restore 后笔记从 trash 出来, 原作者主 view 之前没这条)
   async function refreshSingleNote(id: string) {
     try {
       const res = await api.getNote(id);
+      const inSomeView = Object.values(_viewState).some(vs => vs.notes.some(n => n.id === id));
+      if (!inSomeView) {
+        await syncNoteCreated(id);
+        return;
+      }
       syncFreshToViewStates(id, res.data);
     } catch (e) {
       console.error('[refreshSingleNote]', id, e);

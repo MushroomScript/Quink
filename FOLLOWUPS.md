@@ -2,10 +2,6 @@
 
 集中收录【观察里说过但暂未做】的事, 防止 ship 完后忘掉. 每次 ship 前 Claude 必须 read 这个文件 + 看跟当前 PR 重叠的能不能顺手做掉; ship 后若 commit message 末尾含"留待 PR #X" / "留待 11c" 之类的句子, 必须同步 append 一行到下面对应分组.
 
-## 进 PR #12 (群组回收站 + 审计)
-
-- [ ] `note-deleted-by-admin` 通知 —— 群管理员删别人笔记时给作者写通知. 当时推到 #12 因为依赖 admin 删笔记的完整流程 (来源: commit `fd8eed6`, PR #10c)
-
 ## 进 PR #13 (收尾)
 
 - [ ] `fork-by-other` 通知 —— 笔记被别人 fork 时给原作者写通知. 跟 PR #13 fork UI 收尾密切关联 (来源: commit `fd8eed6`, PR #10c)
@@ -30,4 +26,4 @@
 
 ## 已完成 (历史归档, 不要清空)
 
-(空)
+- [x] `note-deleted-by-admin` 通知 —— admin 删别人笔记时给原作者写一条 (PR #12 一并做, 同时加了 `note-restored-by-admin` 给 restore 流) (原来源: commit `fd8eed6`, PR #10c → 在 PR #12 落地)

@@ -9,6 +9,8 @@ import { publish, isOnline } from '../reminder/bus.js';
 import { loadSocialMetaMaps, loadEditorCountMap } from './notes.js';
 import { logAudit } from '../utils/auditLog.js';
 import { createNotification } from '../utils/notifications.js';
+import { purgeNote, GROUP_TRASH_RETENTION_DAYS } from '../cleanup.js';
+import { broadcastNoteShared } from '../utils/broadcast.js';
 
 // ── 辅助: 拉群 owner + admin id 列表, 给 group-join-request 通知用 (审批权限的人都收) ──
 async function getGroupOwnerAndAdmins(groupId: string): Promise<string[]> {
@@ -73,7 +75,18 @@ async function enrichGroup(groupId: string, viewerId?: string) {
       .from(schema.users).where(eq(schema.users.id, g.announcementUpdatedBy)).get();
     announcementUpdatedByNickname = author?.nickname ?? null;
   }
-  return { ...g, memberCount, myRole, announcementUpdatedByNickname };
+  // PR #12: owner+admin 才看群回收站 + count, 普通成员不返
+  let trashCount: number | null = null;
+  if (myRole === 'owner' || myRole === 'admin') {
+    const trashRow = db.select({ count: sql<number>`count(*)` })
+      .from(schema.notes)
+      .where(and(
+        eq(schema.notes.deletedInGroupId, groupId),
+        sql`${schema.notes.deletedAt} IS NOT NULL`,
+      )).get();
+    trashCount = trashRow?.count ?? 0;
+  }
+  return { ...g, memberCount, myRole, announcementUpdatedByNickname, trashCount };
 }
 
 // =========================================================
@@ -932,6 +945,144 @@ app.patch('/:id/reminder-subscription', async (c) => {
   publish(userId, 'data-changed', { scope: 'reminder-subscription', groupId }, _ocid);
   await logAudit(c, 'group.reminder_subscription', 'group', groupId, { enabled: parsed.data.enabled });
   return c.json({ data: { enabled: parsed.data.enabled } });
+});
+
+// =========================================================
+//  PR #12 群组回收站 + 审计
+//  (purgeNote 跟 GROUP_TRASH_RETENTION_DAYS 抽到 cleanup.ts 复用 cron + endpoints)
+// =========================================================
+
+// 给该群所有 owner+admin publish 'group-trash-changed' 让群回收站 view 实时刷新
+async function broadcastGroupTrashChanged(groupId: string, originClientId?: string) {
+  const admins = await db.select({ userId: schema.groupMembers.userId })
+    .from(schema.groupMembers)
+    .where(and(
+      eq(schema.groupMembers.groupId, groupId),
+      eq(schema.groupMembers.status, 'active'),
+      sql`${schema.groupMembers.role} IN ('owner', 'admin')`,
+    )).all();
+  for (const a of admins) {
+    publish(a.userId, 'group-trash-changed', { groupId }, originClientId);
+  }
+}
+
+// GET /:id/trash — 列群回收站 (owner+admin)
+app.get('/:id/trash', async (c) => {
+  const userId = c.get('userId');
+  const groupId = c.req.param('id');
+  const me = await getActiveMember(groupId, userId);
+  if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
+    return c.json({ error: '只有群管理员可以查看群回收站' }, 403);
+  }
+  // 手写 SQL JOIN 拿作者 + 删除者 nickname. drizzle 链式 join 也行但 SQL 直观 (跟 note-edit-requests 同款风格)
+  // 安全审计: LIMIT 200 防大群灌爆请求. 7 天 retention 下不太可能超
+  const rows = db.all(sql`
+    SELECT n.id, n.user_id as userId, n.content, n.summary, n.category, n.tags, n.type, n.todo_status as todoStatus,
+           n.pinned, n.created_at as createdAt, n.updated_at as updatedAt, n.deleted_at as deletedAt,
+           n.visibility, n.deleted_by_user_id as deletedByUserId, n.deleted_in_group_id as deletedInGroupId,
+           au.nickname as authorNickname, au.avatar as authorAvatar,
+           du.nickname as deletedByNickname
+    FROM notes n
+    LEFT JOIN users au ON au.id = n.user_id
+    LEFT JOIN users du ON du.id = n.deleted_by_user_id
+    WHERE n.deleted_in_group_id = ${groupId} AND n.deleted_at IS NOT NULL
+    ORDER BY n.deleted_at DESC
+    LIMIT 200
+  `) as Array<any>;
+  // tags 原始 SQL 拉出是 JSON 字符串, 手动 parse 跟 drizzle select 行为对齐
+  for (const r of rows) {
+    try { r.tags = JSON.parse(r.tags || '[]'); } catch { r.tags = []; }
+  }
+  return c.json({ data: rows, retentionDays: GROUP_TRASH_RETENTION_DAYS });
+});
+
+// POST /:id/trash/:noteId/restore — 恢复 (owner+admin)
+// 清 deletedAt + deletedByUserId + deletedInGroupId 三列, 笔记回到原作者主 view 跟群 feed
+app.post('/:id/trash/:noteId/restore', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const groupId = c.req.param('id');
+  const noteId = c.req.param('noteId');
+  const me = await getActiveMember(groupId, userId);
+  if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
+    return c.json({ error: '只有群管理员可以恢复' }, 403);
+  }
+  const note = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId)).get();
+  if (!note || note.deletedInGroupId !== groupId || !note.deletedAt) {
+    return c.json({ error: '笔记不在该群回收站' }, 404);
+  }
+  await db.update(schema.notes)
+    .set({ deletedAt: null, deletedByUserId: null, deletedInGroupId: null })
+    .where(eq(schema.notes.id, noteId));
+
+  // 通知群 admin 让群回收站 view 移除该条; 通知原作者 + 群成员让 feed/主 view 重新看到该笔记
+  await broadcastGroupTrashChanged(groupId, _ocid);
+  publish(note.userId, 'note-updated', { noteId }, _ocid);
+  const sharedGroupIds = (await db.select({ groupId: schema.noteShares.groupId })
+    .from(schema.noteShares).where(eq(schema.noteShares.noteId, noteId)).all()).map(s => s.groupId);
+  if (sharedGroupIds.length > 0) {
+    broadcastNoteShared(sharedGroupIds, userId, _ocid).catch(e => console.error('[restore] broadcast failed:', e));
+  }
+  // 通知原作者 (跟 note-deleted-by-admin 一对): 笔记已恢复
+  const [group, actor] = await Promise.all([
+    db.select({ name: schema.groups.name }).from(schema.groups).where(eq(schema.groups.id, groupId)).get(),
+    db.select({ nickname: schema.users.nickname }).from(schema.users).where(eq(schema.users.id, userId)).get(),
+  ]);
+  await createNotification(
+    note.userId, 'content', 'note-restored-by-admin',
+    '你的笔记已被恢复',
+    `${actor?.nickname || '管理员'}在「${group?.name || '群组'}」恢复了你的笔记`,
+    { noteId, groupId },
+  );
+  await logAudit(c, 'group.note_restore', 'group', groupId, { noteId });
+  return c.json({ message: '已恢复' });
+});
+
+// DELETE /:id/trash/:noteId — 永久删 (仅 owner)
+app.delete('/:id/trash/:noteId', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const groupId = c.req.param('id');
+  const noteId = c.req.param('noteId');
+  const me = await getActiveMember(groupId, userId);
+  if (!me || me.role !== 'owner') {
+    return c.json({ error: '只有群主可以永久删除' }, 403);
+  }
+  const note = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId)).get();
+  if (!note || note.deletedInGroupId !== groupId || !note.deletedAt) {
+    return c.json({ error: '笔记不在该群回收站' }, 404);
+  }
+  // 永久删前拍最终快照 (delete-by-admin 时已存一份, 这里追加一份"永久删时刻"快照防 cron 自清后无回溯)
+  const snapshot = {
+    content: note.content, tags: note.tags, category: note.category, type: note.type,
+    visibility: note.visibility, userId: note.userId,
+  };
+  purgeNote(noteId);
+  await broadcastGroupTrashChanged(groupId, _ocid);
+  await logAudit(c, 'group.note_permanent_delete', 'group', groupId, { noteId, snapshot });
+  return c.json({ message: '已永久删除' });
+});
+
+// DELETE /:id/trash — 清空群回收站 (仅 owner)
+app.delete('/:id/trash', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const groupId = c.req.param('id');
+  const me = await getActiveMember(groupId, userId);
+  if (!me || me.role !== 'owner') {
+    return c.json({ error: '只有群主可以清空' }, 403);
+  }
+  const trashed = await db.select({ id: schema.notes.id, userId: schema.notes.userId, content: schema.notes.content })
+    .from(schema.notes)
+    .where(and(eq(schema.notes.deletedInGroupId, groupId), sql`${schema.notes.deletedAt} IS NOT NULL`))
+    .all();
+  if (trashed.length === 0) return c.json({ message: '已清空', count: 0 });
+  for (const t of trashed) purgeNote(t.id);
+  await broadcastGroupTrashChanged(groupId, _ocid);
+  await logAudit(c, 'group.note_permanent_delete_all', 'group', groupId, {
+    count: trashed.length, noteIds: trashed.map(t => t.id),
+  });
+  return c.json({ message: '已清空', count: trashed.length });
 });
 
 export default app;

@@ -266,6 +266,16 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] group-notes-changed parse failed:', e); }
   });
 
+  // PR #12 群组回收站: admin 删共享笔记 / 恢复 / 永久删 / 清空 时 server publish 给该群所有 owner+admin
+  // 让 GroupTrash.vue 实时 reload 列表. 跟 group-notes-changed 同款 window event 模式
+  es.addEventListener('group-trash-changed', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
+      if (isMyEvent(data)) return;
+      window.dispatchEvent(new CustomEvent('quink-group-trash-changed', { detail: { groupId: data.groupId } }));
+    } catch (e) { console.error('[sse] group-trash-changed parse failed:', e); }
+  });
+
   // PR #5b 编辑权限申请: note-edit-request - 申请人提交申请, 作者+群 admin 收实时提示 + 桌面通知
   // toast 加"同意"action 让收件人一键审批 (拒绝走默认: 不操作即 toast 消失, 后续 PR 加完整审批面板)
   es.addEventListener('note-edit-request', (ev) => {

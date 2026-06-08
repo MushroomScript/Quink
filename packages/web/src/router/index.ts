@@ -82,6 +82,12 @@ const router = createRouter({
       meta: { title: '群组', hideSearch: true },
     },
     {
+      path: '/groups/:id/trash',
+      name: 'group-trash',
+      component: () => import('@/views/GroupTrash.vue'),
+      meta: { title: '群回收站' },
+    },
+    {
       path: '/invite/:token',
       name: 'invite',
       component: () => import('@/views/Invite.vue'),

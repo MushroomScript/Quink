@@ -213,12 +213,17 @@ serve({ fetch: app.fetch, port: PORT, hostname: '0.0.0.0' });
 })();
 
 // 启动 + 每 6h 跑一次全量清理 (用户改 trashRetentionDays 时另在 PATCH /me 处单独触发该用户的清理, 见 cleanup.ts)
-import { cleanAllTrash, cleanOldNotifications } from './cleanup.js';
+// PR #12: cleanGroupTrash 7 天扫 + cleanOldAuditSnapshots 90 天清 audit snapshot 字段防 audit 表爆
+import { cleanAllTrash, cleanOldNotifications, cleanGroupTrash, cleanOldAuditSnapshots } from './cleanup.js';
 cleanAllTrash();
 cleanOldNotifications();
+cleanGroupTrash();
+cleanOldAuditSnapshots();
 setInterval(() => {
   cleanAllTrash();
   cleanOldNotifications();
+  cleanGroupTrash();
+  cleanOldAuditSnapshots();
 }, 6 * 60 * 60 * 1000);
 
 // 待办提醒 scheduler: 每分钟扫表, 命中 todoDue <= now 的待办 -> 发到所有 enabled channels

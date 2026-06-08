@@ -32,7 +32,7 @@
 | **#9 权限重整** | 字段权限细分 (B 类作者私域字段非作者禁改) + NoteCard 三点菜单按钮 v-if / 编辑器界面非作者只显示正文 / 后端 PATCH 守卫 / "另存为灵感/笔记/待办" (副本 userId=操作人, 正文加引用原作者) / 申请编辑权点编辑改弹窗 / 作者删 fork 版给提示 / "私密"字面改 "私人" / 群组批量操作权限筛选 (普通成员隐藏多选按钮) | ✅ done | ~400 行 |
 | **#10 通知中心** | 新通知表 + 通知 view (4 tab: 全部/内容/提醒/群组) + 入口 (头像列表传输按钮上方) + SSE 推送 + 接入: 另存为通知 / 申请编辑权通知 / 提醒到点 / 群组变更通知 / 评论从 toast 搬到通知页 (reaction 仍卡片) | ✅ done (10a/10b/10c) | ~850 行 (实际) |
 | **#11 提醒分家** | 个人提醒 (todoDue, 每人自管, 删了内容也响) + 群提醒新表 (群管理员设, 群所有人收) + 群组提醒接收开关 (每人自己控该群提醒) | ✅ done (11a 后端 + 11b 前端) | ~675 行 (实际) |
-| **#12 群组回收站 + 审计** | 每群一个回收站 (从群组页进, 标题"X 群的回收站") + 7 天强制清 + 群主+管理员都能恢复, 仅群主能永久删 + 后端所有改/删存内容快照 (审计表 + 服务器主人管理界面留 #12+ 单独做) | pending | ~700 行 (估) |
+| **#12 群组回收站 + 审计** | 每群一个回收站 (从群组页进, 标题"X 群的回收站") + 7 天强制清 + 群主+管理员都能恢复, 仅群主能永久删 + 后端所有改/删存内容快照 (审计表 + 服务器主人管理界面留 #12+ 单独做) | ✅ done (12a 后端 + 12b 前端 一起 ship) | ~720 行 (实际, 含观察 6 个) |
 | **#13 收尾** | AI chat update_note 适配 fork (主动问用户改哪一版) + shared→private 转换约束 (仅未被任何群修改过能转) + 统计按 origin 维度 (fork 算 1 条, parent_note_id 链追溯) + 导出按 sharedDisplay | pending | ~500 行 (估) |
 
 总量预估 ~6900 行 (含已 ship 跟 6 个新 PR). 每个 PR 独立 ship 不破坏现有功能.
@@ -997,6 +997,37 @@ FROM notes WHERE todo_due IS NOT NULL;
 4. B 设群提醒 → 群里 A 跟其它成员都收到 OS 通知
 5. B 在群详情页关闭"接收本群提醒" → 群提醒到点 B 不收 OS 通知 (但通知页可能仍有? 跟 PR #10 联调时决定)
 6. A 删除该笔记 → B 收"待办已被删除, 提醒失效"通知
+
+---
+
+## PR #12 群组回收站 + 审计 (✅ ship)
+
+**目标**: 群 owner/admin 看 admin 删过的所有笔记, 7 天内可恢复 (仅 owner 永久删/清空). audit 链 admin 改/删别人笔记保 content 快照防滥用 (90 天后 cron 清 snapshot 字段保留行).
+
+**拆分**: 12a 后端 + 12b 前端 一同 ship (一个 commit). 实际 ~720 行 (含 6 个观察修复).
+
+### 核心改动
+
+- **schema**: `notes` 加 `deletedByUserId` + `deletedInGroupId` 两列 (admin 删共享笔记时填, 走群回收站; NULL 走个人回收站) + partial index `idx_notes_group_trash`
+- **4 endpoints** (groups.ts): GET `/:id/trash` (owner+admin) / POST `/:id/trash/:noteId/restore` (owner+admin) / DELETE `/:id/trash/:noteId` (仅 owner) / DELETE `/:id/trash` (仅 owner)
+- **cleanup.ts**: `purgeNote` (cascade 9 子表) + `cleanGroupTrash` (7 天 cron) + `cleanOldAuditSnapshots` (90 天清 audit.meta.snapshot 字段, 保留行)
+- **utils/broadcast.ts**: `broadcastNoteShared` 抽出给 notes.ts + groups.ts 共用 (含节流 + dedup)
+- **enrichGroup 加 trashCount**: 仅 owner+admin 返, 给 GroupDetail 顶部胶囊"回收站(N)"用
+- **删除/修改 audit snapshot**: admin 删 / PATCH isContentChange 时写 `meta.snapshot` (content+tags+category+type+visibility), 永久删时再追加一次 "永久删时刻"快照
+- **note-deleted-by-admin 通知**: admin 删别人笔记时给原作者写一条 (FOLLOWUPS 进 PR #12 那项一并做了)
+- **note-restored-by-admin 通知**: admin 恢复时通知原作者
+- **前端**: `GroupTrash.vue` 复用 `Trash.vue` 80% + 群 API + 路由 `/groups/:id/trash` + `GroupDetail.vue` 顶部「回收站(N)」胶囊 (跟邀请同款, 仅 owner+admin) + `NoteCard.doDelete` 群组上下文 admin 删时透传 `?groupId=` + `sse.ts` 加 `group-trash-changed` handler + Notifications.onItemClick 加 `note-deleted-by-admin` / `note-restored-by-admin` → `/groups/:id/trash` 跳转映射
+
+### 观察修复一并合入
+
+- **个人 trash 全走 purgeNote 修 FK** (cleanup.ts.cleanTrashForUser + notes.ts DELETE `/trash/:id` + DELETE `/trash`): 原版只清 noteShares + groupNotePins, FK on 下若 private 笔记有提醒会阻 delete
+- **refreshSingleNote 加 fallback**: 所有 viewState 都没该 id 时 fallback 调 `syncNoteCreated` 按 type 插入. 修原作者 restore 后多设备主 view 看不到笔记
+- **NoteCard.doDelete + GroupTrash 4 操作完成后 dispatch `quink-group-trash-changed`**: GroupDetail listener 收到调 `loadGroup` 重拉刷 trashCount (本设备实时刷新, 不靠 SSE 回环, `_ocid` 自跳)
+
+### 留待后续 PR
+
+- 服务器主人管理界面 (跨群审计 / 配额管理 / 全局 audit log 浏览) 留 PR #12+ 单独做
+- AI chat 适配 fork / 统计按 origin / 导出按 sharedDisplay → 进 PR #13
 
 ---
 

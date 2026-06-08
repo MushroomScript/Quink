@@ -424,8 +424,24 @@ export const api = {
 
   // PR #7b: 返回 sharedGroupIds (空数组 = private 笔记). 给 store.deleteNote 派 quink-group-notes-changed
   // 事件让操作者自己的 GroupDetail 重拉 (本地 ref 自管, 收不到自己的 SSE)
-  deleteNote(id: string) {
-    return request<{ message: string; sharedGroupIds: string[] }>(`/notes/${id}`, { method: 'DELETE' });
+  // PR #12: 加 groupId 参数 (admin 删别人共享笔记时从群组上下文传, 让后端写 deletedInGroupId 进群回收站)
+  deleteNote(id: string, opts?: { groupId?: string }) {
+    const q = opts?.groupId ? `?groupId=${encodeURIComponent(opts.groupId)}` : '';
+    return request<{ message: string; sharedGroupIds: string[] }>(`/notes/${id}${q}`, { method: 'DELETE' });
+  },
+
+  // PR #12 群组回收站 (owner+admin 列 / 恢复; 仅 owner 永久删 / 清空)
+  getGroupTrash(groupId: string) {
+    return request<{ data: any[]; retentionDays: number }>(`/groups/${groupId}/trash`);
+  },
+  restoreFromGroupTrash(groupId: string, noteId: string) {
+    return request<{ message: string }>(`/groups/${groupId}/trash/${noteId}/restore`, { method: 'POST' });
+  },
+  permanentDeleteFromGroupTrash(groupId: string, noteId: string) {
+    return request<{ message: string }>(`/groups/${groupId}/trash/${noteId}`, { method: 'DELETE' });
+  },
+  emptyGroupTrash(groupId: string) {
+    return request<{ message: string; count: number }>(`/groups/${groupId}/trash`, { method: 'DELETE' });
   },
 
   // PR #5 编辑锁: 仅 shared 笔记走. 返回 lockToken + expiresAt; 409 已被别人锁返回 lockByNickname
