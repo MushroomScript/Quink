@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
-import { eq, and, asc, inArray, sql } from 'drizzle-orm';
+import { eq, and, asc, inArray, sql, max } from 'drizzle-orm';
 import { authMiddleware } from '../auth.js';
 import { publish } from '../reminder/bus.js';
 import { logAudit } from '../utils/auditLog.js';
@@ -65,12 +65,20 @@ app.post('/', async (c) => {
   const body = await c.req.json();
   const parsed = createCategorySchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  // "未分类" 是系统保留名 (Sidebar 虚拟项 / Stats 饼图都用此名字代表 category IS NULL), 禁止用户创建同名分类避免歧义
+  if (parsed.data.name.trim() === '未分类') return c.json({ error: '"未分类" 是系统保留名, 不能用作分类名' }, 400);
+
+  // 新分类排到最后 (蘑菇 2026-06-09): 查当前 max(sortOrder) + 1; 没分类时 null -> -1 -> 0.
+  // 前端 displayList 把"未分类"虚拟项 push 在所有用户分类之后, 顺序: 已有分类 → 新分类 → 未分类
+  const maxRow = await db.select({ maxOrder: max(schema.categories.sortOrder) })
+    .from(schema.categories).where(eq(schema.categories.userId, userId)).get();
+  const newSortOrder = (maxRow?.maxOrder ?? -1) + 1;
 
   const result = await db.insert(schema.categories).values({
     name: parsed.data.name,
     userId,
     icon: parsed.data.icon ?? null,
-    sortOrder: parsed.data.sortOrder,
+    sortOrder: newSortOrder,
   }).returning();
   publish(userId, 'data-changed', { scope: 'categories' }, _ocid);
   await logAudit(c, 'category.create', 'category', String(result[0].id), { name: parsed.data.name });
@@ -83,6 +91,7 @@ app.patch('/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
   const { name } = await c.req.json();
   if (!name?.trim()) return c.json({ error: '名称不能为空' }, 400);
+  if (name.trim() === '未分类') return c.json({ error: '"未分类" 是系统保留名, 不能用作分类名' }, 400);
   const cat = await db.select().from(schema.categories).where(and(eq(schema.categories.id, id), eq(schema.categories.userId, userId))).get();
   if (!cat) return c.json({ error: '分类不存在' }, 404);
   await db.update(schema.categories).set({ name: name.trim() }).where(eq(schema.categories.id, id));

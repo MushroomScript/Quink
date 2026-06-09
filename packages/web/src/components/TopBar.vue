@@ -633,7 +633,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <div class="flex items-center gap-1.5 flex-wrap">
             <span v-if="store.filterCategory" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium"
               style="background: #FFE0CC; color: #D46B27">
-              <span class="truncate max-w-[120px] inline-flex items-center gap-1"><PhFolderOpen size="0.75rem" weight="fill" />{{ store.filterCategory }}</span>
+              <span class="truncate max-w-[120px] inline-flex items-center gap-1"><PhFolderOpen size="0.75rem" weight="fill" />{{ store.filterCategory === '__uncategorized__' ? '未分类' : store.filterCategory }}</span>
               <button @click="clearCategory()" class="hover:opacity-60 shrink-0">×</button>
             </span>
             <span v-for="t in filterTags" :key="t" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-primary-light text-primary-dark">

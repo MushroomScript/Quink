@@ -337,7 +337,10 @@ export const useNotesStore = defineStore('notes', () => {
       if (k === activeView.value) {
         // type / category 改后跟当前 view 过滤不一致 → 移除, 卡片消失
         const typeMismatch = !!filterType.value && res.data.type !== filterType.value;
-        const categoryMismatch = !!filterCategory.value && res.data.category !== filterCategory.value;
+        // sentinel '__uncategorized__' 匹配 category 为 null 的笔记; 普通字符串走严格等
+        const categoryMismatch = filterCategory.value === '__uncategorized__'
+          ? res.data.category !== null
+          : !!filterCategory.value && res.data.category !== filterCategory.value;
         if (typeMismatch || categoryMismatch) {
           vs.notes.splice(idx, 1);
           vs.total = Math.max(0, vs.total - 1);

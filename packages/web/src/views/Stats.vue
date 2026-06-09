@@ -171,16 +171,17 @@ function toggleShowAll() {
 }
 
 // 点击分类(饼图段或右侧 list 项): 跟 sidebar 分类点击同效果 — 设 store filterCategory + 跳 /quink 灵感页
+// "未分类" 传 sentinel '__uncategorized__', 后端走 IS NULL 筛; 其他真实分类名直接传字符串
 function onCategoryClick(name: string) {
-  notesStore.filterCategory = name;
+  notesStore.filterCategory = name === '未分类' ? '__uncategorized__' : name;
   notesStore.fetchNotes();
   router.push('/quink');
 }
 
-// "未分类"(NULL 笔记后端筛不到) + "其他"(真实分类名语义模糊) + isOthers(折叠"其他 N 项") 都不可点击筛选
+// 蘑菇 2026-06-09 放开 "未分类" + 用户分类"其他" 都可筛 (前者走 sentinel, 后者是用户真实分类名 eq match).
+// 仅 isOthers (折叠的"其他 N 项") 是多分类聚合, 没法单一筛, 保持不可点
 function isClickableCategory(item: { name: string; isOthers?: boolean }): boolean {
-  if (item.isOthers) return false;
-  return item.name !== '未分类' && item.name !== '其他';
+  return !item.isOthers;
 }
 
 // chart 实例引用,用于 dispatchAction 联动右侧 list hover

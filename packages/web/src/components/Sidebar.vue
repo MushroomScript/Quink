@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, markRaw } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, markRaw, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useNotesStore } from '@/stores/notes';
@@ -61,6 +61,7 @@ const showUserMenu = ref(false);
 const categories = ref<Category[]>([]);
 const showAddCategory = ref(false);
 const newCategoryName = ref('');
+const addCategoryInputEl = ref<HTMLInputElement | null>(null);
 const activeCategory = ref('');
 const showDeleteConfirm = ref(false);
 const deletingCategoryId = ref<number | null>(null);
@@ -90,7 +91,7 @@ const draggingCat = computed(() => categories.value.find(c => c.id === draggingC
 
 // 拖动时把 indicator 插入到分类列表的扁平化 array. TransitionGroup 看到 indicator enter/leave + item move 自动 FLIP 动画
 // indicator key 固定 'cat-indicator' (整列表只 1 个), 位置变化 → TransitionGroup 触发 move transform 平滑滑动
-type CatListEntry = { type: 'item'; cat: Category; key: string } | { type: 'indicator'; key: string };
+type CatListEntry = { type: 'item'; cat: Category; key: string } | { type: 'indicator'; key: string } | { type: 'uncategorized'; key: string };
 const displayList = computed<CatListEntry[]>(() => {
   const cats = categories.value;
   const list: CatListEntry[] = [];
@@ -105,6 +106,8 @@ const displayList = computed<CatListEntry[]>(() => {
       list.push({ type: 'item', cat: cats[i], key: 'cat-item-' + cats[i].id });
     }
   }
+  // "未分类"虚拟项永远在末尾, 不带 data-cat-id 不参与拖动算法 (rootEls 选 [data-cat-id]), 用户分类拖到 cats.length 位置即最后, indicator 在它上方
+  list.push({ type: 'uncategorized', key: 'uncategorized-sentinel' });
   return list;
 });
 
@@ -132,9 +135,36 @@ function scheduleLoadStats() {
 watch(() => notesStore.notes, scheduleLoadStats, { deep: true });
 watch(() => notesStore.filterCategory, (v) => { activeCategory.value = v; });
 
+// 新增分类弹窗自动聚焦输入框. 跟 NoteCard.vue 申请编辑权弹窗同款模式 (PR #13 followup 2026-06-08):
+// 网页浏览器在 modal Transition (opacity:0→1) opacity:0 时 focus() 不真 focus, document.activeElement 不变 →
+// customCaret 的 focusin listener 不触发 → 无 attach → caret 永远不显. Electron Chromium 对 opacity:0 元素 focus
+// 比标准浏览器宽松所以 PC 端没问题. 修法: 等 modal Transition 完成 (~180ms) 后再 focus + 多次 dispatch input 兜底
+// caret 位置计算. 单纯 HTML autofocus 属性也不行 (v-if 重 mount + Transition 期间渲染时机不可控)
+watch(showAddCategory, async (v) => {
+  if (!v) return;
+  await nextTick();
+  setTimeout(() => {
+    const el = addCategoryInputEl.value;
+    if (!el) return;
+    el.focus();
+    [0, 150, 350].forEach(delay => {
+      setTimeout(() => {
+        if (el && document.activeElement === el) {
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }, delay);
+    });
+  }, 200);
+});
+
 async function addCategory() {
   const name = newCategoryName.value.trim();
   if (!name) return;
+  // "未分类" 是系统保留名 (Sidebar 虚拟项 / Stats 饼图都用此名字代表 category IS NULL), 前端先拦一道防止用户误用
+  if (name === '未分类') {
+    toast.show('"未分类" 是系统保留名, 不能用作分类名', 'error');
+    return;
+  }
   try {
     await api.createCategory({ name });
     newCategoryName.value = '';
@@ -600,16 +630,26 @@ onUnmounted(() => {
         <span class="text-[11px] font-medium" style="color: var(--sb-dim)">分类</span>
         <button @click="showAddCategory = true" class="text-xs" style="color: var(--sb-dim)" title="新增分类">+</button>
       </div>
-      <!-- Tree -->
+      <!-- 暂无自定义分类提示 (跟 TransitionGroup 并存; 现在 TransitionGroup 始终至少有"未分类"虚拟项, 不再用 v-if/v-else 互斥) -->
       <div v-if="categories.length === 0 && !showAddCategory" class="px-3 py-2">
         <span class="text-[11px]" style="color: var(--sb-dim); opacity: 0.5">暂无分类</span>
       </div>
       <!-- root 排序拖拽 (PR 2026-06-09): pointerdown + 5px 阈值 → 拖动. ✕ 按钮 @pointerdown.stop 防把删按钮当拖把手.
-           TransitionGroup: indicator enter/leave fade, item splice 重排时 FLIP 平移 (动画见 .cat-move CSS). -->
-      <TransitionGroup v-else name="cat" tag="div" class="space-y-0.5 overflow-y-auto"
+           TransitionGroup: indicator enter/leave fade, item splice 重排时 FLIP 平移 (动画见 .cat-move CSS).
+           "未分类"虚拟项 (entry.type === 'uncategorized') 跟用户分类同款 class + icon, 永远在末尾, 无 ✕ + 不绑 onCatPointerDown 防拖排序. -->
+      <TransitionGroup name="cat" tag="div" class="space-y-0.5 overflow-y-auto"
         :style="{ height: categoryHeight + 'px' }">
         <template v-for="entry in displayList" :key="entry.key">
           <div v-if="entry.type === 'indicator'" class="h-0.5 bg-primary rounded-full mx-2" />
+          <div v-else-if="entry.type === 'uncategorized'"
+            @click="filterByCategory('__uncategorized__')"
+            class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors select-none"
+            :style="activeCategory === '__uncategorized__'
+              ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)' }
+              : { color: 'var(--sb-dim)' }">
+            <PhFolderOpen size="0.875rem" weight="fill" />
+            <span class="flex-1 truncate">未分类</span>
+          </div>
           <div v-else :data-cat-id="entry.cat.id"
             @pointerdown="onCatPointerDown($event, entry.cat)"
             :data-drop-target="'cat:' + entry.cat.name"
@@ -650,7 +690,8 @@ onUnmounted(() => {
         <div class="absolute inset-0 bg-black/30" @click="showAddCategory = false" />
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-72">
           <p class="text-sm font-medium text-gray-700 mb-3">新增分类</p>
-          <input v-model="newCategoryName" @keydown.enter="addCategory" placeholder="输入分类名称" autofocus
+          <input ref="addCategoryInputEl" v-model="newCategoryName" @keydown.enter="addCategory" placeholder="输入分类名称"
+            data-caret-offset-y="1"
             class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
           <div class="flex gap-2 mt-4 justify-end">
             <button @click="showAddCategory = false; newCategoryName = ''"

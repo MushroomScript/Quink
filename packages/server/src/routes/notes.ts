@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
-import { eq, desc, like, or, and, sql, inArray } from 'drizzle-orm';
+import { eq, desc, like, or, and, sql, inArray, isNull } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
@@ -33,8 +33,9 @@ const NOTE_AI_SKIP_THRESHOLD = 200_000; // 超过 200k 字符跳过 AI 处理防
 const createNoteSchema = z.object({
   content: z.string().min(1).max(NOTE_CONTENT_MAX),
   type: z.enum(['quink', 'note', 'todo']).default('quink'),
-  // null / undefined / 字符串都接受, 跟 updateNoteSchema 对称. null 跟 undefined 后端等价 (DB 默认 null)
-  category: z.string().max(200).nullable().optional(),
+  // null / undefined / 字符串都接受, 跟 updateNoteSchema 对称. null 跟 undefined 后端等价 (DB 默认 null).
+  // refine 拒字符串 "未分类": 是系统保留名 (Sidebar/Stats 用它代表 category IS NULL), 防 API 直调写入让笔记"消失"在筛选里
+  category: z.string().max(200).nullable().optional().refine((v) => v !== '未分类', { message: '"未分类" 是系统保留名, 笔记 category 字段不能设成此字符串 (用 null 表示未分类)' }),
   tags: z.array(z.string().max(50)).max(50).optional(),
   // PR #13: todoDue / todoRemindRrule 已移除. 设提醒走 POST /:id/personal-reminder 单独接口
   // PR #2 群组共享: visibility=private (默认, 仅作者) / visibility=shared 必须给 sharedGroupIds[]
@@ -45,8 +46,9 @@ const createNoteSchema = z.object({
 const updateNoteSchema = z.object({
   content: z.string().min(1).max(NOTE_CONTENT_MAX).optional(),
   summary: z.string().max(2000).optional(),
-  // null = 用户改回"自动" (清空 category 让后续 AI 可重新分类); undefined = 不动 category 字段; 字符串 = 手动选定
-  category: z.string().max(200).nullable().optional(),
+  // null = 用户改回"自动" (清空 category 让后续 AI 可重新分类); undefined = 不动 category 字段; 字符串 = 手动选定.
+  // refine 同 createNoteSchema 拒字符串 "未分类" (系统保留名)
+  category: z.string().max(200).nullable().optional().refine((v) => v !== '未分类', { message: '"未分类" 是系统保留名, 笔记 category 字段不能设成此字符串 (用 null 表示未分类)' }),
   tags: z.array(z.string().max(50)).max(50).optional(),
   type: z.enum(['quink', 'note', 'todo']).optional(),
   todoStatus: z.enum(['pending', 'done']).optional(),
@@ -175,8 +177,12 @@ app.get('/', async (c) => {
       )
     );
   }
-  if (category) {
-    conditions.push(like(schema.notes.category, `${category}%`));
+  if (category === '__uncategorized__') {
+    // sentinel: 前端 Sidebar "未分类" 虚拟项 / Stats "未分类" 饼图段点击传入, 走 IS NULL 筛 category 为空的笔记
+    conditions.push(isNull(schema.notes.category));
+  } else if (category) {
+    // 蘑菇 2026-06-09: 之前用 like prefix 匹配 ("设计%" 会命中 "设计稿") 不是有意 → 改 eq 严格匹配分类名
+    conditions.push(eq(schema.notes.category, category));
   }
   if (types) {
     const typeList = types.split(',').map(t => t.trim()).filter(Boolean);

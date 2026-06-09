@@ -19,7 +19,8 @@
  * 启动：main.ts import 即触发模块级 side effect。
  *
  * 单 input y 微调: 给 input/textarea 加 `data-caret-offset-y="1.5"` 让该元素的 caret 比
- * 文字基线多偏移 N px (默认 0). 蘑菇视觉微调专用, 不影响其他 input.
+ * 文字基线多偏移 N 视觉 CSS px (默认 0). 蘑菇视觉微调专用, 不影响其他 input.
+ * 注意: dataset 写的是视觉 CSS px (zoom-invariant), 实现里乘 zoom 转 layout 让所有 zoom 下视觉位置一致.
  */
 
 import { getCssZoom } from '../utils/zoom';
@@ -277,10 +278,6 @@ function updateCaret() {
 
   syncMirrorStyle(el);
 
-  // input/textarea 维度独立的 caret y 偏移 (dataset.caretOffsetY="1" 让 caret 比文字位置低 1px).
-  // 让蘑菇可以在不动 input padding 的前提下单独微调 caret 视觉位置. 默认 0 = 跟文字基线对齐.
-  const extraY = parseFloat(el.dataset.caretOffsetY || '0') || 0;
-
   const selStart = el.selectionStart ?? el.value.length;
   const before = el.value.substring(0, selStart);
 
@@ -314,6 +311,9 @@ function updateCaret() {
   // 全部走 layout 坐标 (rect / zoom). transform 给 fixed caret 时直接用 layout 值,
   // fixed 子元素渲染时被祖先 zoom 乘回 → 视觉对齐。Electron 端 zoom=1 行为不变。详见 utils/zoom.ts
   const zoom = getCssZoom();
+  // input/textarea 维度独立的 caret y 视觉偏移 (dataset.caretOffsetY="1" 让 caret 比文字位置低 1 视觉 CSS px).
+  // 乘 zoom 转 layout 让所有 zoom 下视觉位置一致 (蘑菇 2026-06-09: 之前直接当 layout 加, zoom=1 视觉 1.5 / zoom=1.5 视觉 1 不一致)
+  const extraY = (parseFloat(el.dataset.caretOffsetY || '0') || 0) * zoom;
   // 提前算 cs / fontSize / caretHeight 让空 textarea 快路径用得上 (原本在 markerRect 之后定义, 快路径需提前)
   const cs = getComputedStyle(el);
   const fontSize = parseFloat(cs.fontSize);

@@ -131,10 +131,10 @@ watch(opened, (v) => { if (!v) emit('close'); });
         <!-- 加入 Tab -->
         <div v-if="tab === 'join'" class="flex-1 flex flex-col">
           <label class="block text-xs text-gray-500 mb-1">邀请码或邀请链接</label>
-          <!-- 视觉微调 (蘑菇两次迭代净效果): 内容向下 0.5px (padding 7/9 vs py-2 = 8/8), caret 再额外向下 1px (data-caret-offset-y) → caret 净向下 1.5px -->
+          <!-- 视觉微调: 内容向下 0.5px (padding 7/9 vs py-2 = 8/8) + caret 额外向下 1px (视觉 CSS px, zoom-invariant) -->
           <input ref="inviteInputEl" v-model="inviteInput" @keydown.enter="doJoin"
             placeholder="粘贴 16 位邀请码或完整邀请链接"
-            data-caret-offset-y="1.5"
+            data-caret-offset-y="1"
             style="padding-top: 7px; padding-bottom: 9px;"
             class="w-full px-3 mb-4 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/20" />
 
@@ -185,10 +185,10 @@ watch(opened, (v) => { if (!v) emit('close'); });
         <!-- 新建 Tab -->
         <div v-else class="flex-1 flex flex-col">
           <label class="block text-xs text-gray-500 mb-1">群组名</label>
-          <!-- 视觉微调 (跟加入 Tab 同步): 内容向下 0.5px + caret 额外向下 1.5px -->
+          <!-- 视觉微调 (跟加入 Tab 同步): 内容向下 0.5px + caret 额外向下 1px (视觉 CSS px, zoom-invariant) -->
           <input ref="nameInputEl" v-model="name" maxlength="50" @keydown.enter="doCreate"
             placeholder="我的群组"
-            data-caret-offset-y="1.5"
+            data-caret-offset-y="1"
             style="padding-top: 7px; padding-bottom: 9px;"
             class="w-full px-3 mb-4 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/20" />
 
