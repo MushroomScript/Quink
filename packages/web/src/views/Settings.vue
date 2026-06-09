@@ -932,9 +932,11 @@ function goBack() {
     </Teleport>
 
     <!-- ═══ 偏好设置 ═══ -->
+    <!-- 蘑菇 2026-06-09: 父容器去掉 space-y-5, 改用每项 py-3 border-t 上下对称 (border-t 到内容上下距离都是 12px) -->
     <div v-if="activeTab === 'preferences'" class="space-y-6">
-      <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-        <div>
+      <div class="bg-white rounded-xl border border-gray-200 p-6">
+        <!-- 主题色: 第一项无 border-t, pb-3 给下方留空间跟下一项 pt-3 对称 -->
+        <div class="pb-3">
           <label class="block text-xs font-medium text-gray-500 mb-2">主题色</label>
           <div class="flex gap-3">
             <button v-for="t in [
@@ -953,21 +955,27 @@ function goBack() {
             </button>
           </div>
         </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">显示比例</label>
-          <CustomSelect v-model="prefs.zoomLevel" size="md" class="w-full" :options="[
-            { value: 75, label: '75%' },
-            { value: 80, label: '80%' },
-            { value: 90, label: '90%' },
-            { value: 100, label: '100%（默认）' },
-            { value: 110, label: '110%' },
-            { value: 125, label: '125%' },
-            { value: 150, label: '150%' },
-            { value: 200, label: '200%' },
-          ]" />
+        <!-- 显示比例: 蘑菇 2026-06-09 改成 horizontal 跟其他项一致 -->
+        <div class="py-3 border-t border-gray-100">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm text-gray-700 font-medium">显示比例</div>
+              <div class="text-xs text-gray-400 mt-0.5">界面整体缩放比例</div>
+            </div>
+            <CustomSelect v-model="prefs.zoomLevel" size="compact" :options="[
+              { value: 75, label: '75%' },
+              { value: 80, label: '80%' },
+              { value: 90, label: '90%' },
+              { value: 100, label: '100%（默认）' },
+              { value: 110, label: '110%' },
+              { value: 125, label: '125%' },
+              { value: 150, label: '150%' },
+              { value: 200, label: '200%' },
+            ]" />
+          </div>
         </div>
         <!-- 列表排序: 灵感/笔记/待办 3 主 view 按此字段排序 (置顶永远在最前, 组内按所选时间排) -->
-        <div class="pt-2 border-t border-gray-100">
+        <div class="py-3 border-t border-gray-100">
           <div class="flex items-center justify-between">
             <div>
               <div class="text-sm text-gray-700 font-medium">列表排序</div>
@@ -981,7 +989,7 @@ function goBack() {
         </div>
         <!-- PR #7a 群组共享笔记可见范围: 改后清各 view 缓存, 切回主 view 时 onActivated wasEmpty 走 reset 拉新 scope 数据.
              私人笔记不受此设置影响, 始终显示; 此设置仅决定主页面是否纳入群组共享笔记 -->
-        <div class="pt-2 border-t border-gray-100">
+        <div class="py-3 border-t border-gray-100">
           <div class="flex items-center justify-between">
             <div>
               <div class="text-sm text-gray-700 font-medium">群组共享笔记可见范围</div>
@@ -996,7 +1004,7 @@ function goBack() {
           </div>
         </div>
         <!-- 待办未完成数字提示 -->
-        <div class="flex items-center justify-between pt-2 border-t border-gray-100">
+        <div class="flex items-center justify-between py-3 border-t border-gray-100">
           <div>
             <div class="text-sm text-gray-700 font-medium">待办未完成数字提示</div>
             <div class="text-xs text-gray-400 mt-0.5">侧边栏「待办」后显示未完成数量的红色徽标</div>
@@ -1004,7 +1012,7 @@ function goBack() {
           <ToggleSwitch v-model="prefs.showTodoBadge" class="ml-4" />
         </div>
         <!-- 回收站保留天数 -->
-        <div class="pt-2 border-t border-gray-100">
+        <div class="py-3 border-t border-gray-100">
           <div class="flex items-center justify-between">
             <div>
               <div class="text-sm text-gray-700 font-medium">回收站保留时间</div>
@@ -1022,7 +1030,7 @@ function goBack() {
           </div>
         </div>
         <!-- 蘑菇 2026-06-09: 卡片最小宽度 (设备本地, localStorage 不跨账号). px 模式按绝对像素切列; percent 模式按 main 区百分比锁列数 -->
-        <div class="pt-2 border-t border-gray-100">
+        <div class="py-3 border-t border-gray-100">
           <div class="flex items-center justify-between gap-3 flex-wrap">
             <div class="flex-1 min-w-0">
               <div class="text-sm text-gray-700 font-medium">卡片最小宽度</div>
@@ -1047,7 +1055,7 @@ function goBack() {
         </div>
         <!-- 下载目录 (本地配置, localStorage 存, 不跨设备同步因为 path 跟 OS 相关).
              非 Electron (手机/网页端) 没有 quinkDesktop, 浏览器自己处理下载, 隐藏整块 -->
-        <div v-if="isElectron" class="pt-2 border-t border-gray-100">
+        <div v-if="isElectron" class="py-3 border-t border-gray-100">
           <div class="flex items-center justify-between gap-3">
             <div class="flex-1 min-w-0">
               <div class="text-sm text-gray-700 font-medium">下载文件夹</div>
@@ -1072,7 +1080,7 @@ function goBack() {
              "自动摘要 · 最少字符数"已挪到提示词编辑区 (auto_summary tab 选中时显示在恢复默认按钮右侧).
              2026-05-29 蘑菇改 -->
         <!-- 讯飞语音识别 -->
-        <div class="pt-2 border-t border-gray-100 space-y-2">
+        <div class="py-3 border-t border-gray-100 space-y-2">
           <div class="text-sm text-gray-700 font-medium">语音识别（讯飞）</div>
           <div class="text-xs text-gray-400 mb-1">用于编辑器的语音输入功能，注册 xfyun.cn 获取</div>
           <div class="space-y-1.5">
@@ -1105,11 +1113,12 @@ function goBack() {
     </div>
 
     <!-- ═══ 快捷键 ═══ -->
+    <!-- 蘑菇 2026-06-09: 内层 space-y-3 去掉, 3 项靠 border-b 自己分隔, 每条线上下 12px 对称 -->
     <div v-if="activeTab === 'shortcuts'">
       <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-        <div class="space-y-3">
-          <!-- Capture shortcut -->
-          <div class="flex items-center justify-between py-3 border-b border-gray-50">
+        <div>
+          <!-- Capture shortcut: 第一项 pb-3 (无 pt) 让标题贴卡片顶部 padding 跟偏好设置一致 -->
+          <div class="flex items-center justify-between pb-3 border-b border-gray-50">
             <div>
               <div class="text-sm text-gray-700 font-medium">快速记录</div>
               <div class="text-xs text-gray-400">弹出输入窗口，写下新想法</div>
@@ -1495,14 +1504,18 @@ function goBack() {
         </div>
 
         <div class="space-y-3 text-sm text-gray-500 mb-6">
-          <p class="text-center">按下快捷键，闪电记录脑中灵感</p>
-          <p class="text-center">AI 自动归类总结，随时回顾</p>
+          <p class="text-center">一念之间，落笔即存</p>
+          <p class="text-center">AI 自动整理，灵感不再走散</p>
         </div>
 
         <div class="border-t border-gray-100 pt-4">
-          <div class="flex justify-between text-xs">
-            <span class="text-gray-400">技术栈</span>
-            <span class="text-gray-500">Electron + Vue 3 + Hono + SQLite</span>
+          <div class="flex justify-between items-center text-xs">
+            <span class="text-gray-400">GitHub</span>
+            <!-- Electron 端 main.ts setWindowOpenHandler 已统一把 target=_blank 走 shell.openExternal -->
+            <a href="https://github.com/MushroomScript/Quink" target="_blank" rel="noopener"
+              class="text-gray-500 hover:text-primary transition-colors font-mono">
+              MushroomScript/Quink
+            </a>
           </div>
         </div>
 
