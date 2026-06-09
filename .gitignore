@@ -56,3 +56,6 @@ packages/desktop/test-keys.js
 
 # 辅助脚本 (seed 测试数据 / 构建图标等, 个人开发环境用)
 scripts/
+
+# 临时调试截图 (MCP 截图给蘑菇看 / 视觉对比, 用完删 + 同步移除此规则)
+.tmp-*.png

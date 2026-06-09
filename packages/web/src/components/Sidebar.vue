@@ -461,13 +461,19 @@ onUnmounted(() => {
         class="flex items-center w-full rounded-xl transition-colors text-left"
         :class="sidebarCollapsed ? 'justify-center p-1' : 'gap-3 px-3 py-2'"
         style="color: var(--sb-text)" @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--sb-hover)'" @mouseleave="($event.currentTarget as HTMLElement).style.background = 'transparent'">
-        <!-- <img> 走 thumb URL; @error 一次性降级原图. 比 background-image 路径 downsample 质量好 -->
-        <img v-if="auth.avatar" :src="resolveFileThumbUrl(auth.avatar)"
-          @error="thumbErrorFallback($event, resolveFileUrl(auth.avatar))"
-          draggable="false" alt="头像"
-          class="w-7 h-7 rounded-full object-cover shrink-0 aspect-square" />
-        <div v-else class="w-7 h-7 rounded-full bg-primary/30 text-primary flex items-center justify-center text-sm font-bold shrink-0">
-          {{ getInitial(auth.nickname) }}
+        <!-- 头像 + 通知红点. relative 容器让红点叠头像右上角 (展开/折叠态一致, 数字在头像菜单内看).
+             仿群组项折叠态 w-2 h-2 bg-red-400/90, 不点头像菜单也能感知未读. -->
+        <div class="relative shrink-0">
+          <!-- <img> 走 thumb URL; @error 一次性降级原图. 比 background-image 路径 downsample 质量好 -->
+          <img v-if="auth.avatar" :src="resolveFileThumbUrl(auth.avatar)"
+            @error="thumbErrorFallback($event, resolveFileUrl(auth.avatar))"
+            draggable="false" alt="头像"
+            class="w-7 h-7 rounded-full object-cover aspect-square" />
+          <div v-else class="w-7 h-7 rounded-full bg-primary/30 text-primary flex items-center justify-center text-sm font-bold">
+            {{ getInitial(auth.nickname) }}
+          </div>
+          <span v-if="notificationsStore.unread.total > 0"
+            class="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-400/90 rounded-full" />
         </div>
         <div v-if="!sidebarCollapsed" class="flex-1 min-w-0">
           <div class="text-sm font-medium truncate" style="color: var(--sb-text)">{{ auth.nickname || '未设置' }}</div>
