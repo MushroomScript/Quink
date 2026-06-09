@@ -2085,10 +2085,15 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
       .replace(/\[[^\]]*\]\([^)]+\.(?:png|jpg|jpeg|gif|webp|svg|webm|mp3|wav|ogg|m4a|mp4|mov|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|txt|md|csv|json)\)/gi, '') // 附件链接
       .trim().length;
 
+    // 纯附件笔记 (音频/图片/视频/文档, plainTextLen=0) 跳过 AI 标签 + 分类:
+    // content 只是 [语音备忘 30s](xxx.m4a) 这类 markdown 时, AI 会从文件名 / 时间戳里抽
+    // "语音备忘" / "2026-06-09" / 文件名当垃圾标签. 阈值 5 跟 autoTag 内部 cleanContent < 5
+    // 跳过门槛对齐, 但用 plainTextLen 度量 (剥过附件 markdown), 让真正的纯附件笔记被拦下.
+    const TAG_MIN_PLAIN_LEN = 5;
     const [tags, category, summary] = await Promise.all([
-      // 用户已自己写了标签 → 直接用; 关了自动标签 → 留空; 否则 AI 生成
-      existingTags.length > 0 ? Promise.resolve(existingTags) : (tagEnabled ? autoTag(userId, content) : Promise.resolve([] as string[])),
-      categorizeEnabled ? autoClassify(userId, content) : Promise.resolve(null),
+      // 用户已自己写了标签 → 直接用; 关了自动标签 / 纯附件笔记 → 留空; 否则 AI 生成
+      existingTags.length > 0 ? Promise.resolve(existingTags) : (tagEnabled && plainTextLen >= TAG_MIN_PLAIN_LEN ? autoTag(userId, content) : Promise.resolve([] as string[])),
+      categorizeEnabled && plainTextLen >= TAG_MIN_PLAIN_LEN ? autoClassify(userId, content) : Promise.resolve(null),
       summaryEnabled && plainTextLen >= summaryMinLen ? autoSummary(userId, content) : Promise.resolve(null),
     ]);
 
