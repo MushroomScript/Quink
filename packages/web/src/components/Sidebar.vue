@@ -9,6 +9,7 @@ import { api, isLoggedIn, type Category } from '@/api';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useToast } from '@/composables/useToast';
 import { dragState } from '@/utils/cardDnd';
+import { getCssZoom } from '@/utils/zoom';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import { tasks as transferTasks, dockVisible as transferDockVisible } from '@/composables/useAttachmentTasks';
 import { useSseSync } from '@/utils/sseSync';
@@ -22,7 +23,6 @@ import {
   PhTag,
   PhTrash,
   PhFolderOpen,
-  PhFile,
   PhCaretDown,
   PhCaretLeft,
   PhCaretRight,
@@ -65,6 +65,48 @@ const activeCategory = ref('');
 const showDeleteConfirm = ref(false);
 const deletingCategoryId = ref<number | null>(null);
 const deletingCategoryName = ref('');
+
+// 分类拖拽自定义排序 (蘑菇 2026-06-09): 系统只支持一级 root 分类, child 已废弃
+//   draggingCatId = 正在拖的 root id; dragStarted = true 才视为真拖动 (5px 阈值过了)
+//   dragInsertIdx = 插入位置 (0 = 第一个之前, categories.length = 末尾, -1 = 不显示 indicator)
+//   ghost: 仿 DragGhost.vue 模式, 拖动时浮动 div 跟随鼠标 (Teleport body + fixed + pointer-events-none)
+const draggingCatId = ref<number | null>(null);
+let dragStartY = 0;
+const dragStarted = ref(false);
+const dragInsertIdx = ref(-1);
+const dragGhostX = ref(0);
+const dragGhostY = ref(0);
+
+// 跟 DragGhost.vue 同款: CSS zoom 下 inline px 渲染会再 *zoom 一次, 用 getCssZoom 除掉. Electron zoom=1 无副作用
+const dragGhostStyle = computed(() => {
+  const z = getCssZoom();
+  return {
+    left: ((dragGhostX.value + 12) / z) + 'px',
+    top: ((dragGhostY.value + 12) / z) + 'px',
+  };
+});
+// 拖动中那个分类的 reactive 引用 (给 ghost 模板用)
+const draggingCat = computed(() => categories.value.find(c => c.id === draggingCatId.value) || null);
+
+// 拖动时把 indicator 插入到分类列表的扁平化 array. TransitionGroup 看到 indicator enter/leave + item move 自动 FLIP 动画
+// indicator key 固定 'cat-indicator' (整列表只 1 个), 位置变化 → TransitionGroup 触发 move transform 平滑滑动
+type CatListEntry = { type: 'item'; cat: Category; key: string } | { type: 'indicator'; key: string };
+const displayList = computed<CatListEntry[]>(() => {
+  const cats = categories.value;
+  const list: CatListEntry[] = [];
+  const insertAt = dragStarted.value ? dragInsertIdx.value : -1;
+  const draggedId = draggingCatId.value;
+  for (let i = 0; i <= cats.length; i++) {
+    // indicator 出现条件: insertAt 等于这位置且不是"放回原位 / 自己后一位" (没意义的目标)
+    if (insertAt === i && draggedId !== cats[i - 1]?.id && draggedId !== cats[i]?.id) {
+      list.push({ type: 'indicator', key: 'cat-indicator' });
+    }
+    if (i < cats.length) {
+      list.push({ type: 'item', cat: cats[i], key: 'cat-item-' + cats[i].id });
+    }
+  }
+  return list;
+});
 
 async function loadStats() {
   if (!isLoggedIn()) return;
@@ -135,6 +177,76 @@ function filterByCategory(name: string) {
   const contentPaths = ['/quink', '/notes', '/todos'];
   if (!contentPaths.includes(route.path)) {
     router.push('/quink');
+  }
+}
+
+// ── 分类排序拖拽: pointerdown + 5px 阈值 → 移过阈值进 drag mode, 没过阈值 pointerup 时走筛选 ──
+// 注: cardDnd 是 NoteCard 上 mousedown 启动 (拖卡片落到 sidebar drop target), 跟本流程源头不同不冲突
+function onCatPointerDown(e: PointerEvent, cat: Category) {
+  if (e.button !== 0) return; // 仅左键
+  draggingCatId.value = cat.id;
+  dragStartY = e.clientY;
+  dragStarted.value = false;
+  dragInsertIdx.value = -1;
+  dragGhostX.value = e.clientX;
+  dragGhostY.value = e.clientY;
+  document.addEventListener('pointermove', onCatPointerMove);
+  document.addEventListener('pointerup', onCatPointerUp, { once: true });
+}
+
+function onCatPointerMove(e: PointerEvent) {
+  if (draggingCatId.value === null) return;
+  if (!dragStarted.value) {
+    if (Math.abs(e.clientY - dragStartY) < 5) return;
+    dragStarted.value = true;
+  }
+  // ghost 跟随鼠标 (拖动期间每帧更新; 阈值前不更新无所谓, ghost 还没显示)
+  dragGhostX.value = e.clientX;
+  dragGhostY.value = e.clientY;
+  // 遍历当前 item DOM (data-cat-id), 找光标 Y 落在哪个 item 的上半 → 该 item 的 categories 原 idx 即为插入位置.
+  // displayList 里掺杂 indicator, 但 indicator 不带 data-cat-id, querySelectorAll 只返回 item 元素, 顺序仍是 categories.value 顺序
+  const rootEls = document.querySelectorAll<HTMLElement>('[data-cat-id]');
+  let idx = rootEls.length;
+  for (let i = 0; i < rootEls.length; i++) {
+    const r = rootEls[i].getBoundingClientRect();
+    if (e.clientY < r.top + r.height / 2) { idx = i; break; }
+  }
+  dragInsertIdx.value = idx;
+}
+
+async function onCatPointerUp() {
+  document.removeEventListener('pointermove', onCatPointerMove);
+  const wasDragging = dragStarted.value;
+  const draggedId = draggingCatId.value;
+  const insertIdx = dragInsertIdx.value;
+  draggingCatId.value = null;
+  dragStarted.value = false;
+  dragInsertIdx.value = -1;
+
+  if (!wasDragging) {
+    // 阈值没过 = 单纯点击 = 走筛选 (用拖动状态外的 cat name 因为 draggingCatId 已清)
+    const cat = categories.value.find(c => c.id === draggedId);
+    if (cat) filterByCategory(cat.name);
+    return;
+  }
+  // 真实拖动结束: 计算新顺序并乐观更新
+  const origIdx = categories.value.findIndex(c => c.id === draggedId);
+  if (origIdx < 0) return;
+  // 插到自己位置 / 自己后一位 = 等于没动, 跳过
+  if (insertIdx === origIdx || insertIdx === origIdx + 1) return;
+  const next = [...categories.value];
+  const [moved] = next.splice(origIdx, 1);
+  // 删除自己后, insertIdx 若大于 origIdx 要减 1 (因 splice 把数组缩短了 1)
+  const realInsertAt = insertIdx > origIdx ? insertIdx - 1 : insertIdx;
+  next.splice(realInsertAt, 0, moved);
+  categories.value = next;
+  // 乐观更新: 立即调 API, 失败回滚
+  try {
+    await api.reorderCategories({ orderedIds: next.map(c => c.id) });
+  } catch (e: any) {
+    console.error('[reorderCategories]', e);
+    toast.show('排序失败, 已回滚', 'error');
+    await loadCategories();
   }
 }
 
@@ -486,38 +598,42 @@ onUnmounted(() => {
       <div v-if="categories.length === 0 && !showAddCategory" class="px-3 py-2">
         <span class="text-[11px]" style="color: var(--sb-dim); opacity: 0.5">暂无分类</span>
       </div>
-      <div v-else class="space-y-0.5 overflow-y-auto"
+      <!-- root 排序拖拽 (PR 2026-06-09): pointerdown + 5px 阈值 → 拖动. ✕ 按钮 @pointerdown.stop 防把删按钮当拖把手.
+           TransitionGroup: indicator enter/leave fade, item splice 重排时 FLIP 平移 (动画见 .cat-move CSS). -->
+      <TransitionGroup v-else name="cat" tag="div" class="space-y-0.5 overflow-y-auto"
         :style="{ height: categoryHeight + 'px' }">
-        <div v-for="cat in categories" :key="cat.id"
-          @click="filterByCategory(cat.name)"
-          :data-drop-target="'cat:' + cat.name"
-          class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-all group"
-          :class="{ 'drop-target-active': isActiveDrop('cat:' + cat.name) }"
-          :style="activeCategory === cat.name
-            ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)' }
-            : { color: 'var(--sb-dim)' }">
-          <PhFolderOpen size="0.875rem" weight="fill" />
-          <span class="flex-1 truncate">{{ cat.name }}</span>
-          <button @click.stop="confirmDelete(cat)" class="opacity-0 group-hover:opacity-100 text-[10px] hover:text-red-400" style="color: var(--sb-dim)">✕</button>
-        </div>
-        <template v-for="cat in categories" :key="'children-' + cat.id">
-          <div v-for="child in cat.children" :key="child.id"
-            @click="filterByCategory(child.name)"
-            :data-drop-target="'cat:' + child.name"
-            class="flex items-center gap-2 px-3 py-1.5 pl-8 rounded-lg text-xs cursor-pointer transition-all group"
-            :class="{ 'drop-target-active': isActiveDrop('cat:' + child.name) }"
-            :style="activeCategory === child.name
+        <template v-for="entry in displayList" :key="entry.key">
+          <div v-if="entry.type === 'indicator'" class="h-0.5 bg-primary rounded-full mx-2" />
+          <div v-else :data-cat-id="entry.cat.id"
+            @pointerdown="onCatPointerDown($event, entry.cat)"
+            :data-drop-target="'cat:' + entry.cat.name"
+            class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors group select-none"
+            :class="[
+              { 'drop-target-active': isActiveDrop('cat:' + entry.cat.name) },
+              draggingCatId === entry.cat.id && dragStarted ? 'cat-dragging' : '',
+            ]"
+            :style="activeCategory === entry.cat.name
               ? { background: 'var(--sb-active-bg)', color: 'var(--sb-active-text)' }
               : { color: 'var(--sb-dim)' }">
-            <PhFile size="0.875rem" weight="fill" />
-            <span class="flex-1 truncate">{{ child.name }}</span>
-            <button @click.stop="confirmDelete(child)" class="opacity-0 group-hover:opacity-100 text-[10px] hover:text-red-400" style="color: var(--sb-dim)">✕</button>
+            <PhFolderOpen size="0.875rem" weight="fill" />
+            <span class="flex-1 truncate">{{ entry.cat.name }}</span>
+            <button @click.stop="confirmDelete(entry.cat)" @pointerdown.stop class="opacity-0 group-hover:opacity-100 text-[10px] hover:text-red-400" style="color: var(--sb-dim)">✕</button>
           </div>
         </template>
-      </div>
+      </TransitionGroup>
     </div>
 
   </aside>
+
+  <!-- 分类拖动 ghost: Teleport body + fixed + pointer-events-none 跟随鼠标. 仿 DragGhost.vue 模式. -->
+  <Teleport to="body">
+    <div v-if="dragStarted && draggingCat"
+      class="cat-drag-ghost pointer-events-none fixed z-[var(--z-overlay)] bg-white border border-gray-300 rounded-lg shadow-lg px-3 py-1.5 text-xs flex items-center gap-2 whitespace-nowrap"
+      :style="dragGhostStyle">
+      <PhFolderOpen size="0.875rem" weight="fill" class="text-gray-500" />
+      <span class="text-gray-700">{{ draggingCat.name }}</span>
+    </div>
+  </Teleport>
 
   <Teleport to="body">
     <div v-if="showUserMenu" class="fixed inset-0 z-[var(--z-sidebar-backdrop)]" @click="closeUserMenu" />
@@ -611,5 +727,32 @@ onUnmounted(() => {
 .category-resize-handle:hover::before {
   height: 3px;
   background: rgb(var(--c-accent) / 0.4);
+}
+
+/* ── 分类拖拽排序动画 ── */
+/* item 重排 (categories splice 后 TransitionGroup FLIP): transform 0.25s ease 让其他 item 平滑滑到新位置.
+   indicator move 也用同条 transition: indicator key 固定 'cat-indicator', dragInsertIdx 变化时它从一个位置滑到另一个. */
+.cat-move {
+  transition: transform 0.25s ease;
+}
+/* indicator enter/leave: fade in/out. item 永不 enter/leave (categories 数量不变 by drag), 这条只影响 indicator */
+.cat-enter-active,
+.cat-leave-active {
+  transition: opacity 0.18s ease;
+}
+.cat-enter-from,
+.cat-leave-to {
+  opacity: 0;
+}
+/* leave 期间 absolute 抽离 layout, 让其他 item 的 FLIP 起算位置不受残影 indicator 影响. mx-2 维持横向位置 */
+.cat-leave-active {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+/* 被拖的 item: 40% 透明度 + 平滑过渡, 让用户感知"这条正在被你抓着" */
+.cat-dragging {
+  opacity: 0.4;
+  transition: opacity 0.15s ease;
 }
 </style>

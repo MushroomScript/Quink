@@ -42,11 +42,11 @@ sqlite.exec(`
     updated_at TEXT NOT NULL
   );
 
+  -- 蘑菇 2026-06-09: 系统只支持一级分类, 不再有 parent_id (旧 DB 启动迁移会 DROP COLUMN)
   CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL REFERENCES users(id),
     name TEXT NOT NULL,
-    parent_id INTEGER,
     icon TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0
   );
@@ -300,7 +300,7 @@ try { sqlite.exec('ALTER TABLE notes ADD COLUMN version INTEGER NOT NULL DEFAULT
 // 这是行为破坏更新 (PR #5 默认 all, PR #5b 默认 admin), dev 环境 OK
 try { sqlite.exec("ALTER TABLE notes ADD COLUMN edit_permission TEXT NOT NULL DEFAULT 'admin'"); } catch {}
 // Migrate: PR #7a COW 分叉模型 - notes.parent_note_id 自引用 root note (默认 NULL = root), 字段先加 7b 用.
-// SQLite ALTER TABLE 不支持加 FK 约束, 跟其他自引用 (folders.parent_id / categories.parent_id) 同款弱约束业务保证.
+// SQLite ALTER TABLE 不支持加 FK 约束, 跟其他自引用 (folders.parent_id / noteComments.parent_id) 同款弱约束业务保证.
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN parent_note_id TEXT'); } catch {}
 // PR #7a 修改历史表 (空间换简洁, 只记 who+when 不存 content snapshot, 给 UI "@B、@C 编辑过" 用)
 sqlite.exec(`
@@ -489,5 +489,9 @@ try {
   }
   sqlite.prepare("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)").run('pinyin_schema_version', JSON.stringify(PINYIN_SCHEMA_VERSION));
 } catch (e) { console.error('[pinyin migration] failed:', e); }
+
+// 蘑菇 2026-06-09: 彻底删 categories.parent_id 列. 系统只支持一级分类, child 概念废弃
+// SQLite 3.35+ 支持 DROP COLUMN, better-sqlite3 内置 SQLite 通常新版. 老版/已删则 catch 吞掉
+try { sqlite.exec('ALTER TABLE categories DROP COLUMN parent_id'); } catch {}
 
 export { schema };

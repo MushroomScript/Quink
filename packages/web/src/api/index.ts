@@ -309,13 +309,12 @@ export interface PaginatedResponse<T> {
   pagination: { page: number; limit: number; total: number };
 }
 
+// 蘑菇 2026-06-09: 系统只支持一级分类, child 概念废弃 (parentId / children 字段移除)
 export interface Category {
   id: number;
   name: string;
-  parentId: number | null;
   icon: string | null;
   sortOrder: number;
-  children: Category[];
 }
 
 export interface AiConfigItem {
@@ -568,7 +567,7 @@ export const api = {
     return request<{ data: Category[] }>('/categories');
   },
 
-  createCategory(data: { name: string; parentId?: number | null }) {
+  createCategory(data: { name: string }) {
     return request<{ data: Category }>('/categories', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -577,6 +576,13 @@ export const api = {
 
   deleteCategory(id: number) {
     return request<{ message: string }>(`/categories/${id}`, { method: 'DELETE' });
+  },
+
+  reorderCategories(data: { orderedIds: number[] }) {
+    return request<{ message: string }>('/categories/reorder', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 
   // Upload

@@ -18,11 +18,11 @@ const submitting = ref(false);
 const showToast = ref(false);
 const toastMsg = ref('');
 
-async function onSubmit(data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[] }) {
+async function onSubmit(data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[]; category: string | null }) {
   if (submitting.value) return;
   submitting.value = true;
   try {
-    const created = await store.createNote(data.html, data.type, data.tags.length ? data.tags : undefined, data.visibility, data.sharedGroupIds);
+    const created = await store.createNote(data.html, data.type, data.tags.length ? data.tags : undefined, data.visibility, data.sharedGroupIds, data.category);
     editorRef.value?.clearContent();
 
     // 通知主窗口刷新 (带 id 让主窗口走单条轮询 patch 而不是全量 fetchNotes; 浏览器场景同 window 内 store listener 也收到)

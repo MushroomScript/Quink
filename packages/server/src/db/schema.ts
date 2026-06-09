@@ -47,7 +47,7 @@ export const notes = sqliteTable('notes', {
   editPermission: text('edit_permission', { enum: ['admin', 'all'] }).notNull().default('admin'),
   // PR #7 COW 分叉模型: 共享笔记被非作者改 / 作者从群组页改时触发 fork, 新建一行 parent_note_id 指向原始 root.
   // root note 该字段 NULL; fork 出来的 child note 指向其 root note id (单层链, 不嵌套 fork-of-fork).
-  // 跟 noteComments.parentId / folders.parentId / categories.parentId 同款约定不加 drizzle references 自引用,
+  // 跟 noteComments.parentId / folders.parentId 同款约定不加 drizzle references 自引用,
   // SQLite 层一致弱约束 (业务保证只往 root 指, 不构造循环).
   // 7a 阶段仅加字段不动 PATCH 逻辑, 等 7b fork 写入逻辑接入.
   parentNoteId: text('parent_note_id'),
@@ -118,11 +118,11 @@ export const noteComments = sqliteTable('note_comments', {
   deletedAt: text('deleted_at'),
 });
 
+// 蘑菇 2026-06-09: 系统只支持一级分类, child 概念废弃 → parentId 字段移除
 export const categories = sqliteTable('categories', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: text('user_id').notNull().references(() => users.id),
   name: text('name').notNull(),
-  parentId: integer('parent_id'),
   icon: text('icon'),
   sortOrder: integer('sort_order').notNull().default(0),
 });

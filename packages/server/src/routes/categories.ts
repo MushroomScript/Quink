@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, asc, inArray, sql } from 'drizzle-orm';
 import { authMiddleware } from '../auth.js';
 import { publish } from '../reminder/bus.js';
 import { logAudit } from '../utils/auditLog.js';
@@ -12,24 +12,51 @@ app.use('*', authMiddleware);
 
 const createCategorySchema = z.object({
   name: z.string().min(1).max(100),
-  parentId: z.number().nullable().optional(),
   icon: z.string().max(64).optional(),
   sortOrder: z.number().default(0),
 });
 
 app.get('/', async (c) => {
   const userId = c.get('userId');
-  const all = await db.select().from(schema.categories).where(eq(schema.categories.userId, userId)).all();
-
-  const map = new Map<number, any>();
-  const roots: any[] = [];
-  for (const cat of all) map.set(cat.id, { ...cat, children: [] });
-  for (const cat of all) {
-    const node = map.get(cat.id)!;
-    if (cat.parentId && map.has(cat.parentId)) map.get(cat.parentId)!.children.push(node);
-    else roots.push(node);
-  }
+  // 蘑菇 2026-06-09: 系统只支持一级分类, schema 已删 parentId. 排序: sortOrder ASC + id ASC (POST /reorder 维护)
+  const roots = await db.select().from(schema.categories)
+    .where(eq(schema.categories.userId, userId))
+    .orderBy(asc(schema.categories.sortOrder), asc(schema.categories.id))
+    .all();
   return c.json({ data: roots });
+});
+
+const reorderSchema = z.object({
+  orderedIds: z.array(z.number().int().positive()).max(500),
+});
+
+// 批量重排 root 分类. body 里 orderedIds 是新顺序的 id 数组, 后端按 index 写 sortOrder
+// 校验所有 id 都是该用户的 (防跨用户改顺序). child 分类的 sortOrder 不动 (保持默认 0)
+app.post('/reorder', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const body = await c.req.json();
+  const parsed = reorderSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+
+  const ids = parsed.data.orderedIds;
+  if (ids.length === 0) return c.json({ message: 'ok' });
+
+  const myCats = await db.select({ id: schema.categories.id }).from(schema.categories)
+    .where(and(eq(schema.categories.userId, userId), inArray(schema.categories.id, ids)))
+    .all();
+  if (myCats.length !== ids.length) return c.json({ error: 'orderedIds 包含非本人分类' }, 400);
+
+  // better-sqlite3 同步事务批量 update
+  db.transaction((tx) => {
+    ids.forEach((id, idx) => {
+      tx.update(schema.categories).set({ sortOrder: idx }).where(eq(schema.categories.id, id)).run();
+    });
+  });
+
+  publish(userId, 'data-changed', { scope: 'categories' }, _ocid);
+  await logAudit(c, 'category.reorder', 'category', null, { count: ids.length });
+  return c.json({ message: 'ok' });
 });
 
 app.post('/', async (c) => {
@@ -39,17 +66,9 @@ app.post('/', async (c) => {
   const parsed = createCategorySchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
 
-  // 安全审计 L6: 校验 parentId 必须是同用户的分类 (防跨用户挂载 / 防注入不存在 ID)
-  if (parsed.data.parentId !== null && parsed.data.parentId !== undefined) {
-    const parent = await db.select({ id: schema.categories.id }).from(schema.categories)
-      .where(and(eq(schema.categories.id, parsed.data.parentId), eq(schema.categories.userId, userId))).get();
-    if (!parent) return c.json({ error: 'parentId 不存在或非本人分类' }, 400);
-  }
-
   const result = await db.insert(schema.categories).values({
     name: parsed.data.name,
     userId,
-    parentId: parsed.data.parentId ?? null,
     icon: parsed.data.icon ?? null,
     sortOrder: parsed.data.sortOrder,
   }).returning();

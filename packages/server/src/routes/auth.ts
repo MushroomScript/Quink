@@ -74,7 +74,7 @@ app.post('/register', async (c) => {
   await Promise.all(
     DEFAULT_CATEGORIES.map((name, idx) =>
       db.insert(schema.categories).values({
-        userId: user.id, name, parentId: null, icon: null, sortOrder: idx,
+        userId: user.id, name, icon: null, sortOrder: idx,
       }).catch(err => console.error('[register] seed category failed:', name, err))
     )
   );

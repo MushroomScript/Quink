@@ -14,6 +14,7 @@ import {
 } from '@/composables/useAttachmentTasks';
 import RenameModal from './RenameModal.vue';
 import VisibilityChip from './VisibilityChip.vue';
+import CategoryPicker from './CategoryPicker.vue';
 import {
   PhLightbulb,
   PhNotePencil,
@@ -48,6 +49,9 @@ const props = withDefaults(defineProps<{
   initialVisibility?: 'private' | 'shared';
   initialSharedGroupIds?: string[];
   showVisibilityChip?: boolean;
+  // 分类 chip: null = 走 AI 自动分类 (或显示"未分类"), 非空 = 用户手动选过
+  initialCategory?: string | null;
+  showCategoryPicker?: boolean;
   // PR #9 权限分级: 非作者编辑共享笔记时锁定 type 不可改 + 隐藏 tag 入口 (只让改正文)
   lockType?: boolean;
   hideTags?: boolean;
@@ -68,6 +72,8 @@ const props = withDefaults(defineProps<{
   initialVisibility: 'private',
   initialSharedGroupIds: () => [],
   showVisibilityChip: true,
+  initialCategory: null,
+  showCategoryPicker: true,
   lockType: false,
   hideTags: false,
 });
@@ -95,7 +101,7 @@ function toggleFullscreen() {
 }
 
 const emit = defineEmits<{
-  (e: 'submit', data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[] }): void;
+  (e: 'submit', data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[]; category: string | null }): void;
   (e: 'ready'): void;
 }>();
 
@@ -104,6 +110,8 @@ const visibilityModel = ref<{ visibility: 'private' | 'shared'; sharedGroupIds: 
   visibility: props.initialVisibility,
   sharedGroupIds: [...props.initialSharedGroupIds],
 });
+// 分类 chip: null = 走 AI 自动分类 (后端 autoClassify 仅在 category 为 null 时回填); 非空 = 用户手动选过, 保护不被 AI 覆盖
+const categoryModel = ref<string | null>(props.initialCategory);
 
 // PR #8 命名重整: value 跟新字段值一致 (quink=灵感, note=笔记, todo=待办)
 const noteTypes = [
@@ -460,7 +468,7 @@ function handleSubmit() {
   const md = stripMarkdownFileUrls(vditor.getValue().trim());
   if (!md) return;
 
-  emit('submit', { html: md, type: noteType.value, tags: [...tags.value], visibility: visibilityModel.value.visibility, sharedGroupIds: [...visibilityModel.value.sharedGroupIds] });
+  emit('submit', { html: md, type: noteType.value, tags: [...tags.value], visibility: visibilityModel.value.visibility, sharedGroupIds: [...visibilityModel.value.sharedGroupIds], category: categoryModel.value });
   dirty.value = false;
   // 保存后退出全屏: NoteInput 场景让用户看回到列表; NoteEditModal 场景下 modal 自身也在
   // 关闭(同一 tick 内 store.updateNote 后 showInner=false),这里只是顺手清掉状态。
@@ -478,6 +486,8 @@ function clearContent() {
     visibility: props.initialVisibility,
     sharedGroupIds: [...props.initialSharedGroupIds],
   };
+  // 分类同理: 发布后回到 initialCategory (默认 null = 自动), 防上次手选的分类残留到下一条 → 永远卡住 AI 不能自动
+  categoryModel.value = props.initialCategory;
   dirty.value = false;
 }
 
@@ -895,9 +905,10 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         </span>
       </div>
 
-      <!-- Submit + fullscreen + visibility chip (PR #2 群组共享) -->
+      <!-- Submit + fullscreen + category chip + visibility chip (PR #2 群组共享) -->
       <div class="flex items-center gap-1.5 shrink-0">
         <span v-if="hintText" class="text-[11px] text-gray-400 mr-1">{{ hintText }}</span>
+        <CategoryPicker v-if="showCategoryPicker" v-model="categoryModel" compact />
         <VisibilityChip v-if="showVisibilityChip" v-model="visibilityModel" compact />
         <button v-if="showFullscreenBtn" @click="toggleFullscreen"
           class="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"

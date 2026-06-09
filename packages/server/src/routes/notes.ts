@@ -33,7 +33,8 @@ const NOTE_AI_SKIP_THRESHOLD = 200_000; // 超过 200k 字符跳过 AI 处理防
 const createNoteSchema = z.object({
   content: z.string().min(1).max(NOTE_CONTENT_MAX),
   type: z.enum(['quink', 'note', 'todo']).default('quink'),
-  category: z.string().max(200).optional(),
+  // null / undefined / 字符串都接受, 跟 updateNoteSchema 对称. null 跟 undefined 后端等价 (DB 默认 null)
+  category: z.string().max(200).nullable().optional(),
   tags: z.array(z.string().max(50)).max(50).optional(),
   // PR #13: todoDue / todoRemindRrule 已移除. 设提醒走 POST /:id/personal-reminder 单独接口
   // PR #2 群组共享: visibility=private (默认, 仅作者) / visibility=shared 必须给 sharedGroupIds[]
@@ -44,7 +45,8 @@ const createNoteSchema = z.object({
 const updateNoteSchema = z.object({
   content: z.string().min(1).max(NOTE_CONTENT_MAX).optional(),
   summary: z.string().max(2000).optional(),
-  category: z.string().max(200).optional(),
+  // null = 用户改回"自动" (清空 category 让后续 AI 可重新分类); undefined = 不动 category 字段; 字符串 = 手动选定
+  category: z.string().max(200).nullable().optional(),
   tags: z.array(z.string().max(50)).max(50).optional(),
   type: z.enum(['quink', 'note', 'todo']).optional(),
   todoStatus: z.enum(['pending', 'done']).optional(),

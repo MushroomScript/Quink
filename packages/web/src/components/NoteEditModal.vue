@@ -181,7 +181,7 @@ onMounted(async () => {
   nextTick(() => { showInner.value = true; });
 });
 
-async function onSubmit(data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[] }) {
+async function onSubmit(data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[]; category: string | null }) {
   if (saving.value) return;
   saving.value = true;
   try {
@@ -189,6 +189,8 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
       content: data.html,
       type: data.type as any,
       tags: data.tags,
+      // 分类: 用户改回"自动"时 category = null 让后端 reset, AI 自动分类下次跑 (虽然编辑路径目前不重跑 AI)
+      category: data.category,
     };
     // 分享设置 (visibility / sharedGroupIds) 仅"主视图 + 作者本人"才传:
     //   非作者传 → 后端 403 "只有作者可以修改共享设置"
@@ -341,6 +343,7 @@ onBeforeUnmount(() => {
             :initial-fullscreen="initialFullscreen"
             :initial-visibility="(note as any).visibility || 'private'"
             :initial-shared-group-ids="(note as any).sharedGroupIds || []"
+            :initial-category="note.category"
             :focus-end="true"
             :max-height="450"
             :lock-type="!isMyNote"

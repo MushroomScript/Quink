@@ -45,7 +45,7 @@ function cleanHtmlStr(h: string) {
     <!-- 多选: ghosts 几何中心 = 鼠标位置, 各 ghost 按原始相对中心偏移摆放. 复用单选 ghost-md-preview 同款紧凑样式 (白底 + border + shadow + 小字号) -->
     <template v-if="dragState.active && dragState.ghosts.length > 0">
       <div v-for="g in dragState.ghosts" :key="g.id"
-        class="pointer-events-none fixed z-[var(--z-overlay)] bg-white border border-gray-300 rounded-lg shadow-lg px-3 py-1.5 opacity-90 ghost-md-preview"
+        class="pointer-events-none fixed z-[var(--z-overlay)] bg-white border border-gray-300 rounded-lg shadow-lg px-3 py-1.5 opacity-60 ghost-md-preview"
         :style="multiGhostStyle(g, dragState.ghostX, dragState.ghostY)">
         <div class="vditor-reset" v-html="cleanHtmlStr(g.html)" />
       </div>
