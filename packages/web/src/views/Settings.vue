@@ -12,6 +12,7 @@ import { useEscToClose } from '@/composables/useEscToClose';
 import ToggleSwitch from '@/components/ToggleSwitch.vue';
 import CustomSelect from '@/components/CustomSelect.vue';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
+import { getCardWidthPref, setCardWidthPref, type CardWidthMode } from '@/utils/cardWidth';
 import dayjs from 'dayjs';
 
 const router = useRouter();
@@ -86,6 +87,17 @@ const localXfyunAppId = ref('');
 const localXfyunApiKey = ref('');
 const localXfyunApiSecret = ref('');
 const localAiPersonaCustom = ref('');
+// 蘑菇 2026-06-09: 卡片最小宽度本地偏好 (localStorage 不跨账号). onMounted 读 + 改完调 saveCardWidth 触发 useMasonry 重算
+const cardWidth = reactive<{ mode: CardWidthMode; value: number }>({ mode: 'px', value: 320 });
+// 像素档位 220-500 步长 10 (共 29 项), 百分比档位 10-50 步长 5 (共 9 项). 蘑菇要下拉不要 input (光标问题)
+const cardWidthPxOptions = Array.from({ length: 29 }, (_, i) => ({ value: 220 + i * 10, label: `${220 + i * 10} px` }));
+const cardWidthPctOptions = Array.from({ length: 9 }, (_, i) => {
+  const v = 10 + i * 5;
+  return { value: v, label: `${v}% (≈ ${Math.max(1, Math.floor(100 / v))} 列)` };
+});
+function saveCardWidth() {
+  setCardWidthPref({ mode: cardWidth.mode, value: Math.max(1, Math.round(cardWidth.value || 1)) });
+}
 const localAutoSummaryMinLen = ref(200);
 // 模板里 ref 自动 unwrap, 所以第一参数收到的是值不是 ref 本身
 function commitField(value: any, target: any, key: string) {
@@ -508,6 +520,10 @@ onMounted(async () => {
     localAiPersonaCustom.value = prefs.aiPersonaCustom;
     localAutoSummaryMinLen.value = prefs.autoSummaryMinLen;
   }
+  // 卡片最小宽度 (设备本地, 不进 user.preferences)
+  const cw = getCardWidthPref();
+  cardWidth.mode = cw.mode;
+  cardWidth.value = cw.value;
   // 同步排序偏好到 notesStore (放 if(auth.user) 块外: 未登录场景 prefs 走默认值也要确保 store 一致,
   // 否则 store.sortBy 可能残留前一次 session 的值. 用户偏好跟 store 默认值不同时触发 store watch
   // 清缓存 → 主 view 在 KeepAlive 后台 vs.notes 清空, 切回时 onActivated wasEmpty 走 reset 拉新顺序)
@@ -1003,6 +1019,30 @@ function goBack() {
               { value: 180, label: '180 天' },
               { value: 0, label: '永久保留' },
             ]" />
+          </div>
+        </div>
+        <!-- 蘑菇 2026-06-09: 卡片最小宽度 (设备本地, localStorage 不跨账号). px 模式按绝对像素切列; percent 模式按 main 区百分比锁列数 -->
+        <div class="pt-2 border-t border-gray-100">
+          <div class="flex items-center justify-between gap-3 flex-wrap">
+            <div class="flex-1 min-w-0">
+              <div class="text-sm text-gray-700 font-medium">卡片最小宽度</div>
+              <div class="text-xs text-gray-400 mt-0.5">
+                影响主视图笔记瀑布流列数. 保存在本设备, 不跨账号. 默认 320px.
+                {{ cardWidth.mode === 'percent' ? '(百分比模式锁定列数, 不论屏幕宽窄)' : '' }}
+              </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <CustomSelect :modelValue="cardWidth.mode"
+                @update:modelValue="(v: any) => { cardWidth.mode = v; cardWidth.value = v === 'px' ? 320 : 25; saveCardWidth(); }"
+                size="compact" :options="[
+                { value: 'px', label: '像素' },
+                { value: 'percent', label: '百分比' },
+              ]" />
+              <CustomSelect :modelValue="cardWidth.value"
+                @update:modelValue="(v: any) => { cardWidth.value = v; saveCardWidth(); }"
+                size="compact"
+                :options="cardWidth.mode === 'percent' ? cardWidthPctOptions : cardWidthPxOptions" />
+            </div>
           </div>
         </div>
         <!-- 下载目录 (本地配置, localStorage 存, 不跨设备同步因为 path 跟 OS 相关).

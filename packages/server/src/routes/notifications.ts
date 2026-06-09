@@ -85,7 +85,7 @@ app.post('/:id/read', async (c) => {
       .where(eq(schema.notifications.id, id));
   }
   publish(userId, 'notification-changed', { scope: 'read', id }, _ocid);
-  await logAudit(c, 'notification.read', 'notification', id);
+  // PR #13 followup: read 是高频操作 (用户点几十次/天) 无掩盖嫌疑, 砍 audit 防 spam audit_logs 表
   return c.json({ data: { id, readAt: row.readAt ?? dayjs().toISOString() } });
 });
 
@@ -108,7 +108,7 @@ app.post('/read-all', async (c) => {
   const now = dayjs().toISOString();
   const result = await db.update(schema.notifications).set({ readAt: now }).where(whereClause);
   publish(userId, 'notification-changed', { scope: 'read-all', category: category ?? null }, _ocid);
-  await logAudit(c, 'notification.read_all', 'notification', null, { category: category ?? null, updated: result.changes ?? 0 });
+  // PR #13 followup: read-all 是高频 + 无掩盖嫌疑, 砍 audit 防 spam (delete/clear 仍留, 才是掩盖证据的核心场景)
   return c.json({ data: { updated: result.changes ?? 0 } });
 });
 

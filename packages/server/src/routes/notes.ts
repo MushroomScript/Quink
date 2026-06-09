@@ -1629,15 +1629,19 @@ app.patch('/:id', async (c) => {
   const now = dayjs().toISOString();
   const updates: Record<string, any> = { updatedAt: now };
 
-  // isContentChange / ctxGroupId / currentShareGroupIds 提前到锁校验之前定义, needLock 跟 fork 决策都用
-  const isContentChange = (
+  // isContentChange / isCollabChange / ctxGroupId / currentShareGroupIds 提前到锁校验之前定义, needLock 跟 fork 决策都用
+  // PR #13 followup (蘑菇 2026-06-09 拖卡片到分类报"需先申请锁"): 拆 isCollabChange (锁判断) vs isContentChange (audit/version).
+  //   - isCollabChange: 触发"群成员协作冲突"的字段 (content / summary / tags / type / todoStatus) - 多人撞改场景, 需要锁
+  //   - isContentChange: 含 category (PR #9 作者私域字段, 仅作者能改 - 不涉及协作冲突所以不需锁, 但 audit 仍存快照 + version 乐观锁防多 tab 撞)
+  // 作者拖共享笔记到分类 (改 category): isCollabChange=false → needLock=false 直接通过; isContentChange=true → audit + version 仍跑
+  const isCollabChange = (
     data.content !== undefined ||
     data.summary !== undefined ||
-    data.category !== undefined ||
     data.tags !== undefined ||
     data.type !== undefined ||
     data.todoStatus !== undefined
   );
+  const isContentChange = isCollabChange || data.category !== undefined;
   const ctxGroupId = data.editContext?.groupId;
   const currentShareGroupIds = (await db.select({ groupId: schema.noteShares.groupId })
     .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all()).map(r => r.groupId);
@@ -1649,9 +1653,8 @@ app.patch('/:id', async (c) => {
   //   - 作者改 root 单群: 单群 root 等价 fork
   //   - 作者改 root 多群 + 群组页: 该路径会触发 fork (创建该群专属版本), 跟非作者改 root 触发 fork 同款流程
   // 锁主要防"群成员协作时撞改". 作者主视图改多群 root 多设备同步靠 version 乐观锁兜底
-  // PR #13 bug 修: 加 isContentChange 前置 - 改管理字段 (editPermission / pinned / visibility / sharedGroupIds) 时不走锁,
-  //                跟 L1656 注释一致. 之前蘑菇切"管理员可编辑" 胶囊报"需要先申请锁" 就是漏了这层判断
-  const needLock = isContentChange && existing.visibility === 'shared' && (
+  // PR #13 bug 修: 加 isCollabChange 前置 - 改管理字段 / 作者私域字段 (editPermission / pinned / visibility / sharedGroupIds / category) 时不走锁
+  const needLock = isCollabChange && existing.visibility === 'shared' && (
     !isAuthor ||                                       // 非作者必锁
     existing.parentNoteId !== null ||                  // 作者改 fork 必锁
     currentShareGroupIds.length <= 1 ||                // 单群必锁 (单群 root 等价 fork)

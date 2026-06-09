@@ -21,9 +21,11 @@ import { ref, watch, onMounted, onBeforeUnmount, nextTick, type Ref } from 'vue'
 // 直接读容器宽度天然避开这坑: sidebar 占不占位, masonry 容器宽度自动反映.
 // 目标列宽 280px (保证 NoteCard chip 行能放下三点不被推出卡片外).
 import { unzoomViewport } from '@/utils/zoom';
+import { computeColumnCount } from '@/utils/cardWidth';
 
 function getColumnCount(rootW?: number): number {
-  const targetColW = 280;
+  // 蘑菇 2026-06-09: 卡片最小宽度可在 Settings 配置 (px / percent 两种模式), 保存到 localStorage.
+  // 默认 { mode: 'px', value: 320 }. 详见 utils/cardWidth.ts
   let main: number;
   if (rootW && rootW > 0) {
     main = rootW;
@@ -33,8 +35,7 @@ function getColumnCount(rootW?: number): number {
     const { vw } = unzoomViewport();
     main = vw >= 768 ? vw - 240 : vw;
   }
-  const cols = Math.max(1, Math.floor(main / targetColW));
-  return Math.min(cols, 5);
+  return computeColumnCount(main);
 }
 
 // 估算 NoteCard 渲染高度. line-clamp-4 限制文字 4 行, 但 block 元素(图片/代码块/附件)

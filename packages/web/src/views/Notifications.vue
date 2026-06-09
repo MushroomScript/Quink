@@ -70,6 +70,11 @@ async function onItemClick(id: string) {
     router.push(`/groups/${p.groupId}/trash`);
     return;
   }
+  // PR #13 followup: comment-added 带 commentId → 跳详情页 + query c=cid 让 NoteDetail 滚动+高亮该评论
+  if (p.noteId && p.commentId && (n.type === 'comment-added' || n.type === 'comment-replied')) {
+    router.push(`/note/${p.noteId}?c=${encodeURIComponent(p.commentId)}`);
+    return;
+  }
   if (p.noteId) router.push(`/note/${p.noteId}`);
   else if (p.groupId) router.push(`/groups/${p.groupId}`);
 }

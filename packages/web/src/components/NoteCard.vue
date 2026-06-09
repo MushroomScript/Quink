@@ -507,14 +507,21 @@ onMounted(() => {
   if (props.note.type === 'todo') loadReminders();
 });
 
-// effectiveReminder: 给铃铛 / 提醒文案 / "设置/编辑" 按钮文案用. 优先 personal > group
+// effectiveReminder: 给铃铛 / 提醒文案 / "设置/编辑" 按钮文案用.
+// 蘑菇 2026-06-09: 改为按 dueAt 升序优先 (最先触发的最紧迫, 比 personal/group 优先级更直观).
+// NoteDetail 双 chip 同时展示, NoteCard 只展示这条最紧迫的 (卡片寸土寸金), 多个走详情看.
 const effectiveReminder = computed<{ dueAt: string | null; rrule: string | null; source: 'personal' | 'group' | null }>(() => {
-  if (myPersonalReminder.value) return { dueAt: myPersonalReminder.value.dueAt, rrule: myPersonalReminder.value.rrule, source: 'personal' };
+  const candidates: Array<{ dueAt: string; rrule: string | null; source: 'personal' | 'group' }> = [];
+  if (myPersonalReminder.value) {
+    candidates.push({ dueAt: myPersonalReminder.value.dueAt, rrule: myPersonalReminder.value.rrule, source: 'personal' });
+  }
   if (myGroupReminders.value.length > 0) {
     const g = myGroupReminders.value[0];
-    return { dueAt: g.dueAt, rrule: g.rrule, source: 'group' };
+    candidates.push({ dueAt: g.dueAt, rrule: g.rrule, source: 'group' });
   }
-  return { dueAt: null, rrule: null, source: null };
+  if (candidates.length === 0) return { dueAt: null, rrule: null, source: null };
+  candidates.sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+  return candidates[0];
 });
 
 // 提醒时间显示: 简短相对时间 (今天 14:30 / 明天 9:00 / 6月10日 / 已过) + 鼠标 hover 看完整
@@ -649,6 +656,8 @@ const typeColor: Record<string, string> = {
           @pointerdown.stop="!store.selectMode ? onPointerDown($event) : undefined">
           {{ typeLabels[note.type] }}
         </span>
+        <!-- 蘑菇 2026-06-09: category 紧贴类型 chip 之后 (之前在作者/已分享 chip 后, 视觉上"分类"跟"类型"语义同组应该挨着) -->
+        <span v-if="note.category" class="text-xs text-gray-400 truncate min-w-0">{{ note.category }}</span>
 <!-- PR #2 / PR #5b: 我自己发的共享笔记加 "已分享" chip; 数量在详情页/title hover 看. 字号 padding 跟 type chip 一致.
              别人发的显示作者头像 + nickname -->
         <span v-if="isMyNote && isShared && sharedCount > 0"
@@ -677,8 +686,6 @@ const typeColor: Record<string, string> = {
           </div>
           <span class="truncate min-w-0">{{ (note as any).authorNickname }}</span>
         </span>
-        <!-- category 跟 nickname 同 "可压缩担当": min-w-0 + truncate 让长 category 自己缩 (而非把三点推出卡片外) -->
-        <span v-if="note.category" class="text-xs text-gray-400 truncate min-w-0">{{ note.category }}</span>
         <!-- 提醒铃铛: 仅 todo 且 effectiveReminder 有 due 时显示. 数据源优先 personal > group > legacy todoDue -->
         <span v-if="note.type === 'todo' && effectiveReminder.dueAt"
           class="ml-auto flex items-center gap-1 text-[11px] cursor-pointer hover:opacity-70 shrink-0 whitespace-nowrap"

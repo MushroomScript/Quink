@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { api, type NoteComment } from '@/api';
 import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
@@ -24,9 +25,23 @@ const props = defineProps<{
 
 const auth = useAuthStore();
 const toast = useToast();
+const route = useRoute();
 const comments = ref<NoteComment[]>([]);
 const loading = ref(false);
 const loaded = ref(false);
+// PR #13 followup: comment-added 通知点击带 ?c=cid, 评论加载后 scroll + 高亮 1.5s
+const highlightId = ref<string | null>(null);
+watch([comments, () => route.query.c], async ([list, cid]) => {
+  if (!cid || typeof cid !== 'string') return;
+  if (!Array.isArray(list) || !list.some(c => c.id === cid)) return;
+  await nextTick();
+  const el = document.querySelector(`[data-comment-id="${cid}"]`);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    highlightId.value = cid;
+    setTimeout(() => { if (highlightId.value === cid) highlightId.value = null; }, 1800);
+  }
+}, { immediate: true });
 
 // 输入区: replyingTo = null = 顶层评论, 否则 = 顶层评论 id (单层 thread, 二级及以下挂同一 root)
 const replyingTo = ref<string | null>(null);
@@ -250,7 +265,8 @@ defineExpose({ reload: load });
     <div v-else class="comment-list">
       <div v-for="root in rootComments" :key="root.id" class="comment-group">
         <!-- 顶层评论 -->
-        <article class="comment-item">
+        <article class="comment-item" :data-comment-id="root.id"
+          :class="{ 'comment-highlight': highlightId === root.id }">
           <div class="avatar">
             <img v-if="root.userAvatar"
               :src="resolveFileThumbUrl(root.userAvatar)"
@@ -301,7 +317,9 @@ defineExpose({ reload: load });
         </article>
         <!-- 一级回复 (单层 thread, 全挂在 root 下不再嵌套) -->
         <div v-if="(repliesMap.get(root.id) || []).length > 0" class="comment-replies">
-          <article v-for="reply in repliesMap.get(root.id)" :key="reply.id" class="comment-item">
+          <article v-for="reply in repliesMap.get(root.id)" :key="reply.id" class="comment-item"
+            :data-comment-id="reply.id"
+            :class="{ 'comment-highlight': highlightId === reply.id }">
             <div class="avatar">
               <img v-if="reply.userAvatar"
                 :src="resolveFileThumbUrl(reply.userAvatar)"
@@ -462,6 +480,15 @@ defineExpose({ reload: load });
   display: flex;
   gap: 0.5rem;
   align-items: flex-start;
+  padding: 0.25rem;
+  margin: -0.25rem;
+  border-radius: 0.5rem;
+  transition: background-color 0.6s ease-out;
+}
+/* PR #13 followup: 通知点击跳关联评论时高亮 1.8s 渐隐 (路由 ?c=cid 触发, CommentThread watch route) */
+.comment-item.comment-highlight {
+  background-color: rgb(254 240 138 / 0.45); /* yellow-100 半透 */
+  transition: background-color 0.15s ease-in;
 }
 .avatar {
   flex-shrink: 0;
