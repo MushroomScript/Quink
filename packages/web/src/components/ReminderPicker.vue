@@ -398,7 +398,7 @@ const canSave = computed(() => !saveBlockReason.value);
                   </label>
                   <label class="flex items-center gap-2 text-xs cursor-pointer h-7">
                     <input type="radio" v-model="gui.endMode" value="until" class="rrule-radio" />
-                    <span>直到</span>
+                    <span class="shrink-0">直到</span>
                     <DatePicker v-model="gui.endUntil"
                       :disabled="gui.endMode !== 'until'"
                       placeholder="截止日" />

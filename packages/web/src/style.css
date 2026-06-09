@@ -712,8 +712,43 @@ mark.find-hl-active {
   color: white;
   background: rgb(var(--c-accent));
 }
+/* 自定义 radio: 原生 accent-color 在 Chromium zoom / 不同 DPR 下内圆视觉比例不稳定 (蘑菇报"填充比黑圈大"),
+   appearance:none + ::after 自画 6/14 ≈ 43% 内圆, 视觉稳定且跟主题色一致. */
 .reminder-picker .rrule-radio {
-  accent-color: rgb(var(--c-accent));
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: 1.5px solid #9ca3af;
+  border-radius: 50%;
+  background: white;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  transition: border-color 0.12s;
+}
+.reminder-picker .rrule-radio:hover:not(:disabled) {
+  border-color: rgb(var(--c-accent) / 0.6);
+}
+.reminder-picker .rrule-radio:checked {
+  border-color: rgb(var(--c-accent));
+}
+.reminder-picker .rrule-radio:checked::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: rgb(var(--c-accent));
+}
+.reminder-picker .rrule-radio:disabled {
+  opacity: 0.5;
+  cursor: var(--cur-not-allowed), not-allowed;
 }
 
 /* ── dark 适配 ── */
@@ -728,6 +763,14 @@ mark.find-hl-active {
   background: #111827;
   border-color: #374151;
   color: #e5e7eb;
+}
+/* radio specificity (0,3,0) > 上面通用 input (0,2,1), 覆盖 border-color 让 dark 下也有边框可见 */
+[data-theme="dark"] .reminder-picker .rrule-radio {
+  background: #111827;
+  border-color: #6b7280;
+}
+[data-theme="dark"] .reminder-picker .rrule-radio:checked {
+  border-color: rgb(var(--c-accent));
 }
 [data-theme="dark"] .reminder-picker .preset-btn,
 [data-theme="dark"] .reminder-picker .weekday-btn {
