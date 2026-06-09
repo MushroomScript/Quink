@@ -111,8 +111,11 @@ const recordingKeys = ref('');
 
 // ── Reminder Channels ──
 import type { ReminderChannel, ReminderChannelType } from '@/api';
+import { NOTIFICATION_GROUPS, ALL_NOTIFICATION_TYPES, TOTAL_UI_TYPE_COUNT, countSelectedUiTypes, metaTypes, type NotificationTypeMeta } from '@/utils/notificationTypes';
 const reminderChannels = ref<ReminderChannel[]>([]);
-const editingChannel = ref<{ id?: string; type: ReminderChannelType; name: string; config: Record<string, any>; enabled: boolean } | null>(null);
+// 蘑菇 2026-06-09: 加 selectedTypes 通知类型白名单. UI 内部按数组管, 保存时全选 → 写 null (兼容老 row + 全收语义)
+const editingChannel = ref<{ id?: string; type: ReminderChannelType; name: string; config: Record<string, any>; enabled: boolean; selectedTypes: string[] } | null>(null);
+const expandedTypeCategories = ref<Set<string>>(new Set(['reminder', 'content', 'group'])); // 默认全展开
 const channelError = ref('');
 const testingChannelId = ref<string | null>(null);
 const browserPermission = ref<NotificationPermission>(typeof Notification !== 'undefined' ? Notification.permission : 'denied');
@@ -190,6 +193,8 @@ function startEditChannel(ch?: ReminderChannel) {
       name: ch.name,
       config: { ...(ch.config || {}) },
       enabled: ch.enabled,
+      // 老 row types=null 视作"全收" 展开成全部勾选; 新 row 跟着写
+      selectedTypes: ch.types && ch.types.length > 0 ? [...ch.types] : [...ALL_NOTIFICATION_TYPES],
     };
   } else {
     // 没有 browser 通道时默认到 browser; 已有就跳到第一个非 browser 类型, 避免新建时弹出 disabled 选项
@@ -198,8 +203,43 @@ function startEditChannel(ch?: ReminderChannel) {
       name: '我的提醒',
       config: {},
       enabled: true,
+      selectedTypes: [...ALL_NOTIFICATION_TYPES], // 蘑菇拍板: 新建默认全选
     };
   }
+}
+
+// 蘑菇 2026-06-09: 切换某个 meta (含 siblings 联动)
+function toggleChannelType(t: NotificationTypeMeta) {
+  if (!editingChannel.value) return;
+  const all = metaTypes(t); // [t.type, ...siblings]
+  const list = editingChannel.value.selectedTypes;
+  const checked = list.includes(t.type);
+  if (checked) {
+    editingChannel.value.selectedTypes = list.filter(tp => !all.includes(tp));
+  } else {
+    editingChannel.value.selectedTypes = Array.from(new Set([...list, ...all]));
+  }
+}
+// 整个 category 全选/全不选 (含 siblings)
+function toggleChannelCategory(category: 'reminder' | 'content' | 'group') {
+  if (!editingChannel.value) return;
+  const group = NOTIFICATION_GROUPS.find(g => g.category === category);
+  if (!group) return;
+  const all = group.types.flatMap(t => metaTypes(t));
+  const allChecked = group.types.every(t => editingChannel.value!.selectedTypes.includes(t.type));
+  if (allChecked) {
+    editingChannel.value.selectedTypes = editingChannel.value.selectedTypes.filter(t => !all.includes(t));
+  } else {
+    editingChannel.value.selectedTypes = Array.from(new Set([...editingChannel.value.selectedTypes, ...all]));
+  }
+}
+function toggleCategoryExpand(category: string) {
+  if (expandedTypeCategories.value.has(category)) expandedTypeCategories.value.delete(category);
+  else expandedTypeCategories.value.add(category);
+}
+// 列表显示用: channel 已选 N/总数 摘要 (按 UI 选项数, siblings 算 1)
+function channelTypesSummary(ch: ReminderChannel): string {
+  return `已选 ${countSelectedUiTypes(ch.types)}/${TOTAL_UI_TYPE_COUNT}`;
 }
 
 async function saveChannel() {
@@ -219,11 +259,13 @@ async function saveChannel() {
     }
   }
 
+  // 蘑菇 2026-06-09: 全选时写 null (兼容老 row + 全收语义节省存储), 否则写数组
+  const types = e.selectedTypes.length === ALL_NOTIFICATION_TYPES.length ? null : e.selectedTypes;
   try {
     if (e.id) {
-      await api.updateReminderChannel(e.id, { name: e.name, config: payloadConfig, enabled: e.enabled });
+      await api.updateReminderChannel(e.id, { name: e.name, config: payloadConfig, enabled: e.enabled, types });
     } else {
-      await api.createReminderChannel({ type: e.type, name: e.name, config: payloadConfig, enabled: e.enabled });
+      await api.createReminderChannel({ type: e.type, name: e.name, config: payloadConfig, enabled: e.enabled, types });
     }
     editingChannel.value = null;
     await loadReminderChannels();
@@ -1277,7 +1319,11 @@ function goBack() {
             <div class="w-2 h-2 rounded-full shrink-0" :class="ch.enabled ? 'bg-green-500' : 'bg-gray-300'"></div>
             <div class="flex-1 min-w-0">
               <div class="text-sm font-medium text-gray-700 truncate">{{ ch.name }}</div>
-              <div class="text-xs text-gray-400">{{ channelTypeOptions.find(o => o.id === ch.type)?.label || ch.type }}</div>
+              <div class="text-xs text-gray-400">
+                {{ channelTypeOptions.find(o => o.id === ch.type)?.label || ch.type }}
+                <span class="text-gray-300 mx-1.5">·</span>
+                <span class="text-gray-500">{{ channelTypesSummary(ch) }} 类通知</span>
+              </div>
             </div>
             <ToggleSwitch :model-value="ch.enabled" @update:model-value="toggleChannelEnabled(ch)" size="sm" />
             <button @click="testChannel(ch.id)" :disabled="testingChannelId === ch.id"
@@ -1329,6 +1375,36 @@ function goBack() {
             <input v-else v-model="editingChannel.config[f.key]" :type="f.type || 'text'"
               :placeholder="f.placeholder" spellcheck="false"
               class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary font-mono" />
+          </div>
+
+          <!-- 蘑菇 2026-06-09: 通知类型白名单 3 category 分组 -->
+          <div class="border-t border-gray-200 pt-3 space-y-2">
+            <div class="text-xs text-gray-500 mb-1">接收哪些类型的通知</div>
+            <div v-for="group in NOTIFICATION_GROUPS" :key="group.category" class="bg-white rounded-lg border border-gray-200">
+              <button @click="toggleCategoryExpand(group.category)" type="button"
+                class="w-full px-3 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left">
+                <input type="checkbox"
+                  :checked="group.types.every(t => editingChannel!.selectedTypes.includes(t.type))"
+                  :indeterminate.prop="group.types.some(t => editingChannel!.selectedTypes.includes(t.type)) && !group.types.every(t => editingChannel!.selectedTypes.includes(t.type))"
+                  @click.stop="toggleChannelCategory(group.category)"
+                  class="w-4 h-4 accent-primary cursor-pointer" />
+                <span class="text-xs font-medium text-gray-700 flex-1">{{ group.label }}</span>
+                <span class="text-[10px] text-gray-400">{{ group.types.filter(t => editingChannel!.selectedTypes.includes(t.type)).length }}/{{ group.types.length }}</span>
+                <span class="text-gray-300 text-xs">{{ expandedTypeCategories.has(group.category) ? '−' : '+' }}</span>
+              </button>
+              <div v-if="expandedTypeCategories.has(group.category)" class="px-3 pb-2 space-y-1 border-t border-gray-100 pt-2">
+                <label v-for="t in group.types" :key="t.type"
+                  class="flex items-start gap-2 py-1 cursor-pointer hover:bg-gray-50 px-1 rounded ml-[10px]">
+                  <input type="checkbox"
+                    :checked="editingChannel!.selectedTypes.includes(t.type)"
+                    @change="toggleChannelType(t)"
+                    class="w-3.5 h-3.5 mt-[3px] accent-primary cursor-pointer" />
+                  <span class="flex-1 min-w-0 -mt-[4px]">
+                    <span class="text-xs text-gray-700">{{ t.label }}</span>
+                  </span>
+                </label>
+              </div>
+            </div>
           </div>
 
           <div v-if="channelError" class="text-red-500 text-xs bg-red-50 rounded-lg px-3 py-2">{{ channelError }}</div>

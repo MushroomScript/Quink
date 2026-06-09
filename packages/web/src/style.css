@@ -791,3 +791,15 @@ mark.find-hl-active {
 [data-theme="dark"] .reminder-picker details .text-gray-400 {
   color: #6b7280;
 }
+
+/* 蘑菇 2026-06-08: 灵感 (quink) type chip 固定 blueberry 蓝色, 不跟主题色变.
+   note/todo chip 已用 Tailwind 固定色 (emerald-100/amber-100), quink 之前用 --c-accent 跟主题, 切非蓝主题时跟列表 chip 视觉断裂.
+   dark 模式下背景改半透明 + 文字提亮, 避免浅蓝在深色背景过冲 */
+.type-chip-quink {
+  background-color: rgb(228 233 255);
+  color: rgb(88 112 230);
+}
+[data-theme="dark"] .type-chip-quink {
+  background-color: rgba(116, 143, 252, 0.22);
+  color: rgb(180, 196, 255);
+}

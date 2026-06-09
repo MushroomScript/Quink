@@ -257,7 +257,7 @@ function deletedAgo(n: any) {
 // PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
 const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
 const typeColor: Record<string, string> = {
-  quink: 'bg-primary-light text-primary',
+  quink: 'type-chip-quink', // 蘑菇 2026-06-08: 固定 blueberry, 不跟主题 (style.css 定义 + dark 适配)
   note: 'bg-emerald-100 text-emerald-600',
   todo: 'bg-amber-100 text-amber-600',
 };

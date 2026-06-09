@@ -202,6 +202,9 @@ export const reminderChannels = sqliteTable('reminder_channels', {
   name: text('name').notNull(),
   config: text('config', { mode: 'json' }).$type<Record<string, any>>().notNull().default({}),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  // 蘑菇 2026-06-09: 通知类型白名单 (string[] / NULL=全收兼容老 row). dispatchToAllChannels 按此过滤
+  // 含: reminder-due / group-reminder-due / reminder-expired / 通知中心所有 type (评论/编辑权/群事件等)
+  types: text('types', { mode: 'json' }).$type<string[] | null>(),
   createdAt: text('created_at').notNull(),
 });
 
@@ -334,14 +337,18 @@ export const noteGroupReminders = sqliteTable('note_group_reminders', {
   pk: primaryKey({ columns: [table.noteId, table.groupId] }),
 }));
 
-// PR #11 群提醒接收开关: 每用户每群最多 1 条. 缺行 = 默认接收 (enabled=1).
-// 用户主动关闭时 INSERT enabled=0; 重开时改回 1
-export const groupReminderSubscriptions = sqliteTable('group_reminder_subscriptions', {
+// 蘑菇 2026-06-09: 群级 group_reminder_subscriptions 已废 (实际只控 group-reminder-set 一种, 改用卡片级 mute)
+// DB 表 db/index.ts 启动 DROP TABLE 一次性清
+
+// 蘑菇 2026-06-08: 卡片级笔记提醒 mute. 用户能屏蔽"某条待办的群提醒" 而保留其他待办提醒.
+// 跟 groupReminderSubscriptions 群级开关独立: 群级关 = 该群所有群提醒不收; 笔记级关 = 仅该笔记的群提醒不收.
+// 主键 (userId, noteId): 一条笔记 share 到多群时, mute 跨所有群生效 (用户对这条待办整体说"不打扰我"). 缺行 = 默认接收
+export const noteGroupReminderMutes = sqliteTable('note_group_reminder_mutes', {
   userId: text('user_id').notNull().references(() => users.id),
-  groupId: text('group_id').notNull().references(() => groups.id),
-  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  noteId: text('note_id').notNull().references(() => notes.id),
+  mutedAt: text('muted_at').notNull(),
 }, (table) => ({
-  pk: primaryKey({ columns: [table.userId, table.groupId] }),
+  pk: primaryKey({ columns: [table.userId, table.noteId] }),
 }));
 
 // PR #10 通知中心: 集中所有"用户该被告知"的事件 (申请编辑权 / 另存为 / 提醒到点 / 群组变更 / 评论等),
@@ -406,5 +413,4 @@ export type NotePersonalReminder = typeof notePersonalReminders.$inferSelect;
 export type NewNotePersonalReminder = typeof notePersonalReminders.$inferInsert;
 export type NoteGroupReminder = typeof noteGroupReminders.$inferSelect;
 export type NewNoteGroupReminder = typeof noteGroupReminders.$inferInsert;
-export type GroupReminderSubscription = typeof groupReminderSubscriptions.$inferSelect;
-export type NewGroupReminderSubscription = typeof groupReminderSubscriptions.$inferInsert;
+// 蘑菇 2026-06-09: GroupReminderSubscription 类型已移除 (表已废)

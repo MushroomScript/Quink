@@ -9,6 +9,7 @@ import { dingtalkBotAdapter } from './adapters/dingtalk-bot.js';
 import { feishuBotAdapter } from './adapters/feishu-bot.js';
 import { telegramAdapter } from './adapters/telegram.js';
 import { webhookAdapter } from './adapters/webhook.js';
+import { isTypeAllowedForChannel } from '../utils/notificationTypes.js';
 
 const adapters: Record<string, AdapterFn> = {
   browser: browserAdapter,
@@ -26,7 +27,8 @@ export function getAdapter(type: string): AdapterFn | undefined {
 }
 
 // 发到该用户的所有 enabled channels, 并发执行 + 单点失败不阻塞其他
-export async function dispatchToAllChannels(userId: string, payload: ReminderPayload): Promise<void> {
+// 蘑菇 2026-06-09: 加 notificationType 参数, 按 channel.types 白名单过滤 (null/空=全收兼容老 row)
+export async function dispatchToAllChannels(userId: string, payload: ReminderPayload, notificationType?: string): Promise<void> {
   const channels = await db.select().from(schema.reminderChannels)
     .where(and(eq(schema.reminderChannels.userId, userId), eq(schema.reminderChannels.enabled, true)))
     .all();
@@ -36,7 +38,15 @@ export async function dispatchToAllChannels(userId: string, payload: ReminderPay
     return;
   }
 
-  await Promise.all(channels.map(async (ch) => {
+  const targets = notificationType
+    ? channels.filter(ch => isTypeAllowedForChannel(ch.types, notificationType))
+    : channels;
+  if (targets.length === 0) {
+    console.log(`[reminder/sender] user ${userId} 无 channel 订阅 type=${notificationType}, 跳过 noteId=${payload.noteId}`);
+    return;
+  }
+
+  await Promise.all(targets.map(async (ch) => {
     const fn = adapters[ch.type];
     if (!fn) {
       console.error(`[reminder/sender] 未知 channel type: ${ch.type}`);
@@ -44,7 +54,7 @@ export async function dispatchToAllChannels(userId: string, payload: ReminderPay
     }
     try {
       await fn({ userId, config: ch.config || {}, payload });
-      console.log(`[reminder/sender] ${ch.type}(${ch.name}) 发送成功 noteId=${payload.noteId}`);
+      console.log(`[reminder/sender] ${ch.type}(${ch.name}) 发送成功 noteId=${payload.noteId} type=${notificationType || 'untyped'}`);
     } catch (e) {
       console.error(`[reminder/sender] ${ch.type}(${ch.name}) 发送失败 noteId=${payload.noteId}:`, e);
     }

@@ -236,6 +236,8 @@ export interface ReminderChannel {
   name: string;
   config: Record<string, any>;
   enabled: boolean;
+  // 蘑菇 2026-06-09: 通知类型白名单. null/空=全收 (兼容老 row). UI 在 Settings 提醒页编辑
+  types: string[] | null;
   createdAt: string;
 }
 
@@ -868,10 +870,10 @@ export const api = {
   getReminderChannels() {
     return request<{ data: ReminderChannel[] }>('/reminder-channels');
   },
-  createReminderChannel(data: { type: ReminderChannelType; name: string; config: Record<string, any>; enabled?: boolean }) {
+  createReminderChannel(data: { type: ReminderChannelType; name: string; config: Record<string, any>; enabled?: boolean; types?: string[] | null }) {
     return request<{ data: ReminderChannel }>('/reminder-channels', { method: 'POST', body: JSON.stringify(data) });
   },
-  updateReminderChannel(id: string, data: Partial<Pick<ReminderChannel, 'name' | 'config' | 'enabled'>>) {
+  updateReminderChannel(id: string, data: Partial<Pick<ReminderChannel, 'name' | 'config' | 'enabled' | 'types'>>) {
     return request<{ data: ReminderChannel }>(`/reminder-channels/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   deleteReminderChannel(id: string) {
@@ -995,16 +997,16 @@ export const api = {
     return request<{ message: string }>(`/notes/${noteId}/group-reminder?groupId=${encodeURIComponent(groupId)}`, { method: 'DELETE' });
   },
   getNoteReminders(noteId: string) {
-    return request<{ data: { personal: PersonalReminderRow | null; group: GroupReminderRow[] } }>(`/notes/${noteId}/reminders`);
+    return request<{ data: { personal: PersonalReminderRow | null; group: GroupReminderRow[]; muted: boolean } }>(`/notes/${noteId}/reminders`);
   },
-  getGroupReminderSubscription(groupId: string) {
-    return request<{ data: { enabled: boolean } }>(`/groups/${groupId}/reminder-subscription`);
+  // 蘑菇 2026-06-08: 卡片级群提醒 mute (跨所有 share 群对该笔记不接收, 仅影响调用者本人)
+  muteNoteGroupReminder(noteId: string) {
+    return request<{ message: string }>(`/notes/${noteId}/group-reminder/mute`, { method: 'POST' });
   },
-  setGroupReminderSubscription(groupId: string, enabled: boolean) {
-    return request<{ data: { enabled: boolean } }>(`/groups/${groupId}/reminder-subscription`, {
-      method: 'PATCH', body: JSON.stringify({ enabled }),
-    });
+  unmuteNoteGroupReminder(noteId: string) {
+    return request<{ message: string }>(`/notes/${noteId}/group-reminder/mute`, { method: 'DELETE' });
   },
+  // 蘑菇 2026-06-09: getGroupReminderSubscription / setGroupReminderSubscription 已移除 (开关废)
 };
 
 // PR #11 提醒分家 type

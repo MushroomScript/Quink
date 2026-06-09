@@ -13,17 +13,20 @@ app.use('*', authMiddleware);
 
 const channelTypes = ['browser', 'email', 'bark', 'wecom_bot', 'dingtalk_bot', 'feishu_bot', 'telegram', 'webhook'] as const;
 
+// 蘑菇 2026-06-09: types 是通知类型白名单. null/undefined 默认 = 全收 (兼容老 row)
 const createSchema = z.object({
   type: z.enum(channelTypes),
   name: z.string().min(1).max(50),
   config: z.record(z.any()).default({}),
   enabled: z.boolean().default(true),
+  types: z.array(z.string().max(64)).nullable().optional(),
 });
 
 const updateSchema = z.object({
   name: z.string().min(1).max(50).optional(),
   config: z.record(z.any()).optional(),
   enabled: z.boolean().optional(),
+  types: z.array(z.string().max(64)).nullable().optional(),
 });
 
 app.get('/', async (c) => {
@@ -56,6 +59,7 @@ app.post('/', async (c) => {
     name: parsed.data.name,
     config: parsed.data.config,
     enabled: parsed.data.enabled,
+    types: parsed.data.types ?? null,
     createdAt: dayjs().toISOString(),
   };
   await db.insert(schema.reminderChannels).values(row);
@@ -80,6 +84,7 @@ app.patch('/:id', async (c) => {
   if (parsed.data.name !== undefined) updates.name = parsed.data.name;
   if (parsed.data.config !== undefined) updates.config = parsed.data.config;
   if (parsed.data.enabled !== undefined) updates.enabled = parsed.data.enabled;
+  if (parsed.data.types !== undefined) updates.types = parsed.data.types;
 
   await db.update(schema.reminderChannels).set(updates).where(eq(schema.reminderChannels.id, id));
   const updated = await db.select().from(schema.reminderChannels).where(eq(schema.reminderChannels.id, id)).get();

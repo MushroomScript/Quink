@@ -1403,7 +1403,15 @@ app.get('/:id', async (c) => {
   // PR #6: shared 笔记带 reaction summary + comment count, NoteDetail 直接用 (省一个 round trip + SSE 增量更新)
   // PR #7b: shared 笔记带 editorCount, NoteDetail "X 人编辑过" 胶囊用
   // PR #9: shared 笔记带 canWrite, NoteCard / NoteDetail 预判"点编辑能否进 modal"
-  let enriched: any = { ...note, sharedGroupIds: shares.map(s => s.groupId) };
+  // 蘑菇 2026-06-08: enrich authorNickname/Avatar, NoteDetail 顶部 chip 显示别人发布的笔记作者头像+昵称 (跟 NoteCard 一致)
+  const author = await db.select({ nickname: schema.users.nickname, avatar: schema.users.avatar })
+    .from(schema.users).where(eq(schema.users.id, note.userId)).get();
+  let enriched: any = {
+    ...note,
+    sharedGroupIds: shares.map(s => s.groupId),
+    authorNickname: author?.nickname ?? null,
+    authorAvatar: author?.avatar ?? null,
+  };
   if (note.visibility === 'shared') {
     const [{ reactionMap, commentCountMap }, editorCountMap, canWriteMap] = await Promise.all([
       loadSocialMetaMaps([id], userId),
@@ -2194,30 +2202,36 @@ app.post('/:id/group-reminder', async (c) => {
     set: { dueAt, rrule: rrule ?? null, remindSentAt: null, createdBy: userId },
   });
   publish(userId, 'data-changed', { scope: 'reminders', noteId: id, groupId }, _ocid);
-  // 蘑菇 2026-06-08: 设/更新群提醒时给该群所有 active 成员 (除发起人) 发通知, 之前是静默写表群成员只能进待办看
-  // category=reminder 落到通知中心"提醒"tab. group_reminder_subscriptions 接收开关只控"到点 OS 弹", 设置事件本身一律通知
+  // 蘑菇 2026-06-08 (修订): 设/更新群提醒时给该群 active 成员 (除发起人) 发通知, 跟 scheduler 到点同款规则:
+  // group_reminder_subscriptions.enabled=false 的成员一律跳过 (用户已明示"不想被该群打扰", 设置事件也算"打扰")
   const members = await db.select({ userId: schema.groupMembers.userId })
     .from(schema.groupMembers)
     .where(and(
       eq(schema.groupMembers.groupId, groupId),
       eq(schema.groupMembers.status, 'active'),
     )).all();
+  // 蘑菇 2026-06-09: 移除群级开关过滤, 仅保留卡片级 mute. 群级"接收本群通知"开关已废
+  const memberIds = members.map(m => m.userId);
+  const mutes = memberIds.length === 0 ? [] : await db.select({ userId: schema.noteGroupReminderMutes.userId })
+    .from(schema.noteGroupReminderMutes).where(and(
+      eq(schema.noteGroupReminderMutes.noteId, id),
+      inArray(schema.noteGroupReminderMutes.userId, memberIds),
+    )).all();
+  const mutedSet = new Set(mutes.map(m => m.userId));
+  const recipients = memberIds.filter(uid => uid !== userId && !mutedSet.has(uid));
   const [group, actor] = await Promise.all([
     db.select({ name: schema.groups.name }).from(schema.groups).where(eq(schema.groups.id, groupId)).get(),
     db.select({ nickname: schema.users.nickname }).from(schema.users).where(eq(schema.users.id, userId)).get(),
   ]);
   const dueLabel = dayjs(dueAt).format('YYYY-MM-DD HH:mm');
   const preview = noteSnippet(note.content);
-  await Promise.all(members
-    .filter(m => m.userId !== userId)
-    .map(m => createNotification(
-      m.userId, 'reminder', 'group-reminder-set',
-      `「${group?.name || '群组'}」多了一条群提醒`,
-      `${actor?.nickname || '管理员'}设置了「${preview}」的群提醒, 到点 ${dueLabel} 提醒大家`,
-      { noteId: id, groupId, dueAt, rrule: rrule ?? null, createdByUserId: userId },
-    ))
-  );
-  await logAudit(c, 'note.group_reminder_set', 'note', id, { groupId, dueAt, rrule, notifiedMembers: members.length - 1 });
+  await Promise.all(recipients.map(uid => createNotification(
+    uid, 'reminder', 'group-reminder-set',
+    `「${group?.name || '群组'}」多了一条群提醒`,
+    `${actor?.nickname || '管理员'}设置了「${preview}」的群提醒, 到点 ${dueLabel} 提醒大家`,
+    { noteId: id, groupId, dueAt, rrule: rrule ?? null, createdByUserId: userId },
+  )));
+  await logAudit(c, 'note.group_reminder_set', 'note', id, { groupId, dueAt, rrule, notifiedMembers: recipients.length });
   return c.json({ data: { noteId: id, groupId, dueAt, rrule: rrule ?? null } });
 });
 
@@ -2270,7 +2284,44 @@ app.get('/:id/reminders', async (c) => {
       eq(schema.noteGroupReminders.noteId, id),
       inArray(schema.noteGroupReminders.groupId, myGroupIds),
     )).all();
-  return c.json({ data: { personal: personal ?? null, group: groupReminders } });
+  // 蘑菇 2026-06-08: 卡片级 mute 状态 (该用户对这条笔记是否屏蔽群提醒). 给 NoteCard 铃铛斜杠图标 + 菜单文案切换用
+  const muteRow = await db.select({ noteId: schema.noteGroupReminderMutes.noteId })
+    .from(schema.noteGroupReminderMutes).where(and(
+      eq(schema.noteGroupReminderMutes.userId, userId),
+      eq(schema.noteGroupReminderMutes.noteId, id),
+    )).get();
+  return c.json({ data: { personal: personal ?? null, group: groupReminders, muted: !!muteRow } });
+});
+
+// POST /api/notes/:id/group-reminder/mute — 屏蔽本笔记群提醒 (跨所有 share 群生效, 仅影响调用者本人)
+// 蘑菇 2026-06-08: 比群级 group_reminder_subscriptions 更细粒度, 用户对单条待办说"不打扰我"
+app.post('/:id/group-reminder/mute', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const { id } = c.req.param();
+  // 校验笔记可见 (防屏蔽不属于自己可访问的笔记)
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  await db.insert(schema.noteGroupReminderMutes).values({
+    userId, noteId: id, mutedAt: dayjs().toISOString(),
+  }).onConflictDoNothing();
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, _ocid);
+  await logAudit(c, 'note.group_reminder_mute', 'note', id, {});
+  return c.json({ message: '已屏蔽' });
+});
+
+// DELETE /api/notes/:id/group-reminder/mute — 取消屏蔽
+app.delete('/:id/group-reminder/mute', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const { id } = c.req.param();
+  await db.delete(schema.noteGroupReminderMutes).where(and(
+    eq(schema.noteGroupReminderMutes.userId, userId),
+    eq(schema.noteGroupReminderMutes.noteId, id),
+  ));
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, _ocid);
+  await logAudit(c, 'note.group_reminder_unmute', 'note', id, {});
+  return c.json({ message: '已恢复接收' });
 });
 
 export default app;

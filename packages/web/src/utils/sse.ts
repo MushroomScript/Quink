@@ -159,16 +159,9 @@ export function startReminderSse() {
         requestId: string; groupId: string; groupName: string;
         applicant: { id: string; username: string; nickname: string; avatar: string | null };
       };
-      // PR #13: toast 砍掉, 通知中心 + OS 通知双渠道已覆盖 (group-join-request 通知 + showNotification L168)
+      // PR #13: toast 砍, PR #14: OS 通知也砍, 由 browser channel 统一触发 (createNotification → dispatch)
       import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onJoinRequest(data.groupId);
-      });
-      // OS 桌面通知 (任务栏闪 + Win 通知中心收纳). 点击跳群组详情页直接看待审申请
-      showNotification({
-        title: '群组申请',
-        body: `${data.applicant.nickname} 申请加入「${data.groupName}」`,
-        tag: `group-join-${data.requestId}`,
-        path: `/groups/${data.groupId}`,
       });
     } catch (e) { console.error('[sse] group-join-request parse failed:', e); }
   });
@@ -178,40 +171,24 @@ export function startReminderSse() {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
       if (isMyEvent(data)) return;
-      // PR #13: toast 砍掉, 通知中心 + OS 通知双渠道已覆盖 (group-joined 通知 + showNotification L186)
+      // OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09 改)
       import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onJoinApproved();
-      });
-      showNotification({
-        title: '加群成功',
-        body: '你的申请已通过, 点击进入群组',
-        tag: `group-approved-${data.groupId}`,
-        path: `/groups/${data.groupId}`,
       });
     } catch (e) { console.error('[sse] group-join-approved parse failed:', e); }
   });
 
-  // group-join-rejected: 我被拒绝 → 桌面通知 (PR #13 砍 toast, 通知中心 group-join-rejected 已覆盖)
-  es.addEventListener('group-join-rejected', (_ev) => {
-    showNotification({
-      title: '申请被拒绝',
-      body: '管理员拒绝了你的申请',
-    });
-  });
+  // group-join-rejected: 我被拒绝. OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09 改), 此 handler 无 store side effect 实际可删
+  es.addEventListener('group-join-rejected', () => {});
 
   // group-dissolved: 我所在群被 owner 解散 → 从 sidebar 移除 + toast + 桌面通知
   es.addEventListener('group-dissolved', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
       if (isMyEvent(data)) return;
-      // PR #13: toast 砍掉, 通知中心 + OS 通知双渠道已覆盖 (group-dissolved 通知 + showNotification L215)
+      // OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09 改)
       import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onDissolved(data.groupId);
-      });
-      showNotification({
-        title: '群组已解散',
-        body: '你所在的一个群组已被创建者解散',
-        tag: `group-dissolved-${data.groupId}`,
       });
     } catch (e) { console.error('[sse] group-dissolved parse failed:', e); }
   });
@@ -221,17 +198,11 @@ export function startReminderSse() {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string; by: string; self: boolean };
       if (isMyEvent(data)) return;
+      // OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09 改). 自己被踢的 toast 保留 (即时反馈)
       Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
         useGroupsStore().onMemberRemoved(data.groupId, data.self);
         if (data.self) useToast().show('你已被移出群组', 'error');
       });
-      if (data.self) {
-        showNotification({
-          title: '已被移出群组',
-          body: '管理员将你移出了一个群组',
-          tag: `group-removed-${data.groupId}`,
-        });
-      }
     } catch (e) { console.error('[sse] group-member-removed parse failed:', e); }
   });
 
@@ -299,12 +270,7 @@ export function startReminderSse() {
           },
         });
       });
-      showNotification({
-        title: '笔记编辑权限申请',
-        body: `${data.requesterNickname} 申请编辑笔记${data.message ? '：' + data.message : ''}`,
-        tag: `note-edit-request-${data.requestId}`,
-        path: `/note/${data.noteId}`,
-      });
+      // OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09)
       // 让 GroupDetail 自动刷新待审列表 (跟 group-notes-changed 同款 window event 模式)
       window.dispatchEvent(new CustomEvent('quink-edit-request-changed'));
     } catch (e) { console.error('[sse] note-edit-request parse failed:', e); }
@@ -317,13 +283,8 @@ export function startReminderSse() {
         originNoteId: string; newNoteId: string; duplicatorNickname: string;
       };
       if (isMyEvent(data)) return;
-      // PR #13: toast 砍掉, 通知中心 duplicated + OS 通知双渠道已覆盖
-      showNotification({
-        title: '笔记被复制',
-        body: `${data.duplicatorNickname} 复制了你的笔记`,
-        tag: `note-duplicated-${data.newNoteId}`,
-        path: `/note/${data.originNoteId}`,
-      });
+      // toast + OS 通知都砍, 通知中心 + browser channel 统一接管 (蘑菇 2026-06-09)
+      void data;
     } catch (e) { console.error('[sse] note-duplicated parse failed:', e); }
   });
 
@@ -333,13 +294,7 @@ export function startReminderSse() {
       const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; status: 'approved' | 'rejected' };
       if (isMyEvent(data)) return;
       const approved = data.status === 'approved';
-      // PR #13: toast 砍掉, 通知中心 edit-request-resolved + OS 通知双渠道已覆盖
-      showNotification({
-        title: approved ? '编辑权限申请通过' : '编辑权限申请被拒',
-        body: approved ? '现在可以编辑这条笔记了' : '作者或管理员拒绝了你的申请',
-        tag: `note-edit-resolved-${data.noteId}`,
-        path: `/note/${data.noteId}`,
-      });
+      // OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09)
       // PR #13 补丁: approved 时刷该笔记 canWrite. 三处需同步: (1) 主 view store viewState (2) 打开的 GroupDetail 群 feed (3) 申请审批面板.
       // 主 view 用 refreshSingleNote 拉单条; GroupDetail 不在 store, 用 window event quink-edit-request-changed (现有 listener 调 loadEditRequests, 蘑菇 2026-06-08 二次报告 canWrite 没刷 → 同时刷 groupNotes)
       if (approved) {
@@ -434,10 +389,9 @@ export function startReminderSse() {
   // PR #10 通知中心 SSE.
   // notification-new: 后端 createNotification helper 推给收件人 (本人所有设备). 不带 _originClientId
   // (不是发起人触发的事件, 多设备都该收到). store handler 头插 + 未读数 +1
-  // 蘑菇 2026-06-08: 高优先级 type 额外弹 OS 通知 (跟通知中心并存, 防群成员漏看).
-  // 设计原则: 协作场景"我必须知道"的事件才弹 OS, 避免低频事件 (评论/fork) spam. 列白名单维护.
-  // 其他 group-* 等事件走专用 SSE handler 弹 OS (跟 createNotification 并行), 不靠这里
-  const OS_NOTIFY_TYPES = new Set(['group-reminder-set']);
+  // 蘑菇 2026-06-09: OS 通知不再由前端硬白名单触发, 完全由后端 browser channel.types 配置控制
+  // (Settings 提醒页里勾选哪些 type → browser channel 收到后走 'reminder' SSE handler 弹 OS).
+  // 这里只更新通知中心徽章, 不直接弹 OS
   es.addEventListener('notification-new', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as {
@@ -461,15 +415,6 @@ export function startReminderSse() {
           createdAt: data.createdAt,
         });
       });
-      if (OS_NOTIFY_TYPES.has(data.type)) {
-        const noteId = data.payload?.noteId;
-        showNotification({
-          title: data.title,
-          body: data.body || '',
-          tag: `${data.type}-${data.id}`,
-          path: noteId ? `/note/${noteId}` : undefined,
-        });
-      }
     } catch (e) { console.error('[sse] notification-new parse failed:', e); }
   });
 

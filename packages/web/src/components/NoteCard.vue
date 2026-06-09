@@ -23,6 +23,7 @@ import {
   PhTrash,
   PhBell,
   PhBellRinging,
+  PhBellSlash,
   PhChatCircleDots,
   PhCopySimple,
 } from '@phosphor-icons/vue';
@@ -473,16 +474,32 @@ const fullTime = computed(() => dayjs(props.note.createdAt).format('YYYY-MM-DD H
 // PR #13: 老 todoDue 字段 fallback 已删 (notes.todo_due 列移除)
 const myPersonalReminder = ref<PersonalReminderRow | null>(null);
 const myGroupReminders = ref<GroupReminderRow[]>([]);
+const groupReminderMuted = ref(false); // 蘑菇 2026-06-08: 卡片级 mute 状态
 const remindersLoaded = ref(false);
 async function loadReminders() {
   try {
     const res = await api.getNoteReminders(props.note.id);
     myPersonalReminder.value = res.data.personal;
     myGroupReminders.value = res.data.group;
+    groupReminderMuted.value = !!res.data.muted;
   } catch (e) {
     console.error('[NoteCard] loadReminders failed:', e);
   } finally {
     remindersLoaded.value = true;
+  }
+}
+// 蘑菇 2026-06-08: 切换屏蔽群提醒. 仅影响调用者本人 (scheduler 到点 + POST 设置通知都过滤 mutedSet)
+async function toggleGroupReminderMute() {
+  showMenu.value = false;
+  const next = !groupReminderMuted.value;
+  groupReminderMuted.value = next; // 乐观更新
+  try {
+    if (next) await api.muteNoteGroupReminder(props.note.id);
+    else await api.unmuteNoteGroupReminder(props.note.id);
+    toast.show(next ? '已屏蔽此待办的群提醒' : '已恢复接收', 'success');
+  } catch (e: any) {
+    groupReminderMuted.value = !next; // 回滚
+    toast.show(e?.message || '操作失败', 'error');
   }
 }
 onMounted(() => {
@@ -598,8 +615,9 @@ async function saveReminder(payload: { remindAt: string | null; rrule: string | 
 
 // PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
 const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
+// 蘑菇 2026-06-08: quink 固定 blueberry 不跟主题 (.type-chip-quink 定义在 style.css). 跟 note/todo 一样固定色
 const typeColor: Record<string, string> = {
-  quink: 'bg-primary-light text-primary',
+  quink: 'type-chip-quink',
   note: 'bg-emerald-100 text-emerald-600',
   todo: 'bg-amber-100 text-amber-600',
 };
@@ -664,10 +682,12 @@ const typeColor: Record<string, string> = {
         <!-- 提醒铃铛: 仅 todo 且 effectiveReminder 有 due 时显示. 数据源优先 personal > group > legacy todoDue -->
         <span v-if="note.type === 'todo' && effectiveReminder.dueAt"
           class="ml-auto flex items-center gap-1 text-[11px] cursor-pointer hover:opacity-70 shrink-0 whitespace-nowrap"
-          :class="reminderText === '已过' ? 'text-gray-400' : 'text-amber-600'"
+          :class="(groupReminderMuted && effectiveReminder.source === 'group') || reminderText === '已过' ? 'text-gray-400' : 'text-amber-600'"
           :title="reminderFullText"
           @click.stop="openReminderPicker">
-          <PhBellRinging v-if="effectiveReminder.rrule" size="0.875rem" weight="fill" />
+          <!-- 蘑菇 2026-06-08: muted=true 且 source=group 时铃铛改 PhBellSlash 提示已屏蔽, 提醒时间仍显示 -->
+          <PhBellSlash v-if="groupReminderMuted && effectiveReminder.source === 'group'" size="0.875rem" weight="fill" />
+          <PhBellRinging v-else-if="effectiveReminder.rrule" size="0.875rem" weight="fill" />
           <PhBell v-else size="0.875rem" weight="fill" />
           <span class="tabular-nums">{{ reminderText }}</span>
         </span>
@@ -750,6 +770,13 @@ const typeColor: Record<string, string> = {
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhBellRinging size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>{{ currentGroupReminder ? '编辑群提醒' : '设置群提醒' }}</span>
+          </button>
+          <!-- 蘑菇 2026-06-08: 屏蔽此待办的群提醒 toggle. 仅 todo + 有我可见的群提醒时显示. 跨所有 share 群对该笔记生效 -->
+          <button v-if="note.type === 'todo' && myGroupReminders.length > 0" @click.stop="toggleGroupReminderMute"
+            class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+            <PhBellSlash v-if="!groupReminderMuted" size="0.875rem" weight="fill" style="margin-top: 2px" />
+            <PhBell v-else size="0.875rem" weight="fill" style="margin-top: 2px" />
+            <span>{{ groupReminderMuted ? '恢复此待办群提醒' : '屏蔽此待办群提醒' }}</span>
           </button>
           <!-- PR #9 另存为: 仅群组界面显示 (主视图含自己分享的都不显示, 蘑菇 2026-06-07 修订: 只有群组上下文有"复制成自己副本"语义). 按 type 决定文案 -->
           <button v-if="inGroupContext" @click.stop="doDuplicate()"

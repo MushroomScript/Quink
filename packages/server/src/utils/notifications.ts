@@ -19,6 +19,7 @@ import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { publish } from '../reminder/bus.js';
 import type { NotificationCategory } from '../db/schema.js';
+import { dispatchToAllChannels } from '../reminder/sender.js';
 
 export async function createNotification(
   userId: string,
@@ -53,6 +54,15 @@ export async function createNotification(
       payload: row.payload,
       createdAt,
     });
+    // 蘑菇 2026-06-09: 通知中心 + 渠道一视同仁 — 同时走 reminder_channels 路由.
+    // browser channel 触发 OS 弹通知, email/wecom_bot/etc 真发. dispatch 按 channel.types 过滤 (null=全收).
+    // fire-and-forget 不阻塞主流程, 失败 console.error
+    dispatchToAllChannels(userId, {
+      noteId: (payload as any)?.noteId || id,
+      title,
+      body: body || '',
+      remindAt: (payload as any)?.remindAt || createdAt,
+    }, type).catch(e => console.error('[notifications] dispatch failed:', { type, userId }, e));
   } catch (e) {
     console.error('[notifications] createNotification failed:', { userId, category, type, title }, e);
   }

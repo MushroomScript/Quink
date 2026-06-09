@@ -52,13 +52,14 @@ function computeNextDue(rrule: string, lastFire: Date): string | null {
 async function deliverToUser(userId: string, note: { id: string; content: string; deletedAt: string | null }, payload: ReminderPayload, source: 'personal' | 'group', extraPayload?: Record<string, any>) {
   if (note.deletedAt) {
     // 笔记已被软删: 不发 channel (用户没必要再看到旧 todo), 只写一条"失效"通知
+    // (createNotification 内会调 dispatch, 由 channel.types 决定走哪些渠道)
     createNotification(userId, 'reminder', 'reminder-expired',
       '提醒已失效', `「${extractPreview(note.content, 40)}」已被删除`,
       { noteId: note.id, source, ...(extraPayload || {}) },
     ).catch(() => {});
     return;
   }
-  await dispatchToAllChannels(userId, payload);
+  // 蘑菇 2026-06-09: scheduler 触发的待办到点不再直调 dispatch, 改通过 createNotification 统一走 channel.types 过滤
   publish(userId, 'note-updated', { noteId: note.id });
   createNotification(userId, 'reminder', source === 'group' ? 'group-reminder-due' : 'reminder-due',
     payload.title, payload.body,
@@ -158,15 +159,17 @@ async function tick() {
       )).all();
     if (members.length > 0) {
       const memberIds = members.map(m => m.userId);
-      const subs = await db.select().from(schema.groupReminderSubscriptions)
-        .where(and(
-          eq(schema.groupReminderSubscriptions.groupId, r.groupId),
-          inArray(schema.groupReminderSubscriptions.userId, memberIds),
+      // 蘑菇 2026-06-09 修订: 群级 group_reminder_subscriptions 开关只控"通知中心相关群事件"
+      // (如 group-reminder-set 设置通知), 不控待办到点的提醒. 待办到点要单独关 → 卡片级 mute.
+      // 此处移除 subMap 过滤, 仅保留 mutedSet (笔记级 mute)
+      const mutes = await db.select({ userId: schema.noteGroupReminderMutes.userId })
+        .from(schema.noteGroupReminderMutes).where(and(
+          eq(schema.noteGroupReminderMutes.noteId, note.id),
+          inArray(schema.noteGroupReminderMutes.userId, memberIds),
         )).all();
-      const subMap = new Map(subs.map(s => [s.userId, s.enabled]));
-      // 默认接收 (subMap 缺行视作 true), 显式 enabled=false 才跳过
+      const mutedSet = new Set(mutes.map(m => m.userId));
       for (const m of memberIds) {
-        if (subMap.get(m) === false) continue;
+        if (mutedSet.has(m)) continue;
         await deliverToUser(m, note, payload, 'group', { groupId: r.groupId, createdBy: r.createdBy });
       }
     }

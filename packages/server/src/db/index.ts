@@ -429,12 +429,19 @@ try { sqlite.exec(`
 `); } catch {}
 try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_group_reminders_due ON note_group_reminders(due_at) WHERE remind_sent_at IS NULL'); } catch {}
 
+// 蘑菇 2026-06-09: group_reminder_subscriptions 表废. DROP 一次性清 (实际只控 group-reminder-set, 卡片级 mute 替代)
+try { sqlite.exec('DROP TABLE IF EXISTS group_reminder_subscriptions'); } catch {}
+
+// 蘑菇 2026-06-09: reminder_channels 加 types JSON 字段 (string[] 白名单, NULL=全收兼容老 row)
+try { sqlite.exec('ALTER TABLE reminder_channels ADD COLUMN types TEXT'); } catch {}
+
+// 蘑菇 2026-06-08: 笔记级群提醒 mute (PR #13 后补丁). 主键 (user_id, note_id), 跨所有群生效
 try { sqlite.exec(`
-  CREATE TABLE IF NOT EXISTS group_reminder_subscriptions (
+  CREATE TABLE IF NOT EXISTS note_group_reminder_mutes (
     user_id TEXT NOT NULL REFERENCES users(id),
-    group_id TEXT NOT NULL REFERENCES groups(id),
-    enabled INTEGER NOT NULL DEFAULT 1,
-    PRIMARY KEY (user_id, group_id)
+    note_id TEXT NOT NULL REFERENCES notes(id),
+    muted_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, note_id)
   );
 `); } catch {}
 

@@ -924,46 +924,9 @@ app.patch('/:id/members/:userId', async (c) => {
   return c.json({ message: '已更新' });
 });
 
-// =========================================================
-//  PR #11 群提醒接收开关
-// =========================================================
-// 每用户每群最多 1 条. 缺行 = 默认接收 (enabled=1). 关闭时 INSERT enabled=0.
-// scheduler 触发群提醒前查这表, enabled=0 跳过本人 (OS + 通知中心都不发)
-const subscriptionSchema = z.object({ enabled: z.boolean() });
-
-// GET /api/groups/:id/reminder-subscription — 拿我对该群的接收开关 (缺行返默认 true)
-app.get('/:id/reminder-subscription', async (c) => {
-  const userId = c.get('userId');
-  const groupId = c.req.param('id');
-  const me = await getActiveMember(groupId, userId);
-  if (!me) return c.json({ error: '不是该群成员' }, 403);
-  const row = await db.select().from(schema.groupReminderSubscriptions)
-    .where(and(
-      eq(schema.groupReminderSubscriptions.userId, userId),
-      eq(schema.groupReminderSubscriptions.groupId, groupId),
-    )).get();
-  return c.json({ data: { enabled: row?.enabled ?? true } });
-});
-
-// PATCH /api/groups/:id/reminder-subscription — 改开关. upsert
-app.patch('/:id/reminder-subscription', async (c) => {
-  const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
-  const groupId = c.req.param('id');
-  const me = await getActiveMember(groupId, userId);
-  if (!me) return c.json({ error: '不是该群成员' }, 403);
-  const parsed = subscriptionSchema.safeParse(await c.req.json().catch(() => ({})));
-  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
-  await db.insert(schema.groupReminderSubscriptions).values({
-    userId, groupId, enabled: parsed.data.enabled,
-  }).onConflictDoUpdate({
-    target: [schema.groupReminderSubscriptions.userId, schema.groupReminderSubscriptions.groupId],
-    set: { enabled: parsed.data.enabled },
-  });
-  publish(userId, 'data-changed', { scope: 'reminder-subscription', groupId }, _ocid);
-  await logAudit(c, 'group.reminder_subscription', 'group', groupId, { enabled: parsed.data.enabled });
-  return c.json({ data: { enabled: parsed.data.enabled } });
-});
+// 蘑菇 2026-06-09: 群级"接收本群通知"开关移除. 实际只控 group-reminder-set 一种 type,
+// 其他 group-* / content-* 通知都不受控. 改用卡片级 mute (note_group_reminder_mutes) 单条管, 简化模型.
+// schema/DB 表 group_reminder_subscriptions 在 db/index.ts DROP TABLE 迁移
 
 // =========================================================
 //  PR #12 群组回收站 + 审计

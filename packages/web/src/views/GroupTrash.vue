@@ -279,7 +279,7 @@ function deletedInfo(n: TrashNote): string {
 
 const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
 const typeColor: Record<string, string> = {
-  quink: 'bg-primary-light text-primary',
+  quink: 'type-chip-quink', // 蘑菇 2026-06-08: 固定 blueberry, 不跟主题 (style.css 定义 + dark 适配)
   note: 'bg-emerald-100 text-emerald-600',
   todo: 'bg-amber-100 text-amber-600',
 };

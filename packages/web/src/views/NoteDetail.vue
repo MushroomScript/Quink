@@ -27,6 +27,8 @@ import {
   PhLightbulb,
   PhCheckSquare,
   PhBell,
+  PhBellSlash,
+  PhBellRinging,
   PhUsersThree,
   PhCaretRight,
   PhArrowsClockwise,
@@ -170,6 +172,14 @@ const restoreRefPreview = inject<() => void>('restoreRefPreview');
 
 // PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
 const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
+// 蘑菇 2026-06-08: type chip 颜色跟 NoteCard 完全一致 (之前 NoteDetail 三种 type 都用同主题色看着错乱)
+// quink 固定 blueberry 不跟主题 (.type-chip-quink 定义在 style.css 含 dark 适配)
+const typeColor: Record<string, string> = {
+  quink: 'type-chip-quink',
+  note: 'bg-emerald-100 text-emerald-600',
+  todo: 'bg-amber-100 text-amber-600',
+};
+const sharedCount = computed(() => sharedGroupIds.value.length);
 
 async function renderContent(content: string): Promise<string> {
   try {
@@ -319,13 +329,54 @@ async function toggleTodo() {
 // 待办提醒: 点菜单"设置/编辑提醒" → 弹 ReminderPicker. PR #13 切到 personal-reminder 接口.
 const reminderPickerOpen = ref(false);
 const myPersonalReminder = ref<{ dueAt: string; rrule: string | null } | null>(null);
+const myGroupReminders = ref<Array<{ groupId: string; dueAt: string; rrule: string | null }>>([]);
+const groupReminderMuted = ref(false);
 async function loadReminder() {
   if (!note.value || note.value.type !== 'todo') return;
   try {
     const res = await api.getNoteReminders(note.value.id);
     myPersonalReminder.value = res.data.personal;
+    myGroupReminders.value = res.data.group;
+    groupReminderMuted.value = !!res.data.muted;
   } catch (e) {
     console.error('[NoteDetail] loadReminder failed:', e);
+  }
+}
+// 蘑菇 2026-06-08: 跟 NoteCard 同款 effectiveReminder (优先 personal > group)
+const effectiveReminder = computed<{ dueAt: string | null; rrule: string | null; source: 'personal' | 'group' | null; groupId?: string }>(() => {
+  if (myPersonalReminder.value) return { dueAt: myPersonalReminder.value.dueAt, rrule: myPersonalReminder.value.rrule, source: 'personal' };
+  if (myGroupReminders.value.length > 0) {
+    const g = myGroupReminders.value[0];
+    return { dueAt: g.dueAt, rrule: g.rrule, source: 'group', groupId: g.groupId };
+  }
+  return { dueAt: null, rrule: null, source: null };
+});
+const reminderDueLabel = computed(() => {
+  const due = effectiveReminder.value.dueAt;
+  if (!due) return '';
+  return dayjs(due).format('YYYY-MM-DD HH:mm');
+});
+const reminderSourceLabel = computed(() => {
+  const src = effectiveReminder.value.source;
+  if (src === 'group') {
+    const gid = effectiveReminder.value.groupId;
+    const name = gid ? groupsStore.groups.find(g => g.id === gid)?.name : '';
+    return name ? `群提醒 · ${name}` : '群提醒';
+  }
+  if (src === 'personal') return '个人提醒';
+  return '';
+});
+async function toggleGroupReminderMute() {
+  if (!note.value) return;
+  const next = !groupReminderMuted.value;
+  groupReminderMuted.value = next;
+  try {
+    if (next) await api.muteNoteGroupReminder(note.value.id);
+    else await api.unmuteNoteGroupReminder(note.value.id);
+    toast.show(next ? '已屏蔽此待办的群提醒' : '已恢复接收', 'success');
+  } catch (e: any) {
+    groupReminderMuted.value = !next;
+    toast.show(e?.message || '操作失败', 'error');
   }
 }
 function openReminderPicker() {
@@ -452,11 +503,42 @@ onUnmounted(() => {
         <button @click="goBack" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
           <PhCaretLeft size="1.25rem" weight="fill" />
         </button>
-        <div class="flex items-center gap-2">
-          <span class="text-xs px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark">{{ typeLabels[note.type] }}</span>
-          <span v-if="note.category" class="text-xs text-gray-400">{{ note.category }}</span>
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-xs px-2 py-0.5 rounded-full font-medium shrink-0 whitespace-nowrap" :class="typeColor[note.type]">{{ typeLabels[note.type] }}</span>
+          <!-- 蘑菇 2026-06-08: 跟 NoteCard 同款"已分享"/作者头像 chip -->
+          <span v-if="isMyNote && isShared && sharedCount > 0"
+            class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark select-none shrink-0 whitespace-nowrap"
+            :title="`已分享到 ${sharedCount} 个群`">
+            <PhUsersThree size="0.75rem" weight="fill" />
+            <span>已分享</span>
+          </span>
+          <span v-else-if="!isMyNote && (note as any).authorNickname"
+            class="inline-flex items-center gap-1 text-xs text-gray-500 select-none min-w-0"
+            :title="`@${(note as any).authorNickname}`">
+            <img v-if="(note as any).authorAvatar" :src="resolveFileThumbUrl((note as any).authorAvatar)"
+              @error="thumbErrorFallback($event, resolveFileUrl((note as any).authorAvatar))"
+              class="w-5 h-5 rounded-full object-cover shrink-0" alt="" />
+            <div v-else class="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[9px] font-bold shrink-0">
+              {{ ((note as any).authorNickname || '?').charAt(0).toUpperCase() }}
+            </div>
+            <span class="truncate min-w-0">{{ (note as any).authorNickname }}</span>
+          </span>
+          <span v-if="note.category" class="text-xs text-gray-400 truncate min-w-0">{{ note.category }}</span>
         </div>
-        <span class="text-xs text-gray-400 ml-auto">{{ dayjs(note.createdAt).format('YYYY-MM-DD HH:mm') }}</span>
+        <!-- 蘑菇 2026-06-08: 待办提醒时间显示, 跟 NoteCard 同款 (个人>群优先级). source=group 时点跳出 mute toggle 提示. 点 chip 打开 picker 改个人提醒 -->
+        <span v-if="note.type === 'todo' && effectiveReminder.dueAt"
+          class="ml-auto flex items-center gap-1 text-xs cursor-pointer hover:opacity-70 shrink-0 whitespace-nowrap"
+          :class="(groupReminderMuted && effectiveReminder.source === 'group') ? 'text-gray-400' : 'text-amber-600'"
+          :title="`${reminderDueLabel}${effectiveReminder.rrule ? '（重复: ' + effectiveReminder.rrule + '）' : ''}${reminderSourceLabel ? '（' + reminderSourceLabel + '）' : ''}`"
+          @click="openReminderPicker">
+          <PhBellSlash v-if="groupReminderMuted && effectiveReminder.source === 'group'" size="0.875rem" weight="fill" />
+          <PhBellRinging v-else-if="effectiveReminder.rrule" size="0.875rem" weight="fill" />
+          <PhBell v-else size="0.875rem" weight="fill" />
+          <span class="tabular-nums">{{ reminderDueLabel }}</span>
+          <span v-if="reminderSourceLabel" class="text-[10px] text-gray-400">· {{ reminderSourceLabel }}</span>
+        </span>
+        <span class="text-xs text-gray-400 shrink-0 whitespace-nowrap"
+          :class="{ 'ml-auto': !(note.type === 'todo' && effectiveReminder.dueAt) }">{{ dayjs(note.createdAt).format('YYYY-MM-DD HH:mm') }}</span>
         <button @click="openEditModal?.(note)" class="px-3 py-1 text-xs rounded-lg hover:bg-gray-100 text-gray-400 inline-flex items-center gap-1">
           <PhPencilSimple size="0.875rem" weight="fill" />
           <span>编辑</span>
@@ -487,7 +569,14 @@ onUnmounted(() => {
             <button v-if="note.type === 'todo'" @click.stop="openReminderPicker"
               class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
               <PhBell size="0.875rem" weight="fill" />
-              <span>{{ myPersonalReminder ? '编辑提醒' : '设置提醒' }}</span>
+              <span>{{ myPersonalReminder ? '编辑个人提醒' : '设置个人提醒' }}</span>
+            </button>
+            <!-- 蘑菇 2026-06-08: 屏蔽此待办的群提醒 toggle, 跟 NoteCard 同款. 仅有可见群提醒时显示 -->
+            <button v-if="note.type === 'todo' && myGroupReminders.length > 0" @click.stop="toggleGroupReminderMute(); showMenu = false"
+              class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+              <PhBellSlash v-if="!groupReminderMuted" size="0.875rem" weight="fill" />
+              <PhBell v-else size="0.875rem" weight="fill" />
+              <span>{{ groupReminderMuted ? '恢复此待办群提醒' : '屏蔽此待办群提醒' }}</span>
             </button>
             <div class="border-t border-gray-100 my-0.5"></div>
             <!-- 移至类型 (PR #8 命名重整: quink=灵感, note=笔记): 当前 type 不显示, 避免"移至自身"无效项 -->
