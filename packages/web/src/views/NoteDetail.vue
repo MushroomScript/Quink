@@ -342,29 +342,11 @@ async function loadReminder() {
     console.error('[NoteDetail] loadReminder failed:', e);
   }
 }
-// 蘑菇 2026-06-08: 跟 NoteCard 同款 effectiveReminder (优先 personal > group)
-const effectiveReminder = computed<{ dueAt: string | null; rrule: string | null; source: 'personal' | 'group' | null; groupId?: string }>(() => {
-  if (myPersonalReminder.value) return { dueAt: myPersonalReminder.value.dueAt, rrule: myPersonalReminder.value.rrule, source: 'personal' };
-  if (myGroupReminders.value.length > 0) {
-    const g = myGroupReminders.value[0];
-    return { dueAt: g.dueAt, rrule: g.rrule, source: 'group', groupId: g.groupId };
-  }
-  return { dueAt: null, rrule: null, source: null };
-});
-const reminderDueLabel = computed(() => {
-  const due = effectiveReminder.value.dueAt;
-  if (!due) return '';
-  return dayjs(due).format('YYYY-MM-DD HH:mm');
-});
-const reminderSourceLabel = computed(() => {
-  const src = effectiveReminder.value.source;
-  if (src === 'group') {
-    const gid = effectiveReminder.value.groupId;
-    const name = gid ? groupsStore.groups.find(g => g.id === gid)?.name : '';
-    return name ? `群提醒 · ${name}` : '群提醒';
-  }
-  if (src === 'personal') return '个人提醒';
-  return '';
+// 蘑菇 2026-06-09: 个人提醒 + 群提醒并存时两个 chip 一起显示 (个人在前, 整行右对齐). 群名退到 title hover.
+function fmtReminder(dueAt: string) { return dayjs(dueAt).format('YYYY-MM-DD HH:mm'); }
+const groupReminderName = computed(() => {
+  const gid = myGroupReminders.value[0]?.groupId;
+  return gid ? groupsStore.groups.find(g => g.id === gid)?.name : '';
 });
 async function toggleGroupReminderMute() {
   if (!note.value) return;
@@ -525,20 +507,7 @@ onUnmounted(() => {
           </span>
           <span v-if="note.category" class="text-xs text-gray-400 truncate min-w-0">{{ note.category }}</span>
         </div>
-        <!-- 蘑菇 2026-06-08: 待办提醒时间显示, 跟 NoteCard 同款 (个人>群优先级). source=group 时点跳出 mute toggle 提示. 点 chip 打开 picker 改个人提醒 -->
-        <span v-if="note.type === 'todo' && effectiveReminder.dueAt"
-          class="ml-auto flex items-center gap-1 text-xs cursor-pointer hover:opacity-70 shrink-0 whitespace-nowrap"
-          :class="(groupReminderMuted && effectiveReminder.source === 'group') ? 'text-gray-400' : 'text-amber-600'"
-          :title="`${reminderDueLabel}${effectiveReminder.rrule ? '（重复: ' + effectiveReminder.rrule + '）' : ''}${reminderSourceLabel ? '（' + reminderSourceLabel + '）' : ''}`"
-          @click="openReminderPicker">
-          <PhBellSlash v-if="groupReminderMuted && effectiveReminder.source === 'group'" size="0.875rem" weight="fill" />
-          <PhBellRinging v-else-if="effectiveReminder.rrule" size="0.875rem" weight="fill" />
-          <PhBell v-else size="0.875rem" weight="fill" />
-          <span class="tabular-nums">{{ reminderDueLabel }}</span>
-          <span v-if="reminderSourceLabel" class="text-[10px] text-gray-400">· {{ reminderSourceLabel }}</span>
-        </span>
-        <span class="text-xs text-gray-400 shrink-0 whitespace-nowrap"
-          :class="{ 'ml-auto': !(note.type === 'todo' && effectiveReminder.dueAt) }">{{ dayjs(note.createdAt).format('YYYY-MM-DD HH:mm') }}</span>
+        <span class="ml-auto text-xs text-gray-400 shrink-0 whitespace-nowrap">{{ dayjs(note.createdAt).format('YYYY-MM-DD HH:mm') }}</span>
         <button @click="openEditModal?.(note)" class="px-3 py-1 text-xs rounded-lg hover:bg-gray-100 text-gray-400 inline-flex items-center gap-1">
           <PhPencilSimple size="0.875rem" weight="fill" />
           <span>编辑</span>
@@ -547,6 +516,7 @@ onUnmounted(() => {
           <PhDotsThreeVertical size="1.25rem" weight="bold" />
         </button>
       </div>
+
 
       <!-- 三点菜单 popover (Teleport 避祖先 overflow + 同步遮罩, 跟 NoteCard 同模式) -->
       <Teleport to="body">
@@ -645,63 +615,93 @@ onUnmounted(() => {
         <span v-for="tag in note.tags" :key="tag" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">#{{ tag }}</span>
       </div>
 
-      <!-- PR #5b: 分享设置 (仅 shared 笔记 + 作者本人能看到管理). 整行内嵌, 不再独立卡片 -->
-      <div v-if="isShared && isMyNote" class="mb-4 flex items-center gap-2 text-xs relative flex-wrap">
-        <button @click.stop="showSharedGroupsPopup = !showSharedGroupsPopup; showGrantsPopup = false"
-          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
-          <PhUsersThree size="0.75rem" weight="fill" />
-          已分享到 {{ sharedGroupIds.length }} 个群
-        </button>
-        <!-- 编辑权限胶囊 (单胶囊点击切换 admin/all, 后跟切换图标) -->
-        <button @click="setEditPermission((note.editPermission || 'admin') === 'admin' ? 'all' : 'admin')"
-          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
-          {{ (note.editPermission || 'admin') === 'admin' ? '管理员可编辑' : '所有人可编辑' }}
-          <PhArrowsClockwise size="0.75rem" weight="bold" />
-        </button>
-        <!-- PR #5b: 已授权小胶囊 (仅 editPermission=admin 时有意义: 'all' 时所有人都能改, 白名单无用; >0 条才显示).
-             包独立 relative 容器让 popover 锚定到按钮下方而非整行右边 -->
-        <span v-if="(note.editPermission || 'admin') === 'admin' && editGrants.length > 0" class="relative inline-block">
-          <button @click.stop="showGrantsPopup = !showGrantsPopup; showSharedGroupsPopup = false"
-            class="px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
-            额外授权 {{ editGrants.length }} 人
+      <!-- 蘑菇 2026-06-09: 分享设置 (左, 仅作者+shared) + 提醒 chips (右, todo + 有提醒) 合并成一行. 任一条件成立都显示这行.
+           -mt-4 抵消顶部 header 的 mb-6, 视觉间距 ~8px 紧贴 (跟其他次级行同款风格) -->
+      <div v-if="(isShared && isMyNote) || (note.type === 'todo' && (myPersonalReminder || myGroupReminders.length > 0))"
+        class="-mt-4 mb-4 flex items-center gap-2 text-xs relative flex-wrap">
+        <!-- 左: PR #5b 分享设置 (仅 shared + 作者本人) -->
+        <template v-if="isShared && isMyNote">
+          <button @click.stop="showSharedGroupsPopup = !showSharedGroupsPopup; showGrantsPopup = false"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
+            <PhUsersThree size="0.75rem" weight="fill" />
+            已分享到 {{ sharedGroupIds.length }} 个群
           </button>
+          <!-- 编辑权限胶囊 (单胶囊点击切换 admin/all, 后跟切换图标) -->
+          <button @click="setEditPermission((note.editPermission || 'admin') === 'admin' ? 'all' : 'admin')"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
+            {{ (note.editPermission || 'admin') === 'admin' ? '管理员可编辑' : '所有人可编辑' }}
+            <PhArrowsClockwise size="0.75rem" weight="bold" />
+          </button>
+          <!-- PR #5b: 已授权小胶囊 (仅 editPermission=admin 时有意义: 'all' 时所有人都能改, 白名单无用; >0 条才显示).
+               包独立 relative 容器让 popover 锚定到按钮下方而非整行右边 -->
+          <span v-if="(note.editPermission || 'admin') === 'admin' && editGrants.length > 0" class="relative inline-block">
+            <button @click.stop="showGrantsPopup = !showGrantsPopup; showSharedGroupsPopup = false"
+              class="px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
+              额外授权 {{ editGrants.length }} 人
+            </button>
+            <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
+              leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
+              <div v-if="showGrantsPopup"
+                class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[var(--z-overlay)] w-[260px] max-h-[280px] overflow-y-auto space-y-1">
+                <div v-for="g in editGrants" :key="g.userId"
+                  class="flex items-center gap-2 hover:bg-gray-50 rounded-lg p-1.5">
+                  <img v-if="g.avatar" :src="resolveFileThumbUrl(g.avatar)"
+                    @error="thumbErrorFallback($event, resolveFileUrl(g.avatar))"
+                    class="w-6 h-6 rounded-full object-cover shrink-0" alt="" />
+                  <div v-else class="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
+                    {{ (g.nickname || '?').charAt(0).toUpperCase() }}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-xs font-medium truncate">{{ g.nickname || '?' }}</div>
+                    <div class="text-[10px] text-gray-400">{{ dayjs(g.grantedAt).format('MM-DD HH:mm') }}</div>
+                  </div>
+                  <button @click="askRevokeGrant(g.userId, g.nickname || '?')"
+                    class="px-2 py-1 text-[11px] rounded-lg bg-red-50 text-red-500 hover:bg-red-100 inline-flex items-center gap-1">
+                    <PhTrash size="0.75rem" weight="bold" /> 撤销
+                  </button>
+                </div>
+              </div>
+            </Transition>
+          </span>
+
+          <!-- 群名 popover (锚定到整行 left, 因为分享胶囊在最左) -->
           <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
             leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
-            <div v-if="showGrantsPopup"
-              class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[var(--z-overlay)] w-[260px] max-h-[280px] overflow-y-auto space-y-1">
-              <div v-for="g in editGrants" :key="g.userId"
-                class="flex items-center gap-2 hover:bg-gray-50 rounded-lg p-1.5">
-                <img v-if="g.avatar" :src="resolveFileThumbUrl(g.avatar)"
-                  @error="thumbErrorFallback($event, resolveFileUrl(g.avatar))"
-                  class="w-6 h-6 rounded-full object-cover shrink-0" alt="" />
-                <div v-else class="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
-                  {{ (g.nickname || '?').charAt(0).toUpperCase() }}
-                </div>
-                <div class="flex-1 min-w-0">
-                  <div class="text-xs font-medium truncate">{{ g.nickname || '?' }}</div>
-                  <div class="text-[10px] text-gray-400">{{ dayjs(g.grantedAt).format('MM-DD HH:mm') }}</div>
-                </div>
-                <button @click="askRevokeGrant(g.userId, g.nickname || '?')"
-                  class="px-2 py-1 text-[11px] rounded-lg bg-red-50 text-red-500 hover:bg-red-100 inline-flex items-center gap-1">
-                  <PhTrash size="0.75rem" weight="bold" /> 撤销
-                </button>
-              </div>
+            <div v-if="showSharedGroupsPopup && sharedGroupNames.length > 0"
+              class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[var(--z-overlay)] min-w-[160px] max-w-[280px]">
+              <div v-for="name in sharedGroupNames" :key="name" class="text-xs text-gray-600 py-1 px-2 truncate">{{ name }}</div>
             </div>
           </Transition>
-        </span>
 
-        <!-- 群名 popover (锚定到整行 left, 因为分享胶囊在最左) -->
-        <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
-          leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
-          <div v-if="showSharedGroupsPopup && sharedGroupNames.length > 0"
-            class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[var(--z-overlay)] min-w-[160px] max-w-[280px]">
-            <div v-for="name in sharedGroupNames" :key="name" class="text-xs text-gray-600 py-1 px-2 truncate">{{ name }}</div>
-          </div>
-        </Transition>
+          <!-- 共用 backdrop 关两个 popover -->
+          <div v-if="showSharedGroupsPopup || showGrantsPopup" class="fixed inset-0 z-[var(--z-overlay-backdrop)]"
+            @click="showSharedGroupsPopup = false; showGrantsPopup = false" />
+        </template>
 
-        <!-- 共用 backdrop 关两个 popover -->
-        <div v-if="showSharedGroupsPopup || showGrantsPopup" class="fixed inset-0 z-[var(--z-overlay-backdrop)]"
-          @click="showSharedGroupsPopup = false; showGrantsPopup = false" />
+        <!-- 右: 待办提醒 chips (个人 + 群并存时一起显示, 个人在前). 点个人 chip 改个人提醒; 点群 chip 切换 mute -->
+        <div v-if="note.type === 'todo' && (myPersonalReminder || myGroupReminders.length > 0)"
+          class="ml-auto flex items-center gap-3">
+          <span v-if="myPersonalReminder"
+            class="inline-flex items-center gap-1 cursor-pointer hover:opacity-70 whitespace-nowrap text-amber-600"
+            :title="`${fmtReminder(myPersonalReminder.dueAt)}${myPersonalReminder.rrule ? '（重复: ' + myPersonalReminder.rrule + '）' : ''}（个人提醒）`"
+            @click="openReminderPicker">
+            <PhBellRinging v-if="myPersonalReminder.rrule" size="0.875rem" weight="fill" />
+            <PhBell v-else size="0.875rem" weight="fill" />
+            <span>个人提醒</span>
+            <span class="tabular-nums">{{ fmtReminder(myPersonalReminder.dueAt) }}</span>
+          </span>
+          <span v-if="myGroupReminders.length > 0"
+            class="inline-flex items-center gap-1 cursor-pointer hover:opacity-70 whitespace-nowrap"
+            :class="groupReminderMuted ? 'text-gray-400' : 'text-amber-600'"
+            :title="`${fmtReminder(myGroupReminders[0].dueAt)}${myGroupReminders[0].rrule ? '（重复: ' + myGroupReminders[0].rrule + '）' : ''}（群提醒${groupReminderName ? ' · ' + groupReminderName : ''}${groupReminderMuted ? ' · 已屏蔽' : ''}）`"
+            @click="toggleGroupReminderMute">
+            <PhBellSlash v-if="groupReminderMuted" size="0.875rem" weight="fill" />
+            <PhBellRinging v-else-if="myGroupReminders[0].rrule" size="0.875rem" weight="fill" />
+            <PhBell v-else size="0.875rem" weight="fill" />
+            <span>群提醒</span>
+            <span class="tabular-nums">{{ fmtReminder(myGroupReminders[0].dueAt) }}</span>
+          </span>
+        </div>
       </div>
 
       <!-- PR #13 补丁 3: 待审编辑申请 section (仅 shared + 作者本人 + 有 pending). 同意/拒绝调 API, 忽略仅本地隐藏 -->
