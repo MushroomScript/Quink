@@ -17,6 +17,9 @@
  * 跳过：非文本 input（button / checkbox / radio / file / range / date 等）。
  *
  * 启动：main.ts import 即触发模块级 side effect。
+ *
+ * 单 input y 微调: 给 input/textarea 加 `data-caret-offset-y="1.5"` 让该元素的 caret 比
+ * 文字基线多偏移 N px (默认 0). 蘑菇视觉微调专用, 不影响其他 input.
  */
 
 import { getCssZoom } from '../utils/zoom';
@@ -274,6 +277,10 @@ function updateCaret() {
 
   syncMirrorStyle(el);
 
+  // input/textarea 维度独立的 caret y 偏移 (dataset.caretOffsetY="1" 让 caret 比文字位置低 1px).
+  // 让蘑菇可以在不动 input padding 的前提下单独微调 caret 视觉位置. 默认 0 = 跟文字基线对齐.
+  const extraY = parseFloat(el.dataset.caretOffsetY || '0') || 0;
+
   const selStart = el.selectionStart ?? el.value.length;
   const before = el.value.substring(0, selStart);
 
@@ -330,7 +337,7 @@ function updateCaret() {
     caret.style.width = CARET_WIDTH + 'px';
     caret.style.height = caretHeight + 'px';
     caret.style.display = 'block';
-    caret.style.transform = `translate(${cl}px, ${ct}px)`;
+    caret.style.transform = `translate(${cl}px, ${ct + extraY}px)`;
     return;
   }
   const markerRect = marker.getBoundingClientRect();
@@ -391,7 +398,7 @@ function updateCaret() {
 
   caret.style.width = CARET_WIDTH + 'px';
   caret.style.display = 'block';
-  caret.style.transform = `translate(${caretLeft}px, ${caretTop}px)`;
+  caret.style.transform = `translate(${caretLeft}px, ${caretTop + extraY}px)`;
   caret.style.height = caretHeight + 'px';
 }
 
@@ -533,6 +540,13 @@ input:placeholder-shown, textarea:placeholder-shown { text-indent: 5px; }
     if (caret) { caret.remove(); caret = null; }
     if (mirror) { mirror.remove(); mirror = null; }
   };
+
+  // 启动时如果 document 已经有 focused eligible input → 主动 attach.
+  // 场景: HMR 重启 caret 模块后, 已 focused 的 input 不会再触发 focusin event,
+  // 不接管就会原生 caret 跟自定义 caret 双显示. 首次启动一般 activeElement = body 不 eligible 跳过.
+  if (document.activeElement && isEligible(document.activeElement)) {
+    attach(document.activeElement);
+  }
 }
 
 // 模块加载即启动（被 main.ts import 一次触发）

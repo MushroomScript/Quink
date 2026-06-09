@@ -1,65 +1,46 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { api, isLoggedIn, type InvitePreview, type ApplyInviteResult } from '@/api';
-import { useGroupsStore } from '@/stores/groups';
+import { isLoggedIn } from '@/api';
 import { useToast } from '@/composables/useToast';
+import { useInviteApply } from '@/composables/useInviteApply';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import { PhUsersThree, PhSignIn, PhSpinner } from '@phosphor-icons/vue';
 
 const route = useRoute();
 const router = useRouter();
-const groups = useGroupsStore();
 const toast = useToast();
 
 const token = computed(() => String(route.params.token));
-const preview = ref<InvitePreview | null>(null);
-const loading = ref(true);
-const errorMsg = ref('');
-const applying = ref(false);
-const result = ref<ApplyInviteResult | null>(null);
+// 共享 useInviteApply (跟 GroupActionModal 同一套预览+申请逻辑)
+// preview/loading/errorMsg/applying/result 跟原本 ref 同名同语义
+const { preview, loading, errorMsg, applying, result, loadPreview, doApply } = useInviteApply();
 
-async function loadPreview() {
-  loading.value = true;
-  errorMsg.value = '';
-  try {
-    const res = await api.getInvite(token.value);
-    preview.value = res.data;
-  } catch (e: any) {
-    errorMsg.value = e?.message || '邀请链接无效';
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function doApply() {
+async function tryApply() {
   if (!preview.value || applying.value) return;
   // 未登录: 跳登录页, 登录回跳回本页 (用 redirect query)
   if (!isLoggedIn()) {
     router.push({ path: '/login', query: { redirect: route.fullPath } });
     return;
   }
-  applying.value = true;
   try {
-    const res = await api.applyInvite(token.value);
-    result.value = res.data;
-    // 成功: 自动加入 / 已是成员 → 跳群详情 + 同步 sidebar 群列表
-    if (res.data.status === 'joined' || res.data.status === 'already_member') {
-      await groups.loadGroups();
-      toast.show(res.data.status === 'joined' ? '已加入群组' : '你已是该群成员', 'success');
-      router.replace(`/groups/${res.data.groupId}`);
+    const r = await doApply(token.value);
+    if (r.status === 'joined' || r.status === 'already_member') {
+      toast.show(r.status === 'joined' ? '已加入群组' : '你已是该群成员', 'success');
+      router.replace(`/groups/${r.groupId}`);
     } else {
       // pending: 等审批, 留在本页显示 status
       toast.show('已申请, 等待管理员审批', 'success');
     }
   } catch (e: any) {
     toast.show(e?.message || '申请失败', 'error');
-  } finally {
-    applying.value = false;
   }
 }
 
-onMounted(loadPreview);
+onMounted(() => {
+  // loadPreview 失败只写 errorMsg 不 throw, 模板用 errorMsg 显示
+  loadPreview(token.value);
+});
 </script>
 
 <template>
@@ -110,7 +91,7 @@ onMounted(loadPreview);
         <p class="text-xs text-gray-400 mb-1">邀请你加入群组</p>
         <h2 class="text-lg font-medium mb-1">{{ preview.name }}</h2>
         <p class="text-xs text-gray-400 mb-5">{{ preview.memberCount }} 位成员 · {{ preview.autoJoin ? '自动加入' : '需管理员审批' }}</p>
-        <button @click="doApply" :disabled="applying"
+        <button @click="tryApply" :disabled="applying"
           class="w-full px-4 py-2.5 text-sm font-medium rounded-lg bg-primary text-white hover:bg-primary-dark inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
           <PhSpinner v-if="applying" size="1rem" class="animate-spin" />
           <PhSignIn v-else size="1rem" weight="fill" />

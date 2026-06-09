@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useGroupsStore } from '@/stores/groups';
 import { useNotesStore } from '@/stores/notes';
 import GroupDetail from '@/components/GroupDetail.vue';
-import CreateGroupModal from '@/components/CreateGroupModal.vue';
+import GroupActionModal from '@/components/GroupActionModal.vue';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import {
   PhUsersThree, PhPlus, PhCaretLeft, PhCaretRight,
@@ -39,7 +39,7 @@ function onCollapseLeave() {
 // 上次打开的群 id (持久化, 进 /groups 时自动恢复)
 const LAST_GROUP_KEY = 'quink_groups_last_id';
 
-const showCreateGroup = ref(false);
+const showGroupAction = ref(false);
 // ready: loadGroups + maybeAutoSelect 完成后才决定显示什么 (避免 loading 中闪空状态)
 const ready = ref(false);
 
@@ -112,16 +112,16 @@ function selectGroup(id: string) {
           <PhCaretRight v-else size="0.5rem" weight="bold" />
         </button>
       </div>
-      <!-- 顶部: 新建按钮 (旧的"收起"行按钮已删, 改走右边缘 hover 椭圆) -->
+      <!-- 顶部: 加入/新建按钮 (旧的"收起"行按钮已删, 改走右边缘 hover 椭圆) -->
       <div class="p-3">
-        <button v-if="!collapsed" @click="showCreateGroup = true"
+        <button v-if="!collapsed" @click="showGroupAction = true"
           class="w-full px-3 py-2 text-xs font-medium rounded-lg transition-colors text-white inline-flex items-center justify-center gap-1"
           style="background: rgb(var(--c-accent))">
-          <PhPlus size="0.75rem" weight="bold" /> 新建群组
+          <PhPlus size="0.75rem" weight="bold" /> 加入 / 新建
         </button>
-        <button v-else @click="showCreateGroup = true"
+        <button v-else @click="showGroupAction = true"
           class="w-full p-2 text-white rounded-lg flex items-center justify-center"
-          style="background: rgb(var(--c-accent))" title="新建群组">
+          style="background: rgb(var(--c-accent))" title="加入 / 新建群组">
           <PhPlus size="0.875rem" weight="bold" />
         </button>
       </div>
@@ -176,14 +176,14 @@ function selectGroup(id: string) {
             <PhUsersThree size="2rem" weight="fill" />
           </div>
           <p class="text-sm text-gray-500 mb-1">还没有群组</p>
-          <p class="text-xs text-gray-400">点左侧 "+ 新建群组" 开始</p>
+          <p class="text-xs text-gray-400">点左侧 "+ 加入 / 新建" 开始</p>
         </div>
       </div>
 
       <!-- 手机端: 群列表显示为顶部下拉 (PR #1 暂不做, 桌面端为主) -->
     </div>
 
-    <!-- 建群弹窗: 移到 Groups.vue 集中管理 -->
-    <CreateGroupModal v-if="showCreateGroup" @close="showCreateGroup = false" />
+    <!-- 加入 / 新建群组弹窗 (Tab 切换): 移到 Groups.vue 集中管理 -->
+    <GroupActionModal v-if="showGroupAction" @close="showGroupAction = false" />
   </div>
 </template>
