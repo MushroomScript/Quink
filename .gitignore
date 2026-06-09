@@ -39,3 +39,17 @@ blinko-analytics.png
 
 # DB 备份(手动备份不入库)
 *.db.bak-*
+
+# 所有 md 文档不 git (README.md 例外, 后期上传)
+*.md
+!README.md
+
+# bat 启动脚本不 git (个人开发环境用)
+*.bat
+
+# Claude Code 本地配置 + 项目级 skill (本地开发用, 不影响项目运行)
+.claude/
+
+# 调试 / 测试用静态文件 (不影响项目启动)
+badge-test.html
+packages/desktop/test-keys.js
