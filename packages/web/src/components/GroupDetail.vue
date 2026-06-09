@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
+import { unzoomViewport, getCssZoom } from '@/utils/zoom';
 import { api } from '@/api';
 import dayjs from 'dayjs';
 import {
@@ -286,7 +287,8 @@ async function doRemoveMember() {
     toast.show(isSelf ? '已退群' : `已移除 ${confirmRemoveName.value}`, 'success');
     confirmRemoveId.value = '';
     confirmRemoveName.value = '';
-    if (isSelf) router.push('/quink');
+    // 退群后留在群组页, Groups.vue 的 watch maybeAutoSelect 自动选下一个群; 没群则显示空状态
+    if (isSelf) router.push('/groups');
   } catch (e: any) {
     toast.show(e?.message || '操作失败', 'error');
   }
@@ -334,10 +336,15 @@ function openCtxMenu(e: MouseEvent, m: GroupMemberInfo) {
   }
   if (items.length === 0) return; // 无可用操作 → 静默 (浏览器原生右键也不弹)
   // 边界检测: 防菜单溢出视口右下
+  // 网页端 CSS zoom 下 e.clientX/Y / window.innerWidth/Height 都是 zoomed 坐标, 设到 fixed style.left/top 会被 zoom 再乘一次飞出视口.
+  // 用 unzoomViewport + getCssZoom 转 unzoomed CSS px 跟 inline px 单位对齐. 详见 packages/web/CLAUDE.md "CSS zoom 显示比例".
   const W = 160, H = items.length * 32 + 8;
-  let x = e.clientX, y = e.clientY;
-  if (x + W > window.innerWidth - 8) x = window.innerWidth - W - 8;
-  if (y + H > window.innerHeight - 8) y = window.innerHeight - H - 8;
+  const zoom = getCssZoom();
+  const { vw, vh } = unzoomViewport();
+  let x = e.clientX / zoom;
+  let y = e.clientY / zoom;
+  if (x + W > vw - 8) x = vw - W - 8;
+  if (y + H > vh - 8) y = vh - H - 8;
   ctxMenu.value = { x, y, items };
 }
 
