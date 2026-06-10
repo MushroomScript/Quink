@@ -509,7 +509,7 @@ export const TOOLS_PROMPT = `你可以使用以下工具来查询和操作用户
 7. get_stats(scope?) — 获取统计数据
 8. get_voice_transcription(audioUrl) — 获取语音转写（自动按可见性校验）
 9. create_note(content, type?, category?, tags?) — 创建笔记/待办
-10. update_note(id, content?, category?, tags?, todoStatus?, pinned?) — 更新笔记
+10. update_note(id, content?, category?, tags?, todoStatus?, pinned?, confirmMultiGroupSync?) — 更新笔记 (root + 多群 share 笔记第一次调用默认拒绝并返回提问, 用户回"确认"/"同步所有群"后带 confirmMultiGroupSync=true 重调)
 
 scope 参数（mine/shared/all，默认 all）：mine=仅我创建 / shared=仅他人共享给我所在群 / all=两者并集。用户明说"我的/我自己的"传 mine，明说"群里/小组里"传 shared，否则用默认 all。
 
