@@ -15,9 +15,15 @@ import { isHeicFilename, generateHeicThumb, heicThumbPath, backfillHeicThumbs } 
 import { isThumbableImage, generateImageThumb } from '../utils/imageThumb.js';
 
 const UPLOAD_DIR = resolve(process.cwd(), 'uploads');
+// avatar 单独存到 uploads/avatars/ 子目录: 中间件按路径前缀放行 (头像设计就是给群成员看)
+// 非 avatars/ 路径强制走 files 表授权, 查不到默认 403/404 (防孤儿文件越权下载)
+const AVATARS_DIR = resolve(UPLOAD_DIR, 'avatars');
 
 if (!existsSync(UPLOAD_DIR)) {
   mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+if (!existsSync(AVATARS_DIR)) {
+  mkdirSync(AVATARS_DIR, { recursive: true });
 }
 
 const app = new Hono();
@@ -97,13 +103,17 @@ function sanitizeName(name: string): string {
 }
 
 // 拼唯一磁盘文件名 + 冲突检测（同秒多次上传时追加 _2/_3）.
-// 入参 safeName 必须已 sanitize（小写字母/数字/中文等安全字符）. 调用方按需自己组装 displayFilename
-function buildUniqueFilename(safeName: string, ext: string): string {
+// 入参 safeName 必须已 sanitize（小写字母/数字/中文等安全字符）. 调用方按需自己组装 displayFilename.
+// dir 默认是 UPLOAD_DIR, 头像上传传 AVATARS_DIR 让冲突检测找子目录.
+// 加 8 字符 nanoid 随机段阻断枚举攻击: entropy ~48bit, 已知用户上传时间秒也无法枚举出文件名.
+function buildUniqueFilename(safeName: string, ext: string, dir: string = UPLOAD_DIR): string {
   const datePrefix = dayjs().format('YYYY-MM-DD_HHmmss');
-  const base = `${datePrefix}_${safeName}`;
+  const rand = nanoid(8);
+  const base = `${datePrefix}_${rand}_${safeName}`;
   let filename = `${base}.${ext}`;
   let counter = 2;
-  while (existsSync(resolve(UPLOAD_DIR, filename))) {
+  // 8 字符 nanoid 同秒同名碰撞概率极低 (~10^-9), counter 路径保留作兜底
+  while (existsSync(resolve(dir, filename))) {
     filename = `${base}_${counter}.${ext}`;
     counter++;
   }
@@ -137,8 +147,8 @@ app.post('/avatar', async (c) => {
   }
 
   const ext = getExt(file.type, file.name);
-  const filename = buildUniqueFilename('avatar', ext);
-  const diskPath = resolve(UPLOAD_DIR, filename);
+  const filename = buildUniqueFilename('avatar', ext, AVATARS_DIR);
+  const diskPath = resolve(AVATARS_DIR, filename);
   writeFileSync(diskPath, Buffer.from(await file.arrayBuffer()));
 
   // 同步生成 thumb (头像 2MB 上限 + sharp 处理 < 300ms 可接受). 失败 swallow, 前端 onError 兜底原图
@@ -151,7 +161,8 @@ app.post('/avatar', async (c) => {
   }
 
   publish(userId, 'data-changed', { scope: 'user-profile' }, _ocid);
-  return c.json({ data: { url: `/api/uploads/${filename}` } }, 201);
+  // url 含 avatars/ 前缀, 让中间件按路径分支放行 (头像可被任意登录用户读)
+  return c.json({ data: { url: `/api/uploads/avatars/${filename}` } }, 201);
 });
 
 // POST /api/upload/file — general file upload (任意类型，最大 100MB)

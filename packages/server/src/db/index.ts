@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
 import { resolve } from 'path';
+import { existsSync, mkdirSync, readdirSync, renameSync } from 'fs';
 import { toPinyinSearchable } from '../utils/pinyin.js';
 import { nanoid } from 'nanoid';
 
@@ -493,5 +494,60 @@ try {
 // 彻底删 categories.parent_id 列. 系统只支持一级分类, child 概念废弃
 // SQLite 3.35+ 支持 DROP COLUMN, better-sqlite3 内置 SQLite 通常新版. 老版/已删则 catch 吞掉
 try { sqlite.exec('ALTER TABLE categories DROP COLUMN parent_id'); } catch {}
+
+// 一次性迁移 (avatar_relocate_migration_v1): 把老头像从 uploads/ 根目录搬到 uploads/avatars/ 子目录.
+// 同步 users.avatar / groups.avatar URL 加 'avatars/' 前缀. 防越权下载 (中间件按 avatars/ 路径分支放行).
+// 老格式: '/api/uploads/2026-05-30_HHmmss_avatar.png'
+// 新格式: '/api/uploads/avatars/2026-05-30_HHmmss_avatar.png'
+try {
+  const row = sqlite.prepare("SELECT value FROM config WHERE key = 'avatar_relocate_migration_v1'").get() as { value: string } | undefined;
+  if (!row) {
+    const uploadsDir = resolve(process.cwd(), 'uploads');
+    const avatarsDir = resolve(uploadsDir, 'avatars');
+    if (!existsSync(uploadsDir)) {
+      // uploads 目录都不存在 = 全新部署, 直接写 flag 跳过
+      sqlite.prepare("INSERT INTO config (key, value) VALUES (?, ?)").run('avatar_relocate_migration_v1', JSON.stringify(true));
+    } else {
+      if (!existsSync(avatarsDir)) mkdirSync(avatarsDir, { recursive: true });
+      sqlite.transaction(() => {
+        // 1. 扫根目录 buildUniqueFilename 用 'avatar' 作 safeName 的文件 (匹配 *_avatar.* 跟 *_avatar.*.thumb.jpg)
+        let renamedCount = 0;
+        try {
+          const entries = readdirSync(uploadsDir, { withFileTypes: true });
+          for (const ent of entries) {
+            if (!ent.isFile()) continue;
+            // 老 buildUniqueFilename 拼出来的 avatar 文件名格式: YYYY-MM-DD_HHmmss_avatar.{ext}
+            // 含 thumb 衍生: YYYY-MM-DD_HHmmss_avatar.{ext}.thumb.jpg
+            // 用宽松正则匹配: _avatar.{ext} 结尾 或 _avatar.{ext}.thumb.jpg 结尾
+            if (!/_avatar\.[a-z]+(\.thumb\.jpg)?$/i.test(ent.name)) continue;
+            try {
+              renameSync(resolve(uploadsDir, ent.name), resolve(avatarsDir, ent.name));
+              renamedCount++;
+            } catch (e: any) {
+              console.warn('[avatar migration v1] rename failed:', ent.name, e?.message);
+            }
+          }
+        } catch (e: any) {
+          console.warn('[avatar migration v1] scan uploads/ failed:', e?.message);
+        }
+        // 2. UPDATE users.avatar: '/api/uploads/X_avatar.Y' → '/api/uploads/avatars/X_avatar.Y'
+        // 用 LIKE '_avatar.%' 匹配避免误伤已迁移过的 (含 'avatars/' 前缀)
+        const usersUpd = sqlite.prepare(`
+          UPDATE users SET avatar = REPLACE(avatar, '/api/uploads/', '/api/uploads/avatars/')
+          WHERE avatar LIKE '/api/uploads/%_avatar.%'
+            AND avatar NOT LIKE '/api/uploads/avatars/%'
+        `).run();
+        // 3. UPDATE groups.avatar 同款
+        const groupsUpd = sqlite.prepare(`
+          UPDATE groups SET avatar = REPLACE(avatar, '/api/uploads/', '/api/uploads/avatars/')
+          WHERE avatar LIKE '/api/uploads/%_avatar.%'
+            AND avatar NOT LIKE '/api/uploads/avatars/%'
+        `).run();
+        sqlite.prepare("INSERT INTO config (key, value) VALUES (?, ?)").run('avatar_relocate_migration_v1', JSON.stringify(true));
+        console.log(`[avatar migration v1] moved ${renamedCount} avatar files, updated ${usersUpd.changes} users + ${groupsUpd.changes} groups`);
+      })();
+    }
+  }
+} catch (e) { console.error('[avatar migration v1] failed:', e); }
 
 export { schema };

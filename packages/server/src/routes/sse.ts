@@ -85,6 +85,16 @@ app.get('/', async (c) => {
   if (!payload) return c.json({ error: '登录已过期' }, 401);
   const userId = payload.sub;
 
+  // 校验 tokenVersion 跟 DB 一致 (跟 authMiddleware / 静态文件中间件对齐).
+  // 改密码后 users.token_version++ → 旧 token 携带 tv 跟 DB 不匹配, 拒绝建立 SSE 连接
+  const tvRow = await db.select({ tokenVersion: schema.users.tokenVersion })
+    .from(schema.users).where(eq(schema.users.id, userId)).get();
+  if (!tvRow) return c.json({ error: '用户不存在' }, 401);
+  if ((payload.tv ?? 0) !== (tvRow.tokenVersion ?? 0)) {
+    return c.json({ error: '登录已失效, 请重新登录' }, 401);
+  }
+  const initialTv = tvRow.tokenVersion ?? 0;
+
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
@@ -127,8 +137,21 @@ app.get('/', async (c) => {
     flushPendingReminders(userId, write).catch(e => console.error('[sse] flush pending failed:', e));
 
     // 15s 一次心跳, 防 nginx / 代理 / Electron 网络层把空闲连接掐掉; SSE 注释行 ":xxx\n\n" 客户端会丢弃但保持连接
-    heartbeat = setInterval(() => {
+    // 每 4 次心跳 (60s) 校验一次 tokenVersion, 防长连接绕过改密失效. DB 临时失败 try/catch 兜底不断连接
+    let beatCount = 0;
+    heartbeat = setInterval(async () => {
       if (closed) { cleanup(); return; }
+      beatCount++;
+      if (beatCount % 4 === 0) {
+        try {
+          const cur = await db.select({ tokenVersion: schema.users.tokenVersion })
+            .from(schema.users).where(eq(schema.users.id, userId)).get();
+          if (!cur || initialTv !== (cur.tokenVersion ?? 0)) {
+            cleanup();
+            return;
+          }
+        } catch {}
+      }
       writer.write(encoder.encode(`:hb\n\n`)).catch(() => cleanup());
     }, 15_000);
   })();

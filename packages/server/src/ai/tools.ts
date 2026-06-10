@@ -357,6 +357,13 @@ export async function executeTool(userId: string, name: string, args: any): Prom
 
     case 'get_voice_transcription': {
       const audioUrl = args.audioUrl as string;
+      // 入参严格校验: audioUrl 必须是 voice_transcriptions 表里存在的真实记录.
+      // 防 LIKE 通配符攻击 (e.g. audioUrl = '.m4a' 子串可匹配大量笔记 → 暴露任意共享笔记里的录音转写)
+      const existsRow = await db.select({ id: schema.voiceTranscriptions.id })
+        .from(schema.voiceTranscriptions)
+        .where(eq(schema.voiceTranscriptions.audioUrl, audioUrl)).get();
+      if (!existsRow) return { result: '未找到该语音的转写记录。', noteIds };
+
       // 优先拿我自己录的转写
       let trans = await db.select().from(schema.voiceTranscriptions)
         .where(and(eq(schema.voiceTranscriptions.userId, userId), eq(schema.voiceTranscriptions.audioUrl, audioUrl))).get();

@@ -54,11 +54,19 @@ app.use('/api/uploads/*', async (c, next) => {
   const isThumb = filename.endsWith('.thumb.jpg');
   if (isThumb) filename = filename.slice(0, -('.thumb.jpg'.length));
 
-  // 3. 查 files 表 (avatar 不入表所以查不到 → 公开放行)
+  // 3. avatars/ 路径任意登录用户可读 (头像设计就是给群成员/邀请页看, 跨用户公开是 by design).
+  // 中间件已校验 token + tokenVersion, 未登录直接 401, 不会泄露给完全匿名访问者.
+  if (filename.startsWith('avatars/')) {
+    return next();
+  }
+
+  // 4. 查 files 表
   const file = await db.select().from(schema.files).where(eq(schema.files.url, filename)).get();
   if (!file) {
-    // 头像 / 历史孤儿: 公开. 让 serveStatic 处理或返回 404
-    return next();
+    // 非 avatars/ 路径且不在 files 表 = 不该存在的孤儿文件 (历史数据残留 / 删 row 但磁盘未删 / 上传时未入表).
+    // 之前"查不到 → next() 公开"是高危漏洞: 任意登录用户能下载所有头像 + 孤儿文件.
+    // 现在统一拒绝, 避免越权下载. avatars/ 路径已在上面单独放行
+    return c.json({ error: '文件不存在' }, 404);
   }
 
   // 4. 作者本人 → 放行
@@ -68,9 +76,11 @@ app.use('/api/uploads/*', async (c, next) => {
   // markdown link 模式精确匹配防"内容里随便提到这文件名"被误绑授权.
   // 兼容两种 markdown 用法: [label](filename) 跟 ![alt](filename), filename 周围必须是 `(` 跟 `)`/查询参数/空格.
   // 简化版: LIKE '%(${filename})%' OR '%(${filename}?%)' 覆盖 99% 真实用例; 兜底走原 %filename% 作 fallback (放行已知用法 + 保留旧授权)
+  // 限定 userId = file.userId 防跨用户撞名攻击: 攻击者构造别人的私密 url 写到自己的 shared 笔记里授权放行
   const linked = await db.select({ id: schema.notes.id })
     .from(schema.notes)
     .where(and(
+      eq(schema.notes.userId, file.userId),
       sql`${schema.notes.deletedAt} IS NULL`,
       eq(schema.notes.visibility, 'shared'),
       sql`(${schema.notes.content} LIKE ${'%(' + filename + ')%'}
