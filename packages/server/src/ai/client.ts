@@ -81,7 +81,7 @@ function buildEndpoint(config: AiConfig): string {
     return `${base}/v1/messages`;
   }
 
-  // OpenAI / Ollama / custom — 全部走 OpenAI 兼容格式
+  // OpenAI / Ollama — 全部走 OpenAI 兼容格式
   if (base.includes('/chat/completions')) return base;
   if (base.endsWith('/v1')) return `${base}/chat/completions`;
   return `${base}/v1/chat/completions`;
@@ -110,7 +110,7 @@ async function callAi(config: AiConfig, systemPrompt: string, userMessage: strin
     const data = await res.json() as any;
     return data.content?.[0]?.text || '';
   } else {
-    // OpenAI-compatible (openai, ollama, custom)
+    // OpenAI-compatible (openai, ollama)
     if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
 
     const res = await fetch(endpoint, {

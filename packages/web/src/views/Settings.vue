@@ -344,10 +344,9 @@ const showApiKey = ref(false);
 const configError = ref('');
 
 const aiProviderOptions = [
-  { id: 'openai', label: 'OpenAI', defaultModel: '', defaultUrl: 'https://api.openai.com' },
-  { id: 'anthropic', label: 'Anthropic', defaultModel: '', defaultUrl: 'https://api.anthropic.com' },
+  { id: 'openai', label: 'OpenAI', defaultModel: '', defaultUrl: 'https://api.deepseek.com' },
+  { id: 'anthropic', label: 'Anthropic', defaultModel: '', defaultUrl: 'https://api.deepseek.com/anthropic' },
   { id: 'ollama', label: 'Ollama', defaultModel: '', defaultUrl: 'http://localhost:11434' },
-  { id: 'custom', label: '自定义 (OpenAI 兼容)', defaultModel: '', defaultUrl: '' },
 ];
 
 const aiFeatures = [
@@ -402,7 +401,7 @@ function startEditConfig(cfg?: AiConfigItem) {
   if (cfg) {
     editingConfig.value = { ...cfg };
   } else {
-    editingConfig.value = { name: '', provider: 'openai', baseUrl: 'https://api.openai.com', apiKey: '', model: '' };
+    editingConfig.value = { name: '', provider: 'openai', baseUrl: 'https://api.deepseek.com', apiKey: '', model: '' };
   }
 }
 
@@ -1213,7 +1212,7 @@ function goBack() {
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-xs text-gray-500 mb-1">名称</label>
-              <input v-model="editingConfig.name" class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary" placeholder="如：GPT-5.4-nano 标签用" />
+              <input v-model="editingConfig.name" class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary" placeholder="如：deepseek-v4-flash 标签用" />
             </div>
             <div>
               <label class="block text-xs text-gray-500 mb-1">服务商</label>

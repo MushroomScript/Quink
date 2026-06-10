@@ -17,7 +17,7 @@ app.use('*', authMiddleware);
 
 const configSchema = z.object({
   name: z.string().min(1).max(50),
-  provider: z.enum(['openai', 'anthropic', 'ollama', 'custom']),
+  provider: z.enum(['openai', 'anthropic', 'ollama']),
   baseUrl: z.string().min(1),
   apiKey: z.string().optional(),
   model: z.string().min(1),

@@ -155,7 +155,7 @@ export const aiConfigs = sqliteTable('ai_configs', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
   name: text('name').notNull(),
-  provider: text('provider').notNull(), // openai, claude, ollama, custom
+  provider: text('provider').notNull(), // openai, anthropic, ollama
   baseUrl: text('base_url').notNull(),
   apiKey: text('api_key'),
   model: text('model').notNull(),
