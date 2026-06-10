@@ -68,7 +68,7 @@ const prefs = reactive({
   // 笔记列表排序字段: created (默认, 按创建时间) / updated (按最后编辑时间).
   // 改后 store watch(sortBy) 清各 view 缓存, 切回 view 时 onActivated 走 reset 拉新顺序
   notesSortBy: 'created' as 'created' | 'updated',
-  // PR #7a 群组共享笔记可见范围 (3 主 view 灵感/笔记/待办). 私密笔记始终显示, 此偏好仅控制
+  // 群组共享笔记可见范围 (3 主 view 灵感/笔记/待办). 私密笔记始终显示, 此偏好仅控制
   // 主页面纳入哪些群组共享笔记, 映射到 vs.scope:
   //   own     = 仅我发布的群组共享笔记 (= mine scope, private + 我分享出去的 shared, 默认, 跟历史行为一致)
   //   others  = 仅他人发布的群组共享笔记 (= others_shared scope, 我的 private + 他人分享给我的, 我的 shared 被过滤)
@@ -87,9 +87,9 @@ const localXfyunAppId = ref('');
 const localXfyunApiKey = ref('');
 const localXfyunApiSecret = ref('');
 const localAiPersonaCustom = ref('');
-// 蘑菇 2026-06-09: 卡片最小宽度本地偏好 (localStorage 不跨账号). onMounted 读 + 改完调 saveCardWidth 触发 useMasonry 重算
+// 卡片最小宽度本地偏好 (localStorage 不跨账号). onMounted 读 + 改完调 saveCardWidth 触发 useMasonry 重算
 const cardWidth = reactive<{ mode: CardWidthMode; value: number }>({ mode: 'px', value: 320 });
-// 像素档位 220-500 步长 10 (共 29 项), 百分比档位 10-50 步长 5 (共 9 项). 蘑菇要下拉不要 input (光标问题)
+// 像素档位 220-500 步长 10 (共 29 项), 百分比档位 10-50 步长 5 (共 9 项). 下拉而非 input (光标问题)
 const cardWidthPxOptions = Array.from({ length: 29 }, (_, i) => ({ value: 220 + i * 10, label: `${220 + i * 10} px` }));
 const cardWidthPctOptions = Array.from({ length: 9 }, (_, i) => {
   const v = 10 + i * 5;
@@ -125,7 +125,7 @@ const recordingKeys = ref('');
 import type { ReminderChannel, ReminderChannelType } from '@/api';
 import { NOTIFICATION_GROUPS, ALL_NOTIFICATION_TYPES, TOTAL_UI_TYPE_COUNT, countSelectedUiTypes, metaTypes, type NotificationTypeMeta } from '@/utils/notificationTypes';
 const reminderChannels = ref<ReminderChannel[]>([]);
-// 蘑菇 2026-06-09: 加 selectedTypes 通知类型白名单. UI 内部按数组管, 保存时全选 → 写 null (兼容老 row + 全收语义)
+// 加 selectedTypes 通知类型白名单. UI 内部按数组管, 保存时全选 → 写 null (兼容老 row + 全收语义)
 const editingChannel = ref<{ id?: string; type: ReminderChannelType; name: string; config: Record<string, any>; enabled: boolean; selectedTypes: string[] } | null>(null);
 const expandedTypeCategories = ref<Set<string>>(new Set(['reminder', 'content', 'group'])); // 默认全展开
 const channelError = ref('');
@@ -215,12 +215,12 @@ function startEditChannel(ch?: ReminderChannel) {
       name: '我的提醒',
       config: {},
       enabled: true,
-      selectedTypes: [...ALL_NOTIFICATION_TYPES], // 蘑菇拍板: 新建默认全选
+      selectedTypes: [...ALL_NOTIFICATION_TYPES], // 新建默认全选
     };
   }
 }
 
-// 蘑菇 2026-06-09: 切换某个 meta (含 siblings 联动)
+// 切换某个 meta (含 siblings 联动)
 function toggleChannelType(t: NotificationTypeMeta) {
   if (!editingChannel.value) return;
   const all = metaTypes(t); // [t.type, ...siblings]
@@ -271,7 +271,7 @@ async function saveChannel() {
     }
   }
 
-  // 蘑菇 2026-06-09: 全选时写 null (兼容老 row + 全收语义节省存储), 否则写数组
+  // 全选时写 null (兼容老 row + 全收语义节省存储), 否则写数组
   const types = e.selectedTypes.length === ALL_NOTIFICATION_TYPES.length ? null : e.selectedTypes;
   try {
     if (e.id) {
@@ -359,7 +359,7 @@ const aiFeatures = [
   { key: 'chat', label: 'AI 对话' },
 ];
 
-// 3 个 auto_* feature 在提示词 tab 栏上带迷你开关 (蘑菇 2026-05-29 改: 开关从偏好设置搬到这里).
+// 3 个 auto_* feature 在提示词 tab 栏上带迷你开关 (开关从偏好设置搬到这里).
 // 其他 feature (polish/expand/write/chat) 没开关 —— 它们是用户主动触发的, 没"自动开关"语义.
 const featureToggleKey: Record<string, 'autoTag' | 'autoCategorize' | 'autoSummary'> = {
   auto_tag: 'autoTag',
@@ -613,7 +613,7 @@ async function saveProfile() {
 let prefsLoaded = false;
 
 // 改"回收站保留时间"时, 若新天数会让现有 trash 笔记立刻被永久清掉, 先弹窗确认再写回 prefs (写回触发下面 prefs watch → PATCH /me → 后端 cleanTrashForUser).
-// 之所以拦在这里而不是放后端: 后端 PATCH /me 在保存的同步路径里直接 DELETE, 用户没机会反悔.
+// 之所以拦在这里而不是放后端: 后端 PATCH /me 在保存的同步路径里直接 DELETE, 用户没机会撤回.
 // CustomSelect 在模板里改成 :modelValue + @update:modelValue → tryChangeRetention, 缩短保留期才检测.
 const pendingRetentionConfirm = ref<{ count: number; newVal: number; oldVal: number } | null>(null);
 useEscToClose(pendingRetentionConfirm, null);
@@ -692,7 +692,7 @@ watch(() => prefs.notesSortBy, (v) => {
   if (!prefsLoaded) return;
   notesStore.sortBy = v;
 });
-// PR #7a 共享显示策略同步到 notesStore (同款套路): 用户改 select → 推到 store → store watch 清缓存 + 改各 view scope
+// 共享显示策略同步到 notesStore (同款套路): 用户改 select → 推到 store → store watch 清缓存 + 改各 view scope
 watch(() => prefs.sharedDisplay, (v) => {
   if (!prefsLoaded) return;
   notesStore.sharedDisplay = v;
@@ -931,7 +931,7 @@ function goBack() {
     </Teleport>
 
     <!-- ═══ 偏好设置 ═══ -->
-    <!-- 蘑菇 2026-06-09: 父容器去掉 space-y-5, 改用每项 py-3 border-t 上下对称 (border-t 到内容上下距离都是 12px) -->
+    <!-- 父容器去掉 space-y-5, 改用每项 py-3 border-t 上下对称 (border-t 到内容上下距离都是 12px) -->
     <div v-if="activeTab === 'preferences'" class="space-y-6">
       <div class="bg-white rounded-xl border border-gray-200 p-6">
         <!-- 主题色: 第一项无 border-t, pb-3 给下方留空间跟下一项 pt-3 对称 -->
@@ -954,7 +954,7 @@ function goBack() {
             </button>
           </div>
         </div>
-        <!-- 显示比例: 蘑菇 2026-06-09 改成 horizontal 跟其他项一致 -->
+        <!-- 显示比例: horizontal 跟其他项一致 -->
         <div class="py-3 border-t border-gray-100">
           <div class="flex items-center justify-between">
             <div>
@@ -986,7 +986,7 @@ function goBack() {
             ]" />
           </div>
         </div>
-        <!-- PR #7a 群组共享笔记可见范围: 改后清各 view 缓存, 切回主 view 时 onActivated wasEmpty 走 reset 拉新 scope 数据.
+        <!-- 群组共享笔记可见范围: 改后清各 view 缓存, 切回主 view 时 onActivated wasEmpty 走 reset 拉新 scope 数据.
              私人笔记不受此设置影响, 始终显示; 此设置仅决定主页面是否纳入群组共享笔记 -->
         <div class="py-3 border-t border-gray-100">
           <div class="flex items-center justify-between">
@@ -1028,7 +1028,7 @@ function goBack() {
             ]" />
           </div>
         </div>
-        <!-- 蘑菇 2026-06-09: 卡片最小宽度 (设备本地, localStorage 不跨账号). px 模式按绝对像素切列; percent 模式按 main 区百分比锁列数 -->
+        <!-- 卡片最小宽度 (设备本地, localStorage 不跨账号). px 模式按绝对像素切列; percent 模式按 main 区百分比锁列数 -->
         <div class="py-3 border-t border-gray-100">
           <div class="flex items-center justify-between gap-3 flex-wrap">
             <div class="flex-1 min-w-0">
@@ -1076,8 +1076,7 @@ function goBack() {
           </div>
         </div>
         <!-- 自动标签 / 自动分类 / 自动摘要 3 个开关已搬到"AI 模型 → 提示词" tab 栏;
-             "自动摘要 · 最少字符数"已挪到提示词编辑区 (auto_summary tab 选中时显示在恢复默认按钮右侧).
-             2026-05-29 蘑菇改 -->
+             "自动摘要 · 最少字符数"已挪到提示词编辑区 (auto_summary tab 选中时显示在恢复默认按钮右侧). -->
         <!-- 讯飞语音识别 -->
         <div class="py-3 border-t border-gray-100 space-y-2">
           <div class="text-sm text-gray-700 font-medium">语音识别（讯飞）</div>
@@ -1112,7 +1111,7 @@ function goBack() {
     </div>
 
     <!-- ═══ 快捷键 ═══ -->
-    <!-- 蘑菇 2026-06-09: 内层 space-y-3 去掉, 3 项靠 border-b 自己分隔, 每条线上下 12px 对称 -->
+    <!-- 内层 space-y-3 去掉, 3 项靠 border-b 自己分隔, 每条线上下 12px 对称 -->
     <div v-if="activeTab === 'shortcuts'">
       <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
         <div>
@@ -1294,7 +1293,7 @@ function goBack() {
               <span class="col-start-1 row-start-1">{{ saving ? '保存中' : '保存' }}</span>
             </button>
             <button @click="resetPrompt(editingPromptFeature)" class="px-4 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">恢复默认</button>
-            <!-- 仅 auto_summary tab 显示触发阈值, 跟保存/恢复同行右侧 (蘑菇 2026-05-29: 从偏好设置挪过来集中) -->
+            <!-- 仅 auto_summary tab 显示触发阈值, 跟保存/恢复同行右侧 (从偏好设置挪过来集中) -->
             <div v-if="editingPromptFeature === 'auto_summary'" class="flex items-center gap-2 ml-2">
               <span class="text-xs text-gray-400 shrink-0">长度小于</span>
               <input v-model.number="localAutoSummaryMinLen" @blur="commitField(localAutoSummaryMinLen, prefs, 'autoSummaryMinLen')"
@@ -1425,7 +1424,7 @@ function goBack() {
               class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary font-mono" />
           </div>
 
-          <!-- 蘑菇 2026-06-09: 通知类型白名单 3 category 分组 -->
+          <!-- 通知类型白名单 3 category 分组 -->
           <div class="border-t border-gray-200 pt-3 space-y-2">
             <div class="text-xs text-gray-500 mb-1">接收哪些类型的通知</div>
             <div v-for="group in NOTIFICATION_GROUPS" :key="group.category" class="bg-white rounded-lg border border-gray-200">

@@ -19,17 +19,17 @@ interface ViewState {
   // 真实卡片高度 → 全走 estimateHeight 偏低 → pickShortest 错把所有卡塞同列). 改打 dirty,
   // 目标 view 下次 onActivated 时走 keepCount fetch 同步.
   dirty?: boolean;
-  // PR #2 / PR #7a 笔记 scope (语义: private 笔记始终显示, sharedDisplay 偏好控制纳入哪些群组共享笔记):
+  // 笔记 scope (语义: private 笔记始终显示, sharedDisplay 偏好控制纳入哪些群组共享笔记):
   //   mine          = 作者本人全部 (private + 我分享出去的 shared, 偏好 'own', 默认)
   //   private       = 仅 private (偏好 'none', 排除任何 shared)
   //   others_shared = 我的 private + 他人共享给我所在群的 shared (偏好 'others', 排除我分享出去的 shared)
-  //   shared        = PR #2 遗留字段, 仅他人 shared (不含我的 private), 偏好不映射到此, 保留兼容旧 API
+  //   shared        = 遗留字段, 仅他人 shared (不含我的 private), 偏好不映射到此, 保留兼容旧 API
   //   all           = mine + 他人共享给我所在群的 shared (偏好 'all')
   // 群 feed 不走这里, GroupDetail 内 local ref 自管.
   scope?: 'mine' | 'private' | 'others_shared' | 'shared' | 'all';
 }
 
-// PR #7a sharedDisplay 偏好 → 后端 scope 映射. Settings 改 sharedDisplay → store watch 推到各 view vs.scope.
+// sharedDisplay 偏好 → 后端 scope 映射. Settings 改 sharedDisplay → store watch 推到各 view vs.scope.
 // 4 个值跟 UI 4 个选项一一对应 (own=仅我发布的 / others=仅他人发布的 / none=全部隐藏 / all=全部显示)
 const SHARED_DISPLAY_TO_SCOPE = {
   own: 'mine',
@@ -88,7 +88,7 @@ export const useNotesStore = defineStore('notes', () => {
       v.dirty = false;
     }
   });
-  // PR #7a 主页共享笔记显示策略: Settings 改 sharedDisplay → 推到这里 → watch 更新各 view scope + 清缓存,
+  // 主页共享笔记显示策略: Settings 改 sharedDisplay → 推到这里 → watch 更新各 view scope + 清缓存,
   // 切回主 view 时 onActivated wasEmpty 走 reset 拉新 scope 数据. 跟 sortBy 同款套路 (用户没打开过 Settings
   // 时 store 保持 'own' 默认值 = mine scope, 跟历史行为完全一致)
   const sharedDisplay = ref<SharedDisplay>('own');
@@ -164,7 +164,7 @@ export const useNotesStore = defineStore('notes', () => {
       // 排序字段 (created 默认, updated = 按最后编辑时间). Settings 偏好驱动, 改后 watch(sortBy) 清缓存
       // 让各 view onActivated 走 wasEmpty 分支重新 fetch (server 真正按时间字段 ORDER BY 排好返回)
       if (sortBy.value === 'updated') params.sort = 'updated';
-      // PR #7a scope: 由 sharedDisplay 偏好 watch 推到 vs.scope, mine 默认不传 (server 也默认 mine)
+      // scope: 由 sharedDisplay 偏好 watch 推到 vs.scope, mine 默认不传 (server 也默认 mine)
       if (vs.scope && vs.scope !== 'mine') params.scope = vs.scope;
 
       const res = await api.getNotes(params);
@@ -222,14 +222,14 @@ export const useNotesStore = defineStore('notes', () => {
     await fetchNotes(vs.lastExtra, { append: true });
   }
 
-  // type → 对应 view 的映射 (PR #8 命名重整: quink=灵感, note=笔记, todo=待办)
+  // type → 对应 view 的映射 (quink=灵感, note=笔记, todo=待办)
   const typeToView: Record<string, ViewKey> = {
     quink: 'inspiration',
     note: 'notes',
     todo: 'todos',
   };
 
-  // PR #2 createNote 加 visibility + sharedGroupIds 透传给 server
+  // createNote 加 visibility + sharedGroupIds 透传给 server
   // category: null = 走 AI 自动分类 (后端 autoClassify 仅在 category 为 null 时回填); 非空 = 用户手动选过, 保护不被 AI 覆盖
   async function createNote(content: string, type: string = 'quink', tags?: string[], visibility: 'private' | 'shared' = 'private', sharedGroupIds: string[] = [], category: string | null = null) {
     const res = await api.createNote({ content, type, tags, visibility, sharedGroupIds, category: category ?? undefined });
@@ -253,7 +253,7 @@ export const useNotesStore = defineStore('notes', () => {
     return res.data;
   }
 
-  // PR #7b: 远端笔记变化时同步主 view (SSE group-notes-changed handler 调). 当前 view 是 3 主 view 之一
+  // 远端笔记变化时同步主 view (SSE group-notes-changed handler 调). 当前 view 是 3 主 view 之一
   // (sharedDisplay='all'/'others_shared' 时主 view 会显示别人共享的笔记) → fetchNotes keepCount 拉新数据;
   // 跨 view 全部标 dirty 让下次 onActivated 走 viewRefresh 同步.
   function refreshFromRemote() {
@@ -284,7 +284,7 @@ export const useNotesStore = defineStore('notes', () => {
       }
     }
     const res = await api.updateNote(id, data);
-    // PR #7b: GroupDetail 用本地 ref 自管群笔记 (CLAUDE.md "群 feed 不走 store"), store 同步走不到那.
+    // GroupDetail 用本地 ref 自管群笔记 (群 feed 不走 store), store 同步走不到那.
     // 从群组上下文改 (editContext.groupId 存在) → 派事件让 GroupDetail 重拉 feed, fork / in-place 路径都要派
     // (作者 in-place 改自己笔记 + 非作者 fork 改别人笔记都从群组页触发, 同款需求). 跟 NoteCard 改群内置顶同款事件.
     const ctxGroupId = data.editContext?.groupId;
@@ -293,7 +293,7 @@ export const useNotesStore = defineStore('notes', () => {
         window.dispatchEvent(new CustomEvent('quink-group-notes-changed', { detail: { groupId: ctxGroupId } }));
       }
     }
-    // PR #7b: COW fork 路径 (非作者改 shared / 作者从群组页改 root 多群 → 后端 fork 写入).
+    // COW fork 路径 (非作者改 shared / 作者从群组页改 root 多群 → 后端 fork 写入).
     // 此时 res.data 是新 fork note (新 id), 老 note 仍存在 (note_shares 仅去掉 ctxGroupId, 其它群保留).
     // in-place mutate 无法同步: 老 note 字段可能也变 (note_shares 少了一项), 新 fork 不在任一 view local cache 里.
     // 解决: 当前 view 走 fetchNotes keepCount 拉权威数据, 跨 view 标 dirty 下次 onActivated 同步.
@@ -378,9 +378,9 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function deleteNote(id: string, opts?: { groupId?: string }) {
-    // PR #12: groupId 可选, admin 删别人共享笔记时从群组上下文传, 后端写 deletedInGroupId 进群回收站
+    // groupId 可选, admin 删别人共享笔记时从群组上下文传, 后端写 deletedInGroupId 进群回收站
     const res = await api.deleteNote(id, opts);
-    // PR #7b: 删共享笔记后给每个所在群派 quink-group-notes-changed 让操作者自己的 GroupDetail 重拉
+    // 删共享笔记后给每个所在群派 quink-group-notes-changed 让操作者自己的 GroupDetail 重拉
     // (GroupDetail 用本地 ref 自管收不到自己的 SSE; 别人通过后端 broadcastNoteShared 收 SSE 已自动刷)
     for (const gid of res.sharedGroupIds ?? []) {
       window.dispatchEvent(new CustomEvent('quink-group-notes-changed', { detail: { groupId: gid } }));
@@ -495,7 +495,7 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   // SSE 收到 note-updated 时调 (scheduler 触发提醒后端更新 todoDue/todoRemindSentAt, 前端立刻反映).
-  // PR #12: 加 fallback - 所有 viewState 都没该 id 时走 syncNoteCreated 按 type 插入 (群回收站 restore 后笔记从 trash 出来, 原作者主 view 之前没这条)
+  // 加 fallback - 所有 viewState 都没该 id 时走 syncNoteCreated 按 type 插入 (群回收站 restore 后笔记从 trash 出来, 原作者主 view 之前没这条)
   async function refreshSingleNote(id: string) {
     try {
       const res = await api.getNote(id);
@@ -624,7 +624,7 @@ export const useNotesStore = defineStore('notes', () => {
 
   // 批量操作统一走 Promise.all 并发 + 失败 console.error (跟 Trash batch ops / Sidebar.doTrash 同模式)
   // 所有 batch 函数操作前调 exitSelectMode 让 UI 立即退出多选 (await 期间用户看到正常视图)
-  // PR #9: 返回 { ok, skipped } 让调用方 toast 区分成功/无权限. 群管理员多选含别人笔记时
+  // 返回 { ok, skipped } 让调用方 toast 区分成功/无权限. 群管理员多选含别人笔记时
   // 后端按字段权限筛 (PATCH 守卫剥字段 / DELETE 仅作者+admin), 失败的算 skipped
   type BatchResult = { ok: number; skipped: number };
   async function settleBatch<T>(ids: string[], runner: (id: string) => Promise<T>): Promise<BatchResult> {

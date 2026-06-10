@@ -7,7 +7,7 @@
  * 子元素的 getBoundingClientRect 返回 zoom 后视觉坐标, fixed 元素 top/left 也被 zoom 乘 1 次)。
  *
  * 问题: trigger.getBoundingClientRect().top 已经是 zoom 后坐标, 直接赋给 popup style.top
- * 会让 popup 实际渲染位置 = top * zoom → 整体偏 (zoom-1)*100% (蘑菇报: 网页版下拉菜单
+ * 会让 popup 实际渲染位置 = top * zoom → 整体偏 (zoom-1)*100% (曾出现: 网页版下拉菜单
  * 位置不对 + 编辑区光标错位)。
  *
  * 修法: web 端把 rect 坐标除以 zoom factor 再赋给 fixed 元素的 top/left/transform,

@@ -17,14 +17,14 @@ import { ref, watch, onMounted, onBeforeUnmount, nextTick, type Ref } from 'vue'
 // 当成"最矮列" → 新卡片继续往该列倒 → 列高越扯越歪. 真实测量解决这个反馈循环.
 // 列数自适应: 用 masonry 容器实际宽度 (rootRef.clientWidth) 算, 不靠 viewport 推算.
 // 之前 `viewport - sidebarW` 算法在 768px 临界点 sidebar 突然消失 (+240px 给主区) → 列数反弹
-// (1100→3列, 770→1列, 760→2列, 559→1列) 蘑菇汇报"缩小过程中 2→1→2→1 反复跳".
+// (1100→3列, 770→1列, 760→2列, 559→1列) 曾出现"缩小过程中 2→1→2→1 反复跳".
 // 直接读容器宽度天然避开这坑: sidebar 占不占位, masonry 容器宽度自动反映.
 // 目标列宽 280px (保证 NoteCard chip 行能放下三点不被推出卡片外).
 import { unzoomViewport } from '@/utils/zoom';
 import { computeColumnCount } from '@/utils/cardWidth';
 
 function getColumnCount(rootW?: number): number {
-  // 蘑菇 2026-06-09: 卡片最小宽度可在 Settings 配置 (px / percent 两种模式), 保存到 localStorage.
+  // 卡片最小宽度可在 Settings 配置 (px / percent 两种模式), 保存到 localStorage.
   // 默认 { mode: 'px', value: 320 }. 详见 utils/cardWidth.ts
   let main: number;
   if (rootW && rootW > 0) {
@@ -84,7 +84,7 @@ export function useMasonry<T extends { id: string }>(
   // 每列累计列高估算(rebuild 时填充), append 前会被真实 DOM 高度覆盖
   const colHeights: number[] = new Array(columnCount.value).fill(0);
   // KeepAlive 后台 view 的 DOM 被 detach. 此时 rebuild() 走 measureCardHeights() querySelectorAll
-  // 拿空 → 所有卡 estimateHeight 兜底 → pickShortestCol 全塞同一列 (蘑菇踩过的"塞同列" bug 根因).
+  // 拿空 → 所有卡 estimateHeight 兜底 → pickShortestCol 全塞同一列 (曾导致"塞同列" bug 的根因).
   // 触发场景: filter-based computed (如 Todos pendingTodos = vs.notes.filter(...)) 在后台 view 的
   // vs.notes deep mutation 时重算返回新数组 → watch newItems !== oldItems → rebuild → detached.
   // 修法: rebuild 检测 root.isConnected, detached 时标 deferred + return; onActivated 时 view 主动调

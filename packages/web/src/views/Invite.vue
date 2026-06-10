@@ -44,7 +44,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <!-- 跟登录页 layout 完全一致 (蘑菇 2026-06-08): min-h-full (= #app height = var(--app-height) 在 CSS zoom 下正确)
+  <!-- 跟登录页 layout 完全一致: min-h-full (= #app height = var(--app-height) 在 CSS zoom 下正确)
        + pb-[12vh] 让卡片居中后整体上移 6vh 视觉略偏上. 不用 min-h-screen 因为 CSS zoom 下 100vh 行为不靠谱
        (跟当初 setAppHeight 双倍计算同根因). 也不加 py-8, 跟 pb-[12vh] 的 padding-bottom 不对称会破坏居中 -->
   <div class="min-h-full flex items-center justify-center px-4 pb-[12vh]" style="background: var(--c-body)">

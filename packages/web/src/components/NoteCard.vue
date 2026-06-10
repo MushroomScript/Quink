@@ -42,30 +42,30 @@ const props = defineProps<{ note: Note }>();
 const store = useNotesStore();
 const auth = useAuthStore();
 
-// PR #2 群组共享: 判断作者身份 + 共享状态. NoteCard 右上角根据这些显示作者头像 / 已分享标识
+// 群组共享: 判断作者身份 + 共享状态. NoteCard 右上角根据这些显示作者头像 / 已分享标识
 const isMyNote = computed(() => !props.note.userId || props.note.userId === auth.user?.id);
 const isShared = computed(() => props.note.visibility === 'shared');
 const sharedCount = computed(() => props.note.sharedGroupIds?.length ?? 0);
 const editorCount = computed(() => props.note.editorCount ?? 0);
 
-// PR #6: shared 笔记底部 reaction summary + 评论计数 (readonly 展示, 点 NoteCard 走详情交互).
+// shared 笔记底部 reaction summary + 评论计数 (readonly 展示, 点 NoteCard 走详情交互).
 // 只显示 count>0 的 emoji 避免 5 个胶囊占满, 0 评论时整行不显示
 const visibleReactions = computed(() => (props.note.reactionSummary || []).filter(r => r.count > 0));
 const commentCount = computed(() => props.note.commentCount || 0);
-// PR #7b: editorCount > 0 也触发底部 meta 行显示 ("N 人编辑过")
+// editorCount > 0 也触发底部 meta 行显示 ("N 人编辑过")
 const showSocialMeta = computed(() => isShared.value && (visibleReactions.value.length > 0 || commentCount.value > 0 || editorCount.value > 0));
 
-// PR #5b: 编辑权限胶囊只在群组上下文显示 (/groups/:id 路径), 避免污染灵感/笔记/待办主 view
+// 编辑权限胶囊只在群组上下文显示 (/groups/:id 路径), 避免污染灵感/笔记/待办主 view
 const route = useRoute();
 const inGroupContext = computed(() => route.path.startsWith('/groups/'));
 // 群组上下文下用 groupId + 群角色 (GroupDetail provide) 走群级置顶 API, 不走 store.togglePin
 const groupIdFromRoute = computed(() => inGroupContext.value ? (route.params.id as string) : null);
 const groupRole = inject<ComputedRef<'owner' | 'admin' | 'member' | null>>('groupRole', computed(() => null));
 const canPinInGroup = computed(() => inGroupContext.value && (groupRole.value === 'owner' || groupRole.value === 'admin'));
-// PR #7b: 删除按钮可见性. 作者本人永远可删; 别人的笔记仅"群组页 + 我是该群 owner/admin"才显示 ("管理操作" 后端校验同款).
+// 删除按钮可见性. 作者本人永远可删; 别人的笔记仅"群组页 + 我是该群 owner/admin"才显示 ("管理操作" 后端校验同款).
 // 主视图看到别人共享笔记 (sharedDisplay='all'/'others_shared') 默认不显示删除, 让用户去群组页操作
 const canDelete = computed(() => isMyNote.value || canPinInGroup.value);
-// PR #9 字段权限:
+// 字段权限:
 //   主页置顶 = isMyNote && !inGroupContext (仅作者主视图)
 //   标完成 / 设群提醒 = isMyNote || canPinInGroup (作者本人 OR 群组上下文管理员)
 //   多选 = 群组页要群管理员; 主视图作者本人或私人 (排除"别人共享给我看的")
@@ -74,21 +74,21 @@ const canChangeTodoStatus = computed(() => isMyNote.value || canPinInGroup.value
 const canMultiSelect = computed(() =>
   inGroupContext.value ? canPinInGroup.value : (isMyNote.value || !isShared.value)
 );
-// PR #9 作者删 fork 版特殊弹窗: 作者主视图列表里看到自己的 fork (parentNoteId 非空) 删除时
+// 作者删 fork 版特殊弹窗: 作者主视图列表里看到自己的 fork (parentNoteId 非空) 删除时
 // 显示"由 @B @C 编辑过 N 处修改"提示. 群组上下文删 fork 走通用文案 (canDelete 含群管理员).
 const isAuthorDeletingFork = computed(() => isMyNote.value && !!(props.note as any).parentNoteId);
 const forkEditors = ref<Array<{ userId: string; nickname: string | null }>>([]);
 const forkEditCount = ref(0);
 
-// PR #9 编辑预判: shared 笔记 + 非作者时看后端返的 canWrite. 没权限 → 直接弹申请编辑权对话框, 不进 NoteEditModal
+// 编辑预判: shared 笔记 + 非作者时看后端返的 canWrite. 没权限 → 直接弹申请编辑权对话框, 不进 NoteEditModal
 // (NoteEditModal acquireLock 失败兜底仍保留, 防权限中途被撤的罕见 race)
 const canEdit = computed(() => isMyNote.value || !isShared.value || !!(props.note as any).canWrite);
 const showRequestPerm = ref(false);
 const requestPermMessage = ref('');
 const submittingRequest = ref(false);
 const requestPermInputEl = ref<HTMLTextAreaElement | null>(null);
-// PR #13 followup (蘑菇 2026-06-08): 弹窗 v-if true 自动 focus textarea + dispatch input event 让 customCaret 重算 caret 位置.
-// 蘑菇 reported (web 端 2026-06-08 二次报告): 网页浏览器在 modal-fade Transition (opacity:0→1) opacity:0 时 focus()
+// 弹窗 v-if true 自动 focus textarea + dispatch input event 让 customCaret 重算 caret 位置.
+// 网页浏览器在 modal-fade Transition (opacity:0→1) opacity:0 时 focus()
 // 不真 focus, document.activeElement 不变 → customCaret 的 focusin listener 不触发 → 无 attach → caret 永远不显.
 // Electron Chromium 对 opacity:0 元素 focus 比标准浏览器宽松, 所以 PC 端没问题.
 // 修法: 等 modal-fade Transition (180ms) 完成后再 focus, 同时多次 dispatch input 兜底 caret 位置计算
@@ -304,7 +304,7 @@ function onPointerDown(e: PointerEvent) {
     if (/\.(webm|mp3|wav|ogg|m4a)(\?.*)?$/i.test(href)) return;
   }
   // 多选模式下: 拖的永远是被选中的卡片, 不管鼠标按哪张 (按未选卡片不响应, 按已选卡片也是拖整批).
-  //   - 没选任何卡片 → return 不响应拖动 (蘑菇约定: 多选模式按未选区不应抓起任何东西)
+  //   - 没选任何卡片 → return 不响应拖动 (约定: 多选模式按未选区不应抓起任何东西)
   //   - 选 1 张 → 拖那 1 张 (即使鼠标按的是另一张)
   //   - 选 N 张 → 拖那 N 张
   // 普通模式: 拖当前卡片 (单选)
@@ -339,7 +339,7 @@ const menuPos = ref<{ top: string; right: string }>({ top: '0px', right: '0px' }
 
 // Teleport+fixed 可跨 main 的 overflow，但不能跨 viewport 物理边界（窗口外不能渲染）；
 // 下方空间不够菜单（估 ~160px）就向按钮上方弹.
-// unzoomRect + unzoomViewport: 蘑菇汇报"网页版缩放后菜单错位偏很远" — CSS zoom 下 rect 是 zoomed,
+// unzoomRect + unzoomViewport: 网页版缩放后菜单错位 — CSS zoom 下 rect 是 zoomed,
 // inline px 渲染又被 zoom 一次, 必须归一到 unzoomed. 详见 utils/zoom.ts.
 function toggleMenu() {
   if (showMenu.value) { showMenu.value = false; return; }
@@ -358,7 +358,7 @@ function toggleMenu() {
 
 async function askDelete() {
   showMenu.value = false;
-  // PR #9 作者删 fork 版: 拉编辑历史 distinct editor 名字, 弹特殊确认
+  // 作者删 fork 版: 拉编辑历史 distinct editor 名字, 弹特殊确认
   if (isAuthorDeletingFork.value) {
     try {
       const res = await api.getNoteEditHistory(props.note.id);
@@ -377,7 +377,7 @@ async function askDelete() {
   confirmDelete.value = true;
 }
 
-// PR #9 "另存为": 复制成自己的私人副本. 文案按 type 决定. 保存成功后本地同步插入 (SSE 给其他设备由后端 publish 触发)
+// "另存为": 复制成自己的私人副本. 文案按 type 决定. 保存成功后本地同步插入 (SSE 给其他设备由后端 publish 触发)
 async function doDuplicate() {
   showMenu.value = false;
   try {
@@ -395,12 +395,12 @@ async function doDelete() {
   confirmDelete.value = false;
   // 留个 snapshot 给撤销用: store.deleteNote 走 splice 会让 props.note 引用失效, 必须先拷贝
   const snapshot = { ...props.note };
-  // PR #7b: try-catch 兜底 — 后端 403 / 网络错时之前会静默(toast.show 不执行 = "什么都不提示")
-  // PR #12: 群组上下文 admin 删别人笔记时透传 groupId, 让后端写 deletedInGroupId 进群回收站
+  // try-catch 兜底 — 后端 403 / 网络错时之前会静默(toast.show 不执行 = "什么都不提示")
+  // 群组上下文 admin 删别人笔记时透传 groupId, 让后端写 deletedInGroupId 进群回收站
   const groupId = !isMyNote.value && inGroupContext.value ? groupIdFromRoute.value : null;
   try {
     await store.deleteNote(props.note.id, groupId ? { groupId } : undefined);
-    // PR #12: admin 删别人笔记进群回收站 → 派事件让 GroupDetail 刷新 trashCount 胶囊
+    // admin 删别人笔记进群回收站 → 派事件让 GroupDetail 刷新 trashCount 胶囊
     if (groupId) {
       window.dispatchEvent(new CustomEvent('quink-group-trash-changed', { detail: { groupId } }));
     }
@@ -428,7 +428,7 @@ import Vditor from 'vditor';
 watchEffect(async (onCleanup) => {
   // 防 race condition: content 变化触发 callback 时,上一次的 await Vditor.md2html(旧内容)
   // 可能还 pending。如果旧的 await 后完成 → 用旧 html 覆盖 renderedContent → UI"不刷新"
-  // (蘑菇遇到过偶发的"编辑后列表不更新"就是这个)。onCleanup 标记过期,过期结果不回写
+  // (曾出现偶发的"编辑后列表不更新")。onCleanup 标记过期,过期结果不回写
   let cancelled = false;
   onCleanup(() => { cancelled = true; });
   const content = props.note.content;
@@ -469,12 +469,12 @@ watchEffect(async (onCleanup) => {
 const timeAgo = computed(() => dayjs(props.note.createdAt).fromNow());
 const fullTime = computed(() => dayjs(props.note.createdAt).format('YYYY-MM-DD HH:mm'));
 
-// PR #11 提醒分家: 我的个人提醒 + 我所在群的群提醒 (onMounted 拉, saveReminder 后本地 mutate)
+// 提醒分家: 我的个人提醒 + 我所在群的群提醒 (onMounted 拉, saveReminder 后本地 mutate)
 // 优先级 (用于铃铛 + 设置按钮显示): 我的个人提醒 > 我所在群的最早一条群提醒
-// PR #13: 老 todoDue 字段 fallback 已删 (notes.todo_due 列移除)
+// 老 todoDue 字段 fallback 已删 (notes.todo_due 列移除)
 const myPersonalReminder = ref<PersonalReminderRow | null>(null);
 const myGroupReminders = ref<GroupReminderRow[]>([]);
-const groupReminderMuted = ref(false); // 蘑菇 2026-06-08: 卡片级 mute 状态
+const groupReminderMuted = ref(false); // 卡片级 mute 状态
 const remindersLoaded = ref(false);
 async function loadReminders() {
   try {
@@ -488,7 +488,7 @@ async function loadReminders() {
     remindersLoaded.value = true;
   }
 }
-// 蘑菇 2026-06-08: 切换屏蔽群提醒. 仅影响调用者本人 (scheduler 到点 + POST 设置通知都过滤 mutedSet)
+// 切换屏蔽群提醒. 仅影响调用者本人 (scheduler 到点 + POST 设置通知都过滤 mutedSet)
 async function toggleGroupReminderMute() {
   showMenu.value = false;
   const next = !groupReminderMuted.value;
@@ -508,7 +508,7 @@ onMounted(() => {
 });
 
 // effectiveReminder: 给铃铛 / 提醒文案 / "设置/编辑" 按钮文案用.
-// 蘑菇 2026-06-09: 改为按 dueAt 升序优先 (最先触发的最紧迫, 比 personal/group 优先级更直观).
+// 按 dueAt 升序优先 (最先触发的最紧迫, 比 personal/group 优先级更直观).
 // NoteDetail 双 chip 同时展示, NoteCard 只展示这条最紧迫的 (卡片寸土寸金), 多个走详情看.
 const effectiveReminder = computed<{ dueAt: string | null; rrule: string | null; source: 'personal' | 'group' | null }>(() => {
   const candidates: Array<{ dueAt: string; rrule: string | null; source: 'personal' | 'group' }> = [];
@@ -546,7 +546,7 @@ const reminderFullText = computed(() => {
   return effectiveReminder.value.rrule ? `${t}${sourceLabel}（重复: ${effectiveReminder.value.rrule}）` : `${t}${sourceLabel}`;
 });
 
-// PR #11: 是否能设群提醒. 仅 inGroupContext + 我是该群 owner/admin + 笔记 share 到当前群
+// 是否能设群提醒. 仅 inGroupContext + 我是该群 owner/admin + 笔记 share 到当前群
 const canSetGroupReminder = computed(() => {
   if (!inGroupContext.value || !groupIdFromRoute.value) return false;
   if (groupRole.value !== 'owner' && groupRole.value !== 'admin') return false;
@@ -620,9 +620,9 @@ async function saveReminder(payload: { remindAt: string | null; rrule: string | 
   }
 }
 
-// PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
+// 命名约定: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
 const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
-// 蘑菇 2026-06-08: quink 固定 blueberry 不跟主题 (.type-chip-quink 定义在 style.css). 跟 note/todo 一样固定色
+// quink 固定 blueberry 不跟主题 (.type-chip-quink 定义在 style.css). 跟 note/todo 一样固定色
 const typeColor: Record<string, string> = {
   quink: 'type-chip-quink',
   note: 'bg-emerald-100 text-emerald-600',
@@ -656,9 +656,9 @@ const typeColor: Record<string, string> = {
           @pointerdown.stop="!store.selectMode ? onPointerDown($event) : undefined">
           {{ typeLabels[note.type] }}
         </span>
-        <!-- 蘑菇 2026-06-09: category 紧贴类型 chip 之后 (之前在作者/已分享 chip 后, 视觉上"分类"跟"类型"语义同组应该挨着) -->
+        <!-- category 紧贴类型 chip 之后 (视觉上"分类"跟"类型"语义同组应该挨着) -->
         <span v-if="note.category" class="text-xs text-gray-400 truncate min-w-0">{{ note.category }}</span>
-<!-- PR #2 / PR #5b: 我自己发的共享笔记加 "已分享" chip; 数量在详情页/title hover 看. 字号 padding 跟 type chip 一致.
+<!-- 我自己发的共享笔记加 "已分享" chip; 数量在详情页/title hover 看. 字号 padding 跟 type chip 一致.
              别人发的显示作者头像 + nickname -->
         <span v-if="isMyNote && isShared && sharedCount > 0"
           class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark select-none whitespace-nowrap"
@@ -666,7 +666,7 @@ const typeColor: Record<string, string> = {
           <PhUsersThree size="0.75rem" weight="fill" />
           <span>已分享</span>
         </span>
-        <!-- PR #5b: 编辑权限胶囊 (仅作者本人 + shared 笔记 + 群组上下文). 单胶囊点击在 admin/all 间切换, 后跟切换图标 -->
+        <!-- 编辑权限胶囊 (仅作者本人 + shared 笔记 + 群组上下文). 单胶囊点击在 admin/all 间切换, 后跟切换图标 -->
         <button v-if="isMyNote && isShared && inGroupContext"
           @click.stop="setEditPermission((note.editPermission || 'admin') === 'admin' ? 'all' : 'admin')"
           class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark hover:bg-primary/20 transition-colors select-none whitespace-nowrap">
@@ -674,7 +674,7 @@ const typeColor: Record<string, string> = {
           <PhArrowsClockwise size="0.625rem" weight="bold" />
         </button>
         <!-- 作者头像 + nickname: 头像 shrink-0 保留, nickname min-w-0+truncate 让它跟 category 一起做"可压缩担当".
-             不让整 span shrink-0, 否则 nickname 强占空间挤爆 NoteCard 右边把三点推出卡片外 (蘑菇汇报: 三点出卡片点不到) -->
+             不让整 span shrink-0, 否则 nickname 强占空间挤爆 NoteCard 右边把三点推出卡片外 (已知问题: 三点出卡片点不到) -->
         <span v-else-if="!isMyNote && (note as any).authorNickname"
           class="inline-flex items-center gap-1 text-[10px] text-gray-500 select-none min-w-0"
           :title="`@${(note as any).authorNickname}`">
@@ -692,7 +692,7 @@ const typeColor: Record<string, string> = {
           :class="(groupReminderMuted && effectiveReminder.source === 'group') || reminderText === '已过' ? 'text-gray-400' : 'text-amber-600'"
           :title="reminderFullText"
           @click.stop="openReminderPicker">
-          <!-- 蘑菇 2026-06-08: muted=true 且 source=group 时铃铛改 PhBellSlash 提示已屏蔽, 提醒时间仍显示 -->
+          <!-- muted=true 且 source=group 时铃铛改 PhBellSlash 提示已屏蔽, 提醒时间仍显示 -->
           <PhBellSlash v-if="groupReminderMuted && effectiveReminder.source === 'group'" size="0.875rem" weight="fill" />
           <PhBellRinging v-else-if="effectiveReminder.rrule" size="0.875rem" weight="fill" />
           <PhBell v-else size="0.875rem" weight="fill" />
@@ -702,7 +702,7 @@ const typeColor: Record<string, string> = {
           :class="{ 'ml-auto': !(note.type === 'todo' && effectiveReminder.dueAt) }"
           :title="fullTime">{{ timeAgo }}</span>
         <!-- 三点菜单: shrink-0 关键 — 无之前 chip 撑爆时 button 被压到 width 0, svg overflow 出 button 外
-             视觉上"出卡片"但 click 区域为 0, 蘑菇汇报"点了没反应"就是这个 -->
+             视觉上"出卡片"但 click 区域为 0, 已知问题"点了没反应"就是这个 -->
         <button ref="menuBtn" @click.stop="toggleMenu"
           class="p-0.5 rounded-md text-gray-300 hover:text-gray-500 hover:bg-gray-100 transition-colors shrink-0">
           <PhDotsThreeVertical size="1.375rem" weight="bold" />
@@ -720,7 +720,7 @@ const typeColor: Record<string, string> = {
         </span>
       </div>
 
-      <!-- PR #6: 共享笔记底部 reaction + 评论计数 + PR #7b 编辑人数 (readonly 展示, 点 NoteCard 走 NoteDetail 交互) -->
+      <!-- 共享笔记底部 reaction + 评论计数 + 编辑人数 (readonly 展示, 点 NoteCard 走 NoteDetail 交互) -->
       <div v-if="showSocialMeta" class="flex items-center gap-3 mt-2 text-[11px] text-gray-500">
         <span v-for="r in visibleReactions" :key="r.emoji" class="inline-flex items-center gap-0.5">
           <span class="text-[13px] leading-none">{{ r.emoji }}</span>
@@ -730,7 +730,7 @@ const typeColor: Record<string, string> = {
           <PhChatCircleDots size="0.875rem" weight="fill" />
           <span class="tabular-nums">{{ commentCount }}</span>
         </span>
-        <!-- PR #7b: 非作者编辑次数 (作者改不计). NoteDetail 点开看完整列表 -->
+        <!-- 非作者编辑次数 (作者改不计). NoteDetail 点开看完整列表 -->
         <span v-if="editorCount > 0" class="inline-flex items-center gap-1" :title="`${editorCount} 人编辑过`">
           <PhPencilSimple size="0.875rem" weight="fill" />
           <span class="tabular-nums">{{ editorCount }}</span>
@@ -745,7 +745,7 @@ const typeColor: Record<string, string> = {
         leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
         <div v-if="showMenu" class="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-[var(--z-overlay)] min-w-[110px] [&_svg]:mt-px"
           :style="menuPos">
-          <!-- PR #9: 主页置顶 仅作者主视图; 群内置顶 仅群组上下文管理员. canPinInMain / canPinInGroup -->
+          <!-- 主页置顶 仅作者主视图; 群内置顶 仅群组上下文管理员. canPinInMain / canPinInGroup -->
           <button v-if="canPinInMain || canPinInGroup"
             @click.stop="handleTogglePin(); showMenu = false"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
@@ -753,45 +753,45 @@ const typeColor: Record<string, string> = {
             <PhMapPin v-else size="0.875rem" weight="fill" />
             <span>{{ displayPinned ? (inGroupContext ? '取消群内置顶' : '取消置顶') : (inGroupContext ? '群内置顶' : '置顶') }}</span>
           </button>
-          <!-- 编辑: 永远显示. PR #9 前端预判 canWrite, 没权限直接弹申请对话框 (NoteEditModal acquireLock 兜底仍在) -->
+          <!-- 编辑: 永远显示. 前端预判 canWrite, 没权限直接弹申请对话框 (NoteEditModal acquireLock 兜底仍在) -->
           <button @click.stop="handleEditClick()"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhPencilSimple size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>编辑</span>
           </button>
-          <!-- PR #9: 标完成 = 作者本人 OR 群组管理员; 普通成员含 grants 不显示 -->
+          <!-- 标完成 = 作者本人 OR 群组管理员; 普通成员含 grants 不显示 -->
           <button v-if="note.type === 'todo' && canChangeTodoStatus" @click.stop="store.toggleTodo(note.id); showMenu = false"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhArrowCounterClockwise v-if="note.todoStatus === 'done'" size="0.875rem" weight="fill" style="margin-top: 2px" />
             <PhCheck v-else size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>{{ note.todoStatus === 'done' ? '标记未完成' : '标记已完成' }}</span>
           </button>
-          <!-- PR #11: 设个人提醒, todo 任何人都能设 (个人 = 我自己收, 别人看不到). 数据走 note_personal_reminders 表 -->
+          <!-- 设个人提醒, todo 任何人都能设 (个人 = 我自己收, 别人看不到). 数据走 note_personal_reminders 表 -->
           <button v-if="note.type === 'todo'" @click.stop="openReminderPicker"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhBell size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>{{ myPersonalReminder ? '编辑个人提醒' : '设置个人提醒' }}</span>
           </button>
-          <!-- PR #11: 设群提醒, 仅 inGroupContext + 我是该群 owner/admin + 笔记 share 到此群 -->
+          <!-- 设群提醒, 仅 inGroupContext + 我是该群 owner/admin + 笔记 share 到此群 -->
           <button v-if="note.type === 'todo' && canSetGroupReminder" @click.stop="openGroupReminderPicker"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhBellRinging size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>{{ currentGroupReminder ? '编辑群提醒' : '设置群提醒' }}</span>
           </button>
-          <!-- 蘑菇 2026-06-08: 屏蔽此待办的群提醒 toggle. 仅 todo + 有我可见的群提醒时显示. 跨所有 share 群对该笔记生效 -->
+          <!-- 屏蔽此待办的群提醒 toggle. 仅 todo + 有我可见的群提醒时显示. 跨所有 share 群对该笔记生效 -->
           <button v-if="note.type === 'todo' && myGroupReminders.length > 0" @click.stop="toggleGroupReminderMute"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhBellSlash v-if="!groupReminderMuted" size="0.875rem" weight="fill" style="margin-top: 2px" />
             <PhBell v-else size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>{{ groupReminderMuted ? '恢复此待办群提醒' : '屏蔽此待办群提醒' }}</span>
           </button>
-          <!-- PR #9 另存为: 仅群组界面显示 (主视图含自己分享的都不显示, 蘑菇 2026-06-07 修订: 只有群组上下文有"复制成自己副本"语义). 按 type 决定文案 -->
+          <!-- 另存为: 仅群组界面显示 (主视图含自己分享的都不显示, 只有群组上下文有"复制成自己副本"语义). 按 type 决定文案 -->
           <button v-if="inGroupContext" @click.stop="doDuplicate()"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhCopySimple size="0.875rem" weight="fill" style="margin-top: 2px" />
             <span>另存为我的{{ typeLabels[note.type] || '副本' }}</span>
           </button>
-          <!-- PR #9 多选: 群组页要群管理员; 主视图作者本人或非共享 (排除主视图见到的别人共享笔记) -->
+          <!-- 多选: 群组页要群管理员; 主视图作者本人或非共享 (排除主视图见到的别人共享笔记) -->
           <button v-if="canMultiSelect" @click.stop="enterSelectMode()"
             class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
             <PhCheckSquare size="0.875rem" weight="fill" style="margin-top: 2px" />
@@ -816,7 +816,7 @@ const typeColor: Record<string, string> = {
       @save="saveReminder"
     />
 
-    <!-- PR #9 申请编辑权对话框: 没 write 权限的人点编辑触发, 不走 NoteEditModal -->
+    <!-- 申请编辑权对话框: 没 write 权限的人点编辑触发, 不走 NoteEditModal -->
     <Teleport to="body">
       <Transition name="modal">
         <div v-if="showRequestPerm" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
@@ -843,7 +843,7 @@ const typeColor: Record<string, string> = {
       </Transition>
     </Teleport>
 
-    <!-- 删除确认弹窗 (PR #5b/#7b: 删别人笔记时显示作者名 + 警告, 自己笔记保持简洁; PR #9: 作者删 fork 版特殊提示) -->
+    <!-- 删除确认弹窗 (删别人笔记时显示作者名 + 警告, 自己笔记保持简洁; 作者删 fork 版特殊提示) -->
     <Teleport to="body">
       <Transition name="modal">
         <div v-if="confirmDelete" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">

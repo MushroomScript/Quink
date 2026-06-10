@@ -45,14 +45,14 @@ const props = withDefaults(defineProps<{
   showAi?: boolean;
   showFullscreenBtn?: boolean;
   hintText?: string;
-  // PR #2 群组共享: chip 控制可见性 (private / shared 到 N 群)
+  // 群组共享: chip 控制可见性 (private / shared 到 N 群)
   initialVisibility?: 'private' | 'shared';
   initialSharedGroupIds?: string[];
   showVisibilityChip?: boolean;
   // 分类 chip: null = 走 AI 自动分类 (或显示"未分类"), 非空 = 用户手动选过
   initialCategory?: string | null;
   showCategoryPicker?: boolean;
-  // PR #9 权限分级: 非作者编辑共享笔记时锁定 type 不可改 + 隐藏 tag 入口 (只让改正文)
+  // 权限分级: 非作者编辑共享笔记时锁定 type 不可改 + 隐藏 tag 入口 (只让改正文)
   lockType?: boolean;
   hideTags?: boolean;
 }>(), {
@@ -105,7 +105,7 @@ const emit = defineEmits<{
   (e: 'ready'): void;
 }>();
 
-// PR #2 群组共享: 内部双向 v-model 的可见性状态. NoteInput 等用方传 initial*, 不再外部 sync (chip popover 实时更新)
+// 群组共享: 内部双向 v-model 的可见性状态. NoteInput 等用方传 initial*, 不再外部 sync (chip popover 实时更新)
 const visibilityModel = ref<{ visibility: 'private' | 'shared'; sharedGroupIds: string[] }>({
   visibility: props.initialVisibility,
   sharedGroupIds: [...props.initialSharedGroupIds],
@@ -113,7 +113,7 @@ const visibilityModel = ref<{ visibility: 'private' | 'shared'; sharedGroupIds: 
 // 分类 chip: null = 走 AI 自动分类 (后端 autoClassify 仅在 category 为 null 时回填); 非空 = 用户手动选过, 保护不被 AI 覆盖
 const categoryModel = ref<string | null>(props.initialCategory);
 
-// PR #8 命名重整: value 跟新字段值一致 (quink=灵感, note=笔记, todo=待办)
+// 命名约定: value 跟字段值一致 (quink=灵感, note=笔记, todo=待办)
 const noteTypes = [
   { value: 'quink', label: '灵感', icon: markRaw(PhLightbulb), iconStyle: '' },
   { value: 'note', label: '笔记', icon: markRaw(PhNotePencil), iconStyle: '' },
@@ -154,7 +154,7 @@ const aiProcessing = ref(false);
 const aiResult = ref('');
 const aiError = ref('');
 
-// 三个图标都比文字基线整体下移 1px（蘑菇视觉偏好），并按各自重心偏差再细调对齐：
+// 三个图标都比文字基线整体下移 1px，并按各自重心偏差再细调对齐：
 // PhBookOpen 顶部空白 -1，PhPenNib 重心偏上 +1，PhSparkle 居中为 0
 const aiFeatureOptions = [
   { value: 'polish' as const, label: '润色', icon: markRaw(PhSparkle), iconStyle: 'margin-top: 1px' },
@@ -297,7 +297,7 @@ function onToolbarMouseOver(e: MouseEvent) {
   if (!btn) return;
   const label = btn.getAttribute('aria-label');
   if (!label) return;
-  // unzoomRect + unzoomViewport: CSS zoom 下 rect 跟 viewport 归一到 unzoomed 防 tooltip 错位 (蘑菇汇报)
+  // unzoomRect + unzoomViewport: CSS zoom 下 rect 跟 viewport 归一到 unzoomed 防 tooltip 错位
   const r = unzoomRect(btn);
   const { vw } = unzoomViewport();
   // 上方空间不够 32px 时翻转到按钮下方,避免 Capture 等顶部贴边场景 tooltip 跑出窗口看不见
@@ -373,7 +373,7 @@ onMounted(() => {
     },
     after: () => {
       // focusEnd: 再次编辑场景 (NoteEditModal), 光标定位到末尾让用户接着写.
-      // CDP 实测 (蘑菇 2026-06-06 汇报): 用 TreeWalker 找最后一个 text node 锚定 selection (避开 PRE element boundary
+      // CDP 实测: 用 TreeWalker 找最后一个 text node 锚定 selection (避开 PRE element boundary
       // 导致 Chromium 渲染光标到开头视觉位置的 bug). after() 在 Vditor IR 渲染完成后立即调 → 不用 setTimeout
       // 让用户首帧就看到光标在末尾 (避免"光标飘一下才到末尾"). RAF + 100ms 双保险防 Vditor 后续 mutation reset.
       // 注: focusEnd 时不调 vditor.focus(), 因为 vditor.focus() 内部把光标重置到默认位置, 会跟我们设的末尾冲突.
@@ -382,7 +382,7 @@ onMounted(() => {
           const contentEl = editorRef.value?.querySelector('.vditor-ir .vditor-reset') as HTMLElement | null;
           if (!contentEl) return;
           contentEl.focus();
-          // CDP 实测 (蘑菇 2026-06-06 汇报"光标在末尾位置一个字后面"): Vditor IR 渲染后 PRE 末尾有一个空 text node
+          // CDP 实测 ("光标在末尾位置一个字后面" bug): Vditor IR 渲染后 PRE 末尾有一个空 text node
           // (length=0), 直接抓最后 text node 会落到空节点开头 → Chromium 渲染光标在最后一段下一行位置, 视觉错位.
           // 必须跳过空 text node, 找最后一个有内容的 text node, 把光标设到它末尾 (offset = text.length).
           const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT);
@@ -480,7 +480,7 @@ function clearContent() {
   vditor?.setValue('');
   tags.value = [];
   noteType.value = props.initialType;
-  // 蘑菇 2026-06-08: 发布后 visibility / sharedGroupIds 也重置回初始 (默认 private + 空群), 跟新编辑器一致
+  // 发布后 visibility / sharedGroupIds 也重置回初始 (默认 private + 空群), 跟新编辑器一致
   // 防止用户连续发同一类型笔记时, 上次选的群残留到下一条 (用户得手动取消才能改私人)
   visibilityModel.value = {
     visibility: props.initialVisibility,
@@ -840,7 +840,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
     <div class="relative">
     <div class="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border-t border-gray-100 select-none">
       <div class="flex items-center gap-2 flex-wrap min-w-0">
-        <!-- Type selector. PR #9: lockType=true 时 button disable, 视觉灰显, 点击不响应 (非作者编辑共享笔记) -->
+        <!-- Type selector. lockType=true 时 button disable, 视觉灰显, 点击不响应 (非作者编辑共享笔记) -->
         <div v-if="showTypeSelector" class="flex gap-0.5">
           <button v-for="t in noteTypes" :key="t.value" @click="lockType ? null : (noteType = t.value)"
             :disabled="lockType && noteType !== t.value"
@@ -871,7 +871,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
           <span class="sep"></span>
         </template>
 
-        <!-- Tags. PR #9: hideTags=true 时入口隐藏 (非作者编辑共享笔记不能改 tag) -->
+        <!-- Tags. hideTags=true 时入口隐藏 (非作者编辑共享笔记不能改 tag) -->
         <div v-if="!hideTags" class="relative">
           <button ref="tagBtnEl" @click.stop="showTagInput = !showTagInput" class="tbtn text-gray-400" title="添加标签"><PhTag size="0.875rem" weight="fill" /></button>
         </div>
@@ -905,7 +905,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         </span>
       </div>
 
-      <!-- Submit + fullscreen + category chip + visibility chip (PR #2 群组共享) -->
+      <!-- Submit + fullscreen + category chip + visibility chip (群组共享) -->
       <div class="flex items-center gap-1.5 shrink-0">
         <span v-if="hintText" class="text-[11px] text-gray-400 mr-1">{{ hintText }}</span>
         <CategoryPicker v-if="showCategoryPicker" v-model="categoryModel" compact />
@@ -973,7 +973,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
       </div>
     </div>
 
-    <!-- Tags display. PR #9: hideTags=true 时整行隐藏 (非作者不能改 tag, 显示也无意义) -->
+    <!-- Tags display. hideTags=true 时整行隐藏 (非作者不能改 tag, 显示也无意义) -->
     <div v-if="tags.length && !hideTags" class="flex flex-wrap gap-1 px-4 py-2 border-t border-gray-50">
       <span v-for="tag in tags" :key="tag" class="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
         #{{ tag }} <button @click="removeTag(tag)" class="text-gray-400 hover:text-red-500">&times;</button>

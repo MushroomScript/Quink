@@ -13,7 +13,7 @@ export const AI_FEATURE_LABELS: Record<AiFeature, string> = {
 
 // 新用户注册时 seed 的默认大类. 之前自动分类 prompt 里硬编码 9 个细分类 (编程/思路 等), AI 容易编造新分类, 后端
 // processNoteWithAi 还自动 insert → 分类列表无限膨胀. 改方案: prompt 用 {categories} 占位符注入用户当前
-// 分类, AI 必须从列表里选 (有"其他"兜底), 后端校验返回不在列表就 null. 老用户不补种 (蘑菇决定).
+// 分类, AI 必须从列表里选 (有"其他"兜底), 后端校验返回不在列表就 null. 老用户不补种.
 export const DEFAULT_CATEGORIES: readonly string[] = ['工作', '学习', '生活', '其他'];
 
 export const DEFAULT_PROMPTS: Record<AiFeature, string> = {

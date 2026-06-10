@@ -33,7 +33,7 @@ const tagCount = ref(0);
 const trashCount = ref(0);
 const loading = ref(true);
 
-// PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
+// 命名约定: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
 const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
 
 function getTypeCount(type: string): number {
@@ -55,7 +55,7 @@ const topCards = computed(() => [
   { label: '回收站', count: trashCount.value, icon: markRaw(PhTrash), color: 'bg-gray-100 text-gray-500', gradient: 'linear-gradient(135deg, #E5E7EB, #9CA3AF)', path: '/trash' },
 ]);
 
-// PR #8 命名重整: quinkCount=灵感 (原 noteCount), noteCount=笔记 (原 snippetCount). link 类型已删
+// 命名约定: quinkCount=灵感, noteCount=笔记. link 类型已删
 type CellData = { date: string; day: number; count: number; quinkCount: number; noteCount: number; todoCount: number };
 
 const heatmapData = computed(() => {
@@ -178,7 +178,7 @@ function onCategoryClick(name: string) {
   router.push('/quink');
 }
 
-// 蘑菇 2026-06-09 放开 "未分类" + 用户分类"其他" 都可筛 (前者走 sentinel, 后者是用户真实分类名 eq match).
+// 放开 "未分类" + 用户分类"其他" 都可筛 (前者走 sentinel, 后者是用户真实分类名 eq match).
 // 仅 isOthers (折叠的"其他 N 项") 是多分类聚合, 没法单一筛, 保持不可点
 function isClickableCategory(item: { name: string; isOthers?: boolean }): boolean {
   return !item.isOthers;

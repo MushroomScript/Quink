@@ -1,4 +1,4 @@
-// 蘑菇 2026-06-09: 前端复制 server 端的通知类型清单 (跟 packages/server/src/utils/notificationTypes.ts 保持同步).
+// 前端复制 server 端的通知类型清单 (跟 packages/server/src/utils/notificationTypes.ts 保持同步).
 // Quink 没 shared 包, 前后端各维护一份. 加新通知 type 必须两边同时改
 
 export interface NotificationTypeMeta {

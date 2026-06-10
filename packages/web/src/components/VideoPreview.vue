@@ -20,7 +20,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
         @click="close">
         <!-- 视频本身不响应外层点击关闭, @click.stop 防止点 video controls 时穿透关 modal.
              禁 controlslist 全部三点菜单内项 + disablepictureinpicture, 让 Chromium overflow menu 无内容自动隐藏
-             (蘑菇说菜单展开后被三点按钮遮住关不掉 — Chromium 已知行为, 禁项让菜单消失绕开) -->
+             (菜单展开后被三点按钮遮住关不掉 — Chromium 已知行为, 禁项让菜单消失绕开) -->
         <video :src="current.url" controls autoplay
           controlslist="nodownload noremoteplayback noplaybackrate"
           disablepictureinpicture

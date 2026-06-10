@@ -64,13 +64,13 @@ async function onItemClick(id: string) {
   const n = store.items.find((x) => x.id === id);
   if (!n) return;
   await store.markRead(id);
-  // 跳关联资源. PR #12: 'note-deleted-by-admin' / 'note-restored-by-admin' 跳群回收站 (笔记已不在主 view)
+  // 跳关联资源. 'note-deleted-by-admin' / 'note-restored-by-admin' 跳群回收站 (笔记已不在主 view)
   const p = n.payload || {};
   if ((n.type === 'note-deleted-by-admin' || n.type === 'note-restored-by-admin') && p.groupId) {
     router.push(`/groups/${p.groupId}/trash`);
     return;
   }
-  // PR #13 followup: comment-added 带 commentId → 跳详情页 + query c=cid 让 NoteDetail 滚动+高亮该评论
+  // comment-added 带 commentId → 跳详情页 + query c=cid 让 NoteDetail 滚动+高亮该评论
   if (p.noteId && p.commentId && (n.type === 'comment-added' || n.type === 'comment-replied')) {
     router.push(`/note/${p.noteId}?c=${encodeURIComponent(p.commentId)}`);
     return;
@@ -118,7 +118,7 @@ async function doClear() {
             : 'text-gray-500 hover:bg-gray-100'"
         >
         <span>{{ t.label }}</span>
-        <!-- badge 蘑菇 2026-06-08 badge-test.html 定稿: 14.5 size, font 10, px-[4.5px], 红点 translate-y-[0.5px] 下移半步,
+        <!-- badge: badge-test.html 定稿: 14.5 size, font 10, px-[4.5px], 红点 translate-y-[0.5px] 下移半步,
              字内 wrap span 加 transform translate(-0.25, -0.25) sub-pixel 微调 (1.5x zoom 下视觉居中) -->
         <span
           v-if="tabUnread(t.key) > 0"
@@ -304,13 +304,13 @@ async function doClear() {
 </template>
 
 <style scoped>
-/* hover 整行被选取的感觉 (蘑菇报告: 之前 brightness + 1px ring 太弱). 用 3 层叠加:
+/* hover 整行被选取的感觉 (之前 brightness + 1px ring 太弱). 用 3 层叠加:
    1. background-image linear-gradient 叠一层半透明 primary 紫色覆盖 (整行被"染色"感)
    2. box-shadow inset 1.5px primary ring (边框感)
    3. brightness 1.1 微提亮 (避免太重)
    background-color 仍由 inline style 控制 (已读灰 / 未读紫底), background-image 跟它叠加不冲突 */
 .notif-item:hover {
-  /* hover 整行淡紫色背景 (蘑菇要求: 不要框 / 只要 bg 跟主题色呼应).
+  /* hover 整行淡紫色背景 (不要框 / 只要 bg 跟主题色呼应).
      用 background-image linear-gradient 叠一层半透明 primary 跟 inline style 的 background-color 共存.
      Quink --c-accent 是 "116 143 252" 空格 channel 格式, 必须用 rgb(var() / alpha) 现代语法 (rgba 不支持空格 channel) */
   background-image: linear-gradient(rgb(var(--c-accent) / 0.12), rgb(var(--c-accent) / 0.12));

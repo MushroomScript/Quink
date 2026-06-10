@@ -4,13 +4,13 @@ import type { Context, Next } from 'hono';
 import { db, schema } from './db/index.js';
 import { eq } from 'drizzle-orm';
 
-// 安全审计 M1: JWT_SECRET 启动校验. 生产环境强制要求 env 设置, 否则 console.warn 醒目提醒.
+// JWT_SECRET 启动校验. 生产环境强制要求 env 设置, 否则 console.warn 醒目提醒.
 // (开发环境允许默认值方便调试, NODE_ENV=production 时启动期警告)
 const JWT_SECRET = process.env.QUINK_JWT_SECRET || 'quink-dev-secret-change-in-production';
 if (process.env.NODE_ENV === 'production' && !process.env.QUINK_JWT_SECRET) {
   console.error('[SECURITY] QUINK_JWT_SECRET 未设置! 生产环境用默认 secret 严重不安全, 请立即设置环境变量');
 }
-// 长效 token，不主动退出就一直有效 (蘑菇拍板, 体验优先)
+// 长效 token，不主动退出就一直有效 (体验优先)
 const TOKEN_EXPIRY = '999y';
 
 // ── Password hashing (HMAC-SHA256 + salt) ──
@@ -34,7 +34,7 @@ export function verifyPassword(password: string, stored: string): boolean {
 
 // ── JWT ──
 
-// 安全审计 M2: token payload 含 tv (token version). 改密码时 users.token_version++ → 旧 token 携带 tv 跟 DB 不匹配, authMiddleware 拒绝
+// token payload 含 tv (token version). 改密码时 users.token_version++ → 旧 token 携带 tv 跟 DB 不匹配, authMiddleware 拒绝
 export function signToken(userId: string, tokenVersion: number = 0): string {
   return jwt.sign({ sub: userId, tv: tokenVersion }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
 }
@@ -81,7 +81,7 @@ export async function authMiddleware(c: Context, next: Next) {
     return c.json({ error: '登录已过期' }, 401);
   }
 
-  // 安全审计 M2: 校验 token version 匹配 (改密码后旧 token tv 旧 → 拒绝)
+  // 校验 token version 匹配 (改密码后旧 token tv 旧 → 拒绝)
   // 老 token (没有 tv 字段) 视为 tv=0, 兼容历史登录会话
   const tokenTv = payload.tv ?? 0;
   const currentTv = await getCurrentTokenVersion(payload.sub);

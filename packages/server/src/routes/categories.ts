@@ -18,7 +18,7 @@ const createCategorySchema = z.object({
 
 app.get('/', async (c) => {
   const userId = c.get('userId');
-  // 蘑菇 2026-06-09: 系统只支持一级分类, schema 已删 parentId. 排序: sortOrder ASC + id ASC (POST /reorder 维护)
+  // 系统只支持一级分类, schema 已删 parentId. 排序: sortOrder ASC + id ASC (POST /reorder 维护)
   const roots = await db.select().from(schema.categories)
     .where(eq(schema.categories.userId, userId))
     .orderBy(asc(schema.categories.sortOrder), asc(schema.categories.id))
@@ -68,7 +68,7 @@ app.post('/', async (c) => {
   // "未分类" 是系统保留名 (Sidebar 虚拟项 / Stats 饼图都用此名字代表 category IS NULL), 禁止用户创建同名分类避免歧义
   if (parsed.data.name.trim() === '未分类') return c.json({ error: '"未分类" 是系统保留名, 不能用作分类名' }, 400);
 
-  // 新分类排到最后 (蘑菇 2026-06-09): 查当前 max(sortOrder) + 1; 没分类时 null -> -1 -> 0.
+  // 新分类排到最后: 查当前 max(sortOrder) + 1; 没分类时 null -> -1 -> 0.
   // 前端 displayList 把"未分类"虚拟项 push 在所有用户分类之后, 顺序: 已有分类 → 新分类 → 未分类
   const maxRow = await db.select({ maxOrder: max(schema.categories.sortOrder) })
     .from(schema.categories).where(eq(schema.categories.userId, userId)).get();

@@ -1,4 +1,4 @@
-// PR #10 通知中心 store
+// 通知中心 store
 // 列表 + 未读数 + 标已读 / 删除 / 清空 + SSE in-place mutate.
 //
 // 多设备同步: 操作发起方本地 mutate UI 不等 SSE 回环 (sse.ts handler 用 isMyEvent 跳过自己的事件);

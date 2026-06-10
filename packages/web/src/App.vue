@@ -210,7 +210,7 @@ function applyUserPreferences(user: any) {
   if (prefs.notesSortBy === 'created' || prefs.notesSortBy === 'updated') {
     store.sortBy = prefs.notesSortBy;
   }
-  // PR #7a 共享笔记显示策略同款放这: 用户首次进主 view 之前必须把偏好推到 store, 否则
+  // 共享笔记显示策略同款放这: 用户首次进主 view 之前必须把偏好推到 store, 否则
   // 启动 → 直接 Inspiration → fetchNotes 用默认 'own' (= mine scope) → 错过用户偏好.
   // 默认 own 跟历史行为一致, 缺失字段不覆盖 (store 默认 'own').
   if (prefs.sharedDisplay === 'own' || prefs.sharedDisplay === 'others' || prefs.sharedDisplay === 'none' || prefs.sharedDisplay === 'all') {
@@ -234,7 +234,7 @@ function applyZoomLevel(level: number) {
     (document.documentElement.style as any).zoom = (level / 100).toString();
   }
   // CSS zoom 改变后 --app-height 必须重算 (zoom 变化但 innerHeight 不变, --app-height 公式 = innerHeight / zoom)
-  // 蘑菇汇报登录页"卡片快挨着底端" root cause 之一: zoom=1.5 时 --app-height 用 zoomed innerHeight 设 CSS px 被 zoom 再乘一次 → #app height 是视口 zoom 倍
+  // 登录页"卡片快挨着底端" root cause 之一: zoom=1.5 时 --app-height 用 zoomed innerHeight 设 CSS px 被 zoom 再乘一次 → #app height 是视口 zoom 倍
   try { (window as any).__quink_setAppHeight?.(); } catch {}
 }
 
@@ -359,7 +359,7 @@ onMounted(async () => {
       window.open(href, '_blank', 'noopener,noreferrer');
       return;
     }
-    // PR fix: 正则容忍 ?token=... query (PR #3 加 query 后 .m4a 不匹配 $ → 音频误进下载分支 → 巨长 toast + 下载文件)
+    // 正则容忍 ?token=... query (加 query 后 .m4a 不匹配 $ → 音频误进下载分支 → 巨长 toast + 下载文件)
     if (href.includes('/api/uploads/') && !/\.(png|jpg|jpeg|gif|webp|svg|webm|mp3|wav|ogg|m4a)(\?.*)?$/i.test(href)) {
       e.preventDefault();
       e.stopImmediatePropagation();

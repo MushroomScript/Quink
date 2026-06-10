@@ -2,7 +2,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import dayjs from 'dayjs';
 import { db, schema } from './db/index.js';
 
-// PR #12 群组回收站 7 天后强清 (个人回收站默认 30 天可改)
+// 群组回收站 7 天后强清 (个人回收站默认 30 天可改)
 export const GROUP_TRASH_RETENTION_DAYS = 7;
 
 // 永久删一条笔记 + cascade 清所有外键关联表 (notes 被 9 张子表 FK 引用, pragma foreign_keys=ON 不清子表会阻 delete).
@@ -36,8 +36,8 @@ export function cleanTrashForUser(userId: string, days: number) {
   for (const e of expired) purgeNote(e.id);
 }
 
-// PR #12 + PR #13 fix 群组回收站 7 天清扫: 扫所有"共享笔记被删超过 7 天" (走 note_shares JOIN, 不依赖 deleted_in_group_id 单字段)
-// 跟个人 trash 30 天 cleanup 重叠时, 7 天先命中 → 共享笔记实际寿命被群 cleanup 截到 7 天 (蘑菇规则)
+// 群组回收站 7 天清扫: 扫所有"共享笔记被删超过 7 天" (走 note_shares JOIN, 不依赖 deleted_in_group_id 单字段)
+// 跟个人 trash 30 天 cleanup 重叠时, 7 天先命中 → 共享笔记实际寿命被群 cleanup 截到 7 天
 export function cleanGroupTrash() {
   try {
     const cutoff = dayjs().subtract(GROUP_TRASH_RETENTION_DAYS, 'day').toISOString();
@@ -63,7 +63,7 @@ export function cleanAllTrash() {
   } catch (e) { console.error('[cleanAllTrash]', e); }
 }
 
-// PR #10 通知 30 天清: 仅清已读 (read_at IS NOT NULL) + created_at 早于 30 天前. 未读不清 (用户没看到).
+// 通知 30 天清: 仅清已读 (read_at IS NOT NULL) + created_at 早于 30 天前. 未读不清 (用户没看到).
 // 硬编码 30 天不开 user.preferences (通知不是用户主动产生的数据, 不像 trash 用户在意保留期).
 // 同 cleanAllTrash 6h 跑一次, 跑量级很小 (单用户通知不至于上千)
 const NOTIFICATION_RETENTION_DAYS = 30;
@@ -78,7 +78,7 @@ export function cleanOldNotifications() {
   } catch (e) { console.error('[cleanOldNotifications]', e); }
 }
 
-// PR #12 audit_logs 内容快照清: 仅清 meta.snapshot 字段 (大头 content 上限 1MB), 保留行让审计追溯链完整.
+// audit_logs 内容快照清: 仅清 meta.snapshot 字段 (大头 content 上限 1MB), 保留行让审计追溯链完整.
 // 90 天足够事后调查 + 单用户 user.update * (千次/天) 单条 1MB → 长期累积 audit 表能爆数 GB.
 // SQLite json_remove 原生支持, drizzle 端 mode 'json' 仍能反序列化清字段后的 meta
 const AUDIT_SNAPSHOT_RETENTION_DAYS = 90;

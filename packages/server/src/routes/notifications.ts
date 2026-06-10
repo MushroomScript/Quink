@@ -1,7 +1,7 @@
-// PR #10 通知中心后端
+// 通知中心后端
 // 6 endpoint: list / unread-count / read-one / read-all / delete-one / clear
 // 写 endpoint 跟其他模块同款 publish('notification-changed', ...) 让发起人多设备 SSE 同步,
-// 'notification-new' 则由 createNotification helper 在事件源头发送 (申请编辑权 / 评论等接入点 PR #10c 改造)
+// 'notification-new' 则由 createNotification helper 在事件源头发送 (申请编辑权 / 评论等接入点)
 
 import { Hono } from 'hono';
 import { db, schema } from '../db/index.js';
@@ -85,7 +85,7 @@ app.post('/:id/read', async (c) => {
       .where(eq(schema.notifications.id, id));
   }
   publish(userId, 'notification-changed', { scope: 'read', id }, _ocid);
-  // PR #13 followup: read 是高频操作 (用户点几十次/天) 无掩盖嫌疑, 砍 audit 防 spam audit_logs 表
+  // read 是高频操作 (用户点几十次/天) 无掩盖嫌疑, 砍 audit 防 spam audit_logs 表
   return c.json({ data: { id, readAt: row.readAt ?? dayjs().toISOString() } });
 });
 
@@ -108,7 +108,7 @@ app.post('/read-all', async (c) => {
   const now = dayjs().toISOString();
   const result = await db.update(schema.notifications).set({ readAt: now }).where(whereClause);
   publish(userId, 'notification-changed', { scope: 'read-all', category: category ?? null }, _ocid);
-  // PR #13 followup: read-all 是高频 + 无掩盖嫌疑, 砍 audit 防 spam (delete/clear 仍留, 才是掩盖证据的核心场景)
+  // read-all 是高频 + 无掩盖嫌疑, 砍 audit 防 spam (delete/clear 仍留, 才是掩盖证据的核心场景)
   return c.json({ data: { updated: result.changes ?? 0 } });
 });
 

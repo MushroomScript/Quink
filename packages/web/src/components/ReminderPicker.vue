@@ -106,7 +106,7 @@ function buildRrule(): string {
 
 // 从已有 RRULE 字符串反向 parse 到 GUI (用于打开 picker / 进入高级 时初始化)
 function parseRruleToGui(s: string | null | undefined) {
-  // 默认重置. bymonthday 用今天的日号兜底, 不留空 (蘑菇 2026-06: 切到 MONTHLY 应该立即有合理值)
+  // 默认重置. bymonthday 用今天的日号兜底, 不留空 (切到 MONTHLY 应该立即有合理值)
   gui.freq = 'DAILY';
   gui.interval = 1;
   gui.byday = [];
@@ -179,7 +179,7 @@ watch(gui, () => {
 }, { deep: true });
 
 // "关 sync → 改 gui 字段 → nextTick 后开 sync" 原子化封装.
-// 避免每个入口手写 "关-改-开" 三步骤漏掉某一步 (蘑菇 2026-06: selectPreset 漏开导致 GUI 不同步).
+// 避免每个入口手写 "关-改-开" 三步骤漏掉某一步 (selectPreset 漏开导致 GUI 不同步).
 // fn 内做需要避免 watch 反向覆盖 rruleValue 的修改 (parseRruleToGui 等).
 function withGuiSyncDisabled(fn: () => void) {
   guiSyncEnabled = false;
@@ -321,7 +321,7 @@ const canSave = computed(() => !saveBlockReason.value);
               </div>
 
               <!-- RRULE 字符串. 仅 advancedOpen=true 时显示, 单栏模式下不出现避免普通用户困惑.
-                   单行 input (不支持多行 RRULE, 蘑菇 2026-06: 多行不做), 长了水平滚动 -->
+                   单行 input (不支持多行 RRULE), 长了水平滚动 -->
               <template v-if="advancedOpen">
                 <label class="block text-xs text-gray-500 mt-4 mb-1">RRULE串</label>
                 <input

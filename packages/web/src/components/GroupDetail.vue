@@ -93,7 +93,7 @@ async function load() {
   }
 }
 
-// PR #2 群内笔记 feed: 单列垂直 stack NoteCard, 分页 "加载更多". 默认 sharedAt DESC
+// 群内笔记 feed: 单列垂直 stack NoteCard, 分页 "加载更多". 默认 sharedAt DESC
 const groupNotes = ref<Note[]>([]);
 const groupNotesTotal = ref(0);
 const groupNotesPage = ref(1);
@@ -126,7 +126,7 @@ function loadMoreGroupNotes() {
   loadGroupNotes(false);
 }
 
-// 蘑菇 2026-06-09: 群级"接收本群通知"开关已移除. 想关单条群提醒走 NoteCard 三点菜单"屏蔽此待办群提醒"
+// 群级"接收本群通知"开关已移除. 想关单条群提醒走 NoteCard 三点菜单"屏蔽此待办群提醒"
 
 watch(groupId, () => {
   // 切群: 关掉所有临时浮层 (邀请折叠 / 公告编辑 / 右键菜单), 防残留
@@ -151,7 +151,7 @@ onUnmounted(() => {
 
 function onEditRequestChanged() {
   loadEditRequests();
-  // PR #13 补丁: 申请审批 / 撤销授权后 NoteCard 的 canWrite 字段变 (后端 enrich 重算).
+  // 申请审批 / 撤销授权后 NoteCard 的 canWrite 字段变 (后端 enrich 重算).
   // GroupDetail 用本地 ref groupNotes (不在 store viewState), 必须重拉才能让 NoteCard 拿到新 canWrite
   loadGroupNotes(true);
 }
@@ -161,14 +161,14 @@ function onGroupNotesChanged(e: Event) {
   if (detail?.groupId === groupId.value) loadGroupNotes(true);
 }
 
-// PR #12: 群回收站变化 (admin 删别人 / 恢复 / 永久删 / 清空) → 重拉 group detail 刷 trashCount.
+// 群回收站变化 (admin 删别人 / 恢复 / 永久删 / 清空) → 重拉 group detail 刷 trashCount.
 // 事件源: 本设备发起方 NoteCard.doDelete / GroupTrash 4 操作 dispatch + 其他设备 SSE handler (sse.ts) 派
 function onGroupTrashChanged(e: Event) {
   const detail = (e as CustomEvent).detail;
   if (detail?.groupId === groupId.value) store.loadGroup(groupId.value);
 }
 
-// PR #5b 待审编辑申请 (跨笔记汇总, 折叠 >3 条)
+// 待审编辑申请 (跨笔记汇总, 折叠 >3 条)
 const editRequests = ref<GroupNoteEditRequestRow[]>([]);
 const editRequestsExpanded = ref(false);
 const COLLAPSE_LIMIT = 3;
@@ -546,7 +546,7 @@ async function saveAnnouncement() {
               邀请
               <PhCaretDown size="0.75rem" weight="bold" :class="['transition-transform', inviteOpen ? 'rotate-180' : '']" />
             </button>
-            <!-- PR #12: 回收站胶囊, 仅 owner+admin 可见. 点跳 /groups/:id/trash. trashCount 为 0 时仍显示让 admin 知道入口在 -->
+            <!-- 回收站胶囊, 仅 owner+admin 可见. 点跳 /groups/:id/trash. trashCount 为 0 时仍显示让 admin 知道入口在 -->
             <button v-if="isOwnerOrAdmin" @click="$router.push(`/groups/${groupId}/trash`)"
               class="px-3 py-1 text-xs rounded-lg font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 inline-flex items-center gap-1">
               <PhTrash size="0.75rem" weight="fill" />
@@ -607,7 +607,7 @@ async function saveAnnouncement() {
           </div>
         </section>
 
-        <!-- PR #5b: 待审编辑申请 (owner/admin, 全宽) -->
+        <!-- 待审编辑申请 (owner/admin, 全宽) -->
         <section v-if="isOwnerOrAdmin && editRequests.length > 0" class="bg-gray-50 rounded-xl p-4">
           <h3 class="text-sm font-medium mb-3">待审编辑申请 ({{ editRequests.length }})</h3>
           <div class="space-y-2">
@@ -755,7 +755,7 @@ async function saveAnnouncement() {
               </div>
             </section>
 
-            <!-- 蘑菇 2026-06-09: 群级"接收本群通知"开关已移除 (实际只控 group-reminder-set 一种), 单条群提醒走卡片三点菜单 -->
+            <!-- 群级"接收本群通知"开关已移除 (实际只控 group-reminder-set 一种), 单条群提醒走卡片三点菜单 -->
 
             <!-- 群组成员 -->
             <section>

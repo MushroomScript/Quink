@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// PR #12b 群组回收站 view. 路由 /groups/:id/trash, 仅 owner+admin 可进, 仅 owner 可永久删/清空.
+// 群组回收站 view. 路由 /groups/:id/trash, 仅 owner+admin 可进, 仅 owner 可永久删/清空.
 // 仿 Trash.vue 80%, 差异: 数据源 group API / 显示"被 @X 删除" / retentionDays 来自 response (7天) /
 // 监听 quink-group-trash-changed window event / 顶栏显示"「群名」的回收站" + 返回按钮.
 import { ref, computed, onMounted, onUnmounted, watch, inject, type Ref } from 'vue';
@@ -54,7 +54,7 @@ const myRole = computed(() => (group.value as any)?.myRole as string | undefined
 const isOwner = computed(() => myRole.value === 'owner');
 const canEnter = computed(() => myRole.value === 'owner' || myRole.value === 'admin');
 
-// PR #13 fix (蘑菇 2026-06-08): 走 detailTitle inject 让 TopBar 显示"「群名」的回收站(数量)",
+// 走 detailTitle inject 让 TopBar 显示"「群名」的回收站(数量)",
 // view 顶部只留返回按钮, 跟 NoteDetail 同款模式. 不再 view 内 H2 重复标题
 const detailTitle = inject<Ref<string>>('detailTitle');
 function syncDetailTitle() {
@@ -279,7 +279,7 @@ function deletedInfo(n: TrashNote): string {
 
 const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
 const typeColor: Record<string, string> = {
-  quink: 'type-chip-quink', // 蘑菇 2026-06-08: 固定 blueberry, 不跟主题 (style.css 定义 + dark 适配)
+  quink: 'type-chip-quink', // 固定 blueberry, 不跟主题 (style.css 定义 + dark 适配)
   note: 'bg-emerald-100 text-emerald-600',
   todo: 'bg-amber-100 text-amber-600',
 };
@@ -324,7 +324,7 @@ function onLeave(el: Element, done: () => void) {
 
 // 返回按钮挪到 TopBar (TopBar.vue group-trash 路由专属), goBack 函数已废, view 内无入口
 
-// PR #12 观察 2: 操作完成派事件让 GroupDetail 刷 trashCount 胶囊 (SSE 派的同款 event 复用 listener)
+// 操作完成派事件让 GroupDetail 刷 trashCount 胶囊 (SSE 派的同款 event 复用 listener)
 function notifyGroupTrashChanged() {
   window.dispatchEvent(new CustomEvent('quink-group-trash-changed', { detail: { groupId: groupId.value } }));
 }
@@ -332,7 +332,7 @@ function notifyGroupTrashChanged() {
 
 <template>
   <div class="px-4 md:px-8 pb-6">
-    <!-- PR #13 fix: 标题"「群名」的回收站(数量)" + 返回按钮 全走 TopBar (TopBar.vue 加 group-trash 路由专属返回按钮).
+    <!-- 标题"「群名」的回收站(数量)" + 返回按钮 全走 TopBar (TopBar.vue 加 group-trash 路由专属返回按钮).
          view 内不再有标题行也不再有返回按钮 -->
 
     <!-- toolbar 同 Trash.vue 风格. 仅 owner 才显示"清空" 和 "批量永久删除". -->

@@ -17,7 +17,7 @@ function emitPresence(userId: string, online: boolean) {
   }
 }
 
-// 安全审计 L5: 单账号 SSE 连接数上限. 防恶意账号开 100 个连接占内存 + 让 heartbeat 每 15s 写 100 次.
+// 单账号 SSE 连接数上限. 防恶意账号开 100 个连接占内存 + 让 heartbeat 每 15s 写 100 次.
 // 个人使用场景一台机 1-2 连接足够, 10 个上限留缓冲 (跨设备 + 多 tab 并存). 超出最早进入的连接被踢
 const MAX_SUBSCRIBERS_PER_USER = 10;
 

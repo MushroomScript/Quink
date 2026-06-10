@@ -29,7 +29,7 @@ const route = useRoute();
 const comments = ref<NoteComment[]>([]);
 const loading = ref(false);
 const loaded = ref(false);
-// PR #13 followup: comment-added 通知点击带 ?c=cid, 评论加载后 scroll + 高亮 1.5s
+// comment-added 通知点击带 ?c=cid, 评论加载后 scroll + 高亮 1.5s
 const highlightId = ref<string | null>(null);
 watch([comments, () => route.query.c], async ([list, cid]) => {
   if (!cid || typeof cid !== 'string') return;
@@ -485,7 +485,7 @@ defineExpose({ reload: load });
   border-radius: 0.5rem;
   transition: background-color 0.6s ease-out;
 }
-/* PR #13 followup: 通知点击跳关联评论时高亮 1.8s 渐隐 (路由 ?c=cid 触发, CommentThread watch route) */
+/* 通知点击跳关联评论时高亮 1.8s 渐隐 (路由 ?c=cid 触发, CommentThread watch route) */
 .comment-item.comment-highlight {
   background-color: rgb(254 240 138 / 0.45); /* yellow-100 半透 */
   transition: background-color 0.15s ease-in;

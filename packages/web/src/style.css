@@ -163,7 +163,7 @@
 [data-theme="dark"] .bg-gray-100\/80,
 [data-theme="dark"] .bg-gray-50\/80,
 [data-theme="dark"] .bg-gray-50\/50 { background: rgba(255,255,255,0.05) !important; }
-/* Resources sticky toolbar 蘑菇要不透明: 跳过上面统一的 5% 白雾, 用 body 同色让它实心(滚动不透出卡片) */
+/* Resources sticky toolbar 不透明: 跳过上面统一的 5% 白雾, 用 body 同色让它实心(滚动不透出卡片) */
 [data-theme="dark"] [data-resources-toolbar] { background: var(--c-body) !important; }
 /* Settings 主题色选择器: dark 主题下选中态需要更亮的背景,否则选中按钮跟周围非选中按钮的 5% 白雾几乎一样,加上 dark 图标的 squircle 也是深色 → 整个按钮溶进页面背景看不清 */
 [data-theme="dark"] .theme-pick-selected { background: rgba(255,255,255,0.22) !important; }
@@ -494,7 +494,7 @@ body.resources-dragging * {
 }
 
 /* ── 语音气泡（微信风格，CSS 属性选择器直接作用于 <a> 标签） ──
-   注: 用 .ext?  跟 .ext  两选一. PR #3 群组文件授权后 url 尾部带 ?token=<jwt> 让 href 不再以 .ext 结尾,
+   注: 用 .ext?  跟 .ext  两选一. 群组文件授权后 url 尾部带 ?token=<jwt> 让 href 不再以 .ext 结尾,
    `$=".m4a"` 失效. 加 `*=".m4a?"` 覆盖带 query 的 case (含路径里恰好出现 .m4a? 子串的罕见 corner case, 接受) */
 .note-content a[href$=".webm"], .note-content a[href*=".webm?"],
 .note-content a[href$=".mp3"],  .note-content a[href*=".mp3?"],
@@ -712,7 +712,7 @@ mark.find-hl-active {
   color: white;
   background: rgb(var(--c-accent));
 }
-/* 自定义 radio: 原生 accent-color 在 Chromium zoom / 不同 DPR 下内圆视觉比例不稳定 (蘑菇报"填充比黑圈大"),
+/* 自定义 radio: 原生 accent-color 在 Chromium zoom / 不同 DPR 下内圆视觉比例不稳定 (曾出现"填充比黑圈大"),
    appearance:none + ::after 自画 6/14 ≈ 43% 内圆, 视觉稳定且跟主题色一致. */
 .reminder-picker .rrule-radio {
   appearance: none;
@@ -835,7 +835,7 @@ mark.find-hl-active {
   color: #6b7280;
 }
 
-/* 蘑菇 2026-06-08: 灵感 (quink) type chip 固定 blueberry 蓝色, 不跟主题色变.
+/* 灵感 (quink) type chip 固定 blueberry 蓝色, 不跟主题色变.
    note/todo chip 已用 Tailwind 固定色 (emerald-100/amber-100), quink 之前用 --c-accent 跟主题, 切非蓝主题时跟列表 chip 视觉断裂.
    dark 模式下背景改半透明 + 文字提亮, 避免浅蓝在深色背景过冲 */
 .type-chip-quink {

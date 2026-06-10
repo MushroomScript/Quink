@@ -3,7 +3,7 @@ import { pinyin } from 'pinyin-pro';
 /**
  * 把中文 text 转成可搜索串: 全拼 + 首字母(都用默认读音,不穷举多音字).
  *
- * 故意不穷举多音字 —— 蘑菇接受"重做不能搜 cxcz" 换 "种/单"等罕用读音字不会误命中.
+ * 故意不穷举多音字 —— 取舍: 牺牲"重做不能搜 cxcz" 换 "种/单"等罕用读音字不会误命中.
  * 即每字按 pinyin-pro 字典默认读音, "重"=zhong (zhòng/chóng 选 zhong),
  * "撤销重做"全拼=chexiaozhongzuo / 首字母=cxzz, 搜 cxcz 不命中.
  *

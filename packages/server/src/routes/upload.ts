@@ -31,7 +31,7 @@ const AVATAR_MAX_SIZE = 2 * 1024 * 1024; // 2MB
 const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
 // MIME → 扩展名 fallback（仅在 file.name 无扩展名时用）
-// 安全审计 H11: 不再支持 svg 推断 (svg 完全黑名单, MIME 黑名单也拒)
+// 不再支持 svg 推断 (svg 完全黑名单, MIME 黑名单也拒)
 const MIME_EXT_MAP: Record<string, string> = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
   'image/webp': 'webp',
@@ -41,7 +41,7 @@ const MIME_EXT_MAP: Record<string, string> = {
   'text/csv': 'csv', 'application/json': 'json', 'application/zip': 'zip',
 };
 
-// 安全审计 H11: 拒绝可被浏览器渲染脚本 / 同源 XSS 的文件类型. 扩展名 + MIME 双重黑名单
+// 拒绝可被浏览器渲染脚本 / 同源 XSS 的文件类型. 扩展名 + MIME 双重黑名单
 const BLOCKED_EXT = new Set([
   'svg', 'svgz',                                   // SVG (含内嵌 <script>)
   'html', 'htm', 'xhtml',                          // HTML / XHTML
@@ -171,7 +171,7 @@ app.post('/file', async (c) => {
 
   const ext = getExt(file.type, file.name);
 
-  // 安全审计 H11: 拒绝可触发存储型 XSS 的文件类型 (扩展名 + MIME 双重判断, 防绕过)
+  // 拒绝可触发存储型 XSS 的文件类型 (扩展名 + MIME 双重判断, 防绕过)
   const mimeLower = (file.type || '').toLowerCase();
   if (BLOCKED_EXT.has(ext.toLowerCase()) || BLOCKED_MIME.has(mimeLower)) {
     return c.json({ error: `不支持的文件类型: ${ext} (出于安全考虑禁止上传可执行脚本 / SVG / HTML)` }, 400);

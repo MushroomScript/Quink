@@ -67,7 +67,7 @@ const showDeleteConfirm = ref(false);
 const deletingCategoryId = ref<number | null>(null);
 const deletingCategoryName = ref('');
 
-// 分类拖拽自定义排序 (蘑菇 2026-06-09): 系统只支持一级 root 分类, child 已废弃
+// 分类拖拽自定义排序: 系统只支持一级 root 分类, child 已废弃
 //   draggingCatId = 正在拖的 root id; dragStarted = true 才视为真拖动 (5px 阈值过了)
 //   dragInsertIdx = 插入位置 (0 = 第一个之前, categories.length = 末尾, -1 = 不显示 indicator)
 //   ghost: 仿 DragGhost.vue 模式, 拖动时浮动 div 跟随鼠标 (Teleport body + fixed + pointer-events-none)
@@ -135,7 +135,7 @@ function scheduleLoadStats() {
 watch(() => notesStore.notes, scheduleLoadStats, { deep: true });
 watch(() => notesStore.filterCategory, (v) => { activeCategory.value = v; });
 
-// 新增分类弹窗自动聚焦输入框. 跟 NoteCard.vue 申请编辑权弹窗同款模式 (PR #13 followup 2026-06-08):
+// 新增分类弹窗自动聚焦输入框. 跟 NoteCard.vue 申请编辑权弹窗同款模式:
 // 网页浏览器在 modal Transition (opacity:0→1) opacity:0 时 focus() 不真 focus, document.activeElement 不变 →
 // customCaret 的 focusin listener 不触发 → 无 attach → caret 永远不显. Electron Chromium 对 opacity:0 元素 focus
 // 比标准浏览器宽松所以 PC 端没问题. 修法: 等 modal Transition 完成 (~180ms) 后再 focus + 多次 dispatch input 兜底
@@ -203,7 +203,7 @@ function filterByCategory(name: string) {
     notesStore.filterCategory = name;
   }
   notesStore.fetchNotes();
-  // 只在非内容页时跳灵感,灵感/笔记/待办页原地筛选 (PR #8: 灵感 / → /quink)
+  // 只在非内容页时跳灵感,灵感/笔记/待办页原地筛选
   const contentPaths = ['/quink', '/notes', '/todos'];
   if (!contentPaths.includes(route.path)) {
     router.push('/quink');
@@ -281,7 +281,7 @@ async function onCatPointerUp() {
 }
 
 // dropType 标记: 前 3 项 = "拖到此处改 type"; AI 用 dropAction='ai' (拖到 AI 项 = 跳 /ai 新对话 / 停留 1s 自动展开)
-// PR #8: dropType 字段值跟新命名对齐 (quink=灵感, note=笔记, todo=待办)
+// dropType 字段值跟命名对齐 (quink=灵感, note=笔记, todo=待办)
 const mainNav: Array<{ path: string; label: string; icon: any; dropType?: 'quink' | 'note' | 'todo'; dropAction?: 'ai' }> = [
   { path: '/quink', label: '灵感', icon: markRaw(PhLightbulb), dropType: 'quink' },
   { path: '/notes', label: '笔记', icon: markRaw(PhNotePencil), dropType: 'note' },
@@ -359,7 +359,7 @@ function openTransferDock() {
   transferDockVisible.value = true;
 }
 
-// PR #10 通知中心入口: 头像菜单"传输列表"上方. badge 显示未读总数 (按 store.unread.total).
+// 通知中心入口: 头像菜单"传输列表"上方. badge 显示未读总数 (按 store.unread.total).
 // 未读数靠 onMounted 首次 + SSE notification-new 实时更新; 这里不主动 setInterval
 function openNotifications() {
   closeUserMenu();
@@ -381,7 +381,7 @@ function onAiExpand(e: Event) {
   if (route.path !== path) router.push(path);
 }
 
-// 分类区高度拖拽. 蘑菇规则:
+// 分类区高度拖拽. 约定:
 //   - nav (上半部分入口) 全程完整显示, 不允许被压缩
 //   - nav 跟 handle 之间是 spacer (间隙), 拖 handle 上移让 spacer 缩
 //   - spacer = 0 时 handle 不能再上 (nav 不允许被压挤)
@@ -444,7 +444,7 @@ onMounted(() => {
   } catch {}
   // ResizeObserver 监听 sidebar 真实大小, layout 稳定 + 窗口缩放都触发 clamp.
   // 之前用 nextTick 只触发一次, 但 Vue nextTick 是 microtask 在 flex 布局之前 → sidebar.clientHeight
-  // 拿到 0 或半成品值 → dynamicMax 算错 → 把 categoryHeight clamp 到不合理的小值 (蘑菇报: 拖了无效,
+  // 拿到 0 或半成品值 → dynamicMax 算错 → 把 categoryHeight clamp 到不合理的小值 (已知问题: 拖了无效,
   // 列表内容滚不到 — 因为 maxHeight 被错误 clamp 到 40 卡死).
   // ResizeObserver 等真正 layout 完成才 fire, 而且窗口缩放时也持续 clamp.
   if (sidebarEl.value) {
@@ -519,14 +519,14 @@ onUnmounted(() => {
           class="absolute bg-sidebar-light rounded-xl shadow-xl z-[var(--z-sidebar)] py-1"
           :class="sidebarCollapsed ? 'left-full ml-1 top-3 w-44' : 'left-3 right-3 top-full mt-1'"
           style="border: 1px solid var(--sb-border)">
-          <!-- PR #10 消息通知: 常驻入口. badge 显示 store.unread.total. 点击跳 /notifications -->
+          <!-- 消息通知: 常驻入口. badge 显示 store.unread.total. 点击跳 /notifications -->
           <button @click="openNotifications"
             class="w-full flex items-center gap-2 px-4 py-2.5 text-sm transition-colors"
             style="color: var(--sb-text)"
             @mouseenter="($event.currentTarget as HTMLElement).style.background = 'var(--sb-hover)'"
             @mouseleave="($event.currentTarget as HTMLElement).style.background = 'transparent'">
             <PhBell size="1rem" weight="fill" /><span>消息通知</span>
-            <!-- badge 样式复用待办那套 (蘑菇 2026-06-08 badge-test.html 定稿: 多位 pl/pr 都 4.5 对称, 不再 3.5/4.5 不对称; 不要 translate-y 偏移) -->
+            <!-- badge 样式复用待办那套 (badge-test.html 定稿: 多位 pl/pr 都 4.5 对称, 不再 3.5/4.5 不对称; 不要 translate-y 偏移) -->
             <span v-if="notificationsStore.unread.total > 0"
               class="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] pb-[1px] bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full"
               :class="String(notificationsStore.unread.total > 99 ? '99+' : notificationsStore.unread.total).length > 1 ? 'pl-[4.5px] pr-[4.5px]' : 'px-1'">
@@ -559,7 +559,7 @@ onUnmounted(() => {
       </Transition>
     </div>
 
-    <!-- Nav: 自然高度全显示 (shrink-0 不压缩 + 无 overflow-y). 蘑菇规则: nav 所有入口必须始终可见,
+    <!-- Nav: 自然高度全显示 (shrink-0 不压缩 + 无 overflow-y). 约定: nav 所有入口必须始终可见,
          不允许被分类区拖大时压缩 / 内部滚动. spacer 跟分类区的 height 互补占满剩余空间.
          折叠态 icon-only + 居中 + label 隐藏 + 角标改右上角小红点 -->
     <nav ref="navEl" class="shrink-0 py-3 space-y-0.5" :class="sidebarCollapsed ? 'px-2' : 'px-3'">
@@ -585,7 +585,7 @@ onUnmounted(() => {
                 translate-y-[1px] 整体下移 1px 让圆点跟"待办"文字 baseline 视觉对齐 (icon size 1.125rem 比 text 14px 略高).
              2. 横向 (2 位数+): "1" 在 em-square 里 ink 偏右半 (左边大段空白让 "1" 看着窄), "10"/"99+" 等多位数视觉重心偏右,
                 技术上 padding 完全对称但视觉看着"左空多右空少". 1 位数 (1-9) "0/2/3..." 字符本身对称, 不调.
-                多位数用 pl-[3.5px] pr-[4.5px] 让内容向左挤 0.5px sub-pixel (蘑菇 2026-06-08 在 badge-test.html 6 方案对比定稿: 整 1px 偏左过头, 0.5px 半步刚好).
+                多位数用 pl-[3.5px] pr-[4.5px] 让内容向左挤 0.5px sub-pixel (badge-test.html 6 方案对比定稿: 整 1px 偏左过头, 0.5px 半步刚好).
                 注: zoom=1.5 时 0.5 CSS px = 0.75 物理像素, 浏览器 sub-pixel antialiasing 渲染. zoom=1 时 0.5px round 但 letter glyph 仍能感知微偏 -->
         <span v-if="!sidebarCollapsed && item.label === '待办' && stats.pendingTodos > 0 && auth.user?.preferences?.showTodoBadge !== false"
           class="ml-auto translate-y-[1px] inline-flex items-center justify-center min-w-[18px] h-[18px] pb-[1px] bg-red-400/70 text-white text-[11px] leading-none font-semibold tabular-nums rounded-full"
@@ -634,7 +634,7 @@ onUnmounted(() => {
       <div v-if="categories.length === 0 && !showAddCategory" class="px-3 py-2">
         <span class="text-[11px]" style="color: var(--sb-dim); opacity: 0.5">暂无分类</span>
       </div>
-      <!-- root 排序拖拽 (PR 2026-06-09): pointerdown + 5px 阈值 → 拖动. ✕ 按钮 @pointerdown.stop 防把删按钮当拖把手.
+      <!-- root 排序拖拽: pointerdown + 5px 阈值 → 拖动. ✕ 按钮 @pointerdown.stop 防把删按钮当拖把手.
            TransitionGroup: indicator enter/leave fade, item splice 重排时 FLIP 平移 (动画见 .cat-move CSS).
            "未分类"虚拟项 (entry.type === 'uncategorized') 跟用户分类同款 class + icon, 永远在末尾, 无 ✕ + 不绑 onCatPointerDown 防拖排序. -->
       <TransitionGroup name="cat" tag="div" class="space-y-0.5 overflow-y-auto"

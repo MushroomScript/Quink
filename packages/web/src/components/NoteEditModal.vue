@@ -24,14 +24,14 @@ const editorRef = ref<InstanceType<typeof RichEditor>>();
 const modalCardRef = ref<HTMLElement>();
 const showConfirm = ref(false);
 
-// PR #7b: 从 router path 自动识别群上下文. /groups/:gid 形式 → editContext.groupId, 否则 undefined (主视图改).
+// 从 router path 自动识别群上下文. /groups/:gid 形式 → editContext.groupId, 否则 undefined (主视图改).
 // 后端用这字段决定是否 fork: 非作者必 fork; 作者改 root 多群也 fork (避免误改影响多群).
 const editGroupId = computed<string | undefined>(() => {
   const m = route.path.match(/^\/groups\/([^/]+)/);
   return m ? m[1] : undefined;
 });
 
-// PR #5 编辑锁: 仅 shared 笔记走 (private 不需要协作锁, 直接编辑).
+// 编辑锁: 仅 shared 笔记走 (private 不需要协作锁, 直接编辑).
 // onMounted 先 try acquire, 失败 → 不打开 modal 直接 emit close;
 // 成功 → showInner = true 启动 enter 动画 + 30s 心跳续约.
 // onBeforeUnmount → fetch keepalive DELETE 释放锁 (兼容页面 unload + Vue unmount 两种 case).
@@ -40,16 +40,16 @@ const lockToken = ref<string | null>(null);
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 const showInner = ref(false);
 
-// PR #9: 申请编辑权弹窗 (无 write 权限的人点编辑 → 不进编辑器, 弹申请理由对话框)
+// 申请编辑权弹窗 (无 write 权限的人点编辑 → 不进编辑器, 弹申请理由对话框)
 const showRequestPerm = ref(false);
 const requestPermLabel = ref<'admin' | 'all'>('admin');
 const requestPermMessage = ref('');
 const submittingRequest = ref(false);
 const requestPermInputEl = ref<HTMLTextAreaElement | null>(null);
-// PR #13 followup (蘑菇 2026-06-08): 弹窗 v-if true → 自动 focus textarea. Web 浏览器 modal-fade opacity:0 时拒绝 focus, 等 Transition 完成 (180ms) 后再 focus + 多次 dispatch input 兜底 customCaret 位置算错
+// 弹窗 v-if true → 自动 focus textarea. Web 浏览器 modal-fade opacity:0 时拒绝 focus, 等 Transition 完成 (180ms) 后再 focus + 多次 dispatch input 兜底 customCaret 位置算错
 // watch + nextTick + requestAnimationFrame 三层兜底 (Teleport + Transition 让 ref 绑/visible 时机复杂,
 // nextTick 单独不够, setTimeout 80ms 仍偶发失败 → 用 rAF 等 Transition 第一帧绘制完再 focus)
-// 跟 NoteCard 同款修法: focus + 等 Transition 完成 dispatch input event 让 customCaret 重算位置 (蘑菇 reported click 后才出 caret)
+// 跟 NoteCard 同款修法: focus + 等 Transition 完成 dispatch input event 让 customCaret 重算位置 (避免 click 后才出 caret)
 watch(showRequestPerm, async (v) => {
   if (!v) return;
   await nextTick();
@@ -86,7 +86,7 @@ function cancelEditRequest() {
 
 async function acquireLock(): Promise<boolean> {
   if (!isSharedNote.value) return true;
-  // PR #5b (蘑菇 2026-06-07 修订): 唯一免锁场景 = 作者主视图改 root 多群. 其它都申锁:
+  // 唯一免锁场景 = 作者主视图改 root 多群. 其它都申锁:
   //   - 非作者: 协作场景必锁
   //   - 作者改 fork: fork 是群协作版本
   //   - 作者改 root 单群: 单群 root 等价 fork
@@ -108,7 +108,7 @@ async function acquireLock(): Promise<boolean> {
       if (res.status === 409 && body.error === 'locked') {
         toast.show(`「${body.lockByNickname}」正在编辑此笔记，稍后再试`, 'error', 3500);
       } else if (res.status === 403 && body.error === 'no_write_permission') {
-        // PR #9: 没编辑权 → 弹申请编辑权对话框 (输入理由 + 提交申请/取消). 不进编辑器
+        // 没编辑权 → 弹申请编辑权对话框 (输入理由 + 提交申请/取消). 不进编辑器
         requestPermLabel.value = body.editPermission === 'admin' ? 'admin' : 'all';
         requestPermMessage.value = '';
         showRequestPerm.value = true;
@@ -201,7 +201,7 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
       patchData.visibility = data.visibility;
       patchData.sharedGroupIds = data.sharedGroupIds;
     }
-    // PR #5: shared 笔记免锁路径外都必须带 lockToken (server 校验 + 自增清锁). 作者主视图改 root 多群免锁不带 lockToken
+    // shared 笔记免锁路径外都必须带 lockToken (server 校验 + 自增清锁). 作者主视图改 root 多群免锁不带 lockToken
     if (isSharedNote.value && lockToken.value) {
       patchData.lockToken = lockToken.value;
     }
@@ -209,7 +209,7 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
     //   - 持锁分支 (非作者 / 作者改 fork / 作者改 root 单群 / 作者群组页改 root 多群): 必须传, 后端校验后 ++ 清锁
     //   - 免锁分支 (作者改 private / 作者改 root 主视图多群): 改内容字段时校验, 不改内容时后端跳过 version 校验
     patchData.version = props.note.version || 1;
-    // PR #7b: 透传群上下文给后端 fork 决策. editGroupId 为空 (主视图改) 时不传, 后端走"作者改 root 多群同步"语义.
+    // 透传群上下文给后端 fork 决策. editGroupId 为空 (主视图改) 时不传, 后端走"作者改 root 多群同步"语义.
     if (editGroupId.value) {
       patchData.editContext = { groupId: editGroupId.value };
     }
@@ -225,14 +225,14 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
     } else if (msg.includes('lock_')) {
       toast.show('编辑锁已失效，请关闭后重新打开笔记', 'error', 3000);
     } else if (msg.includes('no_write_permission')) {
-      // PR #5b: PATCH 时校验失败 (理论上 acquireLock 已拒, 但权限中途被撤等罕见 case 走到这)
+      // PATCH 时校验失败 (理论上 acquireLock 已拒, 但权限中途被撤等罕见 case 走到这)
       toast.show('编辑权限已被收回，请关闭后重新打开笔记', 'error', 3500);
     } else if (msg.includes('editContext_ambiguous')) {
-      // PR #7b: 罕见歧义 case — 用户在多群里都能看到这条笔记, 主视图改没法判断 fork 到哪个群.
+      // 罕见歧义 case — 用户在多群里都能看到这条笔记, 主视图改没法判断 fork 到哪个群.
       // 引导用户从群组页面打开 (那条路径 editGroupId 自动取到, 无歧义)
       toast.show('这条笔记你在多个群里都能看到，请从某个群组页面打开编辑', 'error', 4500);
     } else if (msg.includes('note_not_in_group')) {
-      // PR #7b: 笔记跟当前群上下文不匹配 (并发 case: 进入编辑时还在群里, 提交时该笔记已从群里撤下)
+      // 笔记跟当前群上下文不匹配 (并发 case: 进入编辑时还在群里, 提交时该笔记已从群里撤下)
       toast.show('该笔记已不在当前群组，请关闭后重新打开', 'error', 4000);
     } else if (msg.includes('笔记不存在')) {
       // 笔记可能已被别的设备/用户 fork 走变孤儿或软删, 当前端 cache 里仍持有旧 id
@@ -302,14 +302,14 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => { document.addEventListener('keydown', onKeydown, true); });
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown, true);
-  // PR #5: 关 modal 同时释放编辑锁 (fetch keepalive 保证 page unload 也能发出)
+  // 关 modal 同时释放编辑锁 (fetch keepalive 保证 page unload 也能发出)
   releaseLockOnUnmount();
 });
 </script>
 
 <template>
   <Teleport to="body">
-    <!-- 全屏跟非全屏都走 modal-fade (蘑菇 2026-06-06 拍板):
+    <!-- 全屏跟非全屏都走 modal-fade:
          - 全屏: scale 动画期间 transform 让 fixed inset-0 被困在小窗口尺寸里, 走 fade 避免
          - 非全屏: scale(0.95)→scale(1) 期间 vditor 内 cursor 视觉位置跟着缩放 (cursor 实际在末尾但视觉飘半个字),
            Vditor IR 没法控制 cursor 抗 scale, caret-color: transparent 也救不回. 改 fade 彻底解决 focusEnd cursor 飘动. -->
@@ -379,7 +379,7 @@ onBeforeUnmount(() => {
     </div>
     </Transition>
 
-    <!-- PR #9 申请编辑权对话框: 没 write 权限的人点编辑触发, 不显示编辑器内容 -->
+    <!-- 申请编辑权对话框: 没 write 权限的人点编辑触发, 不显示编辑器内容 -->
     <Transition name="modal-fade">
     <div v-if="showRequestPerm" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
       <div class="absolute inset-0 bg-black/30" @click="cancelEditRequest" />

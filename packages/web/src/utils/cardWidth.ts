@@ -1,4 +1,4 @@
-// 蘑菇 2026-06-09: 卡片最小宽度偏好, localStorage 存到设备本地 (不跨账号同步, 不进 user.preferences).
+// 卡片最小宽度偏好, localStorage 存到设备本地 (不跨账号同步, 不进 user.preferences).
 // 两种模式:
 //  - px: 像素绝对值 (默认 320). cols = floor(main / value), 大屏自然多列, 小屏自动减
 //  - percent: 单卡占 main 区的百分比 (默认 25%). cols = floor(100 / value), 列数固定不论 main 多大 (25%=4列, 20%=5列)

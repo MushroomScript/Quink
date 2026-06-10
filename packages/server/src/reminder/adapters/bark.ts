@@ -4,7 +4,7 @@ import { validateOutboundUrl, sanitizeFetchError } from '../../utils/urlGuard.js
 // Bark (iOS 个人推送): HTTP GET 一个 URL 就推
 // config: { url } 完整 push URL (https://api.day.app/<KEY>) 或 { server, key }
 // title/body 走 query string, encodeURIComponent 防特殊字符
-// 安全审计 H4: 校验 URL 防 SSRF (用户可能填 internal 地址)
+// 校验 URL 防 SSRF (用户可能填 internal 地址)
 export const barkAdapter: AdapterFn = async (ctx) => {
   const c = ctx.config;
   let base = c.url as string | undefined;

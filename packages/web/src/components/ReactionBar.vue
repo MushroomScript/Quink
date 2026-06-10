@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { api, type NoteReactionSummaryItem } from '@/api';
 
-// PR #6: 5 个固定 emoji, 跟后端 ALLOWED_REACTION_EMOJIS 同一份. 不让用户自定义防垃圾/兼容性问题
+// 5 个固定 emoji, 跟后端 ALLOWED_REACTION_EMOJIS 同一份. 不让用户自定义防垃圾/兼容性问题
 const ALLOWED_EMOJIS = ['👍', '❤️', '🤔', '✅', '😂'] as const;
 
 const props = defineProps<{

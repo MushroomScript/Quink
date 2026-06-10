@@ -75,8 +75,8 @@ async function enrichGroup(groupId: string, viewerId?: string) {
       .from(schema.users).where(eq(schema.users.id, g.announcementUpdatedBy)).get();
     announcementUpdatedByNickname = author?.nickname ?? null;
   }
-  // PR #12 + PR #13 fix: owner+admin 才看群回收站 + count, 普通成员不返
-  // 蘑菇规则: 任何人删共享笔记都进该群回收站, 走 note_shares JOIN 判断 (不依赖 deleted_in_group_id 单字段)
+  // owner+admin 才看群回收站 + count, 普通成员不返
+  // 约定: 任何人删共享笔记都进该群回收站, 走 note_shares JOIN 判断 (不依赖 deleted_in_group_id 单字段)
   let trashCount: number | null = null;
   if (myRole === 'owner' || myRole === 'admin') {
     const trashRow = db.get(sql`
@@ -93,7 +93,7 @@ async function enrichGroup(groupId: string, viewerId?: string) {
 //  公开邀请页 (不需 auth)
 // =========================================================
 
-// 安全审计 H3: 公开 endpoint 加 IP rate-limit + 404/410 统一防 token 历史合法性区分泄露.
+// 公开 endpoint 加 IP rate-limit + 404/410 统一防 token 历史合法性区分泄露.
 // 简单的 in-memory token bucket: 每 IP 60 req/min. 进程重启清空 (个人使用场景接受). 大流量场景建议改 Redis.
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX = 60;
@@ -131,7 +131,7 @@ inviteApp.get('/:token', async (c) => {
   }
 
   const token = c.req.param('token');
-  // 安全审计 H3: 404 / 410 / 无效都返同一错误体. 不区分"token 不存在" vs "token 过期",
+  // 404 / 410 / 无效都返同一错误体. 不区分"token 不存在" vs "token 过期",
   // 防攻击者通过状态码判断 token 历史合法性
   const INVALID_RESPONSE = c.json({ error: '邀请链接无效或已过期' }, 404);
   if (!token) return INVALID_RESPONSE;
@@ -173,8 +173,8 @@ inviteApp.post('/:token/apply', authMiddleware, async (c) => {
   if (existing && existing.status === 'active') {
     return c.json({ data: { status: 'already_member', groupId: g.id } });
   }
-  // 之前被踢过 / 主动退群过 (status='removed') 重新申请: 蘑菇 2026-06-08 拍板 autoJoin 群一律直接加 (含被踢的人).
-  // trade-off: 群主踢人后该用户用 autoJoin 链接能秒回, 但蘑菇接受这个个人项目场景. 非 autoJoin 群仍走 pending 审批
+  // 之前被踢过 / 主动退群过 (status='removed') 重新申请: 约定 autoJoin 群一律直接加 (含被踢的人).
+  // trade-off: 群主踢人后该用户用 autoJoin 链接能秒回, 但个人项目场景接受. 非 autoJoin 群仍走 pending 审批
   const wasRemoved = existing?.status === 'removed';
   const now = dayjs().toISOString();
   // autoJoin 模式: 直接加成员 (含被踢过的复用同一行 update status='active')
@@ -194,7 +194,7 @@ inviteApp.post('/:token/apply', authMiddleware, async (c) => {
     await broadcastGroupChanged(g.id, [userId, g.ownerId], _ocid);
     // 多设备同步: 加入群后, 申请人本人其他设备 sidebar 也要看到新群
     publish(userId, 'group-changed', { groupId: g.id }, _ocid);
-    // PR #10c: 给新成员写通知 (你加入了新群); autoJoin 模式下 owner 已有 toast (PR #1), 通知中心不再重复
+    // 给新成员写通知 (你加入了新群); autoJoin 模式下 owner 已有 toast, 通知中心不再重复
     createNotification(userId, 'group', 'group-joined',
       `你已加入「${g.name}」`, null, { groupId: g.id },
     ).catch(() => {});
@@ -224,7 +224,7 @@ inviteApp.post('/:token/apply', authMiddleware, async (c) => {
   // SSE 推 owner: 让 owner 实时看到申请 (前端弹通知 / 角标)
   const applicant = await db.select({ nickname: schema.users.nickname, username: schema.users.username, avatar: schema.users.avatar })
     .from(schema.users).where(eq(schema.users.id, userId)).get();
-  // PR #10c: 通知中心给 owner + admin 都写 (覆盖 owner 不在时 admin 接管审批的体验); SSE toast 仍只给 owner
+  // 通知中心给 owner + admin 都写 (覆盖 owner 不在时 admin 接管审批的体验); SSE toast 仍只给 owner
   const reviewerIds = await getGroupOwnerAndAdmins(g.id);
   for (const rid of reviewerIds) {
     createNotification(rid, 'group', 'group-join-request',
@@ -324,7 +324,7 @@ app.get('/:id', async (c) => {
   if (!me) return c.json({ error: '群组不存在或你不是成员' }, 404);
   const enriched = await enrichGroup(groupId, userId);
   // 成员列表 (含 user nickname/avatar, 排序: owner → admin → member, 同角色按加入时间)
-  // 安全审计 S6: 拉 hide_presence 用于"隐身成员对他人 online=false"过滤
+  // 拉 hide_presence 用于"隐身成员对他人 online=false"过滤
   const members = db.all(sql`
     SELECT gm.user_id, gm.role, gm.joined_at, gm.hide_presence as hidePresence, u.username, u.nickname, u.avatar
     FROM group_members gm
@@ -338,7 +338,7 @@ app.get('/:id', async (c) => {
       members: members.map(m => ({
         userId: m.user_id, role: m.role, joinedAt: m.joined_at,
         username: m.username, nickname: m.nickname, avatar: m.avatar,
-        // 安全审计 S6: 自己看自己 online 真实; 看别人时, 别人隐身 → online=false; 看自己的 hidePresence 状态
+        // 自己看自己 online 真实; 看别人时, 别人隐身 → online=false; 看自己的 hidePresence 状态
         hidePresence: m.user_id === userId ? !!m.hidePresence : undefined,
         online: m.user_id === userId
           ? isOnline(m.user_id)
@@ -348,7 +348,7 @@ app.get('/:id', async (c) => {
   });
 });
 
-// 群内可见笔记列表 (PR #2 群组共享). 必须 active member 才能拉. 排序 sharedAt DESC (最近被分享冲顶)
+// 群内可见笔记列表 (群组共享). 必须 active member 才能拉. 排序 sharedAt DESC (最近被分享冲顶)
 // 跟 GET /api/notes?scope=group:<id> 等价, 但路径更 RESTful + 自然返回作者头像/昵称给 NoteCard 用
 app.get('/:id/notes', async (c) => {
   const userId = c.get('userId');
@@ -379,7 +379,7 @@ app.get('/:id/notes', async (c) => {
     WHERE ns.group_id = ${groupId} AND n.deleted_at IS NULL
   `) as { count: number } | undefined;
 
-  // PR #5b: 批量拉每条笔记的 sharedGroupIds + editPermission, 给 NoteCard 显示"已分享"chip + 群组列表里切换编辑权限
+  // 批量拉每条笔记的 sharedGroupIds + editPermission, 给 NoteCard 显示"已分享"chip + 群组列表里切换编辑权限
   const noteIds = rows.map(r => r.id as string);
   const sharesMap = new Map<string, string[]>();
   if (noteIds.length > 0) {
@@ -393,9 +393,9 @@ app.get('/:id/notes', async (c) => {
     }
   }
 
-  // PR #6: 拼 reaction summary + comment count (群 feed NoteCard 底部显示). 群里都是 shared 笔记, 不分支
-  // PR #7b: 拼 editorCount + parentNoteId (NoteCard 显示"X 人编辑过" + "本群独占版/N 群共享版"标)
-  // PR #13 bug 修: 加 canWriteMap (群 feed 漏 enrich 让 NoteCard.canWrite=undefined → 有权限用户点编辑误弹申请窗)
+  // 拼 reaction summary + comment count (群 feed NoteCard 底部显示). 群里都是 shared 笔记, 不分支
+  // 拼 editorCount + parentNoteId (NoteCard 显示"X 人编辑过" + "本群独占版/N 群共享版"标)
+  // 加 canWriteMap (群 feed 漏 enrich 让 NoteCard.canWrite=undefined → 有权限用户点编辑误弹申请窗)
   const sharedForCanWrite = rows.map(r => ({
     id: r.id as string, userId: r.user_id as string, editPermission: r.edit_permission as string | null,
     sharedGroupIds: sharesMap.get(r.id as string) || [],
@@ -417,26 +417,26 @@ app.get('/:id/notes', async (c) => {
     tags: typeof r.tags === 'string' ? JSON.parse(r.tags) : r.tags,
     type: r.type,
     todoStatus: r.todo_status,
-    // PR #13: todoDue / todoRemindSentAt / todoRemindRrule 三列已删, 不再返回
+    // todoDue / todoRemindSentAt / todoRemindRrule 三列已删, 不再返回
     aiProcessed: !!r.ai_processed,
     pinned: !!r.pinned,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     visibility: r.visibility,
-    version: r.version, // PR #5 乐观锁版本, NoteEditModal PATCH 时必须带. 漏返会让前端 fallback 1 → version_conflict
+    version: r.version, // 乐观锁版本, NoteEditModal PATCH 时必须带. 漏返会让前端 fallback 1 → version_conflict
     editPermission: r.edit_permission,
-    editLockBy: r.edit_lock_by, // PR #5 编辑锁状态 (前端按钮可能根据这个判断是否能进编辑器)
+    editLockBy: r.edit_lock_by, // 编辑锁状态 (前端按钮可能根据这个判断是否能进编辑器)
     editLockExpiresAt: r.edit_lock_expires_at,
-    parentNoteId: r.parent_note_id, // PR #7b: fork 出来的 note 指向 root id, root 自己为 null
+    parentNoteId: r.parent_note_id, // fork 出来的 note 指向 root id, root 自己为 null
     sharedGroupIds: sharesMap.get(r.id) || [],
     sharedAt: r.sharedAt,
     authorNickname: r.authorNickname,
     authorAvatar: r.authorAvatar,
     groupPinned: !!r.groupPinnedAt, // 群内独立置顶状态 (跟 pinned 作者全局置顶分离)
-    canWrite: canWriteMap.get(r.id as string) ?? false, // PR #9 编辑预判, 群 feed 漏 enrich 是 PR #13 bug 后补
+    canWrite: canWriteMap.get(r.id as string) ?? false, // 编辑预判, 群 feed 必须 enrich 否则有权限用户点编辑会误弹申请窗
     reactionSummary: reactionMap.get(r.id) || [],
     commentCount: commentCountMap.get(r.id) || 0,
-    editorCount: editorCountMap.get(r.id) || 0, // PR #7b: 非作者编辑次数, NoteCard "X 人编辑过" 显示
+    editorCount: editorCountMap.get(r.id) || 0, // 非作者编辑次数, NoteCard "X 人编辑过" 显示
   }));
   return c.json({
     data,
@@ -499,7 +499,7 @@ app.delete('/:id/notes/:noteId/pin', async (c) => {
   return c.json({ message: '已取消置顶' });
 });
 
-// PR #5b 群级汇总: 该群所有 shared 笔记的 pending 编辑权申请 (作者+admin 看)
+// 群级汇总: 该群所有 shared 笔记的 pending 编辑权申请 (作者+admin 看)
 // 给群组详情页"编辑申请管理"面板用. 不分页, 假设每群 pending 量不大.
 app.get('/:id/note-edit-requests', async (c) => {
   const userId = c.get('userId');
@@ -509,7 +509,7 @@ app.get('/:id/note-edit-requests', async (c) => {
   if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
     return c.json({ error: '只有群管理员可以查看编辑申请' }, 403);
   }
-  // 安全审计 M7: 加 LIMIT 防 DoS (攻击者灌大量 pending 让 admin 拉这接口卡顿). 默认 100, 超额前端展"还有更多"
+  // 加 LIMIT 防 DoS (攻击者灌大量 pending 让 admin 拉这接口卡顿). 默认 100, 超额前端展"还有更多"
   const limit = Math.min(parseInt(c.req.query('limit') || '100', 10) || 100, 200);
   const offset = parseInt(c.req.query('offset') || '0', 10) || 0;
   const rows = db.all(sql`
@@ -529,7 +529,7 @@ app.get('/:id/note-edit-requests', async (c) => {
   return c.json({ data: rows, pagination: { limit, offset } });
 });
 
-// PR #5b 群级汇总: 该群所有 shared 笔记的已授权用户 (作者+admin 看, 可撤销)
+// 群级汇总: 该群所有 shared 笔记的已授权用户 (作者+admin 看, 可撤销)
 app.get('/:id/note-edit-grants', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id');
@@ -608,7 +608,7 @@ app.delete('/:id', async (c) => {
     .where(eq(schema.groupMembers.groupId, groupId))
     .all()).map(r => r.userId);
   db.transaction((tx) => {
-    // PR #2: 群被解散后 note_shares 引用的 group_id 失效, FK constraint 会阻止 DELETE groups,
+    // 群被解散后 note_shares 引用的 group_id 失效, FK constraint 会阻止 DELETE groups,
     // 先清 note_shares (笔记本体保留, 作者仍能看自己的, 群可见性彻底消失)
     tx.delete(schema.noteShares).where(eq(schema.noteShares.groupId, groupId)).run();
     tx.delete(schema.groupNotePins).where(eq(schema.groupNotePins.groupId, groupId)).run();
@@ -618,7 +618,7 @@ app.delete('/:id', async (c) => {
   });
   for (const uid of memberIds) {
     publish(uid, 'group-dissolved', { groupId }, _ocid);
-    // PR #10c: 给所有 active 成员写通知 (含解散者本人, 让多设备 sidebar 同步移除)
+    // 给所有 active 成员写通知 (含解散者本人, 让多设备 sidebar 同步移除)
     if (uid !== userId) {
       createNotification(uid, 'group', 'group-dissolved',
         `「${dissolvedName}」已被解散`, null, { groupId },
@@ -730,14 +730,14 @@ app.post('/:id/join-requests/:reqId/approve', async (c) => {
   // 广播给其他成员 (排除操作者 + 申请人, 申请人通过 group-join-approved 触发 loadGroups)
   await broadcastGroupChanged(groupId, [userId, reqRow.userId], _ocid);
   publish(userId, 'group-changed', { groupId }, _ocid);
-  // PR #10c: 给申请人写通知 (你的申请已通过)
+  // 给申请人写通知 (你的申请已通过)
   const approvedGroup = await db.select({ name: schema.groups.name }).from(schema.groups)
     .where(eq(schema.groups.id, groupId)).get();
   createNotification(reqRow.userId, 'group', 'group-joined',
     `你已加入「${approvedGroup?.name || '群组'}」`,
     '审批通过', { groupId },
   ).catch(() => {});
-  // PR #13 补丁: 申请已处理, 标已读所有 owner+admin 收到的 group-join-request 通知
+  // 申请已处理, 标已读所有 owner+admin 收到的 group-join-request 通知
   markRequestNotificationsRead(['group-join-request'], reqId).catch(() => {});
   await logAudit(c, 'group.member_add', 'group', groupId, {
     newMemberId: reqRow.userId, requestId: reqId, approvedBy: me.role,
@@ -761,14 +761,14 @@ app.post('/:id/join-requests/:reqId/reject', async (c) => {
     .set({ status: 'rejected', handledAt: now, handledBy: userId })
     .where(eq(schema.groupJoinRequests.id, reqId));
   publish(reqRow.userId, 'group-join-rejected', { groupId, requestId: reqId }, _ocid);
-  // PR #10c: 给申请人写通知 (你的申请被拒)
+  // 给申请人写通知 (你的申请被拒)
   const rejGroup = await db.select({ name: schema.groups.name }).from(schema.groups)
     .where(eq(schema.groups.id, groupId)).get();
   createNotification(reqRow.userId, 'group', 'group-join-rejected',
     `加入「${rejGroup?.name || '群组'}」的申请被拒绝`,
     null, { groupId },
   ).catch(() => {});
-  // PR #13 补丁: 申请已处理, 标已读所有 owner+admin 收到的 group-join-request 通知
+  // 申请已处理, 标已读所有 owner+admin 收到的 group-join-request 通知
   markRequestNotificationsRead(['group-join-request'], reqId).catch(() => {});
   await logAudit(c, 'group.member_reject', 'group', groupId, {
     requesterId: reqRow.userId, requestId: reqId,
@@ -804,7 +804,7 @@ app.delete('/:id/members/:userId', async (c) => {
     }
   }
   const now = dayjs().toISOString();
-  // 安全审计 H8: 改成员状态 + 清被踢人在该群的所有 noteShares + group_note_pins / note_edit_grants / note_edit_requests
+  // 改成员状态 + 清被踢人在该群的所有 noteShares + group_note_pins / note_edit_grants / note_edit_requests
   // 全在事务内做. 防 TOCTOU: A 是群成员 + 同一秒 POST 笔记分享到该群, owner 踢 A → 旧设计被踢后 noteShares 仍 insert 成功.
   // 现在踢人后 A 在该群的所有"内容关联"立即清空, 后续若 race 进来的 insert 也无害 (那条笔记已"分享到 0 人" → 不会出现在 feed)
   db.transaction((tx) => {
@@ -837,7 +837,7 @@ app.delete('/:id/members/:userId', async (c) => {
   // 广播给剩余成员 (status='removed' 的人不在 active 列表自动排除, 不会通知到自己)
   await broadcastGroupChanged(groupId, [meId], _ocid);
   publish(meId, 'group-changed', { groupId }, _ocid);
-  // PR #10c: 被踢时给被踢者写通知 (主动退群不写, 自己知道)
+  // 被踢时给被踢者写通知 (主动退群不写, 自己知道)
   if (!isSelf) {
     const kickGroup = await db.select({ name: schema.groups.name }).from(schema.groups)
       .where(eq(schema.groups.id, groupId)).get();
@@ -854,7 +854,7 @@ app.delete('/:id/members/:userId', async (c) => {
 
 const roleSchema = z.object({ role: z.enum(['admin', 'member']) });
 
-// 安全审计 S6: 设置我在该群的隐身状态. 隐身: 上下线不给群其他成员推 presence-changed, 但我仍能收所有事件
+// 设置我在该群的隐身状态. 隐身: 上下线不给群其他成员推 presence-changed, 但我仍能收所有事件
 // PATCH /api/groups/:id/members/me/presence-mode  body: { hidePresence: boolean }
 app.patch('/:id/members/me/presence-mode', async (c) => {
   const userId = c.get('userId');
@@ -905,7 +905,7 @@ app.patch('/:id/members/:userId', async (c) => {
   // 广播给所有成员让 chip 颜色实时更新 (排除操作者)
   await broadcastGroupChanged(groupId, [meId], _ocid);
   publish(meId, 'group-changed', { groupId }, _ocid);
-  // PR #10c: 给 targetId 写通知 (被任命/取消管理员). member→admin = promoted; admin→member = demoted
+  // 给 targetId 写通知 (被任命/取消管理员). member→admin = promoted; admin→member = demoted
   const isPromote = target.role === 'member' && parsed.data.role === 'admin';
   const isDemote = target.role === 'admin' && parsed.data.role === 'member';
   if (isPromote || isDemote) {
@@ -924,12 +924,12 @@ app.patch('/:id/members/:userId', async (c) => {
   return c.json({ message: '已更新' });
 });
 
-// 蘑菇 2026-06-09: 群级"接收本群通知"开关移除. 实际只控 group-reminder-set 一种 type,
+// 群级"接收本群通知"开关移除. 实际只控 group-reminder-set 一种 type,
 // 其他 group-* / content-* 通知都不受控. 改用卡片级 mute (note_group_reminder_mutes) 单条管, 简化模型.
 // schema/DB 表 group_reminder_subscriptions 在 db/index.ts DROP TABLE 迁移
 
 // =========================================================
-//  PR #12 群组回收站 + 审计
+//  群组回收站 + 审计
 //  (purgeNote 跟 GROUP_TRASH_RETENTION_DAYS 抽到 cleanup.ts 复用 cron + endpoints)
 // =========================================================
 
@@ -955,7 +955,7 @@ app.get('/:id/trash', async (c) => {
   if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
     return c.json({ error: '只有群管理员可以查看群回收站' }, 403);
   }
-  // 蘑菇规则 (PR #13 fix): 任何人删共享笔记都进该群回收站. 走 note_shares INNER JOIN 判断"该群有这条 + deleted_at NOT NULL"
+  // 约定: 任何人删共享笔记都进该群回收站. 走 note_shares INNER JOIN 判断"该群有这条 + deleted_at NOT NULL"
   // LIMIT 200 防大群灌爆. 7 天 retention 下不太可能超
   const rows = db.all(sql`
     SELECT n.id, n.user_id as userId, n.content, n.summary, n.category, n.tags, n.type, n.todo_status as todoStatus,
@@ -980,7 +980,7 @@ app.get('/:id/trash', async (c) => {
 });
 
 // POST /:id/trash/:noteId/restore — 恢复 (owner+admin)
-// 蘑菇规则 (PR #13 fix): 校验"笔记 deletedAt + 在该群 note_shares 关联", 不再用 deletedInGroupId 单字段
+// 约定: 校验"笔记 deletedAt + 在该群 note_shares 关联", 不再用 deletedInGroupId 单字段
 app.post('/:id/trash/:noteId/restore', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id');
@@ -1063,7 +1063,7 @@ app.delete('/:id/trash', async (c) => {
   if (!me || me.role !== 'owner') {
     return c.json({ error: '只有群主可以清空' }, 403);
   }
-  // 蘑菇规则 (PR #13 fix): 清空该群回收站 = 永久删该群所有 deleted 共享笔记 (走 note_shares JOIN)
+  // 约定: 清空该群回收站 = 永久删该群所有 deleted 共享笔记 (走 note_shares JOIN)
   const trashed = db.all(sql`
     SELECT DISTINCT n.id, n.user_id as userId, n.content
     FROM notes n

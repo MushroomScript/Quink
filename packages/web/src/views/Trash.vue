@@ -126,7 +126,7 @@ const rendered = ref<Record<string, string>>({});
 useEscToClose(confirmEmpty);
 useEscToClose(confirmDeleteId, '');
 
-// PR #2: 永久删除确认窗显示 "已分享到 N 群". 笔记保留 note_shares (蘑菇决策, 软删时不清),
+// 永久删除确认窗显示 "已分享到 N 群". 笔记保留 note_shares (软删时不清),
 // 永久删除会同步清掉 note_shares 让历史也消失
 const groupsStore = useGroupsStore();
 const confirmDeleteShares = computed<string[]>(() => {
@@ -254,10 +254,10 @@ function deletedAgo(n: any) {
   return n.deletedAt ? dayjs(n.deletedAt).fromNow() + '删除' : '';
 }
 
-// PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
+// 命名约定: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
 const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
 const typeColor: Record<string, string> = {
-  quink: 'type-chip-quink', // 蘑菇 2026-06-08: 固定 blueberry, 不跟主题 (style.css 定义 + dark 适配)
+  quink: 'type-chip-quink', // 固定 blueberry, 不跟主题 (style.css 定义 + dark 适配)
   note: 'bg-emerald-100 text-emerald-600',
   todo: 'bg-amber-100 text-amber-600',
 };
@@ -417,7 +417,7 @@ function onLeave(el: Element, done: () => void) {
         <div class="relative bg-white rounded-xl shadow-xl p-5 w-80 text-center">
           <p class="text-sm text-gray-700 mb-1">永久删除</p>
           <p class="text-xs text-gray-400 mb-2">此操作不可恢复</p>
-          <!-- PR #2: 提醒共享笔记删除后群里历史也消失 -->
+          <!-- 提醒共享笔记删除后群里历史也消失 -->
           <p v-if="confirmDeleteShares.length > 0" class="text-xs text-red-500 mb-4">
             已分享到
             <template v-if="confirmDeleteGroupNames.length > 0">

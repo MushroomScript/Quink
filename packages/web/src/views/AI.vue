@@ -97,7 +97,7 @@ const editingTitle = ref('');
 const editingConvId = ref('');
 const showSources = ref<Record<string, boolean>>({});
 const sourceNotes = ref<Record<string, { id: string; summary: string; content: string; type: string }[]>>({});
-// PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
+// 命名约定: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
 const SOURCE_TYPE_LABELS: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
 const SOURCE_TYPE_COLORS: Record<string, string> = {
   quink: 'bg-primary-light text-primary-dark',

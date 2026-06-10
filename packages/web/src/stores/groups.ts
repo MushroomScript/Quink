@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed, reactive } from 'vue';
 import { api, type Group, type GroupDetail, type GroupJoinRequest } from '@/api';
 
-// 群组共享 PR #1: 我的群列表 + 当前群详情 + 待审申请角标
+// 群组共享: 我的群列表 + 当前群详情 + 待审申请角标
 // SSE 群组事件由 App.vue 监听 (复用现有 SSE 通道), 命中后调本 store 方法同步状态
 export const useGroupsStore = defineStore('groups', () => {
   // 我的群列表 (createdAt DESC)

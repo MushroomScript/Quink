@@ -41,7 +41,7 @@ app.post('/configs', async (c) => {
   const parsed = configSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
 
-  // 安全审计 H5: 写入时校验 baseUrl 防 SSRF. 一次校验, 运行时直接 fetch 不再校验 (性能)
+  // 写入时校验 baseUrl 防 SSRF. 一次校验, 运行时直接 fetch 不再校验 (性能)
   const { validateOutboundUrl } = await import('../utils/urlGuard.js');
   const guard = await validateOutboundUrl(parsed.data.baseUrl);
   if (!guard.ok) return c.json({ error: `baseUrl 不安全: ${guard.reason}` }, 400);
@@ -93,7 +93,7 @@ app.patch('/configs/:id', async (c) => {
     .where(and(eq(schema.aiConfigs.id, id), eq(schema.aiConfigs.userId, userId))).get();
   if (!existing) return c.json({ error: '配置不存在' }, 404);
 
-  // 安全审计 H5: 改 baseUrl 时复跑校验
+  // 改 baseUrl 时复跑校验
   if (parsed.data.baseUrl !== undefined && parsed.data.baseUrl !== existing.baseUrl) {
     const { validateOutboundUrl } = await import('../utils/urlGuard.js');
     const guard = await validateOutboundUrl(parsed.data.baseUrl);
@@ -210,7 +210,7 @@ app.delete('/prompts/:feature', async (c) => {
 });
 
 // ── Test Config ──
-// 安全审计 H5: 校验 baseUrl 防 SSRF (用户可能填 internal 地址让 server 代为请求, 且 apiKey 会作为 Authorization 头送到该地址).
+// 校验 baseUrl 防 SSRF (用户可能填 internal 地址让 server 代为请求, 且 apiKey 会作为 Authorization 头送到该地址).
 // 同时错误信息脱敏防内网探测
 app.post('/test', async (c) => {
   const userId = c.get('userId');
@@ -344,7 +344,7 @@ app.post('/transcribe-async', async (c) => {
 
       // 读音频文件: audioUrl 可能是裸名 "xxx.webm"(新格式) 或 "/api/uploads/xxx.webm"(老格式),
       // 剥掉前缀统一拿到磁盘文件名 → resolve 到 uploads 目录
-      // 安全审计 H12: path.basename 强制只取文件名防路径穿越 (../etc/passwd) + relative 校验 resolved path
+      // path.basename 强制只取文件名防路径穿越 (../etc/passwd) + relative 校验 resolved path
       // 在 uploads 目录下兜底防符号链接 / Unicode 绕过
       const { resolve: pathResolve, basename, relative } = await import('path');
       const { readFileSync } = await import('fs');

@@ -1,6 +1,6 @@
 // 后端直连 URL helper. 用于 SSE / AI Chat 流式响应等长连接, 绕开 vite proxy.
 //
-// 为啥要绕 vite proxy: vite 的 http-proxy 转发 SSE / fetch 流式长连接时, 在重连 / 上游事件场景
+// 绕 vite proxy 的原因: vite 的 http-proxy 转发 SSE / fetch 流式长连接时, 在重连 / 上游事件场景
 // 会泄漏 socket. 浏览器对 :24888 的 HTTP/1.1 池 (默认 6 个并发) 被 active 状态的"僵尸 socket"
 // 占满 → 新 fetch 排队 → "Initial connection: Stalled" → 整页 API pending 后 cancel.
 // Flush Socket Pools 只清 idle socket 救不回, 必须关掉所有同 origin 标签让网络栈清空.

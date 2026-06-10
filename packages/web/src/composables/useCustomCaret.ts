@@ -19,7 +19,7 @@
  * 启动：main.ts import 即触发模块级 side effect。
  *
  * 单 input y 微调: 给 input/textarea 加 `data-caret-offset-y="1.5"` 让该元素的 caret 比
- * 文字基线多偏移 N 视觉 CSS px (默认 0). 蘑菇视觉微调专用, 不影响其他 input.
+ * 文字基线多偏移 N 视觉 CSS px (默认 0). 视觉微调专用, 不影响其他 input.
  * 注意: dataset 写的是视觉 CSS px (zoom-invariant), 实现里乘 zoom 转 layout 让所有 zoom 下视觉位置一致.
  */
 
@@ -41,11 +41,11 @@ const HMR_KEY = '__quinkCaretController';
 
 const TEXT_INPUT_TYPES = new Set(['text', 'email', 'password', 'search', 'url', 'tel', 'number', '']);
 
-// Caret 尺寸（蘑菇调出来的: 宽 2px + 高 1em + 整体左偏 1px 让 caret 重心落左字尾巴, 减少挡右字）
+// Caret 尺寸: 宽 2px + 高 1em + 整体左偏 1px 让 caret 重心落左字尾巴, 减少挡右字
 const CARET_WIDTH = 2;
 const CARET_HEIGHT_RATIO = 1.0; // 1em
 const CARET_LEFT_OFFSET = -1; // 左偏 1px
-const CARET_BOTTOM_EXTEND = 0.5; // caret 底部往下延伸 0.5px (caret 高度 += 0.5, 顶部不变, 底部下移 0.5, 蘑菇视觉偏好)
+const CARET_BOTTOM_EXTEND = 0.5; // caret 底部往下延伸 0.5px (caret 高度 += 0.5, 顶部不变, 底部下移 0.5)
 
 let mirror: HTMLDivElement | null = null;
 let caret: HTMLDivElement | null = null;
@@ -312,14 +312,14 @@ function updateCaret() {
   // fixed 子元素渲染时被祖先 zoom 乘回 → 视觉对齐。Electron 端 zoom=1 行为不变。详见 utils/zoom.ts
   const zoom = getCssZoom();
   // input/textarea 维度独立的 caret y 视觉偏移 (dataset.caretOffsetY="1" 让 caret 比文字位置低 1 视觉 CSS px).
-  // 乘 zoom 转 layout 让所有 zoom 下视觉位置一致 (蘑菇 2026-06-09: 之前直接当 layout 加, zoom=1 视觉 1.5 / zoom=1.5 视觉 1 不一致)
+  // 乘 zoom 转 layout 让所有 zoom 下视觉位置一致 (之前直接当 layout 加, zoom=1 视觉 1.5 / zoom=1.5 视觉 1 不一致)
   const extraY = (parseFloat(el.dataset.caretOffsetY || '0') || 0) * zoom;
   // 提前算 cs / fontSize / caretHeight 让空 textarea 快路径用得上 (原本在 markerRect 之后定义, 快路径需提前)
   const cs = getComputedStyle(el);
   const fontSize = parseFloat(cs.fontSize);
   const baseHeight = fontSize * CARET_HEIGHT_RATIO;
   const caretHeight = baseHeight + CARET_BOTTOM_EXTEND;
-  // PR #13 followup (蘑菇 2026-06-08 二次报): web 浏览器空 textarea + ZWSP marker.getBoundingClientRect 可能全 0
+  // 调整: web 浏览器空 textarea + ZWSP marker.getBoundingClientRect 可能全 0
   // / Teleport modal-fade Transition opacity 期间 mirror 没真定位 → markerLeft 远小于 minLeft → 边界检查 display=none
   // → click textarea 看不到 caret. Electron Chromium 处理不同, PC 端没问题.
   // 专用快路径: selStart=0 + value=='' 时, 用 textarea 自身 rect + padding 算 caret 在 content area 左上角, 不依赖 mirror.
@@ -359,10 +359,10 @@ function updateCaret() {
   let lineHeight = parseFloat(cs.lineHeight);
   if (isNaN(lineHeight)) lineHeight = fontSize * 1.2;
   // 几何居中(用 baseHeight, 让 caret 顶部位置跟原 baseHeight 时一致)
-  // PR #13 followup (蘑菇 2026-06-08): input/textarea 路径 +1 → -0.5, 比 Vditor 路径 (+1) 高 1.5px,
-  // 因为 Vditor 走 contenteditable Range API 拿位置, 跟 mirror 算 inline 偏移有微差; 蘑菇视觉拍板"input/textarea 这样对"
+  // input/textarea 路径 +1 → -0.5, 比 Vditor 路径 (+1) 高 1.5px,
+  // 因为 Vditor 走 contenteditable Range API 拿位置, 跟 mirror 算 inline 偏移有微差; 视觉对齐"input/textarea 这样对"
   const verticalPadding = Math.max(0, (lineHeight - baseHeight) / 2) - 0.5;
-  // PR #13 followup (蘑菇 2026-06-08): textarea 多行换行跟随. marker 在第 N 行 (N≥0),
+  // textarea 多行换行跟随. marker 在第 N 行 (N≥0),
   // 用 marker 相对 mirror 第一行的纵向偏移除以 lineHeight 算行号, 不依赖 baseline 偏移估算. 单行 input N=0 跟原行为一致.
   let lineNum = 0;
   if (isTextarea) {

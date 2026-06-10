@@ -7,8 +7,8 @@ export const users = sqliteTable('users', {
   nickname: text('nickname').notNull(),
   avatar: text('avatar'), // URL or base64
   preferences: text('preferences', { mode: 'json' }).$type<Record<string, any>>().default({}),
-  // 安全审计 M2: token 版本号. 改密码 / 主动登出所有设备 时 ++ → 旧 token 立即失效.
-  // JWT 长效不变 (蘑菇拍板"不希望用一阵就重新登陆"), 仅改密码需要让旧 token 失效
+  // token 版本号. 改密码 / 主动登出所有设备 时 ++ → 旧 token 立即失效.
+  // JWT 长效不变 (体验优先, 不希望用一阵就重新登陆), 仅改密码需要让旧 token 失效
   tokenVersion: integer('token_version').notNull().default(0),
   createdAt: text('created_at').notNull(),
 });
@@ -20,45 +20,44 @@ export const notes = sqliteTable('notes', {
   // 全拼 + 首字母拼接串(toPinyinSearchable 生成),让搜索框支持拼音输入"zb/zhoubao"命中"周报"
   contentPinyin: text('content_pinyin'),
   summary: text('summary'),
-  category: text('category'), // e.g. "编程/踩坑记录"
+  category: text('category'), // e.g. "编程/经验记录"
   tags: text('tags', { mode: 'json' }).$type<string[]>().default([]),
-  // PR #8 命名重整 (2026-06-06): type 字段值重新对齐 UI. 历史 quirk 已修正:
+  // 命名重整: type 字段值重新对齐 UI. 历史 quirk 已修正:
   // quink=灵感页 (原'note'), note=笔记页 (原'snippet'), todo=待办页 (不变). link 类型废弃删除.
   type: text('type', { enum: ['quink', 'note', 'todo'] }).notNull().default('quink'),
   todoStatus: text('todo_status', { enum: ['pending', 'done'] }),
-  // PR #13: todoDue / todoRemindSentAt / todoRemindRrule 三列已移除. 提醒走 note_personal_reminders / note_group_reminders 两表
+  // todoDue / todoRemindSentAt / todoRemindRrule 三列已移除. 提醒走 note_personal_reminders / note_group_reminders 两表
   aiProcessed: integer('ai_processed', { mode: 'boolean' }).notNull().default(false),
   pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   deletedAt: text('deleted_at'), // 软删除时间，null 表示未删除
-  // PR #2 群组共享: 'private' 仅作者可见; 'shared' 走 note_shares 表关联到指定群
+  // 群组共享: 'private' 仅作者可见; 'shared' 走 note_shares 表关联到指定群
   visibility: text('visibility', { enum: ['private', 'shared'] }).notNull().default('private'),
-  // PR #5 编辑锁: 仅 shared 笔记走锁逻辑 (private 不需要协作所以不锁). 4 列联动:
+  // 编辑锁: 仅 shared 笔记走锁逻辑 (private 不需要协作所以不锁). 4 列联动:
   // editLockBy 当前持锁用户 id, null = 无锁; editLockToken 申请时 nanoid 生成, PATCH 必须匹配 (防同用户多设备冲突);
   // editLockExpiresAt ISO datetime 5 分钟过期, cron 60s 扫清; version 乐观锁兜底, server 重启等极端 case 锁失效时拒绝旧版本提交
   editLockBy: text('edit_lock_by').references(() => users.id),
   editLockToken: text('edit_lock_token'),
   editLockExpiresAt: text('edit_lock_expires_at'),
   version: integer('version').notNull().default(1),
-  // PR #5b 编辑权限分级: shared 笔记加这字段控制谁能改, private 笔记忽略 (作者直接改).
+  // 编辑权限分级: shared 笔记加这字段控制谁能改, private 笔记忽略 (作者直接改).
   // 'admin' (默认) = 群 owner + admin 能改; 'all' = 所有 active member 能改. 作者本人永远能改.
   // 没权限的可申请加入 note_edit_grants 白名单 (永久授权)
   editPermission: text('edit_permission', { enum: ['admin', 'all'] }).notNull().default('admin'),
-  // PR #7 COW 分叉模型: 共享笔记被非作者改 / 作者从群组页改时触发 fork, 新建一行 parent_note_id 指向原始 root.
+  // COW 分叉模型: 共享笔记被非作者改 / 作者从群组页改时触发 fork, 新建一行 parent_note_id 指向原始 root.
   // root note 该字段 NULL; fork 出来的 child note 指向其 root note id (单层链, 不嵌套 fork-of-fork).
   // 跟 noteComments.parentId / folders.parentId 同款约定不加 drizzle references 自引用,
   // SQLite 层一致弱约束 (业务保证只往 root 指, 不构造循环).
-  // 7a 阶段仅加字段不动 PATCH 逻辑, 等 7b fork 写入逻辑接入.
   parentNoteId: text('parent_note_id'),
-  // PR #12 群组回收站: admin 在群组上下文删笔记时填这两列. NULL = 作者自己删 (走个人回收站).
+  // 群组回收站: admin 在群组上下文删笔记时填这两列. NULL = 作者自己删 (走个人回收站).
   // deletedInGroupId NOT NULL = 群回收站, 群 owner/admin 看得到 + 能恢复 (仅 owner 永久删).
   // 7 天后自动永久删, 详见 reminder/scheduler.ts startGroupTrashCleanup
   deletedByUserId: text('deleted_by_user_id').references(() => users.id),
   deletedInGroupId: text('deleted_in_group_id').references(() => groups.id),
 });
 
-// PR #2 群组共享: 笔记 → 群组多对多. 一条笔记可分享到多个群, 删 group_members 不影响共享
+// 群组共享: 笔记 → 群组多对多. 一条笔记可分享到多个群, 删 group_members 不影响共享
 // (member 被踢出群后看不到, 但作者重新加群能恢复可见性). 作者软删笔记不动 note_shares 保留意图
 export const noteShares = sqliteTable('note_shares', {
   noteId: text('note_id').notNull().references(() => notes.id),
@@ -69,7 +68,7 @@ export const noteShares = sqliteTable('note_shares', {
   pk: primaryKey({ columns: [table.noteId, table.groupId] }),
 }));
 
-// PR #5b 编辑权限白名单: 申请编辑权通过后写一条, 永久授权 (跟 group_members 一样属于"成员关系"模型).
+// 编辑权限白名单: 申请编辑权通过后写一条, 永久授权 (跟 group_members 一样属于"成员关系"模型).
 // 作者 / admin 可撤销 (DELETE) 让该 user 回到没权限状态. 笔记被永久删除时 cascade 清.
 export const noteEditGrants = sqliteTable('note_edit_grants', {
   noteId: text('note_id').notNull().references(() => notes.id),
@@ -80,7 +79,7 @@ export const noteEditGrants = sqliteTable('note_edit_grants', {
   pk: primaryKey({ columns: [table.noteId, table.userId] }),
 }));
 
-// PR #5b 编辑权限申请: 没 write 权限的群成员可申请, 作者+群 admin 都能批. 通过后写 noteEditGrants 表.
+// 编辑权限申请: 没 write 权限的群成员可申请, 作者+群 admin 都能批. 通过后写 noteEditGrants 表.
 // status 保留历史: 'pending' / 'approved' / 'rejected' / 'canceled' (申请人主动撤回)
 export const noteEditRequests = sqliteTable('note_edit_requests', {
   id: text('id').primaryKey(), // nanoid
@@ -93,7 +92,7 @@ export const noteEditRequests = sqliteTable('note_edit_requests', {
   handledBy: text('handled_by').references(() => users.id), // 处理人 (作者或群 admin)
 });
 
-// PR #6 表情 reaction: 群共享笔记上的快速表态. 复合主键 (note_id, user_id, emoji) 保证每人每 emoji 最多 1 条.
+// 表情 reaction: 群共享笔记上的快速表态. 复合主键 (note_id, user_id, emoji) 保证每人每 emoji 最多 1 条.
 // emoji 字段为前端固定 5 个之一 (后端白名单校验), 防极端搞怪与垃圾数据. 取消 = 直接 DELETE 行 (无审计需求, 不做软删)
 export const noteReactions = sqliteTable('note_reactions', {
   noteId: text('note_id').notNull().references(() => notes.id),
@@ -104,7 +103,7 @@ export const noteReactions = sqliteTable('note_reactions', {
   pk: primaryKey({ columns: [table.noteId, table.userId, table.emoji] }),
 }));
 
-// PR #6 评论 thread: 共享笔记下挂评论, parent_id 单层 thread (二层及以下 normalize 到根 parent).
+// 评论 thread: 共享笔记下挂评论, parent_id 单层 thread (二层及以下 normalize 到根 parent).
 // 软删 deleted_at: 删除后前端直接隐藏 (不像 notes 走 30 天回收站, 评论不需要恢复入口). 计数也不算.
 // parent_id 不加 drizzle references 自引用 (跟 categories/folders 同款约定保持一致, SQLite 层强约束在 db/index.ts)
 export const noteComments = sqliteTable('note_comments', {
@@ -118,7 +117,7 @@ export const noteComments = sqliteTable('note_comments', {
   deletedAt: text('deleted_at'),
 });
 
-// 蘑菇 2026-06-09: 系统只支持一级分类, child 概念废弃 → parentId 字段移除
+// 系统只支持一级分类, child 概念废弃 → parentId 字段移除
 export const categories = sqliteTable('categories', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: text('user_id').notNull().references(() => users.id),
@@ -202,7 +201,7 @@ export const reminderChannels = sqliteTable('reminder_channels', {
   name: text('name').notNull(),
   config: text('config', { mode: 'json' }).$type<Record<string, any>>().notNull().default({}),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-  // 蘑菇 2026-06-09: 通知类型白名单 (string[] / NULL=全收兼容老 row). dispatchToAllChannels 按此过滤
+  // 通知类型白名单 (string[] / NULL=全收兼容老 row). dispatchToAllChannels 按此过滤
   // 含: reminder-due / group-reminder-due / reminder-expired / 通知中心所有 type (评论/编辑权/群事件等)
   types: text('types', { mode: 'json' }).$type<string[] | null>(),
   createdAt: text('created_at').notNull(),
@@ -229,7 +228,7 @@ export const voiceTranscriptions = sqliteTable('voice_transcriptions', {
   createdAt: text('created_at').notNull(),
 });
 
-// 群组共享 PR #1: 用户可建群组邀请别人加入, 后续 PR 用 note_shares 决定笔记可见性
+// 群组共享: 用户可建群组邀请别人加入, note_shares 决定笔记可见性
 export const groups = sqliteTable('groups', {
   id: text('id').primaryKey(), // nanoid
   ownerId: text('owner_id').notNull().references(() => users.id),
@@ -253,15 +252,15 @@ export const groupMembers = sqliteTable('group_members', {
   userId: text('user_id').notNull().references(() => users.id),
   role: text('role', { enum: ['owner', 'admin', 'member'] }).notNull().default('member'),
   status: text('status', { enum: ['active', 'removed'] }).notNull().default('active'),
-  // 安全审计 S6: 在该群隐身. true 时本人上下线不给群其他成员推 presence-changed,
-  // 但隐身用户仍正常收所有事件 (笔记变更 / 评论 / 申请通知 等). 蘑菇明示"隐身不影响收提示消息"
+  // 在该群隐身. true 时本人上下线不给群其他成员推 presence-changed,
+  // 但隐身用户仍正常收所有事件 (笔记变更 / 评论 / 申请通知 等). 约定: 隐身不影响收提示消息
   hidePresence: integer('hide_presence', { mode: 'boolean' }).notNull().default(false),
   joinedAt: text('joined_at').notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.groupId, table.userId] }),
 }));
 
-// 操作审计日志 (蘑菇 2026-06-07 拍板): 所有写 endpoint 关键位置记录, 文本字段为主, 占空间不大
+// 操作审计日志: 所有写 endpoint 关键位置记录, 文本字段为主, 占空间不大
 // 不分级, 全部 INFO 级别. 攻击追溯 / 用户自查"我啥时候改过啥"双用. 当前不暴露 admin 界面, 后续加 /api/admin/audit-logs
 export const auditLogs = sqliteTable('audit_logs', {
   id: text('id').primaryKey(),
@@ -286,7 +285,7 @@ export const groupJoinRequests = sqliteTable('group_join_requests', {
   handledBy: text('handled_by').references(() => users.id), // 谁处理的 (owner 或 admin)
 });
 
-// PR #7 COW 修改历史: 每次共享笔记被编辑写一条 (作者改不算, 不然历史会被自己 spam),
+// COW 修改历史: 每次共享笔记被编辑写一条 (作者改不算, 不然历史会被自己 spam),
 // 给 UI "原作者发布 · @B、@C 编辑过" 用. 不带 content snapshot (空间换简洁, 只记 who+when).
 // note 被永久删除时 cascade 清. 不软删 (历史无恢复需求).
 export const noteEditHistory = sqliteTable('note_edit_history', {
@@ -307,7 +306,7 @@ export const groupNotePins = sqliteTable('group_note_pins', {
   pk: primaryKey({ columns: [table.groupId, table.noteId] }),
 }));
 
-// PR #11 个人提醒 (替代 notes.todo_due / todo_remind_rrule / todo_remind_sent_at 三列):
+// 个人提醒 (替代 notes.todo_due / todo_remind_rrule / todo_remind_sent_at 三列):
 // 任何用户对任何笔记都能设. (user_id, note_id) UNIQUE 保证一对一. 笔记被作者删后仍扫得到, 改发"失效"通知.
 // 旧 notes.todo_* 三列保留 (避免破坏老客户端读), 启动一次性迁移到此表后新版后端不再写它们
 export const notePersonalReminders = sqliteTable('note_personal_reminders', {
@@ -322,7 +321,7 @@ export const notePersonalReminders = sqliteTable('note_personal_reminders', {
   pk: primaryKey({ columns: [table.userId, table.noteId] }), // 一个用户对一个笔记最多 1 条
 }));
 
-// PR #11 群提醒: 群主/管理员对群内 shared 笔记设. (note_id, group_id) UNIQUE.
+// 群提醒: 群主/管理员对群内 shared 笔记设. (note_id, group_id) UNIQUE.
 // 群所有 active 成员 (且开启接收开关的) 都收. created_by 给通知里显示"X 设置了提醒"
 export const noteGroupReminders = sqliteTable('note_group_reminders', {
   id: text('id').primaryKey(),
@@ -337,10 +336,10 @@ export const noteGroupReminders = sqliteTable('note_group_reminders', {
   pk: primaryKey({ columns: [table.noteId, table.groupId] }),
 }));
 
-// 蘑菇 2026-06-09: 群级 group_reminder_subscriptions 已废 (实际只控 group-reminder-set 一种, 改用卡片级 mute)
+// 群级 group_reminder_subscriptions 已废 (实际只控 group-reminder-set 一种, 改用卡片级 mute)
 // DB 表 db/index.ts 启动 DROP TABLE 一次性清
 
-// 蘑菇 2026-06-08: 卡片级笔记提醒 mute. 用户能屏蔽"某条待办的群提醒" 而保留其他待办提醒.
+// 卡片级笔记提醒 mute. 用户能屏蔽"某条待办的群提醒" 而保留其他待办提醒.
 // 跟 groupReminderSubscriptions 群级开关独立: 群级关 = 该群所有群提醒不收; 笔记级关 = 仅该笔记的群提醒不收.
 // 主键 (userId, noteId): 一条笔记 share 到多群时, mute 跨所有群生效 (用户对这条待办整体说"不打扰我"). 缺行 = 默认接收
 export const noteGroupReminderMutes = sqliteTable('note_group_reminder_mutes', {
@@ -351,7 +350,7 @@ export const noteGroupReminderMutes = sqliteTable('note_group_reminder_mutes', {
   pk: primaryKey({ columns: [table.userId, table.noteId] }),
 }));
 
-// PR #10 通知中心: 集中所有"用户该被告知"的事件 (申请编辑权 / 另存为 / 提醒到点 / 群组变更 / 评论等),
+// 通知中心: 集中所有"用户该被告知"的事件 (申请编辑权 / 另存为 / 提醒到点 / 群组变更 / 评论等),
 // 不再依赖 toast 一闪而过. category 对应 UI 3 tab, type 是具体事件名 (字符串不 enum 防后续扩字段时全表 ALTER).
 // payload 存 JSON 给"点击通知跳关联资源"用 (noteId / groupId / fromUserId 等). read_at NULL=未读, 标已读时填 ISO datetime
 export const notifications = sqliteTable('notifications', {
@@ -413,4 +412,4 @@ export type NotePersonalReminder = typeof notePersonalReminders.$inferSelect;
 export type NewNotePersonalReminder = typeof notePersonalReminders.$inferInsert;
 export type NoteGroupReminder = typeof noteGroupReminders.$inferSelect;
 export type NewNoteGroupReminder = typeof noteGroupReminders.$inferInsert;
-// 蘑菇 2026-06-09: GroupReminderSubscription 类型已移除 (表已废)
+// GroupReminderSubscription 类型已移除 (表已废)

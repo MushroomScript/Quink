@@ -26,7 +26,7 @@ const loginSchema = z.object({
 const updateProfileSchema = z.object({
   nickname: z.string().min(1).max(32).optional(),
   avatar: z.string().max(2048).optional(),
-  // 安全审计 M9: preferences 限制 JSON size 32KB 防恶意大 JSON 灌 DB. 字段不收紧 (兼容大量已知字段如 aiBindings/xfyun/shortcuts)
+  // preferences 限制 JSON size 32KB 防恶意大 JSON 灌 DB. 字段不收紧 (兼容大量已知字段如 aiBindings/xfyun/shortcuts)
   // 但 aiPersonaCustom (会拼进 system prompt) 单独限长 1000 字符
   preferences: z.record(z.any()).refine(
     (p) => JSON.stringify(p).length <= 32 * 1024,
@@ -66,11 +66,11 @@ app.post('/register', async (c) => {
   };
 
   await db.insert(schema.users).values(user);
-  // 安全审计: 注册操作记录
+  // 注册操作记录
   c.set('userId', user.id);
   await logAudit(c, 'auth.register', 'user', user.id, { username: user.username });
   // seed 默认大类 (工作/学习/生活/其他). 自动分类 prompt 用 {categories} 占位, AI 从这个列表里选 (有"其他"兜底),
-  // 不能编新分类. 老用户不补种 (蘑菇 2026-05-29 决定); 失败容忍, 用户后续手动加分类也行
+  // 不能编新分类. 老用户不补种 (按设计约定); 失败容忍, 用户后续手动加分类也行
   await Promise.all(
     DEFAULT_CATEGORIES.map((name, idx) =>
       db.insert(schema.categories).values({
@@ -101,7 +101,7 @@ app.post('/login', async (c) => {
   const user = await db.select().from(schema.users).where(eq(schema.users.username, username)).get();
 
   if (!user || !verifyPassword(password, user.passwordHash)) {
-    // 安全审计: 登录失败 (含密码错误 / 用户不存在). 频繁失败可被监控为暴力破解
+    // 登录失败 (含密码错误 / 用户不存在). 频繁失败可被监控为暴力破解
     c.set('userId', user?.id || 'anonymous');
     await logAudit(c, 'auth.login_failed', 'user', user?.id || null, { username });
     return c.json({ error: '用户名或密码错误' }, 401);
@@ -179,20 +179,20 @@ app.post('/password', authMiddleware, async (c) => {
     return c.json({ error: '旧密码不正确' }, 401);
   }
 
-  // 安全审计 M2: 改密码 → tokenVersion++ + invalidate 缓存 → 所有旧 token 立即失效, 所有设备 401 必须重登
-  // 蘑菇拍板: 长效 token 不变, 但改密码要"修改密码后立即退出登录才对"
+  // 改密码 → tokenVersion++ + invalidate 缓存 → 所有旧 token 立即失效, 所有设备 401 必须重登
+  // 约定: 长效 token 不变, 但改密码要"修改密码后立即退出登录"
   const newTv = (user.tokenVersion ?? 0) + 1;
   await db.update(schema.users)
     .set({ passwordHash: hashPassword(newPassword), tokenVersion: newTv })
     .where(eq(schema.users.id, userId));
   invalidateTokenVersionCache(userId);
-  // 安全审计: 改密码是高敏感操作, 必须记录 (含 tokenVersion 升级方便排查)
+  // 改密码是高敏感操作, 必须记录 (含 tokenVersion 升级方便排查)
   await logAudit(c, 'auth.password_change', 'user', userId, { newTokenVersion: newTv });
   publish(userId, 'data-changed', { scope: 'user-profile' }, _ocid);
   return c.json({ message: '密码已修改, 所有设备需重新登录' });
 });
 
-// 安全审计: 主动"登出所有设备" - 不需旧密码 (因为用户已登录), tokenVersion++ 让所有旧 token (含本机) 立即失效.
+// 主动"登出所有设备" - 不需旧密码 (因为用户已登录), tokenVersion++ 让所有旧 token (含本机) 立即失效.
 // 用户场景: 怀疑某设备 token 泄漏 / 卖二手手机前清干净 / 共用电脑忘了登出. 实际效果跟改密码一致.
 app.post('/logout-all-devices', authMiddleware, async (c) => {
   const userId = c.get('userId');

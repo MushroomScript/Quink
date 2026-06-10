@@ -1,4 +1,4 @@
-// PR #10 通知中心 helper
+// 通知中心 helper
 // 集中所有"用户该被告知"的事件 (申请编辑权 / 另存为 / 提醒到点 / 群组变更 / 评论等),
 // 替代以前散落各处的 toast/SSE 直推. 调用方传"收件人 userId" + 分类 + 类型 + 标题/详情/跳转 payload,
 // helper 负责写 notifications 表 + SSE publish('notification-new') 让收件人前端徽章+列表实时更新.
@@ -54,7 +54,7 @@ export async function createNotification(
       payload: row.payload,
       createdAt,
     });
-    // 蘑菇 2026-06-09: 通知中心 + 渠道一视同仁 — 同时走 reminder_channels 路由.
+    // 通知中心 + 渠道一视同仁 — 同时走 reminder_channels 路由.
     // browser channel 触发 OS 弹通知, email/wecom_bot/etc 真发. dispatch 按 channel.types 过滤 (null=全收).
     // fire-and-forget 不阻塞主流程, 失败 console.error
     dispatchToAllChannels(userId, {

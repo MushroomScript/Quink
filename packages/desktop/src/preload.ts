@@ -13,7 +13,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 // 触发 undefined() 抛 TypeError → fetchMe catch 把 user 设 null → 快捷窗口显示"请先在主窗口登录").
 // 当时改成不暴露 quinkDesktop 让 `?.` 在第一级断掉. 但留下 footgun: App.vue applyZoomLevel 用
 // `quinkDesktop?.isElectron` 判断走 syncZoom IPC, 否则 fallback CSS zoom — 快捷窗口走 CSS zoom 跟 main
-// 端 setZoomFactor 叠加变双重缩放 (蘑菇报: capture 80% 多空白, 125% 显示不完整). 改成暴露 isElectron=true +
+// 端 setZoomFactor 叠加变双重缩放 (实测: capture 80% 多空白, 125% 显示不完整). 改成暴露 isElectron=true +
 // 关键方法 no-op stubs 一次性根治: applyZoomLevel 走 syncZoom no-op 路径不再 CSS zoom, syncTokenToDesktop
 // 调 syncToken no-op 也不抛错.
 contextBridge.exposeInMainWorld('quinkDesktop', {

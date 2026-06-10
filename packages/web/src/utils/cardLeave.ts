@@ -85,7 +85,7 @@ export function fadeInEnter(el: Element, done: () => void) {
   setTimeout(done, 300);
 }
 
-// 笔记 type 映射到 sidebar 上对应的导航菜单路径 (PR #8 命名重整: quink=灵感, note=笔记, todo=待办)
+// 笔记 type 映射到 sidebar 上对应的导航菜单路径 (quink=灵感, note=笔记, todo=待办)
 const TYPE_TO_NAV_PATH: Record<string, string> = {
   quink: '/quink',
   note: '/notes',

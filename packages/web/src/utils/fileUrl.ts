@@ -6,7 +6,7 @@
 // 兼容: 老数据(已带 / 前缀)和新数据(裸名)都能识别——detect 是否以 `/`/`http(s)://`/`data:`/`blob:` 开头
 // 则视为 absolute URL 不动,否则当裸文件名拼前缀。
 //
-// PR #3 群组文件授权: /api/uploads/* 后端中间件按 noteShares 鉴权. <img> 不能带 Authorization header,
+// 群组文件授权: /api/uploads/* 后端中间件按 noteShares 鉴权. <img> 不能带 Authorization header,
 // 走 query token 模式: url 尾部拼 ?token=<jwt>. token 跟 localStorage quink_token 共用 SSE 同一套.
 
 function getAuthToken(): string | null {

@@ -25,7 +25,7 @@ app.mount('#app');
 // window.innerHeight 会自动排除浏览器工具栏、地址栏、底部导航等.
 // CSS zoom 修正: html 上有 zoom (Quink "显示比例" 功能) 时, innerHeight 是 zoomed value,
 // 把它设到 CSS px 字段会被 zoom 再乘一次, 导致 #app height 是视口的 zoom 倍.
-// 蘑菇汇报 zoom=1.5 时登录页卡片"快挨着屏幕底端"就是这个 bug. 除以 zoom 还原 unzoomed CSS px
+// zoom=1.5 时登录页卡片"快挨着屏幕底端"就是这个 bug. 除以 zoom 还原 unzoomed CSS px
 function setAppHeight() {
   const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
   const cssHeight = window.innerHeight / zoom;

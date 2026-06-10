@@ -156,7 +156,7 @@ onUnmounted(() => {
         </div>
         <!-- 列表: flex-1 min-h-0 让它占满 popover 剩余空间, 内容多于剩余空间时内部滚动. Capture 小窗口下整体被 max-h-[90vh] 兜住 -->
         <div v-else class="flex-1 min-h-0 overflow-y-auto">
-          <!-- 一级分类 (root): 系统只支持一级 (蘑菇 2026-06-09 拍板), child 已废弃, 不渲染 -->
+          <!-- 一级分类 (root): 系统只支持一级, child 已废弃, 不渲染 -->
           <button v-for="cat in categories" :key="cat.id" type="button" @click="pickCategory(cat.name)"
             class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-gray-50"
             :class="modelValue === cat.name ? 'bg-primary/5' : ''">

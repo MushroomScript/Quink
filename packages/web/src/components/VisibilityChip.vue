@@ -5,7 +5,7 @@ import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils
 import { unzoomRect, unzoomViewport } from '@/utils/zoom';
 import { PhLock, PhUsersThree, PhCaretDown, PhCheck, PhX } from '@phosphor-icons/vue';
 
-// PR #2 编辑器底栏可见性 chip
+// 编辑器底栏可见性 chip
 // modelValue: { visibility: 'private' | 'shared', sharedGroupIds: string[] }
 // 实时双向绑定 (单击群项即改, 不需要 "确定" 按钮). 点 chip 外关闭 popover
 const props = defineProps<{

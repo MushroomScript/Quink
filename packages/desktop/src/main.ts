@@ -471,7 +471,7 @@ async function toggleCaptureWindow() {
     } catch {}
     // 强制重新对齐 bounds + zoom: hide 期间用户改 zoom (sync-zoom IPC) 时窗口在 hide 状态,
     // OS 对 hidden window 的 setBounds + setZoomFactor 可能延迟/忽略 → 下次 show 时窗口物理或 dpr
-    // 是旧的 → 内容跟边框不对齐 / dpr 跟物理不匹配 (蘑菇报: 100% 正常, <100% 多空白, >100% 显示不完整).
+    // 是旧的 → 内容跟边框不对齐 / dpr 跟物理不匹配 (实测: 100% 正常, <100% 多空白, >100% 显示不完整).
     // 双层 align:
     //   1. show 前 align (优化, 让 show 时窗口尽量对, 避免可见 size 闪烁)
     //   2. once('show') 内 align (兜底, show 事件 fire 时窗口已 visible, setBounds + setZoomFactor
@@ -538,7 +538,7 @@ function createTray() {
 // ──────────────────────────────────
 //  IPC
 // ──────────────────────────────────
-// PR fix: 资源页/右键下载文件 → 走 Electron webContents.downloadURL 主动下载,
+// 资源页/右键下载文件 → 走 Electron webContents.downloadURL 主动下载,
 // 不依赖 programmatic <a download> click 的 user activation (audio/video/pdf INLINE mime 后, await fetch 让 user activation 过期, a.click() 不 trusted)
 // URL 必须 absolute (浏览器解析相对路径靠 location.origin, Electron API 直接传入相对路径不可靠)
 ipcMain.on('download-url', (event, url: string) => {
@@ -546,7 +546,7 @@ ipcMain.on('download-url', (event, url: string) => {
   if (wc) wc.downloadURL(url);
 });
 
-// PR fix: dock "打开所在文件夹" 按钮 → shell.showItemInFolder(savePath). url 作 key 查 task.savePath
+// dock "打开所在文件夹" 按钮 → shell.showItemInFolder(savePath). url 作 key 查 task.savePath
 ipcMain.on('show-in-folder', (_event, url: string) => {
   const savePath = attachmentTasksStore.getSavePathByUrl(url);
   if (savePath && fs.existsSync(savePath)) shell.showItemInFolder(savePath);
@@ -777,7 +777,7 @@ ipcMain.on('show-notification', (_e, payload: { title: string; body: string; not
   });
   n.on('click', () => {
     // 激活主窗口 + 跳转: path 优先 (群组等通用场景), noteId 老 reminder 兼容
-    // PR #13 (蘑菇 2026-06-08 报"有时候点击不激活"): 加强防御 - 100ms→250ms 给 OS 更长完成时间, webContents.focus() 让 Chromium DOM 也接 OS 激活
+    // 加强防御 ("点击不激活" 问题): 100ms→250ms 给 OS 更长完成时间, webContents.focus() 让 Chromium DOM 也接 OS 激活
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       if (!mainWindow.isVisible()) mainWindow.show();
@@ -952,7 +952,7 @@ function applyMainWindowZoomSize(zoomLevel: number) {
   const lastFactor = lastMainZoom / 100;
   const ratio = factor / lastFactor;
   // F5 / 重复 syncZoom 时 ratio === 1 (实际未缩放): 跳过 setBounds 保持窗口当前位置/大小,
-  // 否则用户拖到非中央的窗口会被强制居中 (蘑菇报: F5 后窗口归位最中间).
+  // 否则用户拖到非中央的窗口会被强制居中 (F5 后窗口归位最中间).
   // setMinimumSize 上次设过的也还在 (lastMainZoom 不变意味着 minW/minH 也没变), 跳过 OK.
   if (Math.abs(ratio - 1) < 0.001) return;
   const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
@@ -1122,7 +1122,7 @@ app.whenReady().then(() => {
   // 加载持久化的附件传输任务历史 (跨 session 恢复 success/failed 终态)
   attachmentTasksStore.load();
   // 注册全局下载处理: Electron 默认 <a download> / video controls 下载会直接存到 ~/Downloads,
-  // 不弹"另存为"对话框. 蘑菇要求"不弹窗 + 设置里指定目录", 这里直接 setSavePath 到 currentDownloadDir.
+  // 不弹"另存为"对话框. 直接 setSavePath 到 currentDownloadDir (设置里指定目录, 不弹窗).
   // currentDownloadDir 由 renderer 端启动时 IPC sync-download-path 推过来 (localStorage 配置), 默认 ~/Downloads
   session.defaultSession.on('will-download', (_event, item) => {
     const targetDir = currentDownloadDir;
@@ -1138,7 +1138,7 @@ app.whenReady().then(() => {
     }
     try { fs.mkdirSync(targetDir, { recursive: true }); } catch {}
     item.setSavePath(savePath);
-    // PR fix: 跟 attachmentTasksStore 关联让 dock 显示进度. url 跟 web 端 addDownloadTask 传的一致 (item.getURL() = absolute URL)
+    // 跟 attachmentTasksStore 关联让 dock 显示进度. url 跟 web 端 addDownloadTask 传的一致 (item.getURL() = absolute URL)
     const url = item.getURL();
     attachmentTasksStore.markSavePathByUrl(url, savePath);
     item.on('updated', (_e, state) => {

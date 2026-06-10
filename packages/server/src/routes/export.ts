@@ -13,7 +13,7 @@ const app = new Hono();
 app.use('*', authMiddleware);
 
 // GET /api/export — 导出笔记为 ZIP（Markdown + 附件）
-// PR #13: 按 user.preferences.sharedDisplay 偏好决定范围 (own/others/none/all). 默认 own (仅作者本人)
+// 按 user.preferences.sharedDisplay 偏好决定范围 (own/others/none/all). 默认 own (仅作者本人)
 // fork 不导出 (parent_note_id IS NULL 过滤, 跟统计同款 origin 维度)
 app.get('/', async (c) => {
   const userId = c.get('userId');
@@ -93,7 +93,7 @@ app.get('/', async (c) => {
   // 笔记 → Markdown 文件
   for (const note of notes) {
     const date = dayjs(note.createdAt).format('YYYY-MM-DD_HHmmss');
-    // PR #8 命名重整: quink=灵感, note=笔记, todo=待办
+    // 命名约定: quink=灵感, note=笔记, todo=待办
     const typeLabel = note.type === 'todo' ? '待办' : note.type === 'note' ? '笔记' : '灵感';
     const filename = `notes/${date}_${typeLabel}_${note.id}.md`;
 
@@ -148,7 +148,7 @@ app.get('/', async (c) => {
 });
 
 // POST /api/import — 导入 ZIP
-// 安全审计 M13: zip bomb 防御. 压缩文件大小上限 + 解压后总大小上限 + 单文件大小上限
+// zip bomb 防御. 压缩文件大小上限 + 解压后总大小上限 + 单文件大小上限
 const IMPORT_ZIP_MAX = 50 * 1024 * 1024;          // 50MB 压缩文件
 const IMPORT_UNCOMPRESSED_MAX = 500 * 1024 * 1024; // 500MB 解压总大小 (压缩比 1:10 容限)
 const IMPORT_FILE_MAX = 10 * 1024 * 1024;          // 10MB 单文件
@@ -163,7 +163,7 @@ app.post('/', async (c) => {
     return c.json({ error: '请选择 ZIP 文件' }, 400);
   }
 
-  // 安全审计 M13: 压缩文件大小检查
+  // 压缩文件大小检查
   if (file.size > IMPORT_ZIP_MAX) {
     return c.json({ error: `ZIP 文件过大 (上限 ${IMPORT_ZIP_MAX / 1024 / 1024} MB)` }, 400);
   }
@@ -179,7 +179,7 @@ app.post('/', async (c) => {
     let imported = 0;
     const noteFiles = Object.keys(zip.files).filter(f => f.startsWith('notes/') && f.endsWith('.md'));
 
-    // 安全审计 M13: 文件数 + 解压总大小检查
+    // 文件数 + 解压总大小检查
     if (noteFiles.length > IMPORT_FILE_COUNT_MAX) {
       return c.json({ error: `ZIP 内文件过多 (上限 ${IMPORT_FILE_COUNT_MAX})` }, 400);
     }

@@ -13,7 +13,7 @@ onPresenceChange((userId, online) => {
 
 async function broadcastPresence(userId: string, online: boolean) {
   try {
-    // 该用户所在所有 active 群组. 安全审计 S6: 排除 hidePresence=true 的群 (该群成员不知道 userId 上下线).
+    // 该用户所在所有 active 群组. 排除 hidePresence=true 的群 (该群成员不知道 userId 上下线).
     // 但隐身用户仍能正常收事件 (隐身只单向屏蔽"我向群里广播", 不影响"我收群里事件")
     const myGroups = await db.select({ groupId: schema.groupMembers.groupId })
       .from(schema.groupMembers)

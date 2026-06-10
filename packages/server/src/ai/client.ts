@@ -419,7 +419,7 @@ export async function autoTag(userId: string, content: string): Promise<string[]
 /**
  * Run auto-classify on a note. Returns category string.
  *
- * 新策略 (蘑菇 2026-05-29): {categories} 占位符注入用户当前所有分类名 (新用户注册时 seed 4 个默认大类),
+ * 策略: {categories} 占位符注入用户当前所有分类名 (新用户注册时 seed 4 个默认大类),
  * AI 必须从列表里选, 后端校验返回不在列表就 null (防 AI 编造). 之前是 prompt 写死 9 个细分类 +
  * processNoteWithAi 看到 AI 返回新分类就自动 insert → 分类列表无限膨胀.
  */
@@ -455,7 +455,7 @@ export async function autoClassify(userId: string, content: string): Promise<str
 /**
  * Generate a one-line summary for a note.
  *
- * 2026-05-29 蘑菇: 升级为一等公民 feature (加入 AI_FEATURES) — 独立绑定 AI 配置, 用 getPrompt 取用户自定义,
+ * 升级为一等公民 feature (加入 AI_FEATURES) — 独立绑定 AI 配置, 用 getPrompt 取用户自定义,
  * 不再硬编码 prompt / 不再复用 auto_tag 配置.
  */
 export async function autoSummary(userId: string, content: string): Promise<string | null> {

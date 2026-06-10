@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('quinkDesktop', {
   close: () => ipcRenderer.send('win-close'),
   // 用系统默认应用打开附件 URL(fetch 到临时目录 → shell.openPath)
   openAttachment: (url: string) => ipcRenderer.invoke('open-attachment', url),
-  // PR fix: 强制下载 URL (绕过 <a download> programmatic click 在 await fetch 后失去 user activation 不触发 will-download 的问题).
+  // 强制下载 URL (绕过 <a download> programmatic click 在 await fetch 后失去 user activation 不触发 will-download 的问题).
   // 走 Electron webContents.downloadURL → will-download fire → setSavePath 到 currentDownloadDir
   downloadUrl: (url: string) => ipcRenderer.send('download-url', url),
   // dock "打开所在文件夹": shell.showItemInFolder(savePath), main 端按 url 查 task.savePath

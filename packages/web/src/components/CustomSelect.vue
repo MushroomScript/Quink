@@ -113,7 +113,7 @@ function positionPopup() {
   // 宽度策略: minWidth = trigger (popup 至少跟 trigger 一样宽, 视觉对齐),
   // 不写 width 让 popup 自然撑开到最宽 .qsel-item 的内容宽度 (item 自带 white-space: nowrap),
   // maxWidth viewport - 16 兜底防止超长选项跑出屏幕。
-  // 避免老逻辑 width: trigger 时短 trigger 截断长选项 (蘑菇报: "短的时候展开看不见长的那一行")
+  // 避免老逻辑 width: trigger 时短 trigger 截断长选项 (曾出现: "短的时候展开看不见长的那一行")
   popupStyle.value = {
     top: `${top}px`,
     left: `${rLeft}px`,
@@ -170,7 +170,7 @@ function onDocPointerDown(e: MouseEvent) {
 }
 
 // 滚动 / resize 时重新定位 popup, 不关掉。
-// 之前老版本是直接 closePopup, 蘑菇报两个问题: (a) popup 自身滚动 (因 capture scroll) → 立刻关
+// 之前老版本是直接 closePopup, 出过两个问题: (a) popup 自身滚动 (因 capture scroll) → 立刻关
 // (b) zoom 切换瞬间 layout 重排可能触发 scroll/resize → popup 关后再开异常。
 // 新策略: popup 自身或其子元素的滚动不动 (避免选项滚动时关掉自己), 外部 scroll/resize 重新定位 popup。
 function onWindowChange(e?: Event) {

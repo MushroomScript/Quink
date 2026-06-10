@@ -87,51 +87,51 @@ export interface User {
 
 export interface Note {
   id: string;
-  // 作者 userId (PR #2 群组共享: shared 笔记群成员能看到别人发的, 需区分作者跟自己)
+  // 作者 userId (群组共享: shared 笔记群成员能看到别人发的, 需区分作者跟自己)
   userId?: string;
   content: string;
   summary: string | null;
   category: string | null;
   tags: string[];
-  // PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
+  // 命名约定: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
   type: 'quink' | 'note' | 'todo';
   todoStatus: 'pending' | 'done' | null;
-  // PR #13: todoDue / todoRemindSentAt / todoRemindRrule 三字段已删. 提醒走 note_personal_reminders / note_group_reminders
+  // todoDue / todoRemindSentAt / todoRemindRrule 三字段已删. 提醒走 note_personal_reminders / note_group_reminders
   aiProcessed: boolean;
   pinned: boolean;
   createdAt: string;
   updatedAt: string;
-  // PR #2 群组共享: 'private' (默认 仅作者) / 'shared' (分享到 sharedGroupIds 列出的群)
+  // 群组共享: 'private' (默认 仅作者) / 'shared' (分享到 sharedGroupIds 列出的群)
   visibility?: 'private' | 'shared';
   sharedGroupIds?: string[];
   // 群组 feed (GET /api/groups/:id/notes) 才返回, 给 NoteCard 显示发布人头像 + 排序
   sharedAt?: string;
   authorNickname?: string;
   authorAvatar?: string | null;
-  // PR #5 编辑锁 + 乐观锁版本. shared 笔记 PATCH 时必须带 version, 失败 409 让客户端重拉重试
+  // 编辑锁 + 乐观锁版本. shared 笔记 PATCH 时必须带 version, 失败 409 让客户端重拉重试
   version?: number;
   editLockBy?: string | null;
   editLockExpiresAt?: string | null;
-  // PR #5b 编辑权限分级 (仅 shared 笔记用): admin (默认, 仅作者+群 owner/admin 能改) / all (所有 active member 能改)
+  // 编辑权限分级 (仅 shared 笔记用): admin (默认, 仅作者+群 owner/admin 能改) / all (所有 active member 能改)
   // 作者本人永远能改 (不在 enum 里). 没权限的可通过 POST /:id/edit-request 申请永久授权.
   editPermission?: 'admin' | 'all';
   // 群内独立置顶 (仅 GET /api/groups/:id/notes 返回, 跟 pinned 作者全局置顶完全独立). owner/admin 操作
   groupPinned?: boolean;
-  // PR #6 表情 reaction + 评论. 仅 shared 笔记返回. 列表 API 已 enrich (NoteCard 直接渲染), 详情走专用 API 增量更新.
+  // 表情 reaction + 评论. 仅 shared 笔记返回. 列表 API 已 enrich (NoteCard 直接渲染), 详情走专用 API 增量更新.
   // reactionSummary 按白名单 5 个 emoji 固定顺序 (count=0 也含); NoteCard 按需过滤 count>0 显示, ReactionBar 永远渲染 5 个
   reactionSummary?: NoteReactionSummaryItem[];
   commentCount?: number;
-  // PR #7b COW 分叉: parentNoteId 非 null = fork 出来的笔记 (该群专属版本), null = root note (作者初版, 可能仍连多群).
+  // COW 分叉: parentNoteId 非 null = fork 出来的笔记 (该群专属版本), null = root note (作者初版, 可能仍连多群).
   // NoteCard / NoteDetail / NoteEditModal 用这字段判断展示"本群独占版" vs "N 群共享版" 标.
   parentNoteId?: string | null;
-  // PR #7b 编辑历史计数: 非作者编辑次数 (作者改不计). NoteCard 显示"X 人编辑过" 胶囊, 详情走 getNoteEditHistory 拉完整列表
+  // 编辑历史计数: 非作者编辑次数 (作者改不计). NoteCard 显示"X 人编辑过" 胶囊, 详情走 getNoteEditHistory 拉完整列表
   editorCount?: number;
-  // PR #9: 当前用户对本笔记是否有写权限. shared 笔记由后端 enrich (isAuthor || editPermission='all' || 在共享群是 admin/owner || 在 grants 白名单).
+  // 当前用户对本笔记是否有写权限. shared 笔记由后端 enrich (isAuthor || editPermission='all' || 在共享群是 admin/owner || 在 grants 白名单).
   // private 笔记不返回此字段 (作者本人无视, 别人也读不到), NoteCard 前端用 isMyNote || !isShared || canWrite 预判.
   canWrite?: boolean;
 }
 
-// PR #7b 编辑历史一条: NoteDetail "X 人编辑过" popover 列编辑者用. 后端 join users 给 nickname/avatar.
+// 编辑历史一条: NoteDetail "X 人编辑过" popover 列编辑者用. 后端 join users 给 nickname/avatar.
 export interface NoteEditHistoryRow {
   id: string;
   userId: string;
@@ -140,14 +140,14 @@ export interface NoteEditHistoryRow {
   avatar: string | null;
 }
 
-// PR #6 单个 emoji 的反应汇总. mine = 我自己加过该 emoji (点击 toggle 移除).
+// 单个 emoji 的反应汇总. mine = 我自己加过该 emoji (点击 toggle 移除).
 export interface NoteReactionSummaryItem {
   emoji: string;
   count: number;
   mine: boolean;
 }
 
-// PR #6 评论. 后端 join users 给 nickname / avatar. parentId 走单层 thread normalize (顶层 null; 回复任意级最终归到根 id)
+// 评论. 后端 join users 给 nickname / avatar. parentId 走单层 thread normalize (顶层 null; 回复任意级最终归到根 id)
 export interface NoteComment {
   id: string;
   noteId: string;
@@ -160,7 +160,7 @@ export interface NoteComment {
   userAvatar: string | null;
 }
 
-// PR #5b 编辑权限申请记录
+// 编辑权限申请记录
 export interface NoteEditRequest {
   id: string;
   noteId?: string;
@@ -175,7 +175,7 @@ export interface NoteEditRequest {
   avatar?: string | null;
 }
 
-// PR #5b 编辑权限白名单 (永久授权)
+// 编辑权限白名单 (永久授权)
 export interface NoteEditGrant {
   userId: string;
   grantedAt: string;
@@ -184,7 +184,7 @@ export interface NoteEditGrant {
   avatar?: string | null;
 }
 
-// PR #5b 群级汇总: 该群所有共享笔记的 pending 编辑申请 / 已授权 (含笔记 preview + 申请人 + 作者信息)
+// 群级汇总: 该群所有共享笔记的 pending 编辑申请 / 已授权 (含笔记 preview + 申请人 + 作者信息)
 export interface GroupNoteEditRequestRow {
   id: string;
   noteId: string;
@@ -211,13 +211,13 @@ export interface GroupNoteEditGrantRow {
   authorNickname: string | null;
 }
 
-// PR #2 / PR #7a 笔记列表过滤 scope. 跟 stores/notes.ts 的 ViewState.scope 同 5 档:
-//   mine          (PR #2 默认, 作者本人全部含 shared)
-//   private       (PR #7a, 仅作者本人 private)
-//   others_shared (PR #7a, 作者本人 private + 他人共享给我所在群的 shared)
-//   shared        (PR #2 遗留, 仅他人共享给我所在群的 shared, 偏好不映射, 兼容旧调用方)
-//   all           (PR #7a, mine + 他人共享给我所在群的 shared)
-//   group:<id>    (PR #2, 某群可见笔记)
+// 笔记列表过滤 scope. 跟 stores/notes.ts 的 ViewState.scope 同 5 档:
+//   mine          默认, 作者本人全部含 shared
+//   private       仅作者本人 private
+//   others_shared 作者本人 private + 他人共享给我所在群的 shared
+//   shared        仅他人共享给我所在群的 shared, 偏好不映射, 兼容旧调用方
+//   all           mine + 他人共享给我所在群的 shared
+//   group:<id>    某群可见笔记
 export type NotesScope =
   | 'mine'
   | 'private'
@@ -236,7 +236,7 @@ export interface ReminderChannel {
   name: string;
   config: Record<string, any>;
   enabled: boolean;
-  // 蘑菇 2026-06-09: 通知类型白名单. null/空=全收 (兼容老 row). UI 在 Settings 提醒页编辑
+  // 通知类型白名单. null/空=全收 (兼容老 row). UI 在 Settings 提醒页编辑
   types: string[] | null;
   createdAt: string;
 }
@@ -268,9 +268,9 @@ export interface GroupMemberInfo {
   username: string;
   nickname: string;
   avatar: string | null;
-  // SSE 连接活跃即视为在线; bus.ts presence 追踪. 安全审计 S6: 隐身用户对他人 online 永远为 false
+  // SSE 连接活跃即视为在线; bus.ts presence 追踪. 隐身用户对他人 online 永远为 false
   online?: boolean;
-  // 安全审计 S6: 仅本人 server 返此字段 (其他人看不到我隐身/我看不到别人隐身设置)
+  // 仅本人 server 返此字段 (其他人看不到我隐身/我看不到别人隐身设置)
   hidePresence?: boolean;
 }
 
@@ -309,7 +309,7 @@ export interface PaginatedResponse<T> {
   pagination: { page: number; limit: number; total: number };
 }
 
-// 蘑菇 2026-06-09: 系统只支持一级分类, child 概念废弃 (parentId / children 字段移除)
+// 系统只支持一级分类, child 概念废弃 (parentId / children 字段移除)
 export interface Category {
   id: number;
   name: string;
@@ -372,7 +372,7 @@ export const api = {
     });
   },
 
-  // 安全审计: 主动登出所有设备 (含本机). 后端 tokenVersion++ 让旧 token 立即失效
+  // 主动登出所有设备 (含本机). 后端 tokenVersion++ 让旧 token 立即失效
   logoutAllDevices() {
     return request<{ message: string }>('/auth/logout-all-devices', { method: 'POST' });
   },
@@ -412,7 +412,7 @@ export const api = {
     });
   },
 
-  // PR #7b: PATCH 返回可能含 forked: true + forkedFromNoteId (非作者改 / 作者从群组页改 root 多群 → fork 写入).
+  // PATCH 返回可能含 forked: true + forkedFromNoteId (非作者改 / 作者从群组页改 root 多群 → fork 写入).
   // store 收到 forked 触发本 view fetchNotes (新 fork 出现 + 老 note share 状态变化), 详见 stores/notes.ts updateNote.
   updateNote(id: string, data: Partial<Note> & { lockToken?: string; editContext?: { groupId?: string } }) {
     return request<{ data: Note; forked?: boolean; forkedFromNoteId?: string }>(`/notes/${id}`, {
@@ -421,15 +421,15 @@ export const api = {
     });
   },
 
-  // PR #7b: 返回 sharedGroupIds (空数组 = private 笔记). 给 store.deleteNote 派 quink-group-notes-changed
+  // 返回 sharedGroupIds (空数组 = private 笔记). 给 store.deleteNote 派 quink-group-notes-changed
   // 事件让操作者自己的 GroupDetail 重拉 (本地 ref 自管, 收不到自己的 SSE)
-  // PR #12: 加 groupId 参数 (admin 删别人共享笔记时从群组上下文传, 让后端写 deletedInGroupId 进群回收站)
+  // groupId 参数: admin 删别人共享笔记时从群组上下文传, 让后端写 deletedInGroupId 进群回收站
   deleteNote(id: string, opts?: { groupId?: string }) {
     const q = opts?.groupId ? `?groupId=${encodeURIComponent(opts.groupId)}` : '';
     return request<{ message: string; sharedGroupIds: string[] }>(`/notes/${id}${q}`, { method: 'DELETE' });
   },
 
-  // PR #12 群组回收站 (owner+admin 列 / 恢复; 仅 owner 永久删 / 清空)
+  // 群组回收站 (owner+admin 列 / 恢复; 仅 owner 永久删 / 清空)
   getGroupTrash(groupId: string) {
     return request<{ data: any[]; retentionDays: number }>(`/groups/${groupId}/trash`);
   },
@@ -443,7 +443,7 @@ export const api = {
     return request<{ message: string; count: number }>(`/groups/${groupId}/trash`, { method: 'DELETE' });
   },
 
-  // PR #5 编辑锁: 仅 shared 笔记走. 返回 lockToken + expiresAt; 409 已被别人锁返回 lockByNickname
+  // 编辑锁: 仅 shared 笔记走. 返回 lockToken + expiresAt; 409 已被别人锁返回 lockByNickname
   acquireNoteLock(id: string) {
     return request<{ data: { lockToken: string; expiresAt: string } }>(`/notes/${id}/lock`, {
       method: 'POST',
@@ -463,7 +463,7 @@ export const api = {
     return request<{ data: { released: boolean } }>(`/notes/${id}/lock`, { method: 'DELETE' });
   },
 
-  // PR #5b 编辑权限分级: 申请编辑权 / 审批 / 撤销 (改 editPermission 走 updateNote 的 editPermission 字段)
+  // 编辑权限分级: 申请编辑权 / 审批 / 撤销 (改 editPermission 走 updateNote 的 editPermission 字段)
   requestNoteEditPermission(id: string, message?: string) {
     return request<{ data: NoteEditRequest }>(`/notes/${id}/edit-request`, {
       method: 'POST',
@@ -497,18 +497,18 @@ export const api = {
     });
   },
 
-  // PR #7b: 拉编辑历史. NoteDetail "X 人编辑过" 胶囊 popover 用. 仅非作者编辑写历史, 故作者改不出现在列表里.
+  // 拉编辑历史. NoteDetail "X 人编辑过" 胶囊 popover 用. 仅非作者编辑写历史, 故作者改不出现在列表里.
   getNoteEditHistory(id: string) {
     return request<{ data: NoteEditHistoryRow[] }>(`/notes/${id}/edit-history`);
   },
 
-  // PR #9: 另存为副本. 复制 content + 引用原作者抬头 + 归属操作人 + visibility=private.
+  // 另存为副本. 复制 content + 引用原作者抬头 + 归属操作人 + visibility=private.
   // tags / category / pinned / todoStatus / todoDue / parentNoteId 都不复制. 通知原作者 SSE note-duplicated.
   duplicateNote(id: string) {
     return request<{ data: Note }>(`/notes/${id}/duplicate`, { method: 'POST' });
   },
 
-  // 安全审计 S6: 设置我在某群的隐身状态. 隐身: 我上下线不给群其他成员推 presence-changed (但我仍能收所有事件)
+  // 设置我在某群的隐身状态. 隐身: 我上下线不给群其他成员推 presence-changed (但我仍能收所有事件)
   setGroupPresenceMode(groupId: string, hidePresence: boolean) {
     return request<{ data: { hidePresence: boolean } }>(`/groups/${groupId}/members/me/presence-mode`, {
       method: 'PATCH',
@@ -516,7 +516,7 @@ export const api = {
     });
   },
 
-  // PR #5b: 群级汇总 (作者+admin 看), 给群组详情页"编辑申请管理"面板用
+  // 群级汇总 (作者+admin 看), 给群组详情页"编辑申请管理"面板用
   listGroupEditRequests(groupId: string) {
     return request<{ data: GroupNoteEditRequestRow[] }>(`/groups/${groupId}/note-edit-requests`);
   },
@@ -525,7 +525,7 @@ export const api = {
     return request<{ data: GroupNoteEditGrantRow[] }>(`/groups/${groupId}/note-edit-grants`);
   },
 
-  // PR #6 Reactions: toggle 自己的 reaction + 拉汇总. 仅 shared 笔记可用.
+  // Reactions: toggle 自己的 reaction + 拉汇总. 仅 shared 笔记可用.
   toggleNoteReaction(noteId: string, emoji: string) {
     return request<{ data: { action: 'added' | 'removed'; summary: NoteReactionSummaryItem[] } }>(`/notes/${noteId}/reactions`, {
       method: 'POST',
@@ -537,7 +537,7 @@ export const api = {
     return request<{ data: NoteReactionSummaryItem[] }>(`/notes/${noteId}/reactions`);
   },
 
-  // PR #6 Comments: 单层 thread (parentId 后端 normalize). 软删本人+作者+admin 可操作; 编辑仅本人.
+  // Comments: 单层 thread (parentId 后端 normalize). 软删本人+作者+admin 可操作; 编辑仅本人.
   listNoteComments(noteId: string) {
     return request<{ data: NoteComment[] }>(`/notes/${noteId}/comments`);
   },
@@ -890,7 +890,7 @@ export const api = {
     return request<{ message: string }>(`/reminder-channels/${id}/test`, { method: 'POST' });
   },
 
-  // Groups (PR #1 群组共享: 任何注册用户可建群, 邀请链接默认走申请审批模式)
+  // Groups (群组共享: 任何注册用户可建群, 邀请链接默认走申请审批模式)
   getGroups() {
     return request<{ data: Group[] }>('/groups');
   },
@@ -900,7 +900,7 @@ export const api = {
   getGroup(id: string) {
     return request<{ data: GroupDetail }>(`/groups/${id}`);
   },
-  // PR #2 群组共享: 拉群内共享的笔记 (群内置顶 DESC + sharedAt DESC 排序), 含 authorNickname/Avatar + groupPinned 给 NoteCard 用
+  // 群组共享: 拉群内共享的笔记 (群内置顶 DESC + sharedAt DESC 排序), 含 authorNickname/Avatar + groupPinned 给 NoteCard 用
   getGroupNotes(groupId: string, params?: { page?: number; limit?: number }) {
     const qs = params ? '?' + new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString() : '';
     return request<PaginatedResponse<Note>>(`/groups/${groupId}/notes${qs}`);
@@ -915,7 +915,7 @@ export const api = {
   updateGroup(id: string, data: { name?: string; avatar?: string | null; autoJoin?: boolean; announcement?: string | null }) {
     return request<{ data: Group }>(`/groups/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
-  // 解散群: 仅 owner. 后端事务清 groups + group_members + group_join_requests (PR #2 加 note_shares 也要清)
+  // 解散群: 仅 owner. 后端事务清 groups + group_members + group_join_requests + note_shares
   dissolveGroup(id: string) {
     return request<{ message: string }>(`/groups/${id}`, { method: 'DELETE' });
   },
@@ -954,7 +954,7 @@ export const api = {
     return request<{ message: string }>(`/groups/${groupId}/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) });
   },
 
-  // PR #10 通知中心
+  // 通知中心
   getNotifications(params?: { category?: 'content' | 'reminder' | 'group'; page?: number; limit?: number }) {
     const q = new URLSearchParams();
     if (params?.category) q.set('category', params.category);
@@ -985,7 +985,7 @@ export const api = {
     return request<{ data: { deleted: number } }>(`/notifications${qs}`, { method: 'DELETE' });
   },
 
-  // PR #11 提醒分家
+  // 提醒分家
   setPersonalReminder(noteId: string, body: { dueAt: string; rrule?: string | null }) {
     return request<{ data: { noteId: string; dueAt: string; rrule: string | null } }>(`/notes/${noteId}/personal-reminder`, {
       method: 'POST', body: JSON.stringify(body),
@@ -1005,17 +1005,17 @@ export const api = {
   getNoteReminders(noteId: string) {
     return request<{ data: { personal: PersonalReminderRow | null; group: GroupReminderRow[]; muted: boolean } }>(`/notes/${noteId}/reminders`);
   },
-  // 蘑菇 2026-06-08: 卡片级群提醒 mute (跨所有 share 群对该笔记不接收, 仅影响调用者本人)
+  // 卡片级群提醒 mute (跨所有 share 群对该笔记不接收, 仅影响调用者本人)
   muteNoteGroupReminder(noteId: string) {
     return request<{ message: string }>(`/notes/${noteId}/group-reminder/mute`, { method: 'POST' });
   },
   unmuteNoteGroupReminder(noteId: string) {
     return request<{ message: string }>(`/notes/${noteId}/group-reminder/mute`, { method: 'DELETE' });
   },
-  // 蘑菇 2026-06-09: getGroupReminderSubscription / setGroupReminderSubscription 已移除 (开关废)
+  // getGroupReminderSubscription / setGroupReminderSubscription 已移除 (开关废)
 };
 
-// PR #11 提醒分家 type
+// 提醒分家 type
 export interface PersonalReminderRow {
   id: string;
   userId: string;
@@ -1036,7 +1036,7 @@ export interface GroupReminderRow {
   createdAt: string;
 }
 
-// PR #10 通知中心 type
+// 通知中心 type
 // userId optional: list/unread 接口返回带 userId; SSE notification-new payload 不带 (推给收件人本身, 不需要重复字段),
 // 让两种来源都能 typecheck. 前端用不到 userId 字段 (只渲染本人通知)
 export interface NotificationItem {

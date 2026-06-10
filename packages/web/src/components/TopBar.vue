@@ -47,7 +47,7 @@ function toggleBatchType() {
     batchTypePos.value = { top: (r.bottom + 4) + 'px', left: (r.right - 140) + 'px' };
   }
 }
-// PR #9: 批量操作 toast 含 skipped 提示 (群管理员多选含别人笔记时按权限筛, 失败的算 skipped)
+// 批量操作 toast 含 skipped 提示 (群管理员多选含别人笔记时按权限筛, 失败的算 skipped)
 function reportBatch(r: { ok: number; skipped: number }, verb: string) {
   if (r.skipped > 0) toast.show(`已${verb} ${r.ok} 条, 跳过 ${r.skipped} 条无权限`, 'default', 3500);
   else if (r.ok > 0) toast.show(`已${verb} ${r.ok} 条`, 'success', 2000);
@@ -58,7 +58,7 @@ async function pickBatchType(type: 'quink' | 'note' | 'todo') {
   reportBatch(r, '改类型');
 }
 
-// PR #9: 批量删除. 显示 toast (含 skipped)
+// 批量删除. 显示 toast (含 skipped)
 async function doBatchDelete() {
   confirmBatchDelete.value = false;
   const r = await store.batchDelete();
@@ -139,7 +139,7 @@ const filterTags = ref<string[]>([]);
 // filterTypes 默认跟当前 view 对应的类型走 (之前默认全选 3 个 → 用户输关键字搜出 3 类型,
 // 但 view 自己又 filterType 过滤到单类型,看起来"全选了却没全搜"。现在默认值跟 view 对齐,所见即所得)
 function getDefaultFilterTypes(): string[] {
-  // PR #8 命名重整: /quink=灵感=quink, /notes=笔记=note, /todos=待办=todo
+  // 命名约定: /quink=灵感=quink, /notes=笔记=note, /todos=待办=todo
   if (route.path === '/notes') return ['note'];
   if (route.path === '/todos') return ['todo'];
   return ['quink'];
@@ -169,7 +169,7 @@ watch(() => route.path, () => {
   showTagSuggestions.value = false;
   if (store.selectMode) store.toggleSelectMode();
   // 切到不用筛选的 view (消息通知 / 群组 / AI / 设置 等 hideSearch=true 的) 时彻底清掉 filterCategory + 关筛选面板
-  // 之前漏清, 蘑菇报告"进 /notifications /groups 等还能看到旧筛选 chip" — 因为 filterCategory 残留 + showFilters 跟着自动开
+  // 之前漏清, "进 /notifications /groups 等还能看到旧筛选 chip" — 因为 filterCategory 残留 + showFilters 跟着自动开
   if (route.meta.hideSearch) {
     store.filterCategory = '';
     showFilters.value = false;
@@ -230,7 +230,7 @@ watchEffect(() => {
   store.isFiltering = searchFocused.value || showMobileSearch.value || !!store.searchQuery || !!hasFilters.value || showFilters.value;
 });
 
-// PR #8 命名重整: value 跟新字段值一致 (quink=灵感, note=笔记, todo=待办)
+// 命名约定: value 跟字段值一致 (quink=灵感, note=笔记, todo=待办)
 const typeOptions = [
   { value: 'quink', label: '灵感', icon: markRaw(PhLightbulb) },
   { value: 'note', label: '笔记', icon: markRaw(PhNotePencil) },
@@ -514,7 +514,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           <!-- 用 CSS animation 一次完整 360° 旋转 (跟 spinning state 同步 600ms); 之前用 transition transform 在 fetchNotes 极快返回时只看到一瞬抖动 -->
           <PhArrowsClockwise size="0.875rem" weight="fill" :class="{ 'refresh-spin': spinning }" />
         </button>
-        <!-- PR #13 fix (蘑菇 2026-06-08): 群回收站路由下的返回按钮, 紧跟刷新后面让"刷新 返回 标题(N)" 同行 -->
+        <!-- 群回收站路由下的返回按钮, 紧跟刷新后面让"刷新 返回 标题(N)" 同行 -->
         <button v-if="route.name === 'group-trash'" @click="$router.push(`/groups/${route.params.id}`)"
           class="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors" title="返回群详情">
           <PhArrowLeft size="0.875rem" weight="bold" />

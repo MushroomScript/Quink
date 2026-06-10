@@ -6,7 +6,7 @@ import dayjs from 'dayjs';
 
 // 浏览器/Electron 通知: 通过 SSE 推给前端, 前端调 Notification API
 // 不在线时挂 reminder_pending 表, 用户 SSE ready 时补送 (sse 路由内 flushPendingReminders).
-// 不再静默丢弃 — 蘑菇 Q1: 离线提醒会永久丢
+// 不再静默丢弃 (避免离线提醒永久丢)
 export const browserAdapter: AdapterFn = async (ctx) => {
   const payload = {
     noteId: ctx.payload.noteId,

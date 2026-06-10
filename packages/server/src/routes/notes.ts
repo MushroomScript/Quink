@@ -24,12 +24,12 @@ const app = new Hono();
 // 所有笔记路由都需要登录
 app.use('*', authMiddleware);
 
-// 安全审计 M11: content 上限 1MB (100 万字符约 2-3MB markdown 文件). 防恶意巨型笔记打爆 AI quota + DB.
+// content 上限 1MB (100 万字符约 2-3MB markdown 文件). 防恶意巨型笔记打爆 AI quota + DB.
 // 超大 content 走"跳过 AI" 路径 (processNoteWithAi 内 plainTextLen > MAX 时不调 AI). 实际写入仍保留 (用户可能粘了真材实料的 1MB 文章)
 const NOTE_CONTENT_MAX = 1_000_000;
 const NOTE_AI_SKIP_THRESHOLD = 200_000; // 超过 200k 字符跳过 AI 处理防大账单
 
-// PR #13 strict 模式: 未知字段直接 400, 不静默 strip. 防老前端调 todoDue 等已删字段 200 静默忽略
+// strict 模式: 未知字段直接 400, 不静默 strip. 防老前端调 todoDue 等已删字段 200 静默忽略
 const createNoteSchema = z.object({
   content: z.string().min(1).max(NOTE_CONTENT_MAX),
   type: z.enum(['quink', 'note', 'todo']).default('quink'),
@@ -37,8 +37,8 @@ const createNoteSchema = z.object({
   // refine 拒字符串 "未分类": 是系统保留名 (Sidebar/Stats 用它代表 category IS NULL), 防 API 直调写入让笔记"消失"在筛选里
   category: z.string().max(200).nullable().optional().refine((v) => v !== '未分类', { message: '"未分类" 是系统保留名, 笔记 category 字段不能设成此字符串 (用 null 表示未分类)' }),
   tags: z.array(z.string().max(50)).max(50).optional(),
-  // PR #13: todoDue / todoRemindRrule 已移除. 设提醒走 POST /:id/personal-reminder 单独接口
-  // PR #2 群组共享: visibility=private (默认, 仅作者) / visibility=shared 必须给 sharedGroupIds[]
+  // todoDue / todoRemindRrule 已移除. 设提醒走 POST /:id/personal-reminder 单独接口
+  // 群组共享: visibility=private (默认, 仅作者) / visibility=shared 必须给 sharedGroupIds[]
   visibility: z.enum(['private', 'shared']).default('private'),
   sharedGroupIds: z.array(z.string().max(32)).max(100).optional(),
 }).strict();
@@ -52,17 +52,17 @@ const updateNoteSchema = z.object({
   tags: z.array(z.string().max(50)).max(50).optional(),
   type: z.enum(['quink', 'note', 'todo']).optional(),
   todoStatus: z.enum(['pending', 'done']).optional(),
-  // PR #13: todoDue / todoRemindRrule 已移除. 设提醒走 personal-reminder 接口
+  // todoDue / todoRemindRrule 已移除. 设提醒走 personal-reminder 接口
   pinned: z.boolean().optional(),
-  // PR #2: 改可见性 / 重写分享群列表. sharedGroupIds 传值时整批替换 (delete all + insert new)
+  // 改可见性 / 重写分享群列表. sharedGroupIds 传值时整批替换 (delete all + insert new)
   visibility: z.enum(['private', 'shared']).optional(),
   sharedGroupIds: z.array(z.string()).optional(),
-  // PR #5: 编辑共享笔记必须带 lockToken (POST /lock 拿) + version (乐观锁). 私有笔记不需要.
+  // 编辑共享笔记必须带 lockToken (POST /lock 拿) + version (乐观锁). 私有笔记不需要.
   lockToken: z.string().optional(),
   version: z.number().int().positive().optional(),
-  // PR #5b: 改编辑权限, 仅作者能改 (非作者传 → 403)
+  // 改编辑权限, 仅作者能改 (非作者传 → 403)
   editPermission: z.enum(['admin', 'all']).optional(),
-  // PR #7b COW: 改 shared 笔记时透传"从哪个上下文改" (前端按 router /groups/:gid 自动填).
+  // COW: 改 shared 笔记时透传"从哪个上下文改" (前端按 router /groups/:gid 自动填).
   // 非作者改 → 必 fork 到 editContext.groupId 对应的群版本.
   // 作者改 + editContext.groupId 在 + 当前 note 是 root + 分享群数 > 1 → fork 到该群 (只影响该群).
   // 作者改 + 无 editContext.groupId → 直接改 root, 仍连的群都同步 (灵感页修改语义).
@@ -71,10 +71,10 @@ const updateNoteSchema = z.object({
   }).optional(),
 }).strict();
 
-// PR #2 阶段 5c: 广播 'group-notes-changed' 给目标群所有 active 成员 (除操作者).
+// 广播 'group-notes-changed' 给目标群所有 active 成员 (除操作者).
 // POST/PATCH 共享笔记 / 永久删除 共享笔记时调用, 前端在群详情页时自动 reload group feed
 // originClientId: 调用方从 c.req.header('X-Quink-Client-Id') 拿, 透传给 publish 让发起方设备跳过自己发的事件 (其他用户和同账号其他设备的 clientId 不同, 正常处理)
-// 安全审计 S1: per-user per-group 1 次/秒去抖, 防 A 高频 PATCH 让群里 99 人客户端炸开 (每秒 990 API).
+// per-user per-group 1 次/秒去抖, 防 A 高频 PATCH 让群里 99 人客户端炸开 (每秒 990 API).
 // 取舍: 同账号内连续 PATCH 后 SSE 合并到下一秒一次推送, 用户体验上"延迟 ≤1s" 但能挡住 DoS.
 // in-memory map, 进程重启清空 (用单进程模式, 多 worker 部署改 Redis)
 // broadcastNoteShared 抽到 utils/broadcast.ts, 这里只 import. 节流 + dedup 逻辑跟着挪.
@@ -104,9 +104,9 @@ app.get('/', async (c) => {
   // 排序字段: created (默认, 兼容老行为) / updated. 未知值兜底 createdAt 不报错.
   const sortColumn = sort === 'updated' ? schema.notes.updatedAt : schema.notes.createdAt;
 
-  // scope 列表 (PR #7a 后): private 笔记始终显示, sharedDisplay 偏好控制纳入哪些群组共享笔记.
-  // PR #2 遗留: mine (默认, 作者本人全部含 shared) / shared (仅他人共享给我, 兼容旧 API, 现偏好不再映射) / group:<id> (某群可见笔记)
-  // PR #7a 新增 3 个:
+  // scope 列表: private 笔记始终显示, sharedDisplay 偏好控制纳入哪些群组共享笔记.
+  // mine (默认, 作者本人全部含 shared) / shared (仅他人共享给我, 兼容旧 API, 现偏好不再映射) / group:<id> (某群可见笔记)
+  // 另外 3 个:
   //   private        = 仅作者本人 private (偏好 'none', 排除任何 shared)
   //   others_shared  = 作者本人 private + 他人共享给我所在群的 shared (偏好 'others', 排除我分享出去的 shared)
   //   all            = mine + 他人共享给我所在群的 shared (偏好 'all')
@@ -131,7 +131,7 @@ app.get('/', async (c) => {
       ))
     )`);
   } else if (scope === 'shared') {
-    // PR #2 遗留字段. 仅他人共享给我所在群的 shared (不含作者本人 private). sharedDisplay 不映射到此, 保留兼容旧调用方
+    // 遗留字段. 仅他人共享给我所在群的 shared (不含作者本人 private). sharedDisplay 不映射到此, 保留兼容旧调用方
     conditions.push(sql`${schema.notes.id} IN (
       SELECT ns.note_id FROM note_shares ns
       WHERE ns.group_id IN (
@@ -181,7 +181,7 @@ app.get('/', async (c) => {
     // sentinel: 前端 Sidebar "未分类" 虚拟项 / Stats "未分类" 饼图段点击传入, 走 IS NULL 筛 category 为空的笔记
     conditions.push(isNull(schema.notes.category));
   } else if (category) {
-    // 蘑菇 2026-06-09: 之前用 like prefix 匹配 ("设计%" 会命中 "设计稿") 不是有意 → 改 eq 严格匹配分类名
+    // 之前用 like prefix 匹配 ("设计%" 会命中 "设计稿") 不是有意 → 改 eq 严格匹配分类名
     conditions.push(eq(schema.notes.category, category));
   }
   if (types) {
@@ -220,7 +220,7 @@ app.get('/', async (c) => {
     .where(and(...conditions))
     .get();
 
-  // PR #2 阶段 4: 拼 sharedGroupIds (我的 shared 笔记 NoteCard 显示 "N 群" chip 用) +
+  // 拼 sharedGroupIds (我的 shared 笔记 NoteCard 显示 "N 群" chip 用) +
   // scope!=mine 时拼 author info (NoteCard 显示作者头像区分"我的"vs"群里别人发的")
   let data: any[] = results;
   if (results.length > 0) {
@@ -246,9 +246,9 @@ app.get('/', async (c) => {
         .all();
       authorMap = new Map(authors.map(u => [u.id, { nickname: u.nickname, avatar: u.avatar }]));
     }
-    // PR #6: 给 shared 笔记拼 reaction summary + comment count (NoteCard 底部显示). private 笔记跳过.
-    // PR #7b: 给 shared 笔记拼 editorCount (NoteCard 显示"X 人编辑过", 仅算非作者编辑次数, 作者自己改不计).
-    // PR #9: 给 shared 笔记拼 canWrite (NoteCard 预判"点编辑能否进 modal", 没权限直接弹申请对话框).
+    // 给 shared 笔记拼 reaction summary + comment count (NoteCard 底部显示). private 笔记跳过.
+    // 给 shared 笔记拼 editorCount (NoteCard 显示"X 人编辑过", 仅算非作者编辑次数, 作者自己改不计).
+    // 给 shared 笔记拼 canWrite (NoteCard 预判"点编辑能否进 modal", 没权限直接弹申请对话框).
     const sharedNotes = results.filter(n => n.visibility === 'shared');
     const sharedNoteIds = sharedNotes.map(n => n.id);
     const sharedForCanWrite = sharedNotes.map(n => ({
@@ -294,8 +294,8 @@ app.get('/trash', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   // 个人回收站: 作者自己的所有软删 root 笔记 (fork 不进回收站, fork 是某群独占副本不属于作者主视图概念)
-  // PR #12: deletedInGroupId IS NULL 排除群回收站项 (admin 删别人共享笔记走群回收站, 不进作者个人 trash)
-  // 蘑菇 2026-06-08 bug fix: 之前加 "NOT EXISTS active fork" 排除了 root 孤儿场景 (root 最后一份 share 被 fork 走时 root
+  // deletedInGroupId IS NULL 排除群回收站项 (admin 删别人共享笔记走群回收站, 不进作者个人 trash)
+  // 之前加 "NOT EXISTS active fork" 排除了 root 孤儿场景 (root 最后一份 share 被 fork 走时 root
   // 被孤儿处理软删 + visibility=private, 但同时有 fork active → 永远不在作者回收站, 作者找不回原版). 去掉这个条件让孤儿能恢复.
   // 恢复后 root 仍 private, 不撞群里 fork (fork 在群里继续 active 不变)
   const results = await db.select().from(schema.notes)
@@ -307,7 +307,7 @@ app.get('/trash', async (c) => {
     ))
     .orderBy(desc(schema.notes.deletedAt))
     .all();
-  // PR #2: 拼 sharedGroupIds 让 Trash 删除确认窗显示 "已分享到 N 群组"
+  // 拼 sharedGroupIds 让 Trash 删除确认窗显示 "已分享到 N 群组"
   if (results.length === 0) return c.json({ data: results });
   const noteIds = results.map(n => n.id);
   const sharesRows = await db.select({ noteId: schema.noteShares.noteId, groupId: schema.noteShares.groupId })
@@ -358,7 +358,7 @@ app.delete('/trash/:id', async (c) => {
     ? (await db.select({ groupId: schema.noteShares.groupId })
         .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all()).map(s => s.groupId)
     : [];
-  // PR #12: purgeNote 走完整 cascade (清 9 张子表 + notes), 修原只清 noteShares/groupNotePins 漏 noteEditGrants / notePersonalReminders 等 FK
+  // purgeNote 走完整 cascade (清 9 张子表 + notes), 修原只清 noteShares/groupNotePins 漏 noteEditGrants / notePersonalReminders 等 FK
   if (existing) purgeNote(id);
   // 多设备 + 群成员同步: 作者其他设备的回收站列表移除该 id; 群成员 feed 也确认彻底清
   publish(userId, 'note-deleted', { noteId: id }, _ocid);
@@ -373,13 +373,13 @@ app.delete('/trash/:id', async (c) => {
 app.delete('/trash', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
-  // PR #2: 先拿要删的 noteIds 清 note_shares, 再删 notes (单 DELETE 包 subquery 也能但事务更清晰)
+  // 先拿要删的 noteIds 清 note_shares, 再删 notes (单 DELETE 包 subquery 也能但事务更清晰)
   const trashed = await db.select({ id: schema.notes.id }).from(schema.notes)
     .where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`))
     .all();
   if (trashed.length === 0) return c.json({ message: '已清空' });
   const ids = trashed.map(t => t.id);
-  // PR #12: 走完整 cascade purgeNote (修原只清 noteShares/groupNotePins 漏其他 FK 子表)
+  // 走完整 cascade purgeNote (修原只清 noteShares/groupNotePins 漏其他 FK 子表)
   for (const tid of ids) purgeNote(tid);
   // 多设备同步: 作者本人所有设备清空回收站界面 + 主 view cache 标 dirty
   publish(userId, 'trash-cleared', { count: ids.length }, _ocid);
@@ -403,8 +403,8 @@ app.get('/tags', async (c) => {
   return c.json({ data: [...tagSet].sort(new Intl.Collator('zh-Hans-CN').compare) });
 });
 
-// PR #5 / 5b helper: 校验 userId 能否访问 noteId. 作者本人永远放行; 否则必须 visibility='shared' + 我是 note_shares 关联群 active member.
-// mode='read' (默认) 只校验可见; mode='write' 加 PR #5b editPermission 校验:
+// helper: 校验 userId 能否访问 noteId. 作者本人永远放行; 否则必须 visibility='shared' + 我是 note_shares 关联群 active member.
+// mode='read' (默认) 只校验可见; mode='write' 加 editPermission 校验:
 //   editPermission='all' → 所有 active member 都能改
 //   editPermission='admin' → 必须我在共享群里是 owner/admin
 //   都不满足 → 查 note_edit_grants 白名单, 在内则放行 (申请编辑权通过后写入)
@@ -413,7 +413,7 @@ type AccessMode = 'read' | 'write';
 async function getNoteForAccess(userId: string, noteId: string, mode: AccessMode = 'read'): Promise<typeof schema.notes.$inferSelect | null> {
   const note = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId)).get();
   if (!note) return null;
-  // 安全审计 H1 + L1: 软删笔记不能被任何操作访问 (duplicate / lock / PATCH / reaction / comment).
+  // 软删笔记不能被任何操作访问 (duplicate / lock / PATCH / reaction / comment).
   // 作者要恢复请用 /trash/:id/restore. 防被害者删除后他人仍能复制走 (隐私残留)
   if (note.deletedAt) return null;
   // 作者本人无视所有限制 (read + write)
@@ -433,7 +433,7 @@ async function getNoteForAccess(userId: string, noteId: string, mode: AccessMode
     )).all();
   if (myMemberships.length === 0) return null;
   if (mode === 'read') return note;
-  // write 模式: PR #5b editPermission 三档校验
+  // write 模式: editPermission 三档校验
   if (note.editPermission === 'all') return note;
   // editPermission='admin': 在任一共享群是 owner/admin 即可
   if (myMemberships.some(m => m.role === 'owner' || m.role === 'admin')) return note;
@@ -447,10 +447,10 @@ async function getNoteForAccess(userId: string, noteId: string, mode: AccessMode
   return grant ? note : null;
 }
 
-// PR #7b COW 分叉: shared 笔记被非作者改 / 作者从群组页改"还连多群的 root note" 时调用.
+// COW 分叉: shared 笔记被非作者改 / 作者从群组页改"还连多群的 root note" 时调用.
 // 必须在 db.transaction((tx) => ...) 内同步执行. 同步执行: 新建 fork note row (复制 root 内容, parentNoteId 指 root,
 // 清锁, version=1), 转移该群的 note_shares + group_note_pins (从 original 转给 newId), 复制 note_edit_grants 让
-// 作者授权延续到 fork. reactions / comments 不跟随 fork (蘑菇拍板 2026-06-06: 表态属于原内容, 仍留 original).
+// 作者授权延续到 fork. reactions / comments 不跟随 fork (约定: 表态属于原内容, 仍留 original).
 // 单层链: parentNoteId 永远指 root note, 不嵌套 fork-of-fork. 若 original 已是 fork (parentNoteId 非空), 新 fork
 // 仍指向 original.parentNoteId. 返回新 fork 的 note id, 调用方在 tx 内继续 apply updates 到 new row.
 function forkNote(
@@ -526,7 +526,7 @@ function forkNote(
   return newId;
 }
 
-// PR #9: 批量算一组 shared 笔记的 canWrite. 前端 NoteCard 用来预判"点编辑是 openModal 还是弹申请对话框",
+// 批量算一组 shared 笔记的 canWrite. 前端 NoteCard 用来预判"点编辑是 openModal 还是弹申请对话框",
 // 避免没权限的用户进 modal 闪一下后才弹申请窗 (NoteEditModal acquireLock 失败兜底仍保留, 防权限中途被撤罕见 case).
 // 参数 sharedNotes 必须已含 sharedGroupIds (调用方 enrich 阶段批量查过 note_shares 后传入).
 // canWrite = isAuthor || editPermission='all' || 我在任一共享群是 owner/admin || 我在 grants 白名单
@@ -567,7 +567,7 @@ export async function loadCanWriteMap(
   return out;
 }
 
-// PR #7b: 批量拉一组笔记的 distinct editor count (不含作者本人, 作者改不写 history).
+// 批量拉一组笔记的 distinct editor count (不含作者本人, 作者改不写 history).
 // NoteCard 显示"X 人编辑过"用. shared 笔记才查 (private 笔记不会有 history 记录).
 export async function loadEditorCountMap(noteIds: string[]): Promise<Map<string, number>> {
   if (noteIds.length === 0) return new Map();
@@ -588,7 +588,7 @@ export async function loadEditorCountMap(noteIds: string[]): Promise<Map<string,
   return out;
 }
 
-// PR #5b helper: 校验 userId 在某 shared 笔记关联的群里是 owner/admin. 给 DELETE / 审批申请等
+// helper: 校验 userId 在某 shared 笔记关联的群里是 owner/admin. 给 DELETE / 审批申请等
 // "管理操作"用 (普通成员有 write 权限也不应能删 / 批申请). 笔记不存在 / 不是 shared / 无 admin 角色 → false
 async function isAdminOfSharedNote(userId: string, noteId: string): Promise<boolean> {
   const shared = await db.select({ groupId: schema.noteShares.groupId })
@@ -605,15 +605,15 @@ async function isAdminOfSharedNote(userId: string, noteId: string): Promise<bool
   return !!myAdmin;
 }
 
-// PR #5 编辑锁: 5 分钟 TTL + 30s 前端心跳续约 + sendBeacon 离开释放 + cron 60s 兜底清过期.
+// 编辑锁: 5 分钟 TTL + 30s 前端心跳续约 + sendBeacon 离开释放 + cron 60s 兜底清过期.
 // 仅 shared 笔记走锁逻辑 (private 笔记不需协作, lock API 调用会 400).
 const LOCK_TTL_MS = 5 * 60 * 1000;
 
-// PR #6 表情 reaction 固定 5 个白名单 (前端 ReactionBar 同一份). 防极端搞怪 / 垃圾数据 / 兼容性差的 emoji.
+// 表情 reaction 固定 5 个白名单 (前端 ReactionBar 同一份). 防极端搞怪 / 垃圾数据 / 兼容性差的 emoji.
 const ALLOWED_REACTION_EMOJIS = ['👍', '❤️', '🤔', '✅', '😂'] as const;
 type AllowedReactionEmoji = typeof ALLOWED_REACTION_EMOJIS[number];
 
-// PR #6 评论长度上限 (字符数, 中文也算 1). 防灌水 / 过长评论撑爆界面.
+// 评论长度上限 (字符数, 中文也算 1). 防灌水 / 过长评论撑爆界面.
 const COMMENT_MAX_LEN = 1000;
 
 // POST /api/notes/:id/lock — 申请编辑锁. 别人持锁未过期 → 409 带 lockByNickname + expiresAt
@@ -621,7 +621,7 @@ app.post('/:id/lock', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
-  // PR #5b: 用 write mode 校验 - 没编辑权连锁都拿不到, 避免编辑到一半提交才发现没权 (体验差)
+  // 用 read mode 校验 - 没编辑权连锁都拿不到, 避免编辑到一半提交才发现没权 (体验差)
   const note = await getNoteForAccess(userId, id, 'read');
   if (!note) return c.json({ error: '笔记不存在' }, 404);
   if (note.visibility !== 'shared') return c.json({ error: 'private 笔记不需要编辑锁' }, 400);
@@ -678,7 +678,7 @@ app.post('/:id/lock/heartbeat', async (c) => {
     return c.json({ error: 'lock_expired' }, 409);
   }
 
-  // 安全审计 H2: 续约时复核 write 权. 防"用户 X 拿 grant → 申锁 → 作者撤 grant → X 持锁续约阻塞别人 5min" DoS.
+  // 续约时复核 write 权. 防"用户 X 拿 grant → 申锁 → 作者撤 grant → X 持锁续约阻塞别人 5min" DoS.
   // 作者本人始终通过 (write 校验里 author 直接放行); editPermission='all' 也通过; 仅 grant 被撤的情况会拒
   if (note.userId !== userId) {
     const writable = await getNoteForAccess(userId, id, 'write');
@@ -716,7 +716,7 @@ app.delete('/:id/lock', async (c) => {
   return c.json({ data: { released: true } });
 });
 
-// PR #5 cron: 60s 扫一次清过期锁. 兜底 case: 用户没 sendBeacon (浏览器异常关 / 断电), 锁自然过期但 lock_by 留着.
+// cron: 60s 扫一次清过期锁. 兜底 case: 用户没 sendBeacon (浏览器异常关 / 断电), 锁自然过期但 lock_by 留着.
 // scheduler.ts 同款 setInterval 模式, 启动一次, tsx 进程重启自然重新计时.
 export function startEditLockCleanup() {
   setInterval(async () => {
@@ -737,7 +737,7 @@ export function startEditLockCleanup() {
   console.log('[edit-lock cleanup] started, 60s interval');
 }
 
-// PR #5b helper: 给某笔记的"权限审批 / SSE 通知"收件人 = 作者 + 所有共享群的 owner/admin user ids (dedup)
+// helper: 给某笔记的"权限审批 / SSE 通知"收件人 = 作者 + 所有共享群的 owner/admin user ids (dedup)
 async function getNoteAuthorityRecipients(noteId: string): Promise<string[]> {
   const note = await db.select({ userId: schema.notes.userId }).from(schema.notes)
     .where(eq(schema.notes.id, noteId)).get();
@@ -755,13 +755,13 @@ async function getNoteAuthorityRecipients(noteId: string): Promise<string[]> {
   return [...new Set([note.userId, ...admins.map(a => a.userId)])];
 }
 
-// PR #5b 编辑权限申请 API (5 个): 申请 / 同意 / 拒绝 / 列待审申请 / 撤销已授权
+// 编辑权限申请 API (5 个): 申请 / 同意 / 拒绝 / 列待审申请 / 撤销已授权
 // 改 editPermission 走 PATCH /:id 的 editPermission 字段, 不另外加 API. 跟 visibility / sharedGroupIds 同款约定 (仅作者改).
 
-// 安全审计 M8: edit-request rejected 后冷却 24h, 防"循环 rejected 重申请" spam SSE 给作者
+// edit-request rejected 后冷却 24h, 防"循环 rejected 重申请" spam SSE 给作者
 const EDIT_REQUEST_REJECT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
-// 安全审计 M16/S5: 评论 + 申请 message 简单 markdown sanitize. 后端深度防御 (前端 Vditor 也会渲染时过滤).
+// 评论 + 申请 message 简单 markdown sanitize. 后端深度防御 (前端 Vditor 也会渲染时过滤).
 // 拦截 javascript: / data: / vbscript: 等危险 URI scheme, 含在 markdown link href 里
 function sanitizeUserMarkdown(text: string): string {
   if (!text) return text;
@@ -800,7 +800,7 @@ app.post('/:id/edit-request', async (c) => {
     )).get();
   if (existing) return c.json({ data: existing });
 
-  // 安全审计 M8: rejected 后 24h 冷却防 spam
+  // rejected 后 24h 冷却防 spam
   const recentRejected = await db.select().from(schema.noteEditRequests)
     .where(and(
       eq(schema.noteEditRequests.noteId, id),
@@ -820,7 +820,7 @@ app.post('/:id/edit-request', async (c) => {
 
   const reqId = nanoid(12);
   const now = dayjs().toISOString();
-  // 安全审计 M16: sanitize 申请 message 防恶意 markdown 注入 (SSE payload 透传给作者前端渲染)
+  // sanitize 申请 message 防恶意 markdown 注入 (SSE payload 透传给作者前端渲染)
   const sanitizedMessage = message ? sanitizeUserMarkdown(message) : null;
   const newReq: schema.NewNoteEditRequest = {
     id: reqId, noteId: id, userId, status: 'pending', message: sanitizedMessage,
@@ -828,7 +828,7 @@ app.post('/:id/edit-request', async (c) => {
   };
   await db.insert(schema.noteEditRequests).values(newReq);
 
-  // SSE 推作者 + 群 admin (除申请人自己). 安全审计 M3: 透传 _ocid 让同账号其他设备跳过
+  // SSE 推作者 + 群 admin (除申请人自己). 透传 _ocid 让同账号其他设备跳过
   const requester = await db.select({ nickname: schema.users.nickname })
     .from(schema.users).where(eq(schema.users.id, userId)).get();
   const recipients = await getNoteAuthorityRecipients(id);
@@ -839,7 +839,7 @@ app.post('/:id/edit-request', async (c) => {
       requestId: reqId, noteId: id, noteUserId: note.userId,
       requesterId: userId, requesterNickname: requester?.nickname || '群成员', message: sanitizedMessage,
     }, _ocid);
-    // PR #10c: 写入通知中心. body 跟 toast 文案对齐, payload 含 noteId 让 view 点击跳详情
+    // 写入通知中心. body 跟 toast 文案对齐, payload 含 noteId 让 view 点击跳详情
     createNotification(rid, 'content', 'edit-request',
       `${requester?.nickname || '群成员'} 申请编辑你的笔记`,
       sanitizedMessage ? `${snippet}: ${sanitizedMessage}` : snippet,
@@ -881,12 +881,12 @@ app.post('/:id/edit-requests/:reqId/approve', async (c) => {
   publish(req.userId, 'note-edit-request-resolved', {
     requestId: reqId, noteId: id, status: 'approved', handledBy: userId,
   }, _ocid);
-  // PR #10c: 写通知给申请人
+  // 写通知给申请人
   createNotification(req.userId, 'content', 'edit-request-approved',
     '编辑权限申请已通过', noteSnippet(note.content),
     { noteId: id, requestId: reqId },
   ).catch(() => {});
-  // PR #13 补丁: 申请已处理, 标已读所有作者+admin 收到的 edit-request 通知 (不让通知中心仍显红点)
+  // 申请已处理, 标已读所有作者+admin 收到的 edit-request 通知 (不让通知中心仍显红点)
   markRequestNotificationsRead(['edit-request'], reqId).catch(() => {});
   await logAudit(c, 'note.edit_approve', 'note', id, { requestId: reqId, granteeId: req.userId });
   return c.json({ data: { message: '已同意, 申请人已获得永久编辑权' } });
@@ -917,12 +917,12 @@ app.post('/:id/edit-requests/:reqId/reject', async (c) => {
   publish(req.userId, 'note-edit-request-resolved', {
     requestId: reqId, noteId: id, status: 'rejected', handledBy: userId,
   }, _ocid);
-  // PR #10c: 写通知给申请人
+  // 写通知给申请人
   createNotification(req.userId, 'content', 'edit-request-rejected',
     '编辑权限申请被拒绝', noteSnippet(note.content),
     { noteId: id, requestId: reqId },
   ).catch(() => {});
-  // PR #13 补丁: 申请已处理, 标已读所有作者+admin 收到的 edit-request 通知
+  // 申请已处理, 标已读所有作者+admin 收到的 edit-request 通知
   markRequestNotificationsRead(['edit-request'], reqId).catch(() => {});
   await logAudit(c, 'note.edit_reject', 'note', id, { requestId: reqId, requesterId: req.userId });
   return c.json({ data: { message: '已拒绝' } });
@@ -1003,15 +1003,15 @@ app.delete('/:id/edit-grants/:userId', async (c) => {
     eq(schema.noteEditGrants.noteId, id),
     eq(schema.noteEditGrants.userId, targetUserId),
   ));
-  // PR #13 补丁: 推 SSE 给被撤销人让他前端刷 canWrite (NoteCard 预判 / NoteEditModal 进 modal 前判断)
+  // 推 SSE 给被撤销人让他前端刷 canWrite (NoteCard 预判 / NoteEditModal 进 modal 前判断)
   publish(targetUserId, 'note-edit-grant-revoked', { noteId: id }, _ocid);
   await logAudit(c, 'note.edit_grant_revoke', 'note', id, { revokedUserId: targetUserId });
   return c.json({ data: { message: '已撤销编辑权' } });
 });
 
-// PR #7b: GET /api/notes/:id/edit-history - 列编辑历史 (非作者编辑次数). NoteDetail "X 人编辑过" 胶囊 popover 用.
+// GET /api/notes/:id/edit-history - 列编辑历史 (非作者编辑次数). NoteDetail "X 人编辑过" 胶囊 popover 用.
 // 鉴权: getNoteForAccess(read) - 能看到笔记的人都能看历史 (作者 + 共享群 active member). 私有笔记理论上永远空数组但仍能 GET.
-// 安全审计 M6: 跨群信息泄露. 笔记 N 分享给 G1, G2. X 在 G1 改过 → G2 成员通过该 API 知道 X 改过笔记, 即使 X 不在 G2.
+// 跨群信息泄露: 笔记 N 分享给 G1, G2. X 在 G1 改过 → G2 成员通过该 API 知道 X 改过笔记, 即使 X 不在 G2.
 // 修法: 编辑者只列"调用者也在的群里也是成员"的人, 跨群编辑者匿名化 (用 '群成员' 占位 nickname, avatar=null, userId 仍返用于幂等).
 app.get('/:id/edit-history', async (c) => {
   const userId = c.get('userId');
@@ -1033,7 +1033,7 @@ app.get('/:id/edit-history', async (c) => {
     .orderBy(desc(schema.noteEditHistory.editedAt))
     .all();
 
-  // 安全审计 M6: 调用者是作者 → 全显示 (作者本来就知道自己的笔记被谁改过)
+  // 调用者是作者 → 全显示 (作者本来就知道自己的笔记被谁改过)
   // 否则跨群匿名: 编辑者跟我有共同 active 群才显示 nickname/avatar; 没共同群的匿名为 "群成员"
   const isAuthor = note.userId === userId;
   if (isAuthor || rows.length === 0) return c.json({ data: rows });
@@ -1063,13 +1063,13 @@ app.get('/:id/edit-history', async (c) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// PR #6 表情 reaction + 评论 thread (共享笔记互动)
+// 表情 reaction + 评论 thread (共享笔记互动)
 // 鉴权: getNoteForAccess(read) 让所有"能看到笔记"的人都能 reaction / 评论 (跟 read 同范围, 比 write 宽).
 // 范围: 仅 shared 笔记 (private 笔记自己跟自己 reaction / 评论无语义).
 // SSE: broadcastNoteSocial 推该笔记所属群所有 active 成员 + 作者 (除发起人)
 // ─────────────────────────────────────────────────────────────────────────
 
-// PR #6 broadcast 给笔记可见范围内所有人 (该笔记所属群所有 active member ∪ 作者). reaction / comment 增删改用.
+// broadcast 给笔记可见范围内所有人 (该笔记所属群所有 active member ∪ 作者). reaction / comment 增删改用.
 // 跟 broadcastNoteShared (给群 feed reload 用) 不同: 这个直接推 note-level 事件让 NoteDetail / NoteEditModal 增量更新.
 async function broadcastNoteSocial(noteId: string, eventName: string, payload: any, exceptUserId: string, originClientId?: string) {
   const shared = await db.select({ groupId: schema.noteShares.groupId })
@@ -1091,7 +1091,7 @@ async function broadcastNoteSocial(noteId: string, eventName: string, payload: a
   }
 }
 
-// PR #6 helper: 批量拉一组笔记的 reaction summary + comment count, 给列表 API enrich 用
+// helper: 批量拉一组笔记的 reaction summary + comment count, 给列表 API enrich 用
 // (GET /api/notes 主列表, GET /api/groups/:id/notes 群 feed 同款 NoteCard 渲染需要).
 // 只对 shared 笔记有数据 (private 笔记 reaction/comment 不存在表里); private 笔记拉到也是空, 不区分.
 // reactionMap 按白名单 5 个 emoji 固定顺序输出 (有数据的笔记才进 map; 没数据的调用方按缺省视为空 array).
@@ -1135,7 +1135,7 @@ export async function loadSocialMetaMaps(noteIds: string[], userId: string): Pro
   return { reactionMap, commentCountMap };
 }
 
-// PR #6 helper: 拉单笔记 reaction 汇总 (POST/GET reactions 用). 复用 loadSocialMetaMaps 保口径一致.
+// helper: 拉单笔记 reaction 汇总 (POST/GET reactions 用). 复用 loadSocialMetaMaps 保口径一致.
 async function getReactionSummary(noteId: string, userId: string): Promise<Array<{ emoji: string; count: number; mine: boolean }>> {
   const { reactionMap } = await loadSocialMetaMaps([noteId], userId);
   return reactionMap.get(noteId) || ALLOWED_REACTION_EMOJIS.map(e => ({ emoji: e, count: 0, mine: false }));
@@ -1236,7 +1236,7 @@ app.post('/:id/comments', async (c) => {
 
   const cid = nanoid(12);
   const now = dayjs().toISOString();
-  // 安全审计 M16: 评论内容 sanitize 防 javascript: 注入
+  // 评论内容 sanitize 防 javascript: 注入
   const sanitizedContent = sanitizeUserMarkdown(parsed.data.content);
   const newComment: schema.NewNoteComment = {
     id: cid, noteId: id, userId, parentId: normalizedParentId,
@@ -1253,7 +1253,7 @@ app.post('/:id/comments', async (c) => {
     .catch(e => console.error('[comments] broadcast failed:', e));
   // 多设备同步: CommentThread.onCommentAdded 已有 id 去重防重 push
   publish(userId, 'note-comment-added', { noteId: id, comment: enriched }, _ocid);
-  // PR #10c: 写通知给笔记作者 (除非评论的是自己的笔记). reaction 不写通知 (频率太高)
+  // 写通知给笔记作者 (除非评论的是自己的笔记). reaction 不写通知 (频率太高)
   if (note.userId !== userId) {
     createNotification(note.userId, 'content', 'comment-added',
       `${user?.nickname || '用户'} 评论了你的笔记`,
@@ -1312,13 +1312,13 @@ app.patch('/:id/comments/:cid', async (c) => {
   if (comment.userId !== userId) return c.json({ error: '只能编辑自己的评论' }, 403);
 
   const now = dayjs().toISOString();
-  // 安全审计 M16: sanitize 评论内容防恶意 markdown
+  // sanitize 评论内容防恶意 markdown
   const sanitizedContent = sanitizeUserMarkdown(parsed.data.content);
   await db.update(schema.noteComments).set({
     content: sanitizedContent, updatedAt: now,
   }).where(eq(schema.noteComments.id, cid));
 
-  // 安全审计 L2: SSE payload 加 user nickname/avatar (前端组渲染用)
+  // SSE payload 加 user nickname/avatar (前端组渲染用)
   const u = await db.select({ nickname: schema.users.nickname, avatar: schema.users.avatar })
     .from(schema.users).where(eq(schema.users.id, userId)).get();
   broadcastNoteSocial(id, 'note-comment-updated', {
@@ -1354,7 +1354,7 @@ app.delete('/:id/comments/:cid', async (c) => {
   }
 
   const now = dayjs().toISOString();
-  // 安全审计 L4: 删根评论时级联软删所有子评论 (parentId=cid). 防子评论挂死 (前端组 thread 时找不到 parent).
+  // 删根评论时级联软删所有子评论 (parentId=cid). 防子评论挂死 (前端组 thread 时找不到 parent).
   // 单层 thread (二级评论也都归到顶层 cid 作 parentId), 一次 UPDATE 即可清完
   const deletedCommentIds: string[] = [cid];
   if (comment.parentId === null) {
@@ -1408,10 +1408,10 @@ app.get('/:id', async (c) => {
 
   const shares = await db.select({ groupId: schema.noteShares.groupId })
     .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
-  // PR #6: shared 笔记带 reaction summary + comment count, NoteDetail 直接用 (省一个 round trip + SSE 增量更新)
-  // PR #7b: shared 笔记带 editorCount, NoteDetail "X 人编辑过" 胶囊用
-  // PR #9: shared 笔记带 canWrite, NoteCard / NoteDetail 预判"点编辑能否进 modal"
-  // 蘑菇 2026-06-08: enrich authorNickname/Avatar, NoteDetail 顶部 chip 显示别人发布的笔记作者头像+昵称 (跟 NoteCard 一致)
+  // shared 笔记带 reaction summary + comment count, NoteDetail 直接用 (省一个 round trip + SSE 增量更新)
+  // shared 笔记带 editorCount, NoteDetail "X 人编辑过" 胶囊用
+  // shared 笔记带 canWrite, NoteCard / NoteDetail 预判"点编辑能否进 modal"
+  // enrich authorNickname/Avatar, NoteDetail 顶部 chip 显示别人发布的笔记作者头像+昵称 (跟 NoteCard 一致)
   const author = await db.select({ nickname: schema.users.nickname, avatar: schema.users.avatar })
     .from(schema.users).where(eq(schema.users.id, note.userId)).get();
   let enriched: any = {
@@ -1445,7 +1445,7 @@ app.post('/', async (c) => {
   const parsed = createNoteSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
 
-  // PR #2 visibility 校验: shared 必须给非空 sharedGroupIds + 全是我所在的群; private 不能带 sharedGroupIds
+  // visibility 校验: shared 必须给非空 sharedGroupIds + 全是我所在的群; private 不能带 sharedGroupIds
   const visibility = parsed.data.visibility;
   const sharedGroupIds = parsed.data.sharedGroupIds ?? [];
   if (visibility === 'shared' && sharedGroupIds.length === 0) {
@@ -1489,7 +1489,7 @@ app.post('/', async (c) => {
 
   // 异步 AI 处理（不阻塞响应）
   processNoteWithAi(userId, note.id, note.content, note.tags as string[]).catch(() => {});
-  // PR #2 阶段 5c: 通知目标群成员有新笔记 (前端 sse handler 收到后在群详情页 reload feed)
+  // 通知目标群成员有新笔记 (前端 sse handler 收到后在群详情页 reload feed)
   broadcastNoteShared(sharedGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
   // 多设备同步: 给作者本人所有设备 publish (broadcastNoteShared 排除发起人, 同账号其他设备一起被排除; 私有笔记不走 broadcast 也漏)
   publish(userId, 'note-created', { noteId: note.id }, _ocid);
@@ -1500,22 +1500,22 @@ app.post('/', async (c) => {
   return c.json({ data: { ...note, sharedGroupIds } }, 201);
 });
 
-// 安全审计 L7: duplicate per-user rate-limit. 防批量复制刷数据库
+// duplicate per-user rate-limit. 防批量复制刷数据库
 const DUPLICATE_RATE_WINDOW_MS = 60 * 1000;
 const DUPLICATE_RATE_MAX = 30; // 每分钟 30 次, 正常用户够用
 const duplicateRateMap = new Map<string, { count: number; resetAt: number }>();
 
-// POST /api/notes/:id/duplicate — PR #9 "另存为" 副本
+// POST /api/notes/:id/duplicate — "另存为" 副本
 // 鉴权: 能读到笔记的人都能复制 (作者 + 共享群 active member). 复制后副本归调用人.
 // 副本: userId = 当前操作人, visibility = 'private', type 同原, content = 引用块 + 原 content
 // tags / category / pinned / todoStatus / todoDue / parentNoteId / 锁字段 / version 都不复制
-// 通知原作者: SSE 推 'note-duplicated' (前端 toast / PR #10 接通知页)
+// 通知原作者: SSE 推 'note-duplicated' (前端 toast / 通知中心)
 app.post('/:id/duplicate', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
 
-  // 安全审计 L7: rate-limit (per-user) 防批量复制
+  // rate-limit (per-user) 防批量复制
   const nowMs = Date.now();
   const bucket = duplicateRateMap.get(userId);
   if (bucket && bucket.resetAt > nowMs) {
@@ -1530,7 +1530,7 @@ app.post('/:id/duplicate', async (c) => {
   const original = await getNoteForAccess(userId, id, 'read');
   if (!original) return c.json({ error: '笔记不存在' }, 404);
 
-  // 查原作者 nickname 拼引用抬头. 自己复制自己的笔记也加引用块 (语义统一, 蘑菇可后续编辑去掉)
+  // 查原作者 nickname 拼引用抬头. 自己复制自己的笔记也加引用块 (语义统一, 用户可后续编辑去掉)
   const author = await db.select({ nickname: schema.users.nickname }).from(schema.users)
     .where(eq(schema.users.id, original.userId)).get();
   const authorName = author?.nickname || '原作者';
@@ -1563,7 +1563,7 @@ app.post('/:id/duplicate', async (c) => {
 
   // 多设备同步: 操作者本人所有设备主 view 拉新副本
   publish(userId, 'note-created', { noteId: newId }, _ocid);
-  // 通知原作者 (不通知自己复制自己; PR #10 接入通知页前先 toast 顶)
+  // 通知原作者 (不通知自己复制自己)
   if (original.userId !== userId) {
     const dup = await db.select({ nickname: schema.users.nickname }).from(schema.users)
       .where(eq(schema.users.id, userId)).get();
@@ -1573,7 +1573,7 @@ app.post('/:id/duplicate', async (c) => {
       duplicatorId: userId,
       duplicatorNickname: dup?.nickname || '群成员',
     });
-    // PR #10c: 写通知给原作者
+    // 写通知给原作者
     createNotification(original.userId, 'content', 'duplicated',
       `${dup?.nickname || '群成员'} 另存为了你的笔记`,
       noteSnippet(original.content),
@@ -1596,14 +1596,14 @@ app.patch('/:id', async (c) => {
   const parsed = updateNoteSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
 
-  // PR #5: 鉴权扩到 shared 笔记的群成员; PR #5b: 加 write mode 校验 editPermission
+  // 鉴权扩到 shared 笔记的群成员 + write mode 校验 editPermission
   const existing = await getNoteForAccess(userId, id, 'read');
   if (!existing) return c.json({ error: '笔记不存在' }, 404);
 
   const isAuthor = existing.userId === userId;
   const data = parsed.data;
 
-  // PR #5b: 非作者 + shared 笔记 → 检查 write 权限 (editPermission + grants 白名单)
+  // 非作者 + shared 笔记 → 检查 write 权限 (editPermission + grants 白名单)
   if (!isAuthor && existing.visibility === 'shared') {
     const writable = await getNoteForAccess(userId, id, 'write');
     if (!writable) {
@@ -1614,12 +1614,12 @@ app.patch('/:id', async (c) => {
     }
   }
 
-  // PR #5: 非作者编辑共享笔记 → 禁止改 visibility / sharedGroupIds / editPermission (这些是分享设置, 仅作者控)
+  // 非作者编辑共享笔记 → 禁止改 visibility / sharedGroupIds / editPermission (这些是分享设置, 仅作者控)
   if (!isAuthor && (data.visibility !== undefined || data.sharedGroupIds !== undefined || data.editPermission !== undefined)) {
     return c.json({ error: '只有作者可以修改共享设置' }, 403);
   }
 
-  // PR #9 字段权限守卫: 非作者改任何笔记 → 静默剥作者私域字段 (category / tags / pinned) + 改 type / todoStatus
+  // 字段权限守卫: 非作者改任何笔记 → 静默剥作者私域字段 (category / tags / pinned) + 改 type / todoStatus
   // 要先验证我是群组 admin (前端 UI 已隐藏对应入口, 后端兜底防旧客户端 / curl 直调)
   // - category / tags / pinned: 仅作者能改 (含群主管理员都不能改别人的) → 直接 delete
   // - type / todoStatus: 作者 + 群主/管理员能改 → 非作者时查 isAdminOfSharedNote, 否则 delete
@@ -1638,9 +1638,9 @@ app.patch('/:id', async (c) => {
   const updates: Record<string, any> = { updatedAt: now };
 
   // isContentChange / isCollabChange / ctxGroupId / currentShareGroupIds 提前到锁校验之前定义, needLock 跟 fork 决策都用
-  // PR #13 followup (蘑菇 2026-06-09 拖卡片到分类报"需先申请锁"): 拆 isCollabChange (锁判断) vs isContentChange (audit/version).
+  // 拆 isCollabChange (锁判断) vs isContentChange (audit/version):
   //   - isCollabChange: 触发"群成员协作冲突"的字段 (content / summary / tags / type / todoStatus) - 多人撞改场景, 需要锁
-  //   - isContentChange: 含 category (PR #9 作者私域字段, 仅作者能改 - 不涉及协作冲突所以不需锁, 但 audit 仍存快照 + version 乐观锁防多 tab 撞)
+  //   - isContentChange: 含 category (作者私域字段, 仅作者能改 - 不涉及协作冲突所以不需锁, 但 audit 仍存快照 + version 乐观锁防多 tab 撞)
   // 作者拖共享笔记到分类 (改 category): isCollabChange=false → needLock=false 直接通过; isContentChange=true → audit + version 仍跑
   const isCollabChange = (
     data.content !== undefined ||
@@ -1654,14 +1654,14 @@ app.patch('/:id', async (c) => {
   const currentShareGroupIds = (await db.select({ groupId: schema.noteShares.groupId })
     .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all()).map(r => r.groupId);
 
-  // PR #5: shared 笔记必须持锁 + version 校验. private 笔记保持原行为 (作者直接改, 不需锁)
-  // PR #5b (蘑菇 2026-06-07 修订): 唯一免锁场景 = 作者主视图改 root 多群内容. 其它所有 shared 编辑都要锁:
+  // shared 笔记必须持锁 + version 校验. private 笔记保持原行为 (作者直接改, 不需锁)
+  // 唯一免锁场景 = 作者主视图改 root 多群内容. 其它所有 shared 编辑都要锁:
   //   - 非作者改任何 shared 笔记: 协作场景必锁
   //   - 作者改 fork (parentNoteId !== null): fork 是群协作版本
   //   - 作者改 root 单群: 单群 root 等价 fork
   //   - 作者改 root 多群 + 群组页: 该路径会触发 fork (创建该群专属版本), 跟非作者改 root 触发 fork 同款流程
   // 锁主要防"群成员协作时撞改". 作者主视图改多群 root 多设备同步靠 version 乐观锁兜底
-  // PR #13 bug 修: 加 isCollabChange 前置 - 改管理字段 / 作者私域字段 (editPermission / pinned / visibility / sharedGroupIds / category) 时不走锁
+  // 加 isCollabChange 前置 - 改管理字段 / 作者私域字段 (editPermission / pinned / visibility / sharedGroupIds / category) 时不走锁
   const needLock = isCollabChange && existing.visibility === 'shared' && (
     !isAuthor ||                                       // 非作者必锁
     existing.parentNoteId !== null ||                  // 作者改 fork 必锁
@@ -1709,12 +1709,12 @@ app.patch('/:id', async (c) => {
     updates.todoStatus = 'pending';
   }
   if (data.todoStatus !== undefined) updates.todoStatus = data.todoStatus;
-  // PR #13: todoDue / todoRemindRrule 字段已删, 改提醒走 personal-reminder 接口
+  // todoDue / todoRemindRrule 字段已删, 改提醒走 personal-reminder 接口
   if (data.pinned !== undefined) updates.pinned = data.pinned;
-  // PR #5b: 改编辑权限. 仅作者能改 (上面已校验非作者传过来直接 403)
+  // 改编辑权限. 仅作者能改 (上面已校验非作者传过来直接 403)
   if (data.editPermission !== undefined) updates.editPermission = data.editPermission;
 
-  // PR #7b COW fork 决策. shared 笔记被"群组页打开编辑"的非作者 / 作者改 → 可能 fork 到该群专属版本.
+  // COW fork 决策. shared 笔记被"群组页打开编辑"的非作者 / 作者改 → 可能 fork 到该群专属版本.
   // (isContentChange / ctxGroupId / currentShareGroupIds 已在锁校验之前定义, 复用)
   let shouldFork = false;
   let effectiveGroupId: string | undefined = ctxGroupId; // 可能被下面自动推断覆盖 (非作者主视图改时)
@@ -1748,7 +1748,7 @@ app.patch('/:id', async (c) => {
       } else if (!currentShareGroupIds.includes(effectiveGroupId)) {
         return c.json({ error: 'note_not_in_group', message: '该笔记未分享到此群' }, 400);
       }
-      // 安全审计 H9: 校验非作者 X 是 effectiveGroupId 群的 active member, 防伪造 editContext.groupId 让 fork 落到 X 不在的群
+      // 校验非作者 X 是 effectiveGroupId 群的 active member, 防伪造 editContext.groupId 让 fork 落到 X 不在的群
       // 攻击场景: X 在 G1 看到 B 的笔记, 传 editContext.groupId=G2 (X 不在 G2) → fork 落 G2, 挂着 B 名字写 X 的内容 → 身份冒充
       const myActiveInTarget = await db.select({ groupId: schema.groupMembers.groupId })
         .from(schema.groupMembers)
@@ -1766,7 +1766,7 @@ app.patch('/:id', async (c) => {
       if (!currentShareGroupIds.includes(effectiveGroupId)) {
         return c.json({ error: 'note_not_in_group', message: '该笔记未分享到此群' }, 400);
       }
-      // 安全审计 H9: 作者也校验自己是 effectiveGroupId 群的 active member (作者可能已退该群, 不应再 fork 进去)
+      // 作者也校验自己是 effectiveGroupId 群的 active member (作者可能已退该群, 不应再 fork 进去)
       const authorActiveInTarget = await db.select({ groupId: schema.groupMembers.groupId })
         .from(schema.groupMembers)
         .where(and(
@@ -1784,7 +1784,7 @@ app.patch('/:id', async (c) => {
     //  - 作者改 root + 单群 (fork 单群无意义, 不增加无用 fork)
     //  - 作者改 fork (parentNoteId 非空, 已经是该群专属版本, 不二次分叉)
   }
-  // PR #2 改 visibility / sharedGroupIds: 校验后整批替换 note_shares (delete all + insert new)
+  // 改 visibility / sharedGroupIds: 校验后整批替换 note_shares (delete all + insert new)
   // 客户端可以三种方式调: 仅传 visibility (改私密性) / 仅传 sharedGroupIds (改群列表) / 两个一起
   // 注: fork 路径不允许改分享设置 (fork 是"在该群版本上改内容", 改分享设置只有作者从主视图 in-place 改)
   if (shouldFork && (data.visibility !== undefined || data.sharedGroupIds !== undefined)) {
@@ -1801,7 +1801,7 @@ app.patch('/:id', async (c) => {
     if (newVisibility === 'private' && newSharedGroupIds && newSharedGroupIds.length > 0) {
       return c.json({ error: 'visibility=private 不能带 sharedGroupIds' }, 400);
     }
-    // PR #13: shared → private 转换约束 - 仅 root 笔记 + 无 fork 子节点能转 (有 fork = 已被群编辑过, 转 private 会孤立 fork)
+    // shared → private 转换约束 - 仅 root 笔记 + 无 fork 子节点能转 (有 fork = 已被群编辑过, 转 private 会孤立 fork)
     if (existing.visibility === 'shared' && newVisibility === 'private') {
       if (existing.parentNoteId !== null) {
         return c.json({ error: 'fork 笔记不能转 private (它是某群的独占副本)', code: 'fork_cannot_privatize' }, 409);
@@ -1827,7 +1827,7 @@ app.patch('/:id', async (c) => {
     if (data.visibility !== undefined) updates.visibility = data.visibility;
   }
 
-  // PR #7b fork 路径: 事务里 forkNote + apply updates to new note + 写 history (非作者时).
+  // fork 路径: 事务里 forkNote + apply updates to new note + 写 history (非作者时).
   // 不改 original (除 note_shares + group_note_pins 已在 forkNote 内调整). 广播给该群 + 仍连原 note 的其它群.
   if (shouldFork) {
     let newNoteId = '';
@@ -1841,8 +1841,8 @@ app.patch('/:id', async (c) => {
       delete forkUpdates.editLockToken;
       delete forkUpdates.editLockExpiresAt;
       tx.update(schema.notes).set(forkUpdates).where(eq(schema.notes.id, newNoteId)).run();
-      // PR #7b: 持锁人改触发 fork 时, 也要清 original (root) 的锁. 锁是 "PATCH 提交即释放" 语义.
-      // 覆盖 2 个 fork 来源: 非作者改 root + 作者群组页改 root 多群 (蘑菇 2026-06-07 修订规则后作者也持锁).
+      // 持锁人改触发 fork 时, 也要清 original (root) 的锁. 锁是 "PATCH 提交即释放" 语义.
+      // 覆盖 2 个 fork 来源: 非作者改 root + 作者群组页改 root 多群 (修订规则后作者也持锁).
       // 作者主视图改 root 多群免锁不持锁, 不进此分支 (editLockBy 是别人或 null)
       if (existing.editLockBy === userId) {
         tx.update(schema.notes).set({
@@ -1851,7 +1851,7 @@ app.patch('/:id', async (c) => {
           editLockExpiresAt: null,
         }).where(eq(schema.notes.id, id)).run();
       }
-      // PR #7b 孤儿处理 (蘑菇 2026-06-06 拍板, 替代 Corner #4 原 "物理删" 决策):
+      // 孤儿处理 (替代原 "物理删" 决策):
       // forkNote 已删除 (id, effectiveGroupId) 这条 note_shares. 查 existing 剩余 shares 数为 0 →
       // existing 变孤儿 (所有共享群都 fork 走了). 不物理删 (作者可能想保留原稿), 改私密 + 移回收站
       // 让作者可恢复. 锁字段顺便清 (作者 fork 上面没清, 这里补一致性).
@@ -1867,7 +1867,7 @@ app.patch('/:id', async (c) => {
           editLockExpiresAt: null,
         }).where(eq(schema.notes.id, id)).run();
       }
-      // PR #7b history: 非作者改才写 ("原作者发布 · @B 编辑过", 作者自己不算编辑过)
+      // history: 非作者改才写 ("原作者发布 · @B 编辑过", 作者自己不算编辑过)
       if (!isAuthor) {
         tx.insert(schema.noteEditHistory).values({
           id: nanoid(12),
@@ -1882,7 +1882,7 @@ app.patch('/:id', async (c) => {
     broadcastNoteShared(allGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
     // 多设备同步: 给作者本人所有设备 publish 让其他设备 store 拉 fork 新版本
     publish(userId, 'note-updated', { noteId: newNoteId }, _ocid);
-    // 蘑菇 2026-06-08 bug fix: 孤儿处理软删 root 时 publish 'note-deleted' for root id 给原作者, 让其他设备主 view splice 出 root
+    // 孤儿处理软删 root 时 publish 'note-deleted' for root id 给原作者, 让其他设备主 view splice 出 root
     // (本设备 _ocid 跳过, 非作者触发时操作者 clientId 跟作者无关, 作者所有设备都收到)
     if (orphanedRoot) {
       publish(existing.userId, 'note-deleted', { noteId: id }, _ocid);
@@ -1891,7 +1891,7 @@ app.patch('/:id', async (c) => {
       originNoteId: id, groupId: effectiveGroupId, isAuthor,
     });
 
-    // PR #13: fork-by-other 通知 - 非作者改 root 触发 fork 时, 给原作者写一条让他知道笔记在 X 群被 @Y fork 走
+    // fork-by-other 通知 - 非作者改 root 触发 fork 时, 给原作者写一条让他知道笔记在 X 群被 @Y fork 走
     if (!isAuthor && effectiveGroupId) {
       const [group, actor] = await Promise.all([
         db.select({ name: schema.groups.name }).from(schema.groups).where(eq(schema.groups.id, effectiveGroupId)).get(),
@@ -1913,7 +1913,7 @@ app.patch('/:id', async (c) => {
     });
   }
 
-  // 事务: notes update + note_shares 整批替换 + PR #7b 非作者 history 一起跑, 防写一半留脏数据
+  // 事务: notes update + note_shares 整批替换 + 非作者 history 一起跑, 防写一半留脏数据
   db.transaction((tx) => {
     tx.update(schema.notes).set(updates).where(eq(schema.notes.id, id)).run();
     if (willUpdateShares) {
@@ -1924,7 +1924,7 @@ app.patch('/:id', async (c) => {
         ).run();
       }
     }
-    // PR #7b history: 非作者 in-place 改 shared + 改内容 → 写一条 (作者 in-place 改不写)
+    // history: 非作者 in-place 改 shared + 改内容 → 写一条 (作者 in-place 改不写)
     if (!isAuthor && existing.visibility === 'shared' && isContentChange) {
       tx.insert(schema.noteEditHistory).values({
         id: nanoid(12),
@@ -1935,7 +1935,7 @@ app.patch('/:id', async (c) => {
     }
   });
 
-  // PR #2 阶段 5c: 广播给 旧 ∪ 新 groupIds 的成员 (旧群刷掉这条笔记, 新群加上这条笔记 / 内容改了也要同步)
+  // 广播给 旧 ∪ 新 groupIds 的成员 (旧群刷掉这条笔记, 新群加上这条笔记 / 内容改了也要同步)
   if (willUpdateShares) {
     const allGroupIds = [...new Set([...currentShareGroupIds, ...(newSharedGroupIds || [])])];
     broadcastNoteShared(allGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
@@ -1945,7 +1945,7 @@ app.patch('/:id', async (c) => {
   }
   // 多设备同步: 给作者本人所有设备 publish 让其他设备 store 拉单条 refreshSingleNote (复用 scheduler 那条线已有的 note-updated SSE 事件)
   publish(userId, 'note-updated', { noteId: id }, _ocid);
-  // PR #12: 内容变化时拍 before 快照存 audit (跟 delete 时的 snapshot 一致, 让审计可完整回溯任意时刻笔记状态).
+  // 内容变化时拍 before 快照存 audit (跟 delete 时的 snapshot 一致, 让审计可完整回溯任意时刻笔记状态).
   // 仅 isContentChange 存 (pinned/visibility/sharedGroupIds 等管理操作不影响内容, 无快照意义)
   await logAudit(c, 'note.update', 'note', id, {
     fields: Object.keys(updates).filter(k => k !== 'updatedAt'),
@@ -1969,7 +1969,7 @@ app.patch('/:id', async (c) => {
 });
 
 // DELETE /api/notes/:id — 软删除（移入回收站）
-// PR #13 fix (蘑菇规则): 任何人删共享笔记都进所有相关群的回收站 (群 trash query 走 note_shares JOIN).
+// 约定: 任何人删共享笔记都进所有相关群的回收站 (群 trash query 走 note_shares JOIN).
 // 个人 trash 仅 "root 最后一份留存 (parent_note_id IS NULL + 无 fork 子节点)" 显示 (查询时过滤, 写入端不区分).
 // admin 删别人笔记仍写 deletedByUserId (审计 + 通知), 但路径不再依赖 deletedInGroupId.
 // ?groupId= 仍可选传 (audit 记录哪个群上下文发起), 不影响进哪个回收站
@@ -1979,7 +1979,7 @@ app.delete('/:id', async (c) => {
   const { id } = c.req.param();
   const groupIdQuery = c.req.query('groupId');
 
-  // PR #5b: 扩到群 admin 可删共享笔记 (普通成员有 write 权限也不能删, 删除是管理操作)
+  // 扩到群 admin 可删共享笔记 (普通成员有 write 权限也不能删, 删除是管理操作)
   const existing = await getNoteForAccess(userId, id, 'read');
   if (!existing) return c.json({ error: '笔记不存在' }, 404);
   const isAuthor = existing.userId === userId;
@@ -1989,7 +1989,7 @@ app.delete('/:id', async (c) => {
     }
   }
 
-  // PR #7b: 拉 sharedGroupIds 给前端 (操作者自己的 GroupDetail 用本地 ref 自管, 收不到 SSE)
+  // 拉 sharedGroupIds 给前端 (操作者自己的 GroupDetail 用本地 ref 自管, 收不到 SSE)
   let sharedGroupIds: string[] = [];
   if (existing.visibility === 'shared') {
     const shares = await db.select({ groupId: schema.noteShares.groupId })
@@ -1997,7 +1997,7 @@ app.delete('/:id', async (c) => {
     sharedGroupIds = shares.map(s => s.groupId);
   }
 
-  // PR #12 + PR #13 fix: 内容快照 (审计 + 7 天内回收站恢复用. 7 天后永久删时快照仍留 audit_logs)
+  // 内容快照 (审计 + 7 天内回收站恢复用. 7 天后永久删时快照仍留 audit_logs)
   const snapshot = {
     content: existing.content,
     tags: existing.tags,
@@ -2016,14 +2016,14 @@ app.delete('/:id', async (c) => {
     })
     .where(eq(schema.notes.id, id));
 
-  // PR #2 阶段 5c: 软删共享笔记 → 通知群成员 (note_shares 保留但 deletedAt 过滤让 feed 看不到)
+  // 软删共享笔记 → 通知群成员 (note_shares 保留但 deletedAt 过滤让 feed 看不到)
   if (existing.visibility === 'shared' && sharedGroupIds.length > 0) {
     broadcastNoteShared(sharedGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
   }
   // 多设备同步: 作者本人所有设备主 view 移除该 id
   publish(userId, 'note-deleted', { noteId: id }, _ocid);
 
-  // PR #13 fix: 任何人删共享笔记都给所有相关群 owner+admin 发 group-trash-changed 让群回收站 view 刷
+  // 任何人删共享笔记都给所有相关群 owner+admin 发 group-trash-changed 让群回收站 view 刷
   if (existing.visibility === 'shared' && sharedGroupIds.length > 0) {
     const admins = await db.select({ userId: schema.groupMembers.userId, groupId: schema.groupMembers.groupId })
       .from(schema.groupMembers)
@@ -2041,7 +2041,7 @@ app.delete('/:id', async (c) => {
     }
   }
 
-  // PR #12: admin 删别人笔记 → 通知作者. 只在非作者删时发, 作者删自己不通知自己
+  // admin 删别人笔记 → 通知作者. 只在非作者删时发, 作者删自己不通知自己
   if (!isAuthor && sharedGroupIds.length > 0) {
     // 通知 body 提哪个群: 优先 groupIdQuery (前端从上下文传的), fallback 第一个共享群
     const notifyGroupId = (groupIdQuery && sharedGroupIds.includes(groupIdQuery)) ? groupIdQuery : sharedGroupIds[0];
@@ -2066,7 +2066,7 @@ app.delete('/:id', async (c) => {
 /**
  * 异步 AI 处理：自动标签 + 自动分类
  * 不阻塞笔记保存，后台静默执行
- * 安全审计 M11: 巨型 content 跳过 AI 处理防大账单
+ * 巨型 content 跳过 AI 处理防大账单
  */
 async function processNoteWithAi(userId: string, noteId: string, content: string, existingTags: string[]) {
   try {
@@ -2085,7 +2085,7 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
 
     // 摘要长度判断: 排除图片/音频/视频/文档等附件 markdown,只看纯文字长度.
     // 否则"只贴一张图"的笔记 content.length 很大但实际文字 0,触发 AI 摘要后 AI
-    // 回报"无法生成摘要 请提供文本内容"或"内容为空或无法识别"(蘑菇汇报的 G1/G2)
+    // 回报"无法生成摘要 请提供文本内容"或"内容为空或无法识别"
     const plainTextLen = content
       .replace(/!\[[^\]]*\]\([^)]+\)/g, '') // 图片 ![alt](url)
       .replace(/\[[^\]]*\]\([^)]+\.(?:png|jpg|jpeg|gif|webp|svg|webm|mp3|wav|ogg|m4a|mp4|mov|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|txt|md|csv|json)\)/gi, '') // 附件链接
@@ -2093,7 +2093,7 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
 
     // 纯附件笔记 (音频/图片/视频/文档, plainTextLen=0) 跳过 AI 标签 + 分类:
     // content 只是 [语音备忘 30s](xxx.m4a) 这类 markdown 时, AI 会从文件名 / 时间戳里抽
-    // "语音备忘" / "2026-06-09" / 文件名当垃圾标签. 阈值 5 跟 autoTag 内部 cleanContent < 5
+    // "语音备忘" / 日期 / 文件名当垃圾标签. 阈值 5 跟 autoTag 内部 cleanContent < 5
     // 跳过门槛对齐, 但用 plainTextLen 度量 (剥过附件 markdown), 让真正的纯附件笔记被拦下.
     const TAG_MIN_PLAIN_LEN = 5;
     const [tags, category, summary] = await Promise.all([
@@ -2103,7 +2103,7 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
       summaryEnabled && plainTextLen >= summaryMinLen ? autoSummary(userId, content) : Promise.resolve(null),
     ]);
 
-    // 安全审计 H6: AI 异步回填可能跟用户立即 PATCH 撞 race. 仅在原值仍为 null/空时回填,
+    // AI 异步回填可能跟用户立即 PATCH 撞 race. 仅在原值仍为 null/空时回填,
     // 防 AI 返回值覆盖用户手动改的字段 (用户改 tags=['foo'], AI 同时返回 ['bar'] → 不能盖)
     const fresh = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId)).get();
     if (!fresh) return; // 笔记被删了, 静默退出
@@ -2112,7 +2112,7 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
     if (tags.length > 0 && existingTags.length === 0 && freshTags.length === 0) {
       updates.tags = tags;
     }
-    // 不再"AI 返回新分类就自动 insert" (2026-05-29). autoClassify 已经在内部用 {categories} 限定 + 校验,
+    // 不再"AI 返回新分类就自动 insert". autoClassify 已经在内部用 {categories} 限定 + 校验,
     // 返回值要么在 categories 表里要么是 null. category 表只在注册 seed / 用户手动添加时增长.
     if (category && !fresh.category) updates.category = category;
     if (summary && !fresh.summary) updates.summary = summary;
@@ -2125,7 +2125,7 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
 }
 
 // =========================================================
-//  PR #11 提醒分家: 个人提醒 + 群提醒
+//  提醒分家: 个人提醒 + 群提醒
 // =========================================================
 // 个人提醒: 任何 read 权限用户都能设 (自己或别人共享的笔记). UNIQUE (user, note) 自动覆盖旧值.
 // 群提醒: 群 owner/admin 对群内 shared 笔记设 (笔记必须 share 到指定 group_id). UNIQUE (note, group).
@@ -2218,7 +2218,7 @@ app.post('/:id/group-reminder', async (c) => {
     set: { dueAt, rrule: rrule ?? null, remindSentAt: null, createdBy: userId },
   });
   publish(userId, 'data-changed', { scope: 'reminders', noteId: id, groupId }, _ocid);
-  // 蘑菇 2026-06-08 (修订): 设/更新群提醒时给该群 active 成员 (除发起人) 发通知, 跟 scheduler 到点同款规则:
+  // 设/更新群提醒时给该群 active 成员 (除发起人) 发通知, 跟 scheduler 到点同款规则:
   // group_reminder_subscriptions.enabled=false 的成员一律跳过 (用户已明示"不想被该群打扰", 设置事件也算"打扰")
   const members = await db.select({ userId: schema.groupMembers.userId })
     .from(schema.groupMembers)
@@ -2226,7 +2226,7 @@ app.post('/:id/group-reminder', async (c) => {
       eq(schema.groupMembers.groupId, groupId),
       eq(schema.groupMembers.status, 'active'),
     )).all();
-  // 蘑菇 2026-06-09: 移除群级开关过滤, 仅保留卡片级 mute. 群级"接收本群通知"开关已废
+  // 移除群级开关过滤, 仅保留卡片级 mute. 群级"接收本群通知"开关已废
   const memberIds = members.map(m => m.userId);
   const mutes = memberIds.length === 0 ? [] : await db.select({ userId: schema.noteGroupReminderMutes.userId })
     .from(schema.noteGroupReminderMutes).where(and(
@@ -2300,7 +2300,7 @@ app.get('/:id/reminders', async (c) => {
       eq(schema.noteGroupReminders.noteId, id),
       inArray(schema.noteGroupReminders.groupId, myGroupIds),
     )).all();
-  // 蘑菇 2026-06-08: 卡片级 mute 状态 (该用户对这条笔记是否屏蔽群提醒). 给 NoteCard 铃铛斜杠图标 + 菜单文案切换用
+  // 卡片级 mute 状态 (该用户对这条笔记是否屏蔽群提醒). 给 NoteCard 铃铛斜杠图标 + 菜单文案切换用
   const muteRow = await db.select({ noteId: schema.noteGroupReminderMutes.noteId })
     .from(schema.noteGroupReminderMutes).where(and(
       eq(schema.noteGroupReminderMutes.userId, userId),
@@ -2310,7 +2310,7 @@ app.get('/:id/reminders', async (c) => {
 });
 
 // POST /api/notes/:id/group-reminder/mute — 屏蔽本笔记群提醒 (跨所有 share 群生效, 仅影响调用者本人)
-// 蘑菇 2026-06-08: 比群级 group_reminder_subscriptions 更细粒度, 用户对单条待办说"不打扰我"
+// 比群级 group_reminder_subscriptions 更细粒度, 用户对单条待办说"不打扰我"
 app.post('/:id/group-reminder/mute', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id');

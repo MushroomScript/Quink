@@ -18,7 +18,7 @@ export interface PersistedTask {
   total: number;
   status: AttachmentStatus;
   error?: string;
-  // PR fix: 下载完成后保存到的本地绝对路径. 给 dock"打开所在文件夹"按钮用 (shell.showItemInFolder)
+  // 下载完成后保存到的本地绝对路径. 给 dock"打开所在文件夹"按钮用 (shell.showItemInFolder)
   savePath?: string;
 }
 

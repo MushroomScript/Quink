@@ -27,7 +27,7 @@ export function getAdapter(type: string): AdapterFn | undefined {
 }
 
 // 发到该用户的所有 enabled channels, 并发执行 + 单点失败不阻塞其他
-// 蘑菇 2026-06-09: 加 notificationType 参数, 按 channel.types 白名单过滤 (null/空=全收兼容老 row)
+// 加 notificationType 参数, 按 channel.types 白名单过滤 (null/空=全收兼容老 row)
 export async function dispatchToAllChannels(userId: string, payload: ReminderPayload, notificationType?: string): Promise<void> {
   const channels = await db.select().from(schema.reminderChannels)
     .where(and(eq(schema.reminderChannels.userId, userId), eq(schema.reminderChannels.enabled, true)))

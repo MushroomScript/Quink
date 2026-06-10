@@ -13,7 +13,7 @@ const store = useNotesStore();
 const content = ref('');
 const submitting = ref(false);
 const showToast = ref(false);
-// PR #2 群组共享: chip 控制可见性
+// 群组共享: chip 控制可见性
 const visibilityModel = ref<{ visibility: 'private' | 'shared'; sharedGroupIds: string[] }>({
   visibility: 'private',
   sharedGroupIds: [],
@@ -26,7 +26,7 @@ async function submit() {
   try {
     const note = await store.createNote(text, props.defaultType, undefined, visibilityModel.value.visibility, visibilityModel.value.sharedGroupIds);
     content.value = '';
-    // 蘑菇 2026-06-08: 发布后 visibility 重置成 private (跟 RichEditor clearContent 同款), 防上次选的群残留下一条
+    // 发布后 visibility 重置成 private (跟 RichEditor clearContent 同款), 防上次选的群残留下一条
     visibilityModel.value = { visibility: 'private', sharedGroupIds: [] };
     showToast.value = true;
     setTimeout(() => (showToast.value = false), 1500);

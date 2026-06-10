@@ -1,4 +1,4 @@
-// 操作审计日志 helper (蘑菇 2026-06-07 拍板)
+// 操作审计日志 helper
 // 后端所有"写" endpoint 关键位置调 logAudit(c, action, targetType, targetId, meta?)
 // 文本字段为主, 占空间不大 (单条 ~200 字节 × 10 万操作 ~20MB)
 //
@@ -11,7 +11,7 @@
 //   group: group.note_pin / group.note_unpin / group.announcement
 //   file: file.upload / file.delete / file.rename
 //   ai: ai.config_create / ai.config_update / ai.config_delete / ai.chat
-//   notification (PR #10): notification.read / notification.read_all / notification.delete / notification.clear
+//   notification: notification.read / notification.read_all / notification.delete / notification.clear
 //   admin: admin.cleanup_trash (cron 触发的) 等
 //
 // 失败 swallow (不阻塞主流程), console.error 留痕

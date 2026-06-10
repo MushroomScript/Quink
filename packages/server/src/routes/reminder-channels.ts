@@ -13,7 +13,7 @@ app.use('*', authMiddleware);
 
 const channelTypes = ['browser', 'email', 'bark', 'wecom_bot', 'dingtalk_bot', 'feishu_bot', 'telegram', 'webhook'] as const;
 
-// 蘑菇 2026-06-09: types 是通知类型白名单. null/undefined 默认 = 全收 (兼容老 row)
+// types 是通知类型白名单. null/undefined 默认 = 全收 (兼容老 row)
 const createSchema = z.object({
   type: z.enum(channelTypes),
   name: z.string().min(1).max(50),

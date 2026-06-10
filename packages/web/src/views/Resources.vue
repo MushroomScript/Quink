@@ -11,7 +11,7 @@ import { pinyinMatch } from '@/utils/pinyin';
 import AudioPlayer from '@/components/AudioPlayer.vue';
 import PdfThumbnail from '@/components/PdfThumbnail.vue';
 import HeicImage from '@/components/HeicImage.vue';
-// PR #13 hotfix: heicCache.ts 已删, HEIC thumb 走 resolveFileThumbUrl 统一处理 query (无重复)
+// heicCache.ts 已删, HEIC thumb 走 resolveFileThumbUrl 统一处理 query (无重复)
 import VideoThumbnail from '@/components/VideoThumbnail.vue';
 import { preconvert as pdfPreconvert } from '@/utils/pdfCache';
 import { useVideoPreview } from '@/composables/useVideoPreview';

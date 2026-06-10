@@ -1,4 +1,4 @@
-// SSRF 防御 helper (安全审计 H4 + H5)
+// SSRF 防御 helper
 // 用于校验用户提供的 webhook URL / AI baseUrl 等"由用户输入而后端去 fetch"的场景.
 // 防御策略: 协议白名单 (仅 https, dev 允许 http localhost 调试) + DNS 解析后 IP 黑名单 (私有 / loopback / 元数据)
 

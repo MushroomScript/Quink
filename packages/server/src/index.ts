@@ -27,11 +27,11 @@ app.use('*', cors());
 app.use('*', logger());
 
 // Static files (uploaded avatars etc.)
-// PR #3 群组文件授权: query token 鉴权 + files 表查作者 + note_shares 查群可见性.
+// 群组文件授权: query token 鉴权 + files 表查作者 + note_shares 查群可见性.
 // avatar 不入 files 表 → 默认公开放行 (跨用户能看头像). file 入 files 表 → 走鉴权
 app.use('/api/uploads/*', async (c, next) => {
   // 1. 拿 token (优先 Authorization header, fallback query token).
-  // 安全审计 M14: query token 会泄漏到浏览器历史 / referer / 服务器 access log. 优先 header, query 仅在 GET (浏览器直接打开 <img>/<audio> 没法设 header) 时接受
+  // query token 会泄漏到浏览器历史 / referer / 服务器 access log. 优先 header, query 仅在 GET (浏览器直接打开 <img>/<audio> 没法设 header) 时接受
   const queryToken = c.req.query('token');
   const headerAuth = c.req.header('Authorization');
   const headerToken = headerAuth?.startsWith('Bearer ') ? headerAuth.slice(7) : null;
@@ -40,7 +40,7 @@ app.use('/api/uploads/*', async (c, next) => {
   const payload = verifyToken(token);
   if (!payload) return c.json({ error: '登录已过期' }, 401);
   const userId = payload.sub;
-  // 安全审计 M14: 校验 tokenVersion 防"旧 token 在 URL 里复活". 缓存 10s 跟 authMiddleware 同款
+  // 校验 tokenVersion 防"旧 token 在 URL 里复活". 缓存 10s 跟 authMiddleware 同款
   // 不直接 import getCurrentTokenVersion (避免循环 import), 单独查一次 (静态文件请求不频繁, 性能可接受)
   const tvRow = await db.select({ tokenVersion: schema.users.tokenVersion })
     .from(schema.users).where(eq(schema.users.id, userId)).get();
@@ -65,7 +65,7 @@ app.use('/api/uploads/*', async (c, next) => {
   if (file.userId === userId) return next();
 
   // 5. 查 url 是否出现在某 shared 笔记 content + 我是该群 active member → 放行
-  // 安全审计 L8: 改 markdown link 模式精确匹配防"内容里随便提到这文件名"被误绑授权.
+  // markdown link 模式精确匹配防"内容里随便提到这文件名"被误绑授权.
   // 兼容两种 markdown 用法: [label](filename) 跟 ![alt](filename), filename 周围必须是 `(` 跟 `)`/查询参数/空格.
   // 简化版: LIKE '%(${filename})%' OR '%(${filename}?%)' 覆盖 99% 真实用例; 兜底走原 %filename% 作 fallback (放行已知用法 + 保留旧授权)
   const linked = await db.select({ id: schema.notes.id })
@@ -99,7 +99,7 @@ app.use('/api/uploads/*', async (c, next) => {
 
   return next();
 });
-// 安全审计 H11: 静态文件响应加 X-Content-Type-Options: nosniff 防 MIME sniff 绕过, 非白名单类型强制 attachment 让浏览器下载不渲染.
+// 静态文件响应加 X-Content-Type-Options: nosniff 防 MIME sniff 绕过, 非白名单类型强制 attachment 让浏览器下载不渲染.
 // INLINE_EXT 跟 upload.ts BLOCKED_EXT 配套 (svg/html/脚本 上传已拒, 历史遗留经此 disposition=attachment 兜底).
 // 必须 inline 的: 图片 + 音频 + 视频 + PDF (浏览器原生可播放/打开, attachment 会让 <audio>/<video>/PDF viewer 失效)
 const INLINE_EXT = new Set([
@@ -169,7 +169,7 @@ app.get('/api/health', (c) => {
 app.get('/api/stats', authMiddleware, async (c) => {
   const userId = c.get('userId');
 
-  // PR #13: 统计按 origin 维度 - fork 不算新笔记 (parent_note_id IS NULL 才是 origin root, 用户实际创建的)
+  // 统计按 origin 维度 - fork 不算新笔记 (parent_note_id IS NULL 才是 origin root, 用户实际创建的)
   const totalNotes = db.select({ count: sql<number>`count(*)` })
     .from(schema.notes).where(and(
       eq(schema.notes.userId, userId),
@@ -187,8 +187,8 @@ app.get('/api/stats', authMiddleware, async (c) => {
     ).get();
 
   // 每日记录数（热力图）+ 按 type 分组(tooltip 显示当天灵感/笔记/待办各几条)
-  // PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删除
-  // PR #13: parent_note_id IS NULL 过滤 fork (按 origin 维度统计)
+  // 命名约定: quink=灵感, note=笔记, todo=待办. link 类型已废弃删除
+  // parent_note_id IS NULL 过滤 fork (按 origin 维度统计)
   const dailyCounts = db.all(sql`
     SELECT substr(${schema.notes.createdAt}, 1, 10) as date,
       count(*) as count,
@@ -249,7 +249,7 @@ serve({ fetch: app.fetch, port: PORT, hostname: '0.0.0.0' });
 })();
 
 // 启动 + 每 6h 跑一次全量清理 (用户改 trashRetentionDays 时另在 PATCH /me 处单独触发该用户的清理, 见 cleanup.ts)
-// PR #12: cleanGroupTrash 7 天扫 + cleanOldAuditSnapshots 90 天清 audit snapshot 字段防 audit 表爆
+// cleanGroupTrash 7 天扫 + cleanOldAuditSnapshots 90 天清 audit snapshot 字段防 audit 表爆
 import { cleanAllTrash, cleanOldNotifications, cleanGroupTrash, cleanOldAuditSnapshots } from './cleanup.js';
 cleanAllTrash();
 cleanOldNotifications();
@@ -265,5 +265,5 @@ setInterval(() => {
 // 待办提醒 scheduler: 每分钟扫表, 命中 todoDue <= now 的待办 -> 发到所有 enabled channels
 startReminderScheduler();
 
-// PR #5 编辑锁过期清理: 60s 扫一次, 兜底 sendBeacon 未触发的孤儿锁
+// 编辑锁过期清理: 60s 扫一次, 兜底 sendBeacon 未触发的孤儿锁
 startEditLockCleanup();

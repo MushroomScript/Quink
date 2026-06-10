@@ -170,7 +170,7 @@ async function onReopenTask(t: AttachmentTask): Promise<void> {
               <PhArrowDown v-else size="0.75rem" weight="bold" class="text-primary shrink-0" />
               <span class="text-sm text-gray-700 truncate" :title="cleanFilename(t.filename)">{{ cleanFilename(t.filename) }}</span>
             </div>
-            <!-- 状态指示 + 操作按钮. 文件夹按钮放对勾左边 (蘑菇要求) -->
+            <!-- 状态指示 + 操作按钮. 文件夹按钮放对勾左边 -->
             <button
               v-if="t.kind === 'download' && t.status === 'success' && t.savePath && hasShowInFolder"
               @click.stop="onShowInFolder(t)"

@@ -151,15 +151,15 @@ export function startReminderSse() {
     }
   });
 
-  // ── 群组共享 PR #1 SSE 事件 ──
-  // group-join-request: owner 收到 "X 申请加入" → pendingCount++ + toast + 桌面通知 (蘑菇要求 owner 离线/不在 Quink 窗口时能收到)
+  // ── 群组共享 SSE 事件 ──
+  // group-join-request: owner 收到 "X 申请加入" → pendingCount++ + toast + 桌面通知 (owner 离线/不在 Quink 窗口时也能收到)
   es.addEventListener('group-join-request', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as {
         requestId: string; groupId: string; groupName: string;
         applicant: { id: string; username: string; nickname: string; avatar: string | null };
       };
-      // PR #13: toast 砍, PR #14: OS 通知也砍, 由 browser channel 统一触发 (createNotification → dispatch)
+      // toast 砍, OS 通知也砍, 由 browser channel 统一触发 (createNotification → dispatch)
       import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onJoinRequest(data.groupId);
       });
@@ -171,14 +171,14 @@ export function startReminderSse() {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
       if (isMyEvent(data)) return;
-      // OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09 改)
+      // OS 通知由 browser channel 统一触发
       import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onJoinApproved();
       });
     } catch (e) { console.error('[sse] group-join-approved parse failed:', e); }
   });
 
-  // group-join-rejected: 我被拒绝. OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09 改), 此 handler 无 store side effect 实际可删
+  // group-join-rejected: 我被拒绝. OS 通知由 browser channel 统一触发, 此 handler 无 store side effect 实际可删
   es.addEventListener('group-join-rejected', () => {});
 
   // group-dissolved: 我所在群被 owner 解散 → 从 sidebar 移除 + toast + 桌面通知
@@ -186,7 +186,7 @@ export function startReminderSse() {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string };
       if (isMyEvent(data)) return;
-      // OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09 改)
+      // OS 通知由 browser channel 统一触发
       import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onDissolved(data.groupId);
       });
@@ -198,7 +198,7 @@ export function startReminderSse() {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { groupId: string; by: string; self: boolean };
       if (isMyEvent(data)) return;
-      // OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09 改). 自己被踢的 toast 保留 (即时反馈)
+      // OS 通知由 browser channel 统一触发. 自己被踢的 toast 保留 (即时反馈)
       Promise.all([import('@/stores/groups'), import('@/composables/useToast')]).then(([{ useGroupsStore }, { useToast }]) => {
         useGroupsStore().onMemberRemoved(data.groupId, data.self);
         if (data.self) useToast().show('你已被移出群组', 'error');
@@ -218,9 +218,9 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] group-member-joined parse failed:', e); }
   });
 
-  // PR #2 阶段 5c: group-notes-changed - 共享笔记 POST/PATCH/DELETE 时给目标群成员推, 触发群 feed 自动刷新
+  // group-notes-changed - 共享笔记 POST/PATCH/DELETE 时给目标群成员推, 触发群 feed 自动刷新
   // 派 window 事件让 GroupDetail.vue 监听 (sse.ts 拿不到 component instance / router).
-  // PR #7b: 同时让主 view (Inspiration/Notes/Todos) 也同步 — sharedDisplay='all'/'others_shared' 时主 view 显示别人共享笔记.
+  // 同时让主 view (Inspiration/Notes/Todos) 也同步 — sharedDisplay='all'/'others_shared' 时主 view 显示别人共享笔记.
   // store.refreshFromRemote 处理"当前主 view fetchNotes + 跨 view 标 dirty"逻辑
   es.addEventListener('group-notes-changed', (ev) => {
     try {
@@ -233,7 +233,7 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] group-notes-changed parse failed:', e); }
   });
 
-  // PR #12 群组回收站: admin 删共享笔记 / 恢复 / 永久删 / 清空 时 server publish 给该群所有 owner+admin
+  // 群组回收站: admin 删共享笔记 / 恢复 / 永久删 / 清空 时 server publish 给该群所有 owner+admin
   // 让 GroupTrash.vue 实时 reload 列表. 跟 group-notes-changed 同款 window event 模式
   es.addEventListener('group-trash-changed', (ev) => {
     try {
@@ -243,14 +243,14 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] group-trash-changed parse failed:', e); }
   });
 
-  // PR #5b 编辑权限申请: note-edit-request - 申请人提交申请, 作者+群 admin 收实时提示 + 桌面通知
-  // toast 加"同意"action 让收件人一键审批 (拒绝走默认: 不操作即 toast 消失, 后续 PR 加完整审批面板)
+  // 编辑权限申请: note-edit-request - 申请人提交申请, 作者+群 admin 收实时提示 + 桌面通知
+  // toast 加"同意"action 让收件人一键审批 (拒绝走默认: 不操作即 toast 消失, 后续补完整审批面板)
   es.addEventListener('note-edit-request', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as {
         requestId: string; noteId: string; requesterId: string; requesterNickname: string; message: string | null;
       };
-      // PR #13 (蘑菇 2026-06-08 反悔): note-edit-request toast 加回, 只显示「同意」quick-action 按钮.
+      // 调整: note-edit-request toast 加回, 只显示「同意」quick-action 按钮.
       // 「拒绝」/「忽略」不放 toast (避免误点), 走通知中心或 NoteDetail 的"待审申请" section 操作.
       Promise.all([import('@/composables/useToast'), import('@/api')]).then(([{ useToast }, { api }]) => {
         const toast = useToast();
@@ -270,33 +270,33 @@ export function startReminderSse() {
           },
         });
       });
-      // OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09)
+      // OS 通知由 browser channel 统一触发
       // 让 GroupDetail 自动刷新待审列表 (跟 group-notes-changed 同款 window event 模式)
       window.dispatchEvent(new CustomEvent('quink-edit-request-changed'));
     } catch (e) { console.error('[sse] note-edit-request parse failed:', e); }
   });
 
-  // PR #9: note-duplicated - 别人复制了你的笔记, 给原作者 toast + 桌面通知
+  // note-duplicated - 别人复制了你的笔记, 给原作者 toast + 桌面通知
   es.addEventListener('note-duplicated', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as {
         originNoteId: string; newNoteId: string; duplicatorNickname: string;
       };
       if (isMyEvent(data)) return;
-      // toast + OS 通知都砍, 通知中心 + browser channel 统一接管 (蘑菇 2026-06-09)
+      // toast + OS 通知都砍, 通知中心 + browser channel 统一接管
       void data;
     } catch (e) { console.error('[sse] note-duplicated parse failed:', e); }
   });
 
-  // PR #5b: note-edit-request-resolved - 申请人收到处理结果 (approved/rejected)
+  // note-edit-request-resolved - 申请人收到处理结果 (approved/rejected)
   es.addEventListener('note-edit-request-resolved', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; status: 'approved' | 'rejected' };
       if (isMyEvent(data)) return;
       const approved = data.status === 'approved';
-      // OS 通知由 browser channel 统一触发 (蘑菇 2026-06-09)
-      // PR #13 补丁: approved 时刷该笔记 canWrite. 三处需同步: (1) 主 view store viewState (2) 打开的 GroupDetail 群 feed (3) 申请审批面板.
-      // 主 view 用 refreshSingleNote 拉单条; GroupDetail 不在 store, 用 window event quink-edit-request-changed (现有 listener 调 loadEditRequests, 蘑菇 2026-06-08 二次报告 canWrite 没刷 → 同时刷 groupNotes)
+      // OS 通知由 browser channel 统一触发
+      // approved 时刷该笔记 canWrite. 三处需同步: (1) 主 view store viewState (2) 打开的 GroupDetail 群 feed (3) 申请审批面板.
+      // 主 view 用 refreshSingleNote 拉单条; GroupDetail 不在 store, 用 window event quink-edit-request-changed (现有 listener 调 loadEditRequests, canWrite 同时刷 groupNotes)
       if (approved) {
         import('@/stores/notes').then(({ useNotesStore }) => {
           useNotesStore().refreshSingleNote(data.noteId);
@@ -306,7 +306,7 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] note-edit-request-resolved parse failed:', e); }
   });
 
-  // PR #13 补丁: note-edit-grant-revoked - 我的编辑权被撤销 → 刷该笔记 canWrite (后端 enrich 现在返 false)
+  // note-edit-grant-revoked - 我的编辑权被撤销 → 刷该笔记 canWrite (后端 enrich 现在返 false)
   es.addEventListener('note-edit-grant-revoked', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { noteId: string };
@@ -318,7 +318,7 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] note-edit-grant-revoked parse failed:', e); }
   });
 
-// PR #6: 共享笔记 reaction / 评论增删改事件. server publish 给该笔记所属群所有 active member + 作者.
+// 共享笔记 reaction / 评论增删改事件. server publish 给该笔记所属群所有 active member + 作者.
   // 前端 dispatchEvent 让打开的 NoteDetail / NoteEditModal / CommentThread 接住做增量更新.
   // NoteCard 不直接监听 (避免 N 个 listener), 它的 commentCount/reactionSummary 等下次 fetchNotes / group-notes-changed 时同步.
   es.addEventListener('note-reaction-changed', (ev) => {
@@ -386,10 +386,10 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] group-changed parse failed:', e); }
   });
 
-  // PR #10 通知中心 SSE.
+  // 通知中心 SSE.
   // notification-new: 后端 createNotification helper 推给收件人 (本人所有设备). 不带 _originClientId
   // (不是发起人触发的事件, 多设备都该收到). store handler 头插 + 未读数 +1
-  // 蘑菇 2026-06-09: OS 通知不再由前端硬白名单触发, 完全由后端 browser channel.types 配置控制
+  // OS 通知不再由前端硬白名单触发, 完全由后端 browser channel.types 配置控制
   // (Settings 提醒页里勾选哪些 type → browser channel 收到后走 'reminder' SSE handler 弹 OS).
   // 这里只更新通知中心徽章, 不直接弹 OS
   es.addEventListener('notification-new', (ev) => {

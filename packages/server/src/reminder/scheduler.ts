@@ -59,7 +59,7 @@ async function deliverToUser(userId: string, note: { id: string; content: string
     ).catch(() => {});
     return;
   }
-  // 蘑菇 2026-06-09: scheduler 触发的待办到点不再直调 dispatch, 改通过 createNotification 统一走 channel.types 过滤
+  // scheduler 触发的待办到点不再直调 dispatch, 改通过 createNotification 统一走 channel.types 过滤
   publish(userId, 'note-updated', { noteId: note.id });
   createNotification(userId, 'reminder', source === 'group' ? 'group-reminder-due' : 'reminder-due',
     payload.title, payload.body,
@@ -70,7 +70,7 @@ async function deliverToUser(userId: string, note: { id: string; content: string
 async function tick() {
   const nowIso = dayjs().toISOString();
 
-  // ── 1) 个人提醒 (PR #11) ──
+  // ── 1) 个人提醒 ──
   // due_at <= now AND remind_sent_at IS NULL. 命中后 deliver + RRULE 推算下次 / 否则删行
   const personalRows = await db.select().from(schema.notePersonalReminders).where(and(
     sql`${schema.notePersonalReminders.dueAt} <= ${nowIso}`,
@@ -119,7 +119,7 @@ async function tick() {
     }
   }
 
-  // ── 2) 群提醒 (PR #11) ──
+  // ── 2) 群提醒 ──
   // 命中后给群所有 active 成员发, 跳过关闭接收开关的成员. 笔记被删: 所有成员都收"失效"通知
   const groupRows = await db.select().from(schema.noteGroupReminders).where(and(
     sql`${schema.noteGroupReminders.dueAt} <= ${nowIso}`,
@@ -159,7 +159,7 @@ async function tick() {
       )).all();
     if (members.length > 0) {
       const memberIds = members.map(m => m.userId);
-      // 蘑菇 2026-06-09 修订: 群级 group_reminder_subscriptions 开关只控"通知中心相关群事件"
+      // 群级 group_reminder_subscriptions 开关只控"通知中心相关群事件"
       // (如 group-reminder-set 设置通知), 不控待办到点的提醒. 待办到点要单独关 → 卡片级 mute.
       // 此处移除 subMap 过滤, 仅保留 mutedSet (笔记级 mute)
       const mutes = await db.select({ userId: schema.noteGroupReminderMutes.userId })
@@ -188,7 +188,7 @@ async function tick() {
     }
   }
 
-  // PR #13: 老 notes.todo_due legacy 扫描路径已移除. 前端 PR #11b 切完 personal_reminders 接口,
+  // 老 notes.todo_due legacy 扫描路径已移除. 前端切完 personal_reminders 接口,
   // 启动迁移 personal_reminder_migration_v1 把 notes.todo_due 全量迁过去 (db/index.ts), 没漏网.
   const total = personalRows.length + groupRows.length;
   if (total > 0) console.log(`[reminder/scheduler] tick: personal=${personalRows.length}, group=${groupRows.length}`);

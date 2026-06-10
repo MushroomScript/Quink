@@ -3,7 +3,7 @@ import { validateOutboundUrl, sanitizeFetchError } from '../../utils/urlGuard.js
 
 // 通用 webhook: POST 自定义 URL, body 是 JSON {title, body, remindAt, noteId}
 // config: { url, method?, headers?(JSON 对象) }
-// 安全审计 H4 + M18: 校验 URL 防 SSRF + header key 黑名单防 Host/Connection 等 hop-by-hop 头注入
+// 校验 URL 防 SSRF + header key 黑名单防 Host/Connection 等 hop-by-hop 头注入
 const BLOCKED_HEADER_KEYS = new Set([
   'host', 'connection', 'content-length', 'transfer-encoding',
   'cookie', 'authorization-source', 'x-forwarded-for', 'x-real-ip', 'x-forwarded-host',

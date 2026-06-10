@@ -2,7 +2,7 @@
 // 用途: 所有写操作 API 请求带 X-Quink-Client-Id header, server publish SSE 时把 originClientId 附在 payload.
 // 前端 SSE handler 检查 _originClientId === 自己 clientId → 是则跳过 (本设备已经在 PATCH/POST 时直接 mutate UI, 不需要 SSE 二次触发).
 //
-// 为啥 sessionStorage 不是 localStorage: localStorage 跨 tab 共享 → 一个 tab 写另一个 tab 收不到自己发的 SSE → 永远跳过 → 其他 tab 看不到更新.
+// 不用 localStorage 的原因: localStorage 跨 tab 共享 → 一个 tab 写另一个 tab 收不到自己发的 SSE → 永远跳过 → 其他 tab 看不到更新.
 // sessionStorage 每 tab 独立, A tab 写时 originClientId=A, B tab 收到时 _originClientId=A ≠ B → 不跳过 → B 正常处理.
 
 const CLIENT_ID_KEY = 'quink_client_id';

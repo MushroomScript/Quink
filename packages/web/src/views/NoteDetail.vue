@@ -53,7 +53,7 @@ const note = ref<Note | null>(null);
 const rendered = ref('');
 const loading = ref(true);
 
-// PR #5b 详情页分享设置
+// 详情页分享设置
 const isMyNote = computed(() => note.value && (!note.value.userId || note.value.userId === auth.user?.id));
 const isShared = computed(() => note.value?.visibility === 'shared');
 const sharedGroupIds = computed(() => note.value?.sharedGroupIds ?? []);
@@ -72,7 +72,7 @@ async function loadEditGrants() {
   } catch { editGrants.value = []; }
 }
 
-// PR #13 补丁 3: 待审编辑申请 section (仅 shared + 作者本人 + 有 pending 申请). 复用 GroupDetail 同款 API
+// 待审编辑申请 section (仅 shared + 作者本人 + 有 pending 申请). 复用 GroupDetail 同款 API
 const editRequests = ref<NoteEditRequest[]>([]);
 const dismissedEditRequestIds = ref<Set<string>>(new Set());
 const visibleEditRequests = computed(() => editRequests.value.filter(r => !dismissedEditRequestIds.value.has(r.id)));
@@ -127,7 +127,7 @@ async function setEditPermission(perm: 'admin' | 'all') {
 const confirmRevokeGrant = ref<{ userId: string; nickname: string } | null>(null);
 useEscToClose(confirmRevokeGrant, null);
 function askRevokeGrant(userId: string, nickname: string) {
-  // PR #13 bug 修: 同时关 grants popover, 防 popover (z=9999) 浮在 modal (z=200) 之上挡住确认按钮
+  // bug 修: 同时关 grants popover, 防 popover (z=9999) 浮在 modal (z=200) 之上挡住确认按钮
   showGrantsPopup.value = false;
   confirmRevokeGrant.value = { userId, nickname };
 }
@@ -148,7 +148,7 @@ const showSharedGroupsPopup = ref(false);
 // 已授权 popover: 收到胶囊里, 点击展开 (不常用功能不独占一行)
 const showGrantsPopup = ref(false);
 
-// PR #7b: 编辑历史 popover (作者 + 群成员都能看, 仅 shared + editorCount > 0 显示). lazy load 不预拉.
+// 编辑历史 popover (作者 + 群成员都能看, 仅 shared + editorCount > 0 显示). lazy load 不预拉.
 const editorCount = computed(() => note.value?.editorCount ?? 0);
 const editHistory = ref<NoteEditHistoryRow[]>([]);
 const showEditHistoryPopup = ref(false);
@@ -170,9 +170,9 @@ const detailTitle = inject<Ref<string>>('detailTitle');
 const hasRefPreviewPending = inject<Ref<boolean>>('hasRefPreviewPending');
 const restoreRefPreview = inject<() => void>('restoreRefPreview');
 
-// PR #8 命名重整: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
+// 命名约定: quink=灵感, note=笔记, todo=待办. link 类型已废弃删
 const typeLabels: Record<string, string> = { quink: '灵感', note: '笔记', todo: '待办' };
-// 蘑菇 2026-06-08: type chip 颜色跟 NoteCard 完全一致 (之前 NoteDetail 三种 type 都用同主题色看着错乱)
+// type chip 颜色跟 NoteCard 完全一致 (避免三种 type 都用同主题色看着错乱)
 // quink 固定 blueberry 不跟主题 (.type-chip-quink 定义在 style.css 含 dark 适配)
 const typeColor: Record<string, string> = {
   quink: 'type-chip-quink',
@@ -213,7 +213,7 @@ async function loadNote() {
     note.value = res.data;
     if (detailTitle) detailTitle.value = typeLabels[res.data.type] + '详情';
     // 不直接渲染,let watch(note.value.content) 自动触发 renderContent(避免双重渲染)
-    // PR #5b: shared 笔记并发拉群名 + 已授权列表
+    // shared 笔记并发拉群名 + 已授权列表
     if (res.data.visibility === 'shared') {
       if (groupsStore.groups.length === 0) groupsStore.loadGroups().catch(() => {});
       loadEditGrants();
@@ -326,7 +326,7 @@ async function toggleTodo() {
   showMenu.value = false;
 }
 
-// 待办提醒: 点菜单"设置/编辑提醒" → 弹 ReminderPicker. PR #13 切到 personal-reminder 接口.
+// 待办提醒: 点菜单"设置/编辑提醒" → 弹 ReminderPicker. 走 personal-reminder 接口.
 const reminderPickerOpen = ref(false);
 const myPersonalReminder = ref<{ dueAt: string; rrule: string | null } | null>(null);
 const myGroupReminders = ref<Array<{ groupId: string; dueAt: string; rrule: string | null }>>([]);
@@ -342,7 +342,7 @@ async function loadReminder() {
     console.error('[NoteDetail] loadReminder failed:', e);
   }
 }
-// 蘑菇 2026-06-09: 个人提醒 + 群提醒并存时两个 chip 一起显示 (个人在前, 整行右对齐). 群名退到 title hover.
+// 个人提醒 + 群提醒并存时两个 chip 一起显示 (个人在前, 整行右对齐). 群名退到 title hover.
 function fmtReminder(dueAt: string) { return dayjs(dueAt).format('YYYY-MM-DD HH:mm'); }
 const groupReminderName = computed(() => {
   const gid = myGroupReminders.value[0]?.groupId;
@@ -367,7 +367,7 @@ function openReminderPicker() {
 }
 async function saveReminder(payload: { remindAt: string | null; rrule: string | null }) {
   if (!note.value) return;
-  // PR #13: 切到 personal-reminder 接口 (老 todoDue/todoRemindRrule schema 列已删)
+  // 切到 personal-reminder 接口 (老 todoDue/todoRemindRrule schema 列已删)
   try {
     if (payload.remindAt) {
       await api.setPersonalReminder(note.value.id, { dueAt: payload.remindAt, rrule: payload.rrule });
@@ -394,7 +394,7 @@ async function doDelete() {
   // 留个 snapshot 给撤销用 (跳页后 note ref 会被清, 必须先拷贝)
   const snapshot = { ...note.value };
   confirmDelete.value = false;
-  // PR #7b: try-catch 兜底 — 后端 403 / 网络错时之前 await throw 后续语句全跳过 = "什么都不提示"
+  // try-catch 兜底 — 后端 403 / 网络错时之前 await throw 后续语句全跳过 = "什么都不提示"
   try {
     await store.deleteNote(id);
   } catch (e: any) {
@@ -435,7 +435,7 @@ function onKeydown(e: KeyboardEvent) {
   goBack();
 }
 
-// PR #6: reaction summary 本地 ref 让 ReactionBar 走 v-model 模式. loadNote 完成后从 note.value 同步过来.
+// reaction summary 本地 ref 让 ReactionBar 走 v-model 模式. loadNote 完成后从 note.value 同步过来.
 // SSE 别人 reaction 变化时增量更新 (server publish 给所有共享群成员 + 作者).
 const reactionSummary = ref<NoteReactionSummaryItem[]>([]);
 function onReactionUpdate(newSummary: NoteReactionSummaryItem[]) {
@@ -487,7 +487,7 @@ onUnmounted(() => {
         </button>
         <div class="flex items-center gap-2 min-w-0">
           <span class="text-xs px-2 py-0.5 rounded-full font-medium shrink-0 whitespace-nowrap" :class="typeColor[note.type]">{{ typeLabels[note.type] }}</span>
-          <!-- 蘑菇 2026-06-08: 跟 NoteCard 同款"已分享"/作者头像 chip -->
+          <!-- 跟 NoteCard 同款"已分享"/作者头像 chip -->
           <span v-if="isMyNote && isShared && sharedCount > 0"
             class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark select-none shrink-0 whitespace-nowrap"
             :title="`已分享到 ${sharedCount} 个群`">
@@ -541,7 +541,7 @@ onUnmounted(() => {
               <PhBell size="0.875rem" weight="fill" />
               <span>{{ myPersonalReminder ? '编辑个人提醒' : '设置个人提醒' }}</span>
             </button>
-            <!-- 蘑菇 2026-06-08: 屏蔽此待办的群提醒 toggle, 跟 NoteCard 同款. 仅有可见群提醒时显示 -->
+            <!-- 屏蔽此待办的群提醒 toggle, 跟 NoteCard 同款. 仅有可见群提醒时显示 -->
             <button v-if="note.type === 'todo' && myGroupReminders.length > 0" @click.stop="toggleGroupReminderMute(); showMenu = false"
               class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
               <PhBellSlash v-if="!groupReminderMuted" size="0.875rem" weight="fill" />
@@ -549,7 +549,7 @@ onUnmounted(() => {
               <span>{{ groupReminderMuted ? '恢复此待办群提醒' : '屏蔽此待办群提醒' }}</span>
             </button>
             <div class="border-t border-gray-100 my-0.5"></div>
-            <!-- 移至类型 (PR #8 命名重整: quink=灵感, note=笔记): 当前 type 不显示, 避免"移至自身"无效项 -->
+            <!-- 移至类型 (quink=灵感, note=笔记): 当前 type 不显示, 避免"移至自身"无效项 -->
             <button v-if="note.type !== 'quink'" @click.stop="moveTo('quink')"
               class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors">
               <PhLightbulb size="0.875rem" weight="fill" />
@@ -565,7 +565,7 @@ onUnmounted(() => {
               <PhCheckSquare size="0.875rem" weight="fill" />
               <span>移至待办</span>
             </button>
-            <!-- PR #7b: 非作者不显示删除按钮. NoteDetail 是独立 route 拿不到群上下文,
+            <!-- 非作者不显示删除按钮. NoteDetail 是独立 route 拿不到群上下文,
                  无法判断我是否该笔记某共享群的 admin → 别人的笔记一律隐藏删除, 让用户去群组页 NoteCard 删 -->
             <div v-if="isMyNote" class="border-t border-gray-100 my-0.5"></div>
             <button v-if="isMyNote" @click.stop="askDelete()"
@@ -615,11 +615,11 @@ onUnmounted(() => {
         <span v-for="tag in note.tags" :key="tag" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">#{{ tag }}</span>
       </div>
 
-      <!-- 蘑菇 2026-06-09: 分享设置 (左, 仅作者+shared) + 提醒 chips (右, todo + 有提醒) 合并成一行. 任一条件成立都显示这行.
+      <!-- 分享设置 (左, 仅作者+shared) + 提醒 chips (右, todo + 有提醒) 合并成一行. 任一条件成立都显示这行.
            -mt-4 抵消顶部 header 的 mb-6, 视觉间距 ~8px 紧贴 (跟其他次级行同款风格) -->
       <div v-if="(isShared && isMyNote) || (note.type === 'todo' && (myPersonalReminder || myGroupReminders.length > 0))"
         class="-mt-4 mb-4 flex items-center gap-2 text-xs relative flex-wrap">
-        <!-- 左: PR #5b 分享设置 (仅 shared + 作者本人) -->
+        <!-- 左: 分享设置 (仅 shared + 作者本人) -->
         <template v-if="isShared && isMyNote">
           <button @click.stop="showSharedGroupsPopup = !showSharedGroupsPopup; showGrantsPopup = false"
             class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
@@ -632,7 +632,7 @@ onUnmounted(() => {
             {{ (note.editPermission || 'admin') === 'admin' ? '管理员可编辑' : '所有人可编辑' }}
             <PhArrowsClockwise size="0.75rem" weight="bold" />
           </button>
-          <!-- PR #5b: 已授权小胶囊 (仅 editPermission=admin 时有意义: 'all' 时所有人都能改, 白名单无用; >0 条才显示).
+          <!-- 已授权小胶囊 (仅 editPermission=admin 时有意义: 'all' 时所有人都能改, 白名单无用; >0 条才显示).
                包独立 relative 容器让 popover 锚定到按钮下方而非整行右边 -->
           <span v-if="(note.editPermission || 'admin') === 'admin' && editGrants.length > 0" class="relative inline-block">
             <button @click.stop="showGrantsPopup = !showGrantsPopup; showSharedGroupsPopup = false"
@@ -704,7 +704,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- PR #13 补丁 3: 待审编辑申请 section (仅 shared + 作者本人 + 有 pending). 同意/拒绝调 API, 忽略仅本地隐藏 -->
+      <!-- 待审编辑申请 section (仅 shared + 作者本人 + 有 pending). 同意/拒绝调 API, 忽略仅本地隐藏 -->
       <section v-if="isShared && isMyNote && visibleEditRequests.length > 0"
         class="mb-4 bg-gray-50 rounded-xl p-4">
         <h3 class="text-sm font-medium mb-3">待审编辑申请 ({{ visibleEditRequests.length }})</h3>
@@ -744,7 +744,7 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <!-- PR #7b: 编辑历史行 (shared 笔记 + editorCount > 0 时显示). 跟分享设置行分开避免破坏 isMyNote 条件. -->
+      <!-- 编辑历史行 (shared 笔记 + editorCount > 0 时显示). 跟分享设置行分开避免破坏 isMyNote 条件. -->
       <div v-if="isShared && editorCount > 0" class="mb-4 flex items-center gap-2 text-xs relative flex-wrap">
         <span class="relative inline-block">
           <button @click.stop="toggleEditHistory"
@@ -777,7 +777,7 @@ onUnmounted(() => {
           @click="showEditHistoryPopup = false" />
       </div>
 
-      <!-- PR #5b 撤销授权确认 modal -->
+      <!-- 撤销授权确认 modal -->
       <Teleport to="body">
         <Transition name="modal">
           <div v-if="confirmRevokeGrant" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
@@ -803,7 +803,7 @@ onUnmounted(() => {
         <div class="vditor-reset" v-html="rendered" />
       </div>
 
-      <!-- PR #6: 共享笔记的 reaction + 评论区 (private 笔记无意义不显示) -->
+      <!-- 共享笔记的 reaction + 评论区 (private 笔记无意义不显示) -->
       <section v-if="isShared" class="mt-4 bg-white rounded-2xl shadow-sm p-6 md:p-8">
         <div class="mb-4">
           <h3 class="text-xs font-medium text-gray-500 mb-2">反应</h3>

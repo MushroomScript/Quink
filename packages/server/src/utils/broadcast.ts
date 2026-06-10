@@ -1,4 +1,4 @@
-// 跨 endpoint 共用的 SSE 广播 helper. 历史定义在 routes/notes.ts 内私有, PR #12 抽出复用.
+// 跨 endpoint 共用的 SSE 广播 helper. 历史定义在 routes/notes.ts 内私有, 后抽出复用.
 // 当前包: broadcastNoteShared (shared 笔记内容/分享变化时通知群成员刷 feed).
 // 后续要加 broadcastNoteSocial / broadcastGroupChanged 等也归这里, 跟 reminder/bus.ts 的 publish 区分:
 // - publish: 单点推送给某 userId 所有 SSE 连接

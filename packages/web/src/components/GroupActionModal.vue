@@ -138,7 +138,7 @@ watch(opened, (v) => { if (!v) emit('close'); });
             style="padding-top: 7px; padding-bottom: 9px;"
             class="w-full px-3 mb-4 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/20" />
 
-          <!-- 状态区: 格式错 / loading / 服务端错 / preview, 互斥, 占位高度统一防抖. 默认空白不放提示文字 (蘑菇要求) -->
+          <!-- 状态区: 格式错 / loading / 服务端错 / preview, 互斥, 占位高度统一防抖. 默认空白不放提示文字 -->
           <div class="min-h-[5.5rem]">
             <!-- 格式错 -->
             <p v-if="parseError" class="text-xs text-red-500 py-2">{{ parseError }}</p>
@@ -152,7 +152,7 @@ watch(opened, (v) => { if (!v) emit('close'); });
             <!-- 服务端错 (token 无效/过期) -->
             <p v-else-if="errorMsg" class="text-xs text-red-500 py-2">{{ errorMsg }}</p>
 
-            <!-- 预览卡: 头像 + 群名 + 成员数 + 加入方式. items-center 让文字垂直居中, 上下 padding 等距 (蘑菇要求) -->
+            <!-- 预览卡: 头像 + 群名 + 成员数 + 加入方式. items-center 让文字垂直居中, 上下 padding 等距 -->
             <div v-else-if="preview" class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
               <img v-if="preview.avatar" :src="resolveFileThumbUrl(preview.avatar)"
                 @error="thumbErrorFallback($event, resolveFileUrl(preview.avatar))"
@@ -160,7 +160,7 @@ watch(opened, (v) => { if (!v) emit('close'); });
               <div v-else class="w-12 h-12 rounded-lg bg-primary/15 text-primary-dark flex items-center justify-center shrink-0">
                 <PhUsersThree size="1.5rem" weight="fill" />
               </div>
-              <!-- 文字整块上移 2px (蘑菇微调), 保持中间字间距不变 -->
+              <!-- 文字整块上移 2px, 保持中间字间距不变 -->
               <div class="flex-1 min-w-0 -translate-y-0.5">
                 <p class="text-sm font-medium text-gray-800 truncate">{{ preview.name }}</p>
                 <p class="text-xs text-gray-400 mt-0.5">

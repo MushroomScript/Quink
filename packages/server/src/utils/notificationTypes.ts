@@ -1,4 +1,4 @@
-// 蘑菇 2026-06-09: 通知类型全清单 + 3 category 分组. server + 前端 Settings UI 共用.
+// 通知类型全清单 + 3 category 分组. server + 前端 Settings UI 共用.
 // channel.types 白名单字段存这里面的 type 字符串. 加新通知 type 必须同步加这文件.
 
 export interface NotificationTypeMeta {

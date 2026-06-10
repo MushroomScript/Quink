@@ -14,7 +14,7 @@ declare global {
 
 function syncTokenToDesktop(token: string | null) {
   // 双层 optional chaining: `?.syncToken?.()` 防止 quinkDesktop truthy 但 syncToken undefined 触发
-  // TypeError → fetchMe catch 把 user 设 null → "请先登录" 假象 (preload.ts 历史踩过). 现在
+  // TypeError → fetchMe catch 把 user 设 null → "请先登录" 假象 (preload.ts 历史出现过). 现在
   // shortcut preload 也注入了 syncToken no-op 不会出问题, 但 ?.()  保险防未来类似 footgun.
   window.quinkDesktop?.syncToken?.(token);
 }

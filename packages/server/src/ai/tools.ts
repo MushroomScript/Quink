@@ -139,7 +139,7 @@ export const TOOL_DEFINITIONS = [
     type: 'function' as const,
     function: {
       name: 'update_note',
-      description: '更新一条笔记的内容、分类、标签、待办状态或置顶状态。PR #13: 若笔记分享到多个群 (root 多群 share), 默认会拒绝并返回提问, 需用户确认后传 confirmMultiGroupSync=true 才真改 (改后所有群同步).',
+      description: '更新一条笔记的内容、分类、标签、待办状态或置顶状态。若笔记分享到多个群 (root 多群 share), 默认会拒绝并返回提问, 需用户确认后传 confirmMultiGroupSync=true 才真改 (改后所有群同步).',
       parameters: {
         type: 'object',
         properties: {
@@ -173,7 +173,7 @@ function cleanContent(content: string): string {
     .trim();
 }
 
-// PR #4: 批量给非作者笔记填 authorNickname, 让 formatNote 能展示"作者:xxx" 帮 AI 区分来源.
+// 批量给非作者笔记填 authorNickname, 让 formatNote 能展示"作者:xxx" 帮 AI 区分来源.
 // notes 数组里 note.userId === currentUserId 的不填 (省 1 次 users 表 join).
 async function fillAuthorNicknames(currentUserId: string, notes: any[]): Promise<void> {
   const otherIds = [...new Set(notes.filter(n => n.userId !== currentUserId).map(n => n.userId))];
@@ -190,7 +190,7 @@ async function fillAuthorNicknames(currentUserId: string, notes: any[]): Promise
   }
 }
 
-// PR #4: 群组共享 chat 上下文. 读类工具按 scope 决定可见范围:
+// 群组共享 chat 上下文. 读类工具按 scope 决定可见范围:
 // - mine   = 我创建的 (原行为)
 // - shared = 别人共享给我所在 active 群组的 (作者 != me)
 // - all    = mine + shared (默认)
@@ -212,7 +212,7 @@ function getVisibilityCondition(userId: string, scope: ScopeArg) {
 
 function formatNote(note: any): string {
   const meta = [`ID:${note.id}`, `类型:${note.type}`];
-  // PR #4: 非本人笔记 (来自群共享) 才有 authorNickname, fillAuthorNicknames 填的, 本人笔记不显示这字段
+  // 非本人笔记 (来自群共享) 才有 authorNickname, fillAuthorNicknames 填的, 本人笔记不显示这字段
   if (note.authorNickname) meta.push(`作者:${note.authorNickname}`);
   if (note.todoStatus) meta.push(`状态:${note.todoStatus === 'done' ? '已完成' : '未完成'}`);
   if (note.category) meta.push(`分类:${note.category}`);
@@ -265,7 +265,7 @@ export async function executeTool(userId: string, name: string, args: any): Prom
     }
 
     case 'get_note': {
-      // PR #4: 作者本人直接放行; 否则校验 note_shares ∩ my_active_groups, 跟 routes/notes.ts GET /:id 一致
+      // 作者本人直接放行; 否则校验 note_shares ∩ my_active_groups, 跟 routes/notes.ts GET /:id 一致
       const note = await db.select().from(schema.notes)
         .where(eq(schema.notes.id, args.id)).get();
       if (!note) return { result: '笔记不存在或已删除。', noteIds };
@@ -361,7 +361,7 @@ export async function executeTool(userId: string, name: string, args: any): Prom
       let trans = await db.select().from(schema.voiceTranscriptions)
         .where(and(eq(schema.voiceTranscriptions.userId, userId), eq(schema.voiceTranscriptions.audioUrl, audioUrl))).get();
       if (!trans) {
-        // PR #4: 不是我录的, 走 PR #3 文件授权链 - audioUrl 出现在某 shared 笔记 + 我是该群 active 成员才放
+        // 不是我录的, 走文件授权链 - audioUrl 出现在某 shared 笔记 + 我是该群 active 成员才放
         const audioName = audioUrl.replace(/^\/api\/uploads\//, '').replace(/^uploads\//, '');
         const linked = await db.select({ id: schema.notes.id }).from(schema.notes)
           .where(and(
@@ -405,7 +405,7 @@ export async function executeTool(userId: string, name: string, args: any): Prom
     }
 
     case 'update_note': {
-      // PR #5: 扩到群成员可编辑共享笔记; PR #5b: 加 editPermission write 校验.
+      // 扩到群成员可编辑共享笔记 + editPermission write 校验.
       // chat 工具不走 lock 流程 (AI 是单次 update 不持锁), 但别人持锁未过期 / 没编辑权 → 拒绝.
       const note = await db.select().from(schema.notes)
         .where(eq(schema.notes.id, args.id)).get();
@@ -423,7 +423,7 @@ export async function executeTool(userId: string, name: string, args: any): Prom
             inArray(schema.groupMembers.groupId, shared.map(s => s.groupId)),
           )).all();
         if (myMemberships.length === 0) return { result: '笔记不存在。', noteIds };
-        // PR #5b write 校验: editPermission + grants 白名单
+        // write 校验: editPermission + grants 白名单
         let writable = note.editPermission === 'all';
         if (!writable && myMemberships.some(m => m.role === 'owner' || m.role === 'admin')) writable = true;
         if (!writable) {
@@ -441,7 +441,7 @@ export async function executeTool(userId: string, name: string, args: any): Prom
         }
       }
 
-      // PR #5: shared 笔记别人持锁未过期 → 拒绝, AI 告知用户稍后再试
+      // shared 笔记别人持锁未过期 → 拒绝, AI 告知用户稍后再试
       if (note.visibility === 'shared' && note.editLockBy && note.editLockBy !== userId) {
         const now = dayjs();
         if (!note.editLockExpiresAt || dayjs(note.editLockExpiresAt).isAfter(now)) {
@@ -451,7 +451,7 @@ export async function executeTool(userId: string, name: string, args: any): Prom
         }
       }
 
-      // PR #13: 若笔记是 root + 多群 share, 改会让所有群同步. 没显式 confirm 时返回提问让用户拍板.
+      // 若笔记是 root + 多群 share, 改会让所有群同步. 没显式 confirm 时返回提问让用户确认.
       // (单群 / fork 笔记 / private 直接改, 跟前端 PATCH needLock 判断同款; fork 该群独占走前端 GroupDetail 改更顺手)
       if (note.visibility === 'shared' && note.parentNoteId === null && !args.confirmMultiGroupSync) {
         const shareGroups = await db.select({ groupId: schema.noteShares.groupId, name: schema.groups.name })
@@ -472,7 +472,7 @@ export async function executeTool(userId: string, name: string, args: any): Prom
       if (args.tags !== undefined) updates.tags = args.tags;
       if (args.todoStatus !== undefined) updates.todoStatus = args.todoStatus;
       if (args.pinned !== undefined) updates.pinned = args.pinned;
-      // PR #5: shared 笔记 version++, 跟 PATCH HTTP 同款维护乐观锁
+      // shared 笔记 version++, 跟 PATCH HTTP 同款维护乐观锁
       if (note.visibility === 'shared') updates.version = note.version + 1;
 
       await db.update(schema.notes).set(updates).where(eq(schema.notes.id, args.id));
