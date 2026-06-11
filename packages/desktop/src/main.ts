@@ -21,7 +21,11 @@ import { registerShortcut, unregisterAll, startHook, stopHook, onKeydown } from 
 import * as attachmentTasksStore from './attachmentTasksStore';
 
 const API_BASE = `http://localhost:${process.env.QUINK_PORT || '38999'}`;
-const WEB_URL = `http://localhost:${process.env.QUINK_WEB_PORT || '24888'}`;
+// dev: 走 Vite dev server (24888, HMR). prod (打包后): server 同进程 SPA serve, 跟 API_BASE 同 origin (38999)
+// 用户的 server 跑在别处时未来加 onboarding 让用户填 URL, 当前 alpha 版默认连本机
+const WEB_URL = app.isPackaged
+  ? API_BASE
+  : `http://localhost:${process.env.QUINK_WEB_PORT || '24888'}`;
 
 // 显式声明 app name. Electron 默认用 package.json 的 name (@quink/desktop), 导致
 // userData 路径变成 %APPDATA%\@quink\desktop 难找. 显式设 Quink 让路径变 %APPDATA%\Quink.

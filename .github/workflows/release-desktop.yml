@@ -1,0 +1,81 @@
+name: Release desktop client
+
+# 触发方式:
+# 1. workflow_dispatch: GitHub Actions 页面手动 "Run workflow" 按钮 (开发期间用这个 iterate)
+# 2. push tag desktop-v*: 自动打包 + 创建 Release (alpha 稳定后用)
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false  # 一个平台失败不阻塞其他平台 (Win build 失败也能拿到 Mac/Linux 产物)
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # pin pnpm 10 (跟 Dockerfile 一致, 防 pnpm 11 严格行为)
+      - name: Install pnpm
+        run: npm install -g pnpm@10
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      # Vditor 静态文件 (.gitignore 排了, build 时从 node_modules 复制)
+      - name: Copy Vditor static files
+        run: |
+          mkdir -p packages/web/public/vditor
+          cp -r node_modules/vditor/dist packages/web/public/vditor/dist
+        shell: bash
+
+      - name: Build web
+        run: pnpm --filter @quink/web build
+
+      - name: Build desktop installer
+        run: pnpm --filter @quink/desktop dist
+        env:
+          # electron-builder 在 GitHub Actions 上跑时, GH_TOKEN 用于自动发布. 我们用 softprops/action-gh-release
+          # 单独控制 Release, 这里不让 electron-builder 自己发, publish: null in package.json 已禁
+          CSC_IDENTITY_AUTO_DISCOVERY: false  # mac 不签名 (没 Apple 开发者账号)
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: quink-desktop-${{ matrix.os }}
+          path: |
+            packages/desktop/dist-electron/*.exe
+            packages/desktop/dist-electron/*.dmg
+            packages/desktop/dist-electron/*.zip
+            packages/desktop/dist-electron/*.AppImage
+            packages/desktop/dist-electron/*.deb
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # 仅 push tag desktop-v* 时跑, 把三平台 artifact 汇总发布到 GitHub Release
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    permissions:
+      contents: write  # 创建 Release 必须
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
+          name: Quink Desktop ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}

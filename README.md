@@ -246,9 +246,29 @@ pnpm run dev:web      # 起前端 (24888, 另一终端)
 
 需要 Node.js >= 20 + pnpm。
 
-### 桌面客户端
+### 桌面客户端（alpha）
 
-Electron 桌面客户端（Win / macOS / Linux 安装包）正在准备中。当前用浏览器访问即可使用所有功能，唯一缺失的是 OS 全局快捷键弹出快速记录窗口。
+Electron 桌面客户端三平台安装包通过 GitHub Actions 跨平台 build:
+
+- **稳定版本**: 打 tag `desktop-v0.1.0-alpha` push → 三平台 runner (windows-latest / macos-latest / ubuntu-latest) 并行 build → 自动发布到 [Releases](https://github.com/MushroomScript/Quink/releases)
+- **开发测试**: 维护者去 [Actions](https://github.com/MushroomScript/Quink/actions) 页面手动 "Run workflow" 触发, 产物在 Actions Artifacts 下载 (保留 30 天)
+
+**alpha 限制**:
+
+- **macOS** 未签名（没 Apple 开发者账号）: 首次打开右键 → 打开 → 继续。macOS 15+ 进一步要求 系统设置 → 隐私 → 点允许
+- **Windows** 未签名: 首次打开有 SmartScreen 警告 → 更多信息 → 仍要运行
+- **客户端默认连本机 `localhost:38999`**: 需要本机用 Docker 跑 Quink server (见上面"部署"段). 远程 / 局域网 server 支持等下一版本加 onboarding UI
+
+桌面端独有功能（相比浏览器）:
+
+- 全局快捷键弹出快速记录窗口 (Capture)
+- 全局快捷键弹出 AI 对话 (AiChat)
+- 全局快捷键抓取选中文字弹悬浮操作菜单 (Float)
+- 系统托盘常驻
+- 拖文件入主窗口 = 入库
+- OS 原生通知
+
+不需要这些功能的用户直接浏览器开 `http://<server>:38999` 即可。
 
 ---
 
