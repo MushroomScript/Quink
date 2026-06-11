@@ -7,8 +7,7 @@ import { resolve } from 'path';
 import { existsSync, createReadStream } from 'fs';
 import { Readable } from 'stream';
 import dayjs from 'dayjs';
-
-const UPLOAD_DIR = resolve(process.cwd(), 'uploads');
+import { UPLOAD_DIR, VERSION } from '../config/paths.js';
 const app = new Hono();
 app.use('*', authMiddleware);
 
@@ -129,7 +128,7 @@ app.get('/', async (c) => {
     exportedAt: dayjs().toISOString(),
     noteCount: notes.length,
     fileCount: files.length,
-    version: '0.1.0',
+    version: VERSION,
   };
   archive.append(JSON.stringify(meta, null, 2), { name: 'meta.json' });
 

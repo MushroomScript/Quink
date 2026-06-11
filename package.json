@@ -20,6 +20,7 @@
       "better-sqlite3",
       "esbuild",
       "electron",
+      "sharp",
       "uiohook-napi"
     ]
   }

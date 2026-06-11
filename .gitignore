@@ -26,6 +26,9 @@ packages/native/*.node
 # Uploads
 packages/server/uploads/
 
+# Docker 用户数据目录 (docker-compose volume 挂载点, 含 quink.db + uploads + 缩略图)
+quink-data/
+
 # IDE
 .vscode/
 .idea/

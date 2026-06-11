@@ -19,11 +19,23 @@ import groupsRoutes, { inviteApp } from './routes/groups.js';
 import notificationsRoutes from './routes/notifications.js';
 import { startReminderScheduler } from './reminder/scheduler.js';
 import { startEditLockCleanup } from './routes/notes.js';
+import { UPLOAD_DIR, VERSION, WEB_DIST } from './config/paths.js';
 
 const app = new Hono();
 
 // Middleware
-app.use('*', cors());
+// CORS: 默认放行所有 origin (dev / 自部署单用户场景). QUINK_ALLOWED_ORIGINS 逗号分隔白名单收紧 (公网部署用).
+// allowHeaders 必须显式列出 Authorization 跟 X-Quink-Client-Id, 否则浏览器拦预检 → 多设备 SSE 去重链路断
+app.use('*', cors({
+  origin: (origin) => {
+    const allowed = process.env.QUINK_ALLOWED_ORIGINS;
+    if (!allowed || allowed === '*') return origin || '*';
+    if (!origin) return null;
+    const list = allowed.split(',').map(s => s.trim());
+    return list.includes(origin) ? origin : null;
+  },
+  allowHeaders: ['Authorization', 'Content-Type', 'X-Quink-Client-Id'],
+}));
 app.use('*', logger());
 
 // Static files (uploaded avatars etc.)
@@ -153,7 +165,9 @@ app.use('/api/uploads/*', async (c, next) => {
     c.res.headers.set('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`);
   }
 });
-app.use('/api/uploads/*', serveStatic({ root: './', rewriteRequestPath: (path) => path.replace('/api/uploads', '/uploads') }));
+// root 用绝对路径 (DATA_DIR/uploads), rewrite 把 '/api/uploads/' 剥成 '/' 让 serveStatic join 出 UPLOAD_DIR/<filename>
+// 不依赖 cwd, Docker / Electron spawn 任意 cwd 都正确指向 DATA_DIR
+app.use('/api/uploads/*', serveStatic({ root: UPLOAD_DIR, rewriteRequestPath: (path) => path.replace('/api/uploads/', '/') }));
 
 // Routes
 app.route('/api/auth', authRoutes);
@@ -170,10 +184,11 @@ app.route('/api/notifications', notificationsRoutes);
 // 邀请页 + 申请走独立挂载点 (GET /api/invite/:token 公开不需 auth, POST .../apply 内部加 authMiddleware)
 app.route('/api/invite', inviteApp);
 
-// Health check（不需要登录）
-app.get('/api/health', (c) => {
-  return c.json({ status: 'ok', name: 'Quink Server', version: '0.1.0' });
-});
+// Health check / version (无需登录). 客户端连通性探测 + 版本兼容性校验.
+// /api/version 别名: 客户端发现服务器 / onboarding 校验 URL 是真 Quink 服务器用
+const healthHandler = (c: any) => c.json({ status: 'ok', name: 'Quink Server', version: VERSION });
+app.get('/api/health', healthHandler);
+app.get('/api/version', healthHandler);
 
 // Stats（需要登录）
 app.get('/api/stats', authMiddleware, async (c) => {
@@ -235,27 +250,39 @@ app.get('/api/stats', authMiddleware, async (c) => {
   });
 });
 
+// SPA 模式: QUINK_WEB_DIST 设了时 (Docker / prod), server 同时 serve 前端静态文件.
+// 必须在所有 /api/* 路由之后注册, 让 /api/* 优先匹配, 其他 path 落到静态文件 / SPA fallback.
+if (WEB_DIST) {
+  const { readFileSync, existsSync: fsExists } = await import('fs');
+  const { join: pathJoin } = await import('path');
+  const indexHtmlPath = pathJoin(WEB_DIST, 'index.html');
+  const indexHtml = fsExists(indexHtmlPath) ? readFileSync(indexHtmlPath, 'utf-8') : '';
+  // 静态资源 (assets / vditor / favicon / *.js / *.css 等)
+  app.use('/*', serveStatic({ root: WEB_DIST }));
+  // SPA fallback: 上面没匹配到 (vue-router history 路径) 全部返回 index.html
+  app.get('*', (c) => c.html(indexHtml));
+  console.log(`[web] serving SPA from ${WEB_DIST}`);
+}
+
 const PORT = parseInt(process.env.QUINK_PORT || '38999');
+// QUINK_HOST: '0.0.0.0' (默认, 对外开放) / '127.0.0.1' (Electron 单机模式锁本地, 局域网设备访问不到)
+const HOST = process.env.QUINK_HOST || '0.0.0.0';
 
 console.log(`
   ╭──────────────────────────────────────╮
   │                                      │
-  │   Quink Server v0.1.0                │
-  │   http://localhost:${PORT}              │
+  │   Quink Server v${VERSION}
+  │   ${HOST}:${PORT}
   │                                      │
   ╰──────────────────────────────────────╯
 `);
 
-serve({ fetch: app.fetch, port: PORT, hostname: '0.0.0.0' });
+serve({ fetch: app.fetch, port: PORT, hostname: HOST });
 
 // 异步给升级前已上传但还没 thumb 的 HEIC 文件批量补 .thumb.jpg. 不阻塞启动
 (async () => {
-  const [{ backfillHeicThumbs }, { resolve: resolvePath }] = await Promise.all([
-    import('./utils/heicThumb.js'),
-    import('path'),
-  ]);
-  const dir = resolvePath(process.cwd(), 'uploads');
-  backfillHeicThumbs(dir).catch((e) => console.warn('[backfillHeicThumbs]', e?.message));
+  const { backfillHeicThumbs } = await import('./utils/heicThumb.js');
+  backfillHeicThumbs(UPLOAD_DIR).catch((e) => console.warn('[backfillHeicThumbs]', e?.message));
 })();
 
 // 启动 + 每 6h 跑一次全量清理 (用户改 trashRetentionDays 时另在 PATCH /me 处单独触发该用户的清理, 见 cleanup.ts)

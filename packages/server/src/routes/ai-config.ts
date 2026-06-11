@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import dayjs from 'dayjs';
 import { DEFAULT_PROMPTS, AI_FEATURES, AI_FEATURE_LABELS } from '../ai/prompts.js';
 import { aiProcess } from '../ai/client.js';
+import { UPLOAD_DIR } from '../config/paths.js';
 
 const app = new Hono();
 app.use('*', authMiddleware);
@@ -353,7 +354,7 @@ app.post('/transcribe-async', async (c) => {
       if (!filename || filename.startsWith('.')) {
         throw new Error('非法 audioUrl');
       }
-      const uploadDir = pathResolve(process.cwd(), 'uploads');
+      const uploadDir = UPLOAD_DIR;
       const filePath = pathResolve(uploadDir, filename);
       // relative 兜底: 若 filePath 不在 uploadDir 内, relative 会返回以 ".." 开头的路径
       const rel = relative(uploadDir, filePath);

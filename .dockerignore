@@ -1,0 +1,69 @@
+# Docker build context 排除. 跟 .gitignore 类似但口径更紧:
+# .gitignore 是 "不进 git", .dockerignore 是 "不进 build context"
+# build context 越小, docker build 越快, 缓存命中率越高
+
+# Node / build
+node_modules
+**/node_modules
+dist
+**/dist
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# 文档 / 开发用 (不参与 build)
+*.md
+!packages/server/package.json
+*.bat
+LICENSE
+
+# 本地开发工具配置
+.vscode
+.idea
+.claude
+.playwright-mcp
+
+# 本地数据 / 测试残留 (要从镜像隔离, 别污染 volume)
+packages/server/quink.db
+packages/server/quink.db-*
+packages/server/uploads
+packages/server/data
+quink-data
+*.db
+*.db-*
+*.bak
+
+# 临时调试文件
+.tmp-*
+tmp-*
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Vditor 静态文件 (build 时从 node_modules 重新 copy, 源码这份不进镜像)
+packages/web/public/vditor/
+
+# Desktop 整个不要 (镜像不跑 electron)
+packages/desktop
+
+# Rust native 整个不要 (server 不依赖)
+packages/native
+
+# CI / 项目元数据 (不参与 server 运行)
+.github
+FOLLOWUPS.md
+GROUPS-ROADMAP.md
+RENDERING-PITFALLS.md
+SECURITY-AUDIT.md
+SECURITY-FIX-PLAN.md
+THUMBNAILS.md
+ICONS.md
+Z-INDEX-SCALE.md
+badge-test.html
+assets/source

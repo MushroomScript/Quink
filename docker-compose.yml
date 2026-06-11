@@ -1,0 +1,51 @@
+# Quink 自部署 docker-compose
+#
+# 用法:
+#   1. cp .env.example .env  (改 JWT_SECRET 必做)
+#   2. mkdir -p quink-data && chown 1000:1000 quink-data  (容器内非 root 用户 uid 1000 跑)
+#   3. docker compose up -d
+#   4. 浏览器打开 http://<server-ip>:38999
+#
+# 升级:
+#   docker compose pull && docker compose up -d
+#   (本地 build 改 docker compose build && docker compose up -d)
+#
+# 备份:
+#   tar -czf quink-backup-$(date +%F).tar.gz quink-data/
+#
+# 数据迁移到其他机器:
+#   把 quink-data/ 整个目录复制过去就行 (sqlite db + uploads + 缩略图都在内)
+
+services:
+  quink:
+    # image + build 共存: docker compose up 先 pull image, 找不到 fallback 用 build
+    # - 默认 (QUINK_IMAGE 未设): image=quink:latest 本地不存在 → 走 build 现场编 (15-25 min)
+    # - 推荐 (用户在 .env 设 QUINK_IMAGE=ghcr.io/mushroomscript/quink:latest): 30 秒拉完镜像直接跑
+    image: ${QUINK_IMAGE:-quink:latest}
+    build:
+      context: .
+      args:
+        # 中国大陆用户加速 docker build (默认空走官方源)
+        APT_MIRROR: ${APT_MIRROR:-}
+        NPM_MIRROR: ${NPM_MIRROR:-}
+    container_name: quink
+    restart: unless-stopped
+    ports:
+      # 改成 "127.0.0.1:38999:38999" 锁本机不暴露公网 (配 nginx 反代时常用)
+      - "38999:38999"
+    volumes:
+      # 数据持久化. ./quink-data 是相对 docker-compose.yml 所在目录
+      # NAS 用户改成 /volume1/docker/quink/data:/data 之类
+      - ./quink-data:/data
+    environment:
+      # JWT 签名密钥. 必须改成强随机串 (openssl rand -hex 32 生成 64 字符).
+      # 不改的话所有 token 用同一弱 key, 任何人能伪造登录. .env 文件里设
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET 必须设置, 见 .env.example}
+      # CORS 白名单. 不设 = 允许所有 origin (内网 / 单用户 OK).
+      # 公网部署改成你的域名 "https://quink.yourdomain.com" 收紧
+      QUINK_ALLOWED_ORIGINS: ${QUINK_ALLOWED_ORIGINS:-*}
+      # 其他覆盖 (一般不动). 完整列表见 packages/server/CLAUDE.md
+      # QUINK_DATA_DIR: /data
+      # QUINK_WEB_DIST: /app/web-dist
+      # QUINK_PORT: 38999
+      # QUINK_HOST: 0.0.0.0

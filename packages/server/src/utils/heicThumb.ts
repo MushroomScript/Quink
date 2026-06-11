@@ -9,7 +9,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 // 用 wasm-bundle 版本: 把 .wasm 内嵌到 .js 里 (避免 libheif-js/wasm 用相对路径 readFileSync 找 wasm
 // 文件时因为 server cwd 不对而 crash). pure-js 版本慢几倍, 不可接受
-import libheif from 'libheif-js/wasm-bundle';
+// .js 后缀必须显式 (Node ESM 严格模式), 不带 prod Docker 内 import 报 ERR_MODULE_NOT_FOUND
+// libheif-js 没单独给 wasm-bundle.js 子路径的 .d.ts (主 index.d.ts 没 export 它), @ts-ignore 跳过 type check (runtime 安全)
+// @ts-ignore
+import libheif from 'libheif-js/wasm-bundle.js';
 import jpegJs from 'jpeg-js';
 
 const MAX_DIM = 1500;

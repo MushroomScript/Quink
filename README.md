@@ -133,11 +133,106 @@ Quink 把记录流程压到 **一个全局快捷键 + 一次回车**：
 
 ---
 
-## 🚀 快速开始
+## 🚀 部署
 
-### 安装包（推荐）
+Quink 服务端 + Web 端打包到一个 Docker 镜像里。任意有 Docker 的设备（NAS / Mac mini / Linux VPS / Windows + Docker Desktop / 树莓派）都能跑。
 
-待发布 release 后，从 [Releases](https://github.com/MushroomScript/Quink/releases) 下载对应平台安装包，开箱即用。
+### 方式 A：拉预构建镜像（推荐, 30 秒可用）
+
+每次 main 分支有新 commit, GitHub Actions 自动 build 镜像推到 GHCR。用户拉镜像直接跑, 不用本地 build。
+
+```bash
+git clone https://github.com/MushroomScript/Quink.git
+cd Quink
+cp .env.example .env
+nano .env  # 改 .env (见下面"必填配置")
+
+mkdir -p quink-data
+# Linux/macOS: sudo chown 1000:1000 quink-data  (容器内非 root uid 1000 跑)
+
+docker compose up -d  # 自动 pull GHCR 镜像 + 起容器
+```
+
+**必填配置（`.env`）**：
+
+```ini
+# 1. JWT 签名密钥, 必改强随机串. 不改 = 任何人能伪造登录 token
+#    生成方法 (Linux/macOS):     openssl rand -hex 32
+#    生成方法 (Windows PS):      [Convert]::ToHexString([byte[]] @(1..32 | ForEach { Get-Random -Max 256 }))
+JWT_SECRET=改成你生成的强随机串
+
+# 2. 用 GHCR 预构建镜像 (推荐). 注释掉走方式 B 本地 build
+QUINK_IMAGE=ghcr.io/mushroomscript/quink:latest
+```
+
+浏览器打开 `http://<server-ip>:38999` 注册首个账号即可使用。
+
+### 方式 B：本地 build（开发者 / 想改代码 / 国内 GHCR 拉不到）
+
+跟方式 A 一样, 但 `.env` 里**注释掉 `QUINK_IMAGE`** 那行。`docker compose up -d` 自动 fallback 到本地 build, 首次 15-25 分钟。
+
+**中国大陆用户加速 build**：`.env` 取消注释这两行:
+
+```ini
+APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+NPM_MIRROR=https://registry.npmmirror.com
+```
+
+### 升级
+
+```bash
+git pull               # 拉新代码 (Dockerfile / docker-compose 可能改)
+docker compose pull    # 方式 A: 拉新镜像
+# docker compose build # 方式 B: 本地重 build
+docker compose up -d   # 重启容器用新镜像
+```
+
+SQLite schema 启动自动迁移，所有版本兼容老 DB（每个迁移都 try-catch 包着 + `WHERE` 限制反复跑无害）。**升级前务必备份**：
+
+```bash
+tar -czf quink-backup-$(date +%F).tar.gz quink-data/
+```
+
+### 国内 docker pull 加速
+
+GHCR (`ghcr.io`) 国内访问看运气。慢的话可在 Docker Desktop / `/etc/docker/daemon.json` 配 registry mirror。注意 GHCR 不在传统 dockerhub mirror 覆盖范围, 建议直接挂代理 pull 一次（镜像本地有了之后启停容器都不再走网络）。
+
+### 迁移到其他机器
+
+把 `quink-data/` 整个目录复制过去就行（SQLite DB + uploads + 缩略图都在内）。同版本镜像直接跑，不同版本启动会自动迁移。
+
+### 反向代理 + HTTPS（可选）
+
+公网部署建议 nginx / caddy 反代加 HTTPS。**SSE 长连接** 必须特殊配置：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:38999;
+    proxy_buffering off;          # SSE 必须关 buffering
+    proxy_read_timeout 24h;       # SSE 长连接, 不能短超时
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+caddy 用户更简单（自动 SSE 适配 + Let's Encrypt 证书）：
+
+```caddy
+quink.yourdomain.com {
+    reverse_proxy 127.0.0.1:38999
+}
+```
+
+### 配置参数（.env）
+
+| 变量 | 用途 | 必填 |
+|---|---|---|
+| `JWT_SECRET` | JWT 签名密钥, 必改强随机串 | **是** |
+| `QUINK_ALLOWED_ORIGINS` | CORS 白名单. 默认 `*`. 公网部署填具体域名收紧 | 否 |
+
+完整 env 列表见 `packages/server/CLAUDE.md` "环境变量约定" 段。
 
 ### 从源码运行（开发者）
 
@@ -145,11 +240,15 @@ Quink 把记录流程压到 **一个全局快捷键 + 一次回车**：
 git clone https://github.com/MushroomScript/Quink.git
 cd Quink
 pnpm install
-pnpm run dev:server   # 起后端
-pnpm run dev:web      # 起前端（另一终端）
+pnpm run dev:server   # 起后端 (38999)
+pnpm run dev:web      # 起前端 (24888, 另一终端)
 ```
 
-需要 Node.js ≥ 20 + pnpm。
+需要 Node.js >= 20 + pnpm。
+
+### 桌面客户端
+
+Electron 桌面客户端（Win / macOS / Linux 安装包）正在准备中。当前用浏览器访问即可使用所有功能，唯一缺失的是 OS 全局快捷键弹出快速记录窗口。
 
 ---
 

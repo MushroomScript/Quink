@@ -5,7 +5,7 @@ import { logAudit } from '../utils/auditLog.js';
 import { db, schema } from '../db/index.js';
 import { eq, desc, and, isNull, inArray } from 'drizzle-orm';
 import { resolve } from 'path';
-import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, writeFileSync, unlinkSync } from 'fs';
 import { Readable } from 'stream';
 import archiver from 'archiver';
 import { nanoid } from 'nanoid';
@@ -13,18 +13,9 @@ import dayjs from 'dayjs';
 import { toPinyinSearchable } from '../utils/pinyin.js';
 import { isHeicFilename, generateHeicThumb, heicThumbPath, backfillHeicThumbs } from '../utils/heicThumb.js';
 import { isThumbableImage, generateImageThumb } from '../utils/imageThumb.js';
-
-const UPLOAD_DIR = resolve(process.cwd(), 'uploads');
+import { UPLOAD_DIR, AVATARS_DIR } from '../config/paths.js';
 // avatar 单独存到 uploads/avatars/ 子目录: 中间件按路径前缀放行 (头像设计就是给群成员看)
 // 非 avatars/ 路径强制走 files 表授权, 查不到默认 403/404 (防孤儿文件越权下载)
-const AVATARS_DIR = resolve(UPLOAD_DIR, 'avatars');
-
-if (!existsSync(UPLOAD_DIR)) {
-  mkdirSync(UPLOAD_DIR, { recursive: true });
-}
-if (!existsSync(AVATARS_DIR)) {
-  mkdirSync(AVATARS_DIR, { recursive: true });
-}
 
 const app = new Hono();
 

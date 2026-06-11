@@ -5,8 +5,7 @@ import { resolve } from 'path';
 import { existsSync, mkdirSync, readdirSync, renameSync } from 'fs';
 import { toPinyinSearchable } from '../utils/pinyin.js';
 import { nanoid } from 'nanoid';
-
-const DB_PATH = process.env.QUINK_DB_PATH || resolve(process.cwd(), 'quink.db');
+import { DB_PATH, UPLOAD_DIR } from '../config/paths.js';
 
 const sqlite = new Database(DB_PATH);
 sqlite.pragma('journal_mode = WAL');
@@ -502,7 +501,7 @@ try { sqlite.exec('ALTER TABLE categories DROP COLUMN parent_id'); } catch {}
 try {
   const row = sqlite.prepare("SELECT value FROM config WHERE key = 'avatar_relocate_migration_v1'").get() as { value: string } | undefined;
   if (!row) {
-    const uploadsDir = resolve(process.cwd(), 'uploads');
+    const uploadsDir = UPLOAD_DIR;
     const avatarsDir = resolve(uploadsDir, 'avatars');
     if (!existsSync(uploadsDir)) {
       // uploads 目录都不存在 = 全新部署, 直接写 flag 跳过
