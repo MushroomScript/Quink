@@ -56,6 +56,7 @@ blinko-analytics.png
 # 调试 / 测试用静态文件 (不影响项目启动)
 badge-test.html
 packages/desktop/test-keys.js
+login-demo-*.html
 
 # 辅助脚本 (seed 测试数据 / 构建图标等, 个人开发环境用)
 scripts/
