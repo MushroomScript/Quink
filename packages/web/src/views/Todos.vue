@@ -145,7 +145,7 @@ onDeactivated(() => {
       </div>
     </div>
 
-    <div v-if="vs.notes.length === 0 && !store.loading" class="text-center py-16">
+    <div v-if="vs.notes.length === 0 && !store.loading" class="empty-state-center">
       <div class="mb-3 flex justify-center text-gray-300">
         <PhCheckSquare size="3rem" weight="fill" />
       </div>

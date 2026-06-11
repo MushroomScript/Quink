@@ -72,7 +72,7 @@ watch(() => vs.notes.length, () => snapshotCards(), { flush: 'sync' });
     <div v-if="store.loading && vs.notes.length === 0" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <template v-else>
-      <div v-if="vs.notes.length === 0" class="text-center py-16">
+      <div v-if="vs.notes.length === 0" class="empty-state-center">
         <div class="mb-3 flex justify-center text-gray-300">
           <PhNotePencil size="3rem" weight="fill" />
         </div>

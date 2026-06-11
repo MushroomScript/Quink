@@ -33,6 +33,8 @@ const store = useNotesStore();
 const showChrome = computed(() => !['login', 'capture', 'float', 'ai-chat', 'invite'].includes(route.name as string));
 const isElectron = !!(window as any).quinkDesktop?.isElectron;
 const desk = (window as any).quinkDesktop;
+// 给 html 加 data-electron 让 CSS 能区分 Electron / 浏览器 (用于 .empty-state-center 偏移量等).
+if (isElectron) document.documentElement.setAttribute('data-electron', '');
 const showMobileSidebar = ref(false);
 const appReady = ref(false);
 const currentTheme = useTheme();
@@ -629,8 +631,11 @@ watch(() => auth.user, (user) => {
                让 batch bar 物理位置在 main 内 (跟卡片在同一 overflow 容器), 半透明 bg-gray-50/80
                透过去能看到下方卡片轮廓 (跟回收站 sticky toolbar 同款视觉).
                portal 必须包住 RouterView: sticky 元素的钉住范围 = containing block, portal 必须高度 = main 内容全高,
-               否则 sticky 范围被限制在 batch bar 自身那 46px 内, 等同 sticky 失效跟随滚动. -->
-          <div id="batch-bar-portal">
+               否则 sticky 范围被限制在 batch bar 自身那 46px 内, 等同 sticky 失效跟随滚动.
+               h-full: 让子 view 的 min-h-full / h-full 链条工作 (CSS 规范要求父 height 是 definite 才让子 % 生效, min-h-full 不算).
+               配合 .empty-state-center 在 Resources 等多层嵌套 view 内 absolute 锚到根 div 正常居中.
+               h-full 不破坏滚动: 内容超出时溢出可见, main 的 overflow-y-auto 仍能滚到 batch-bar-portal 外的内容. -->
+          <div id="batch-bar-portal" class="h-full">
             <RouterView v-slot="{ Component }">
               <KeepAlive :include="['inspiration', 'notes', 'todos', 'ai-page']">
                 <component :is="Component" />

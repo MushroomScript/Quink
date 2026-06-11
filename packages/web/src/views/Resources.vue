@@ -1027,9 +1027,10 @@ onUnmounted(() => {
       </template>
     </div>
 
-    <!-- relative 容器: wrapper + 遮罩平级. 遮罩 absolute inset-0 相对它, 自然贴合 toolbar 下方所有内容区域.
-         flex-1 占满根 div 内除 toolbar 之外的全部高度, 让遮罩在文件少时也能撑满整个可视区 -->
-    <div class="relative flex-1">
+    <!-- flex-1 让此容器在根 flex-col 内撑满 toolbar 之外的剩余高度.
+         (历史上还带 relative 当 dropzone 遮罩 absolute 锚点, 但遮罩早改成 fixed + JS 算 main rect — relative 删了
+          让空状态 .empty-state-center 的 absolute 能跳过此层直接锚到根 div, 居中对齐 viewport 中线) -->
+    <div class="flex-1">
     <!-- wrapper 包文件列表 / 空状态 / 各种 Teleport modal, 拖入时整体虚化 (Teleport 内容 portal 到 body 不受 blur) -->
     <div class="transition-[filter] duration-150" :class="isDraggingFiles ? 'pointer-events-none blur-[3px] select-none' : ''">
 
@@ -1067,7 +1068,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="filtered.length === 0 && filteredFolders.length === 0" class="text-center py-16">
+      <div v-if="filtered.length === 0 && filteredFolders.length === 0" class="empty-state-center">
         <div class="mb-3 flex justify-center text-gray-300">
           <PhFolder size="3rem" weight="fill" />
         </div>
@@ -1307,7 +1308,7 @@ onUnmounted(() => {
         </p>
       </div>
     </Transition>
-    </div><!-- /relative wrapper -->
+    </div><!-- /flex-1 wrapper -->
   </div>
 
   <!-- 文件重命名弹窗 -->

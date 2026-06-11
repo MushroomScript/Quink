@@ -169,8 +169,9 @@ function selectGroup(id: string) {
       <!-- 选中群: 渲染 GroupDetail. key=selectedId 让切群时 mount 新组件 (避开 watch 时机 race) -->
       <GroupDetail v-if="selectedId" :group-id="selectedId" :key="selectedId" />
 
-      <!-- 空状态: 只在 ready (loadGroups + autoSelect 完成) 后仍无群组时显示, 避免 loading 闪 -->
-      <div v-else-if="ready && store.groups.length === 0" class="h-full flex items-center justify-center text-center px-4">
+      <!-- 空状态: 只在 ready (loadGroups + autoSelect 完成) 后仍无群组时显示, 避免 loading 闪.
+           用 empty-state-center 跟其他 view 统一对齐 viewport 中线 (absolute 锚定到 .flex-1 min-w-0 relative 父容器) -->
+      <div v-else-if="ready && store.groups.length === 0" class="empty-state-center">
         <div>
           <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-primary/10 text-primary-dark flex items-center justify-center">
             <PhUsersThree size="2rem" weight="fill" />

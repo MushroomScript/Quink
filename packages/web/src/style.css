@@ -135,6 +135,33 @@
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 
+/* ══ 空状态居中 (统一对齐 viewport 中线) ══
+   各 view "暂无数据" 提示统一用这个 class. absolute 浮在 main 容器内 (main 自带 position:relative),
+   padding-bottom = TopBar(+Electron 标题栏) 高度, 让 flex items-center 把内容中心上移到 viewport 中线.
+   原理: main 在 viewport 内顶部偏移 T (TopBar + 标题栏), main 中线比 viewport 中线靠下 T/2;
+   给 flex container 加 padding-bottom = T 后, 内容居中位置在 (main_h - T)/2 = viewport 中线. */
+:root { --empty-state-offset: 48px; }        /* 默认 = 浏览器移动: h-12 TopBar */
+@media (min-width: 768px) {
+  :root { --empty-state-offset: 56px; }      /* 浏览器桌面: md:h-14 TopBar */
+}
+html[data-electron] { --empty-state-offset: 84px; }  /* Electron 移动 (罕见): 48 + 36 标题栏 */
+@media (min-width: 768px) {
+  html[data-electron] { --empty-state-offset: 92px; }  /* Electron 桌面: 56 + 36 */
+}
+.empty-state-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1rem;
+  padding-bottom: var(--empty-state-offset);
+  pointer-events: none;  /* 不挡住下面的 sticky toolbar / 编辑区交互 */
+}
+.empty-state-center > * { pointer-events: auto; }
+
 @layer base {
   html, body {
     height: 100%;

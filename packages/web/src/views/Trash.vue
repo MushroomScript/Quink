@@ -343,15 +343,15 @@ function onLeave(el: Element, done: () => void) {
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <template v-else>
-      <!-- 空状态分两种: 回收站本身为空 vs 搜索没匹配 -->
-      <div v-if="allNotes.length === 0" class="text-center py-16">
+      <!-- 空状态分两种: 回收站本身为空 vs 搜索没匹配. 用 empty-state-center 跟其他 view 统一对齐 viewport 中线 -->
+      <div v-if="allNotes.length === 0" class="empty-state-center">
         <div class="mb-3 flex justify-center text-gray-300">
           <PhTrash size="3rem" weight="fill" />
         </div>
         <p class="text-gray-500 text-sm">回收站是空的</p>
         <p class="text-gray-400 text-xs mt-1">删除的内容会在这里保留30天</p>
       </div>
-      <div v-else-if="notes.length === 0" class="text-center py-16">
+      <div v-else-if="notes.length === 0" class="empty-state-center">
         <p class="text-gray-500 text-lg">没有匹配的内容</p>
       </div>
 
