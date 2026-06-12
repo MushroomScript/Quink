@@ -29,12 +29,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      # pnpm 10 onlyBuiltDependencies allowlist 有时不让 install scripts 跑 (Win runner 实测 app-builder-bin
-      # postinstall 跳过, app-builder.exe 不下载). pnpm rebuild 是 manual 命令绕过 allowlist 强制跑.
-      - name: Force run postinstall scripts (electron-builder native binaries)
+      # pnpm 10 onlyBuiltDependencies + pnpm rebuild 实测都不让 app-builder-bin postinstall 跑
+      # 直接用 npm 在 packages/desktop 装 electron-builder, npm 100% 跑 postinstall download app-builder binary.
+      # 装到 packages/desktop/node_modules, electron-builder 跑时 cwd 优先找这里
+      - name: Setup electron-builder via npm (bypass pnpm strict install scripts)
+        working-directory: packages/desktop
         shell: bash
         run: |
-          pnpm rebuild app-builder-bin electron 2>&1 || true
+          npm install --no-save --no-fund --no-audit --legacy-peer-deps electron-builder@25.1.8 electron@35.0.0
           # 诊断: 看 app-builder.exe / app-builder 是否真的存在
           ls -la node_modules/app-builder-bin/win/x64/ 2>&1 || echo "no win/x64/"
           ls -la node_modules/app-builder-bin/mac/ 2>&1 || echo "no mac/"
