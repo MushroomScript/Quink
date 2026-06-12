@@ -36,8 +36,11 @@ jobs:
 
       # 自动生成 tags:
       # - latest (main 分支)
+      # - main (branch name)
       # - sha-<commit> (每次 push)
       # - v0.1.0 / 0.1 (打 tag v0.1.0 时)
+      # 用 GitHub Actions expression 替代 metadata-action 的 {{is_default_branch}} 模板, 后者在某些 repo
+      # 不可靠 (实测: workflow 跑通但 latest tag 没 emit, 只剩 sha-xxx). expression 直接判断 ref 100% work
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -45,9 +48,10 @@ jobs:
           images: ghcr.io/${{ env.OWNER_LC }}/quink
           tags: |
             type=ref,event=branch
+            type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-
 
       - name: Build and push
