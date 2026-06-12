@@ -42,6 +42,19 @@ jobs:
           ls -la node_modules/app-builder-bin/mac/ 2>&1 || echo "no mac/"
           ls -la node_modules/app-builder-bin/linux/x64/ 2>&1 || echo "no linux/x64/"
 
+      # @electron/rebuild 调老版本 node-gyp 只识 VS 2013-2017, GHA win runner 自带 VS 2022 → 找不到 fail.
+      # 升级 node-gyp 到 10.x (支持 VS 2022) + 设 npm config 让 @electron/rebuild 用新 node-gyp
+      - name: Upgrade node-gyp for VS 2022 (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          npm install -g node-gyp@10
+          npm config set msvs_version 2022 --global
+          $newGyp = "$(npm root -g)\node-gyp\bin\node-gyp.js"
+          Write-Host "node_gyp path: $newGyp"
+          npm config set node_gyp "$newGyp" --global
+          npm config list
+
       # Vditor 静态文件 (.gitignore 排了, build 时从 node_modules 复制)
       - name: Copy Vditor static files
         run: |
