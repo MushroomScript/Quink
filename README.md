@@ -273,6 +273,38 @@ pnpm run dev:web      # 起前端 (24888, 另一终端)
 
 需要 Node.js >= 20 + pnpm。
 
+### 便携服务端可执行文件（alpha）
+
+不想装 Docker 也不想装 Node 的用户可以直接下载 single binary 双击 / 命令行运行:
+
+| 平台 | 文件 | 怎么跑 |
+|---|---|---|
+| Windows | `quink-server.exe` | 双击或命令行 `quink-server.exe`, 弹一个控制台窗口, 关掉 = 关服务 |
+| macOS (Apple Silicon) | `quink-server-macos-latest` | 命令行 `./quink-server-macos-latest`, Ctrl+C 退出 |
+| macOS (Intel) | `quink-server-macos-latest-x64` | 同上 |
+| Linux x86_64 | `quink-server-ubuntu-latest` | 同上 |
+
+数据存当前目录下的 `quink-data/`（启动时自动创建）。要换数据路径就 `QUINK_DATA_DIR=/path` 启动:
+
+```bash
+# Linux / macOS
+QUINK_DATA_DIR=~/quink-data ./quink-server-macos-latest
+
+# Windows PowerShell
+$env:QUINK_DATA_DIR='C:\quink-data'; .\quink-server.exe
+```
+
+binary 自带:
+- Node 22 runtime
+- 全部依赖（Hono + SQLite + sharp 等 native 模块）
+- web 静态文件（同进程 SPA serve, 浏览器直接打 `http://localhost:38999` 即可）
+
+binary 大约 80-150MB（含 libvips / better-sqlite3 prebuilt 等）。下载: 见 [Releases](https://github.com/MushroomScript/Quink/releases) 页面。
+
+**alpha 限制**:
+- macOS / Windows 未签名, 首次打开 macOS 右键 → 打开, Windows SmartScreen → 更多信息 → 仍要运行
+- 国内 Linux glibc 版本太老的发行版（如 CentOS 7）可能跑不起来, 推荐 Ubuntu 22+ / Debian 12+
+
 ### 桌面客户端（alpha）
 
 Electron 桌面客户端三平台安装包通过 GitHub Actions 跨平台 build:

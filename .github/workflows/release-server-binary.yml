@@ -1,0 +1,75 @@
+name: Release server binary
+
+# 触发:
+# 1. workflow_dispatch: GitHub Actions 页面手动 "Run workflow" 按钮 (iterate 用)
+# 2. push tag server-v*: 自动 build + 发布到 Release (稳定后用)
+on:
+  workflow_dispatch:
+  push:
+    tags: ['server-v*']
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false  # 一个平台 fail 不阻其他
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # pin pnpm 10 (跟 Dockerfile / desktop workflow 一致)
+      - name: Install pnpm
+        run: npm install -g pnpm@10
+
+      # 装 packages/server 跟整个 monorepo 依赖. pkg 需要拿到 better-sqlite3 / sharp 这种 native module
+      # 编译产物 (build/Release/*.node), 必须在原平台 install + rebuild
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      # 顺序: tsc → esbuild bundle → pkg
+      - name: Build server (tsc → esbuild → pkg)
+        run: pnpm --filter @quink/server run build:binary
+
+      - name: Rename Linux/Mac binaries (pkg 输出无扩展, 重命名好认)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd packages/server/dist-binary
+          ls -la
+          for f in quink-server-*; do
+            mv "$f" "${f}-${{ matrix.os }}" 2>/dev/null || true
+          done
+          ls -la
+        shell: bash
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: quink-server-${{ matrix.os }}
+          path: packages/server/dist-binary/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/server-v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
+          name: Quink Server Binary ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}

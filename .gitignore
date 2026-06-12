@@ -1,5 +1,8 @@
 node_modules/
 dist/
+dist-bundle/
+dist-binary/
+dist-electron/
 .env
 .env.local
 *.db
