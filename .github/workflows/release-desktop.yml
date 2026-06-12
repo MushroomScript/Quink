@@ -42,18 +42,27 @@ jobs:
           ls -la node_modules/app-builder-bin/mac/ 2>&1 || echo "no mac/"
           ls -la node_modules/app-builder-bin/linux/x64/ 2>&1 || echo "no linux/x64/"
 
-      # @electron/rebuild 调老版本 node-gyp 只识 VS 2013-2017, GHA win runner 自带 VS 2022 → 找不到 fail.
-      # 升级 node-gyp 到 10.x (支持 VS 2022) + 设 npm config 让 @electron/rebuild 用新 node-gyp
-      - name: Upgrade node-gyp for VS 2022 (Windows)
+      # @electron/rebuild 直接 require packages/desktop/node_modules/node-gyp (老版只识 VS 2013-2017),
+      # 不看 npm config, 所以全局升级 node-gyp 无效. 必须强制替换 local node-gyp 跟 @electron/rebuild
+      # 子目录内的 node-gyp (如果 bundle 了的话)
+      - name: Force install node-gyp 10 locally (Windows, replace VS-2017-only old version)
         if: matrix.os == 'windows-latest'
+        working-directory: packages/desktop
         shell: pwsh
         run: |
           npm install -g node-gyp@10
           npm config set msvs_version 2022 --global
-          $newGyp = "$(npm root -g)\node-gyp\bin\node-gyp.js"
-          Write-Host "node_gyp path: $newGyp"
-          npm config set node_gyp "$newGyp" --global
-          npm config list
+          # 删 老 node-gyp 强制装 10.x 到 packages/desktop/node_modules
+          if (Test-Path node_modules/node-gyp) { Remove-Item -Recurse -Force node_modules/node-gyp }
+          npm install --no-save --no-fund --no-audit node-gyp@10
+          Write-Host "Local node-gyp version:"
+          Get-Content node_modules/node-gyp/package.json | Select-String -Pattern '"version"'
+          # @electron/rebuild 如果 bundle 了自己的 node-gyp 子目录也替换
+          if (Test-Path node_modules/@electron/rebuild/node_modules/node-gyp) {
+            Remove-Item -Recurse -Force node_modules/@electron/rebuild/node_modules/node-gyp
+            Copy-Item -Recurse node_modules/node-gyp node_modules/@electron/rebuild/node_modules/node-gyp
+            Write-Host "Replaced @electron/rebuild internal node-gyp"
+          }
 
       # Vditor 静态文件 (.gitignore 排了, build 时从 node_modules 复制)
       - name: Copy Vditor static files
