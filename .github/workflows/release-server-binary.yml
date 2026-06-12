@@ -31,6 +31,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      # 同 desktop workflow, force install scripts (pkg-fetch download node binary 需要)
+      - name: Force run postinstall scripts (pkg native binaries)
+        shell: bash
+        run: |
+          pnpm rebuild @yao-pkg/pkg pkg-fetch better-sqlite3 sharp 2>&1 || true
+
       # 顺序: tsc → esbuild bundle → pkg
       - name: Build server (tsc → esbuild → pkg)
         run: pnpm --filter @quink/server run build:binary

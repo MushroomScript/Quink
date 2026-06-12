@@ -29,6 +29,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      # pnpm 10 onlyBuiltDependencies allowlist 有时不让 install scripts 跑 (Win runner 实测 app-builder-bin
+      # postinstall 跳过, app-builder.exe 不下载). pnpm rebuild 是 manual 命令绕过 allowlist 强制跑.
+      - name: Force run postinstall scripts (electron-builder native binaries)
+        shell: bash
+        run: |
+          pnpm rebuild app-builder-bin electron 2>&1 || true
+          # 诊断: 看 app-builder.exe / app-builder 是否真的存在
+          ls -la node_modules/app-builder-bin/win/x64/ 2>&1 || echo "no win/x64/"
+          ls -la node_modules/app-builder-bin/mac/ 2>&1 || echo "no mac/"
+          ls -la node_modules/app-builder-bin/linux/x64/ 2>&1 || echo "no linux/x64/"
+
       # Vditor 静态文件 (.gitignore 排了, build 时从 node_modules 复制)
       - name: Copy Vditor static files
         run: |

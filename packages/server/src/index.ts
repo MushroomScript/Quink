@@ -20,6 +20,8 @@ import notificationsRoutes from './routes/notifications.js';
 import { startReminderScheduler } from './reminder/scheduler.js';
 import { startEditLockCleanup } from './routes/notes.js';
 import { UPLOAD_DIR, VERSION, WEB_DIST } from './config/paths.js';
+import { readFileSync, existsSync } from 'fs';
+import { join as pathJoin } from 'path';
 
 const app = new Hono();
 
@@ -252,11 +254,10 @@ app.get('/api/stats', authMiddleware, async (c) => {
 
 // SPA 模式: QUINK_WEB_DIST 设了时 (Docker / prod), server 同时 serve 前端静态文件.
 // 必须在所有 /api/* 路由之后注册, 让 /api/* 优先匹配, 其他 path 落到静态文件 / SPA fallback.
+// fs/path 用顶部 static import (esbuild bundle 成 CJS 时 top-level await dynamic import 不被支持)
 if (WEB_DIST) {
-  const { readFileSync, existsSync: fsExists } = await import('fs');
-  const { join: pathJoin } = await import('path');
   const indexHtmlPath = pathJoin(WEB_DIST, 'index.html');
-  const indexHtml = fsExists(indexHtmlPath) ? readFileSync(indexHtmlPath, 'utf-8') : '';
+  const indexHtml = existsSync(indexHtmlPath) ? readFileSync(indexHtmlPath, 'utf-8') : '';
   // 静态资源 (assets / vditor / favicon / *.js / *.css 等)
   app.use('/*', serveStatic({ root: WEB_DIST }));
   // SPA fallback: 上面没匹配到 (vue-router history 路径) 全部返回 index.html
