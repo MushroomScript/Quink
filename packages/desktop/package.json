@@ -2,6 +2,13 @@
   "name": "@quink/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Quink (一念) desktop client - quick capture + AI auto-organize for personal notes",
+  "homepage": "https://github.com/MushroomScript/Quink",
+  "author": {
+    "name": "Mushroom",
+    "email": "mushroom@users.noreply.github.com"
+  },
+  "license": "MIT",
   "main": "dist/main.js",
   "scripts": {
     "dev": "tsc && electron . --remote-debugging-port=9222",
