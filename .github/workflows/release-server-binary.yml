@@ -37,6 +37,20 @@ jobs:
         run: |
           pnpm rebuild @yao-pkg/pkg pkg-fetch better-sqlite3 sharp 2>&1 || true
 
+      # Windows pkg fabricator 跑临时 binary 时 Win Defender 实时扫描拦截 → spawn UNKNOWN (errno -4094)
+      # 临时禁 real-time monitoring + 加 workspace / pkg cache 排除路径. GHA runner 默认 admin 权限可改 Defender
+      - name: Disable Defender for pkg fabricator (Windows only)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionPath $env:TEMP -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.pkg-cache" -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionProcess pkg.exe -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionProcess node.exe -ErrorAction SilentlyContinue
+          Write-Host "Defender real-time monitoring disabled + workspace excluded"
+
       # 顺序: tsc → esbuild bundle → pkg
       - name: Build server (tsc → esbuild → pkg)
         run: pnpm --filter @quink/server run build:binary
