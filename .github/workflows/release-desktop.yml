@@ -58,6 +58,9 @@ jobs:
           # electron-builder 在 GitHub Actions 上跑时, GH_TOKEN 用于自动发布. 我们用 softprops/action-gh-release
           # 单独控制 Release, 这里不让 electron-builder 自己发, publish: null in package.json 已禁
           CSC_IDENTITY_AUTO_DISCOVERY: false  # mac 不签名 (没 Apple 开发者账号)
+          # node-gyp 在 win-2022 runner 上默认找 VS 2013/2015/2017, 找不到. 显式告诉它用 VS 2022
+          # (GHA windows-latest 镜像自带 VS 2022 Enterprise + C++ workload). 在 mac/linux 上这 env 被忽略
+          GYP_MSVS_VERSION: '2022'
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
