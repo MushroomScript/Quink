@@ -141,6 +141,8 @@ Quink 服务端 + Web 端打包到一个 Docker 镜像里。任意有 Docker 的
 
 每次 main 分支有新 commit, GitHub Actions 自动 build 镜像推到 GHCR。用户拉镜像直接跑, 不用本地 build。
 
+#### A1. git clone（适合想看代码 / 用 git pull 升级）
+
 ```bash
 git clone https://github.com/MushroomScript/Quink.git
 cd Quink
@@ -151,6 +153,31 @@ mkdir -p quink-data
 # Linux/macOS: sudo chown 1000:1000 quink-data  (容器内非 root uid 1000 跑)
 
 docker compose up -d  # 自动 pull GHCR 镜像 + 起容器
+```
+
+#### A2. curl 两个文件（轻量, 不想要源码）
+
+```bash
+mkdir quink && cd quink
+curl -O https://raw.githubusercontent.com/MushroomScript/Quink/main/docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/MushroomScript/Quink/main/.env.example -o .env
+nano .env  # 改 .env (见下面"必填配置")
+
+mkdir -p quink-data
+# Linux/macOS: sudo chown 1000:1000 quink-data
+
+docker compose up -d
+```
+
+升级时（A1 用 `git pull`, A2 重新 curl 一次 docker-compose.yml）:
+
+```bash
+# A1
+git pull && docker compose pull && docker compose up -d
+
+# A2
+curl -O https://raw.githubusercontent.com/MushroomScript/Quink/main/docker-compose.yml
+docker compose pull && docker compose up -d
 ```
 
 **必填配置（`.env`）**：
