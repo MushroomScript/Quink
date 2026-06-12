@@ -27,6 +27,7 @@
     "appId": "cc.quink.desktop",
     "productName": "Quink",
     "asar": true,
+    "electronVersion": "35.0.0",
     "directories": {
       "output": "dist-electron",
       "buildResources": "build"
