@@ -22,6 +22,13 @@ jobs:
         with:
           node-version: '22'
 
+      # node-gyp 10 子目录的 gyp/ 老代码 require distutils, Python 3.12+ 已经移除. 装 Python 3.11
+      # (含 distutils) 让 mac/linux native rebuild 跑通. Windows 不受影响 (走 MSBuild 不用 Python gyp)
+      - name: Setup Python 3.11 (node-gyp distutils compat)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       # pin pnpm 10 (跟 Dockerfile 一致, 防 pnpm 11 严格行为)
       - name: Install pnpm
         run: npm install -g pnpm@10
