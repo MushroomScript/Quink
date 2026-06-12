@@ -29,6 +29,29 @@ jobs:
         with:
           python-version: '3.11'
 
+      # uiohook-napi 在 Linux 上用 X11 API 做全局快捷键监听, native compile 需要 X11 dev headers
+      - name: Install X11 dev libraries (Linux, uiohook-napi native build deps)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libx11-dev \
+            libxtst-dev \
+            libxt-dev \
+            libxinerama-dev \
+            libxkbcommon-x11-dev \
+            libxkbcommon-dev \
+            libxrandr-dev \
+            libxi-dev
+
+      # Windows native compile 之前卡 "preparing" hang. 显式 setup MSVC env (cl.exe + INCLUDE + LIB)
+      # 让 node-gyp 直接用, 不走 VS auto-detect 路径
+      - name: Setup MSVC environment (Windows, native compile)
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       # pin pnpm 10 (跟 Dockerfile 一致, 防 pnpm 11 严格行为)
       - name: Install pnpm
         run: npm install -g pnpm@10
