@@ -114,16 +114,81 @@ jobs:
           # (GHA windows-latest 镜像自带 VS 2022 Enterprise + C++ workload). 在 mac/linux 上这 env 被忽略
           GYP_MSVS_VERSION: '2022'
 
-      - name: Upload artifacts
+      # 每种文件类型/架构单独 artifact, 用户能选择性下载 (整包 zip 太大, 一个 dmg 就 130 MB 够用)
+      # if-no-files-found: ignore 让不存在的 platform-specific 文件不阻塞 build
+
+      # Mac (arm64 + x64, dmg + zip)
+      - name: Upload Mac arm64 dmg
+        if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: quink-desktop-${{ matrix.os }}
-          path: |
-            packages/desktop/dist-electron/*.exe
-            packages/desktop/dist-electron/*.dmg
-            packages/desktop/dist-electron/*.zip
-            packages/desktop/dist-electron/*.AppImage
-            packages/desktop/dist-electron/*.deb
+          name: Quink-mac-arm64-dmg
+          path: packages/desktop/dist-electron/*arm64.dmg
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload Mac x64 dmg
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quink-mac-x64-dmg
+          path: packages/desktop/dist-electron/*x64.dmg
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload Mac arm64 zip
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quink-mac-arm64-zip
+          path: packages/desktop/dist-electron/*arm64.zip
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload Mac x64 zip
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quink-mac-x64-zip
+          path: packages/desktop/dist-electron/*x64.zip
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # Linux (AppImage + deb)
+      - name: Upload Linux AppImage
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quink-linux-AppImage
+          path: packages/desktop/dist-electron/*.AppImage
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload Linux deb
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quink-linux-deb
+          path: packages/desktop/dist-electron/*.deb
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # Windows (nsis setup + portable)
+      - name: Upload Windows installer
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quink-win-setup
+          path: packages/desktop/dist-electron/*setup.exe
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload Windows portable
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quink-win-portable
+          path: packages/desktop/dist-electron/*.exe
           if-no-files-found: ignore
           retention-days: 30
 
