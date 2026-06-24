@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-bundle/
 dist-binary/
+/web-dist/
 dist-electron/
 .env
 .env.local
@@ -18,6 +19,9 @@ packages/web/public/vditor/
 
 # Electron build output
 packages/desktop/dist/
+
+# 桌面内嵌 server 打包产物 (prepare-server-runtime.mjs 生成: bundle + native node_modules + web-dist, 不入库)
+packages/desktop/server-runtime/
 
 # TypeScript incremental build cache (vue-tsc -b / tsc --incremental 生成)
 *.tsbuildinfo
@@ -63,6 +67,11 @@ login-demo-*.html
 
 # 辅助脚本 (seed 测试数据 / 构建图标等, 个人开发环境用)
 scripts/
+# 例外: 桌面打包必需脚本要入库. scripts/ 已忽略整个目录, 父目录被 ignore 时子文件的 ! 例外不生效,
+# 必须先放行目录、再忽略目录内容、最后放行具体文件
+!packages/desktop/scripts/
+packages/desktop/scripts/*
+!packages/desktop/scripts/prepare-server-runtime.mjs
 
 # 临时调试截图 (MCP 截图给蘑菇看 / 视觉对比, 用完删 + 同步移除此规则)
 .tmp-*.png

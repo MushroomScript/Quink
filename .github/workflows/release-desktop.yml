@@ -104,8 +104,26 @@ jobs:
       - name: Build web
         run: pnpm --filter @quink/web build
 
+      # 二合一: 桌面包内嵌 server (方案 A: electron-as-node, 取代旧 pkg 单文件二进制).
+      # build server bundle (esbuild external native) + prepare-server-runtime.mjs 准备 server-runtime
+      # (依赖闭包扁平复制 + better-sqlite3 electron-rebuild 成当前平台 electron ABI). 每个 runner 只准备
+      # 自己平台 native (不能跨平台编译). desktop package.json extraResources 把 server-runtime 打进
+      # app 的 resources/server, 主进程 ELECTRON_RUN_AS_NODE 拉起 index.cjs. (web 已在上一步 build)
+      - name: Build server bundle + prepare server-runtime (electron ABI native)
+        shell: bash
+        run: |
+          pnpm --filter @quink/server build
+          pnpm --filter @quink/server build:bundle
+          node packages/desktop/scripts/prepare-server-runtime.mjs
+
+      # dist 脚本本地会串 build:runtime (server bundle + web + prepare), CI 已在上一步单独跑 prepare,
+      # 这里直接 tsc + electron-builder 避免重复. electron-builder 用 packages/desktop/node_modules 的 (npm 装)
       - name: Build desktop installer
-        run: pnpm --filter @quink/desktop dist
+        working-directory: packages/desktop
+        shell: bash
+        run: |
+          pnpm exec tsc
+          pnpm exec electron-builder
         env:
           # electron-builder 在 GitHub Actions 上跑时, GH_TOKEN 用于自动发布. 我们用 softprops/action-gh-release
           # 单独控制 Release, 这里不让 electron-builder 自己发, publish: null in package.json 已禁
@@ -133,24 +151,6 @@ jobs:
         with:
           name: Quink-mac-x64-dmg
           path: packages/desktop/dist-electron/*x64.dmg
-          if-no-files-found: ignore
-          retention-days: 30
-
-      - name: Upload Mac arm64 zip
-        if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Quink-mac-arm64-zip
-          path: packages/desktop/dist-electron/*arm64.zip
-          if-no-files-found: ignore
-          retention-days: 30
-
-      - name: Upload Mac x64 zip
-        if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Quink-mac-x64-zip
-          path: packages/desktop/dist-electron/*x64.zip
           if-no-files-found: ignore
           retention-days: 30
 
