@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Quink - 选择服务器</title>
+  <style>
+    :root {
+      --bg: #f4f5fc;
+      --card: #ffffff;
+      --accent: #5870e6;
+      --accent-soft: #eef1fd;
+      --text: #2b2e3a;
+      --dim: #8a8f9c;
+      --line: #e6e8f0;
+      --danger: #e05656;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      user-select: none;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 自定义标题栏 (frame:false), 整条可拖动, 关闭按钮 no-drag */
+    .titlebar {
+      height: 38px;
+      flex: 0 0 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 8px 0 16px;
+      -webkit-app-region: drag;
+    }
+    .titlebar .brand { font-size: 13px; font-weight: 700; color: var(--accent); letter-spacing: 0.3px; }
+    .titlebar .close {
+      -webkit-app-region: no-drag;
+      width: 28px; height: 28px; border: none; background: transparent;
+      border-radius: 7px; cursor: pointer; color: var(--dim);
+      display: flex; align-items: center; justify-content: center; font-size: 16px;
+    }
+    .titlebar .close:hover { background: rgba(0,0,0,0.06); color: var(--text); }
+
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 28px 24px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    h1 { font-size: 21px; font-weight: 700; margin-bottom: 6px; }
+    .subtitle { font-size: 13px; color: var(--dim); margin-bottom: 22px; line-height: 1.5; }
+
+    .mode-cards { display: flex; gap: 12px; margin-bottom: 18px; }
+    .mode-card {
+      flex: 1; background: var(--card); border: 2px solid var(--line);
+      border-radius: 14px; padding: 16px 14px; cursor: pointer;
+      transition: border-color 0.15s, background 0.15s; text-align: left;
+    }
+    .mode-card:hover { border-color: #cdd3ec; }
+    .mode-card.active { border-color: var(--accent); background: var(--accent-soft); }
+    .mode-card .ic { color: var(--accent); margin-bottom: 10px; }
+    .mode-card .t { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .mode-card .d { font-size: 12px; color: var(--dim); line-height: 1.5; }
+
+    .panel { display: none; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 18px; }
+    .panel.show { display: block; }
+
+    label.field { display: block; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 7px; }
+    .addr-row { display: flex; gap: 8px; }
+    input[type="text"] {
+      flex: 1; height: 38px; border: 1px solid var(--line); border-radius: 9px;
+      padding: 0 12px; font-size: 13px; color: var(--text); outline: none;
+      font-family: inherit; background: #fafbff; user-select: text;
+    }
+    input[type="text"]:focus { border-color: var(--accent); background: #fff; }
+    .test-btn {
+      height: 38px; padding: 0 16px; border: 1px solid var(--accent); background: #fff;
+      color: var(--accent); border-radius: 9px; font-size: 13px; font-weight: 600;
+      cursor: pointer; white-space: nowrap; font-family: inherit;
+    }
+    .test-btn:hover { background: var(--accent-soft); }
+    .test-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .test-status { font-size: 12px; margin-top: 10px; min-height: 16px; display: flex; align-items: center; gap: 6px; }
+    .test-status.ok { color: #2fa36b; }
+    .test-status.fail { color: var(--danger); }
+    .test-status.testing { color: var(--dim); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px; }
+    .test-status.ok .dot { background: #2fa36b; }
+    .test-status.fail .dot { background: var(--danger); }
+    .test-status.testing .dot { background: var(--dim); animation: pulse 0.9s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+    .expose-row { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; }
+    .expose-row input { margin-top: 2px; width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+    .expose-row .lbl { font-size: 13px; font-weight: 600; }
+    .expose-row .sub { font-size: 12px; color: var(--dim); margin-top: 2px; line-height: 1.45; }
+    .risk { display: none; margin-top: 11px; padding: 10px 12px; background: #fdf0f0; border-radius: 9px;
+      font-size: 12px; color: var(--danger); line-height: 1.5; }
+    .risk.show { display: block; }
+
+    .footer { margin-top: auto; }
+    .done-btn {
+      width: 100%; height: 44px; border: none; background: var(--accent); color: #fff;
+      border-radius: 11px; font-size: 14px; font-weight: 600; cursor: pointer;
+      font-family: inherit; transition: background 0.15s, opacity 0.15s;
+    }
+    .done-btn:hover { background: #4a61d8; }
+    .done-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  </style>
+</head>
+<body spellcheck="false">
+  <div class="titlebar">
+    <span class="brand">Quink</span>
+    <button class="close" id="closeBtn" title="关闭">&#10005;</button>
+  </div>
+
+  <div class="content">
+    <h1>选择 Quink 服务器</h1>
+    <p class="subtitle">笔记存在哪台机器上？可随时在托盘菜单「切换服务器」里更改。</p>
+
+    <div class="mode-cards">
+      <button class="mode-card" data-mode="local" id="cardLocal">
+        <div class="ic">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" />
+          </svg>
+        </div>
+        <div class="t">本机模式</div>
+        <div class="d">本机既当服务器，又当客户端。</div>
+      </button>
+      <button class="mode-card" data-mode="remote" id="cardRemote">
+        <div class="ic">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+          </svg>
+        </div>
+        <div class="t">远程模式</div>
+        <div class="d">连接已部署的 Quink 服务器。</div>
+      </button>
+    </div>
+
+    <!-- 本机面板 -->
+    <div class="panel" id="panelLocal">
+      <label class="expose-row">
+        <input type="checkbox" id="exposeChk" autocomplete="off" />
+        <span>
+          <span class="lbl">对局域网开放</span>
+          <span class="sub">使局域网内其他设备可注册或登录账号访问 Quink。</span>
+        </span>
+      </label>
+      <div class="risk" id="riskBox">
+        建议仅在可信的家庭网络开启，并放行防火墙 38999 端口。
+      </div>
+    </div>
+
+    <!-- 远程面板 -->
+    <div class="panel" id="panelRemote">
+      <label class="field" for="addrInput">服务器地址</label>
+      <div class="addr-row">
+        <input type="text" id="addrInput" placeholder="" autocomplete="off" />
+        <button class="test-btn" id="testBtn">测试连接</button>
+      </div>
+      <div class="test-status" id="testStatus"></div>
+    </div>
+
+    <div class="footer">
+      <button class="done-btn" id="doneBtn">完成</button>
+    </div>
+  </div>
+
+  <script>
+    const setup = window.quinkSetup;
+    const cards = document.querySelectorAll('.mode-card');
+    const panelLocal = document.getElementById('panelLocal');
+    const panelRemote = document.getElementById('panelRemote');
+    const exposeChk = document.getElementById('exposeChk');
+    const riskBox = document.getElementById('riskBox');
+    const addrInput = document.getElementById('addrInput');
+    const testBtn = document.getElementById('testBtn');
+    const testStatus = document.getElementById('testStatus');
+    const doneBtn = document.getElementById('doneBtn');
+    const closeBtn = document.getElementById('closeBtn');
+
+    let mode = 'local';
+    let testOk = false;
+    let testSeq = 0; // 每次测试 / 每次改地址都自增, 让进行中的旧测试结果作废 (不再回写状态)
+
+    // Chromium 重开同 URL 会恢复表单控件状态 (autocomplete), 显式重置默认 = 不对局域网开放 (更安全)
+    exposeChk.checked = false;
+
+    // 末尾去斜杠 + 没写协议补 http://
+    function normalizeUrl(raw) {
+      let u = (raw || '').trim().replace(/\/+$/, '');
+      if (!u) return '';
+      if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
+      return u;
+    }
+
+    function setTestStatus(kind, text) {
+      testStatus.className = 'test-status' + (kind ? ' ' + kind : '');
+      testStatus.innerHTML = kind ? '<span class="dot"></span><span>' + text + '</span>' : '';
+    }
+
+    function updateUI() {
+      cards.forEach((c) => c.classList.toggle('active', c.dataset.mode === mode));
+      panelLocal.classList.toggle('show', mode === 'local');
+      panelRemote.classList.toggle('show', mode === 'remote');
+      riskBox.classList.toggle('show', mode === 'local' && exposeChk.checked);
+      // 完成按钮: 本机随时可点; 远程必须测试通过
+      const ready = mode === 'local' || (mode === 'remote' && testOk && normalizeUrl(addrInput.value));
+      doneBtn.disabled = !ready;
+    }
+
+    cards.forEach((c) => c.addEventListener('click', () => { mode = c.dataset.mode; updateUI(); }));
+    exposeChk.addEventListener('change', updateUI);
+    // 改地址: 作废进行中的测试 (testSeq++) + 清状态, 避免旧测试 fetch 返回后又把"连接失败"写回来
+    addrInput.addEventListener('input', () => {
+      testOk = false;
+      testSeq++;
+      testBtn.disabled = false;
+      setTestStatus('', '');
+      updateUI();
+    });
+
+    testBtn.addEventListener('click', doTest);
+    addrInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doTest(); } });
+
+    async function doTest() {
+      const url = normalizeUrl(addrInput.value);
+      if (!url) { setTestStatus('fail', '请输入服务器地址'); return; }
+      const mySeq = ++testSeq; // 抢占本次序号, 改地址 / 再点测试都会让它过期
+      testBtn.disabled = true;
+      setTestStatus('testing', '连接中…');
+      let result;
+      try {
+        result = await setup.testConnection(url);
+      } catch (e) {
+        result = { ok: false, error: e && e.message ? e.message : '未知错误' };
+      }
+      if (mySeq !== testSeq) return; // 测试期间地址变了 / 又点了测试 → 本次结果作废, 不回写
+      testBtn.disabled = false;
+      if (result.ok) { testOk = true; setTestStatus('ok', '连接成功'); }
+      else { testOk = false; setTestStatus('fail', '连接失败：' + (result.error || '未知错误')); }
+      updateUI();
+    }
+
+    doneBtn.addEventListener('click', () => {
+      if (doneBtn.disabled) return;
+      setup.save({
+        mode,
+        remoteUrl: mode === 'remote' ? normalizeUrl(addrInput.value) : '',
+        localExposeLan: mode === 'local' ? exposeChk.checked : false,
+      });
+    });
+
+    closeBtn.addEventListener('click', () => window.close());
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.close(); });
+
+    // 切换服务器场景: 预填当前配置 (首次启动返回 null, 用默认 local)
+    (async () => {
+      try {
+        const cur = await setup.getCurrent();
+        if (cur && (cur.mode === 'local' || cur.mode === 'remote')) {
+          mode = cur.mode;
+          exposeChk.checked = !!cur.localExposeLan;
+          if (cur.remoteUrl) addrInput.value = cur.remoteUrl;
+        }
+      } catch {}
+      updateUI();
+    })();
+  </script>
+</body>
+</html>

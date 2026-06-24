@@ -16,23 +16,210 @@ import {
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { spawn, ChildProcess } from 'child_process';
 import { createTrayIcon } from './tray-icon';
 import { registerShortcut, unregisterAll, startHook, stopHook, onKeydown } from './shortcuts';
 import * as attachmentTasksStore from './attachmentTasksStore';
+import { readServerConfig, writeServerConfig, ServerConfig } from './serverConfig';
 
-const API_BASE = `http://localhost:${process.env.QUINK_PORT || '38999'}`;
-// dev: 走 Vite dev server (24888, HMR). prod (打包后): server 同进程 SPA serve, 跟 API_BASE 同 origin (38999)
-// 用户的 server 跑在别处时未来加 onboarding 让用户填 URL, 当前 alpha 版默认连本机
-const WEB_URL = app.isPackaged
+// 默认值 = 本机模式 (local). app.whenReady 读 server-config.json 后 applyServerConfig 可能覆盖成远程地址.
+// 改 let (不再 const): 下游 IPC handler / createWindow 都在运行时读, 启动时按 config 赋好值再建窗口.
+let API_BASE = `http://localhost:${process.env.QUINK_PORT || '38999'}`;
+// local-dev: 走 Vite dev server (24888, HMR). local-prod (打包后): server 同进程 SPA serve, 跟 API_BASE 同 origin (38999).
+// remote: applyServerConfig 把两者都设成远程服务器地址, 前端从远程 origin 加载, API 相对路径自动跟到远程.
+let WEB_URL = app.isPackaged
   ? API_BASE
   : `http://localhost:${process.env.QUINK_WEB_PORT || '24888'}`;
+
+// 按 server-config.json 决定 API_BASE / WEB_URL.
+// remote: 都指向远程服务器 → 前端从远程 origin 加载, API 相对路径自动打远程.
+// local: 回本机默认 (dev 走 Vite 24888, prod 走内嵌 server 同 origin).
+function applyServerConfig(cfg: ServerConfig) {
+  if (cfg.mode === 'remote' && cfg.remoteUrl) {
+    API_BASE = cfg.remoteUrl;
+    WEB_URL = cfg.remoteUrl;
+  } else {
+    API_BASE = `http://localhost:${process.env.QUINK_PORT || '38999'}`;
+    WEB_URL = app.isPackaged ? API_BASE : `http://localhost:${process.env.QUINK_WEB_PORT || '24888'}`;
+  }
+}
 
 // 显式声明 app name. Electron 默认用 package.json 的 name (@quink/desktop), 导致
 // userData 路径变成 %APPDATA%\@quink\desktop 难找. 显式设 Quink 让路径变 %APPDATA%\Quink.
 // 必须在任何 app.getPath('userData') 调用之前 (HEIC_CACHE_DIR / PDF_CACHE_DIR 初始化用了它)
 app.setName('Quink');
 
+// ── 便携模式: 绿色版(zip)数据跟程序走 ──────────────────────────────
+// 安装版 nsis 安装时在 exe 旁写 .installed 标记 → 数据用系统 %APPDATA%\Quink.
+// 绿色版(zip 解压)没这标记 → 把 userData 指到 exe 旁 quink-data, 整个目录可拷走(笔记+登录态+主题都跟着).
+// exe 旁不可写(误解压到 Program Files 等只读处)时兜底回退默认 %APPDATA%. dev 不受影响(!isPackaged).
+if (app.isPackaged) {
+  try {
+    const exeDir = path.dirname(app.getPath('exe'));
+    if (!fs.existsSync(path.join(exeDir, '.installed'))) {
+      const portableDir = path.join(exeDir, 'quink-data');
+      fs.mkdirSync(portableDir, { recursive: true });
+      fs.accessSync(portableDir, fs.constants.W_OK);
+      app.setPath('userData', portableDir);
+    }
+  } catch {}
+}
+
+// ── 二合一: 内嵌 server (electron-as-node) 进程管理 ──────────────────
+// 打包后桌面端自带 server-runtime (resources/server: server esbuild bundle + native(electron ABI) + 前端 SPA),
+// app 启动时用 Electron 自带 node (ELECTRON_RUN_AS_NODE) 拉起 index.cjs, 退出时 kill.
+// dev 模式不 spawn (用 pnpm dev:server 跑 tsx). 用户已自己跑 server (端口被占) 时复用现有, 不重复拉起.
+let serverProcess: ChildProcess | null = null;
+
+async function isServerUp(): Promise<boolean> {
+  try {
+    const r = await fetch(`${API_BASE}/api/health`);
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+function getServerDir(): string {
+  // 打包后 server-runtime 放 resources/server (electron-builder extraResources: from server-runtime to server).
+  // dev 回退到 packages/desktop/server-runtime (本地 prepare 脚本产物). dev 一般不 spawn 用不到, 仅占位.
+  if (app.isPackaged) return path.join(process.resourcesPath, 'server');
+  return path.join(__dirname, '..', 'server-runtime');
+}
+
+async function startServer(host: string): Promise<void> {
+  if (!app.isPackaged) return; // dev: server 由 pnpm dev:server 跑, 不 spawn
+  if (await isServerUp()) {
+    console.log('[server] 已在运行, 复用现有');
+    return;
+  }
+  const serverDir = getServerDir();
+  const bundlePath = path.join(serverDir, 'index.cjs');
+  if (!fs.existsSync(bundlePath)) {
+    console.error('[server] 找不到 server bundle:', bundlePath);
+    return;
+  }
+  console.log('[server] 拉起内嵌 server (electron-as-node):', bundlePath);
+  // process.execPath = Electron 二进制. ELECTRON_RUN_AS_NODE=1 让它当纯 node 跑 server bundle.
+  // NODE_PATH 指向随包 node_modules, bundle external 的 better-sqlite3/sharp 等 native 从这加载 (electron ABI).
+  serverProcess = spawn(process.execPath, [bundlePath], {
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      QUINK_DATA_DIR: app.getPath('userData'), // 数据落 userData, 重装/升级不丢
+      QUINK_WEB_DIST: path.join(serverDir, 'web-dist'), // server 同进程 serve 前端 SPA
+      QUINK_HOST: host, // local 模式 host: 127.0.0.1 锁本机 / 0.0.0.0 对局域网开放 (引导页"对局域网开放")
+      QUINK_PORT: String(process.env.QUINK_PORT || 38999),
+      NODE_PATH: path.join(serverDir, 'node_modules'),
+    },
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  serverProcess.on('exit', (code) => {
+    console.log('[server] 退出, code=', code);
+    serverProcess = null;
+  });
+  // 等 server ready (最多 30s) 再返回, 让窗口加载时后端已就绪, 避免白屏
+  const start = Date.now();
+  while (Date.now() - start < 30000) {
+    if (await isServerUp()) {
+      console.log('[server] ready');
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  console.error('[server] 启动超时 30s, 仍继续建窗口');
+}
+
+function stopServer(): void {
+  if (serverProcess) {
+    try {
+      serverProcess.kill();
+    } catch {}
+    serverProcess = null;
+  }
+}
+
+// ── 自选服务器: 引导页 + 远程可达性 ──────────────────────────────
+// 首次启动 (无 server-config.json) 或托盘"切换服务器"时弹. 纯本地 HTML (ui/setup.html), 不依赖任何 server.
+function createSetupWindow(isFirstRun: boolean) {
+  if (setupWindow && !setupWindow.isDestroyed()) {
+    setupWindow.focus();
+    return;
+  }
+  setupWindow = new BrowserWindow({
+    width: 540,
+    height: 480,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    title: 'Quink - 选择服务器',
+    icon: createTrayIcon(currentTheme),
+    frame: false,
+    show: false,
+    backgroundColor: THEME_BG.blueberry,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-setup.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  setupWindow.loadFile(path.join(__dirname, '..', 'ui', 'setup.html'));
+  setupWindow.once('ready-to-show', () => setupWindow?.show());
+  setupWindow.on('closed', () => {
+    setupWindow = null;
+    // 首次启动 (还没写 config) 关掉引导 = 退出 app (没 config 进不了主界面).
+    // 切换服务器 (已有 config) 关掉 = 仅关窗, 主窗口照常.
+    if (isFirstRun && !readServerConfig()) app.quit();
+  });
+}
+
+// 远程服务器可达性检测 (5s 超时). 启动时 + 引导页"测试连接"共用.
+async function checkRemote(url: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const r = await fetch(`${url.replace(/\/+$/, '')}/api/health`, { signal: controller.signal });
+    clearTimeout(timer);
+    return r.ok ? { ok: true } : { ok: false, error: `HTTP ${r.status}` };
+  } catch (e: any) {
+    return { ok: false, error: e?.name === 'AbortError' ? '连接超时 (5 秒)' : e?.message || '无法连接' };
+  }
+}
+
+// 远程模式连不上: 弹原生 dialog. 三个出口都不继续当前启动 (relaunch / 引导 / 退出 接管).
+async function handleRemoteUnreachable(url: string) {
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    title: 'Quink',
+    message: '连接服务器失败',
+    detail: `无法连接到 ${url}\n服务器可能没开机, 或不在同一网络.`,
+    buttons: ['重试', '切换服务器', '退出'],
+    defaultId: 0,
+    cancelId: 2,
+  });
+  if (response === 0) {
+    app.relaunch();
+    app.exit(0);
+  } else if (response === 1) {
+    createSetupWindow(false);
+  } else {
+    app.quit();
+  }
+}
+
+// 引导页 IPC
+ipcMain.handle('setup:test-connection', (_e, url: string) => checkRemote(url));
+ipcMain.handle('setup:get-current', () => readServerConfig());
+ipcMain.on('setup:save', (_e, cfg: ServerConfig) => {
+  writeServerConfig(cfg);
+  // origin (远程地址) / host (对局域网开放) 变了, 必须重启 app 重新走启动分支 + 重新 loadURL
+  app.relaunch();
+  app.exit(0);
+});
+
 let mainWindow: BrowserWindow | null = null;
+let setupWindow: BrowserWindow | null = null;
 let captureWindow: BrowserWindow | null = null;
 let floatWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -245,6 +432,14 @@ function createMainWindow() {
   // 彻底删掉菜单栏（Alt 键也不会弹出）
   Menu.setApplicationMenu(null);
   mainWindow.loadURL(WEB_URL);
+
+  // 远程模式主文档加载失败 (服务器中途挂 / 网络断) 兜底: 弹 dialog 让用户重试/换服务器.
+  // 只认主 frame 失败, 排除 -3 (ERR_ABORTED, 正常导航取消会报). 本机模式不弹 (server await ready 后才建窗口).
+  mainWindow.webContents.on('did-fail-load', (_e, errorCode, _desc, _url, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return;
+    const cfg = readServerConfig();
+    if (cfg?.mode === 'remote') handleRemoteUnreachable(cfg.remoteUrl);
+  });
 
   // 右键上下文菜单
   mainWindow.webContents.on('context-menu', (_event, params) => {
@@ -526,6 +721,10 @@ function createTray() {
       },
     },
     { type: 'separator' },
+    {
+      label: '切换服务器',
+      click: () => createSetupWindow(false),
+    },
     {
       label: '退出',
       click: () => {
@@ -1122,7 +1321,27 @@ if (!gotLock) {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // 读"连哪个 server"配置. 首次启动 (无配置) → 弹引导页不走主流程; 用户选完写 config + relaunch 重新进这里.
+  const cfg = readServerConfig();
+  if (!cfg) {
+    createSetupWindow(true);
+    return;
+  }
+  applyServerConfig(cfg);
+
+  // remote: 不拉内嵌 server, 先确认远程可达 (连不上弹 dialog 重试/换服务器/退出).
+  // local: 按"对局域网开放"决定 host 拉起内嵌 server (打包后才真 spawn, dev 由 pnpm dev:server 跑).
+  if (cfg.mode === 'remote') {
+    const { ok } = await checkRemote(cfg.remoteUrl);
+    if (!ok) {
+      await handleRemoteUnreachable(cfg.remoteUrl);
+      return; // 当前启动到此为止, 由 relaunch / 引导接管
+    }
+  } else {
+    await startServer(cfg.localExposeLan ? '0.0.0.0' : '127.0.0.1');
+  }
+
   // 加载持久化的附件传输任务历史 (跨 session 恢复 success/failed 终态)
   attachmentTasksStore.load();
   // 注册全局下载处理: Electron 默认 <a download> / video controls 下载会直接存到 ~/Downloads,
@@ -1182,6 +1401,7 @@ app.whenReady().then(() => {
 app.on('will-quit', () => {
   stopHook();
   tryStopSelectionMonitor();
+  stopServer(); // 关掉内嵌 server 进程
   // 显式销毁托盘，避免某些 Windows 环境下应用退出后图标残留
   if (tray && !tray.isDestroyed()) tray.destroy();
 });
