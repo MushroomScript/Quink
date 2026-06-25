@@ -10,7 +10,7 @@ export type ServerMode = 'local' | 'remote';
 
 export interface ServerConfig {
   mode: ServerMode;
-  remoteUrl: string; // remote 模式连的服务器地址, 如 http://192.168.0.153:38999 (末尾无斜杠)
+  remoteUrl: string; // remote 模式连的服务器地址, 如 http://192.168.1.100:38999 (末尾无斜杠)
   localExposeLan: boolean; // local 模式是否对局域网开放 (true=0.0.0.0 别的设备可连, false=127.0.0.1 锁本机)
   localPort: number; // local 模式 server 监听端口, 默认 38999. 对局域网开放时用户可改 (避端口占用)
 }
