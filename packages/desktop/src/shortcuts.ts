@@ -122,9 +122,11 @@ export function unregisterAll() {
   bindings.length = 0;
 }
 
-export function startHook() {
-  if (started) return;
-  started = true;
+let listenersAttached = false;
+
+function attachListeners() {
+  if (listenersAttached) return;
+  listenersAttached = true;
 
   uIOhook.on('keydown', (e) => {
     pressedKeys.add(e.keycode);
@@ -145,8 +147,21 @@ export function startHook() {
   uIOhook.on('keyup', (e) => {
     pressedKeys.delete(e.keycode);
   });
+}
 
-  uIOhook.start();
+// 返回是否启动成功. macOS 没"辅助功能"权限时 uIOhook.start() 抛错, 这里 catch 不崩, 返 false 让 main 引导授权.
+// listener 只挂一次 (attachListeners), 授权后重试 startHook 不会重复挂 → 防快捷键触发多次.
+export function startHook(): boolean {
+  if (started) return true;
+  attachListeners();
+  try {
+    uIOhook.start();
+    started = true;
+    return true;
+  } catch (e) {
+    console.error('[startHook] uiohook 启动失败 (macOS 需"辅助功能"权限):', e instanceof Error ? e.message : e);
+    return false;
+  }
 }
 
 export function stopHook() {

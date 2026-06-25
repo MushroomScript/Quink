@@ -53,10 +53,10 @@
       flex-direction: column;
     }
 
-    h1 { font-size: 21px; font-weight: 700; margin-bottom: 6px; }
-    .subtitle { font-size: 13px; color: var(--dim); margin-bottom: 22px; line-height: 1.5; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 5px; }
+    .subtitle { font-size: 13px; color: var(--dim); margin-bottom: 14px; line-height: 1.5; }
 
-    .mode-cards { display: flex; gap: 12px; margin-bottom: 18px; }
+    .mode-cards { display: flex; gap: 12px; margin-bottom: 12px; }
     .mode-card {
       flex: 1; background: var(--card); border: 2px solid var(--line);
       border-radius: 14px; padding: 16px 14px; cursor: pointer;
@@ -68,7 +68,7 @@
     .mode-card .t { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
     .mode-card .d { font-size: 12px; color: var(--dim); line-height: 1.5; }
 
-    .panel { display: none; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 18px; }
+    .panel { display: none; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
     .panel.show { display: block; }
 
     label.field { display: block; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 7px; }
@@ -123,7 +123,7 @@
 
   <div class="content">
     <h1>选择 Quink 服务器</h1>
-    <p class="subtitle">笔记存在哪台机器上？可随时在托盘菜单「切换服务器」里更改。</p>
+    <p class="subtitle">笔记存在哪台机器上？</p>
 
     <div class="mode-cards">
       <button class="mode-card" data-mode="local" id="cardLocal">
@@ -155,8 +155,13 @@
           <span class="sub">使局域网内其他设备可注册或登录账号访问 Quink。</span>
         </span>
       </label>
+      <div id="portRow" style="display:none; margin-top:14px; align-items:center; gap:10px;">
+        <label for="portInput" style="font-size:12px; font-weight:600; color:var(--text); white-space:nowrap;">端口</label>
+        <input type="text" id="portInput" value="38999" inputmode="numeric" autocomplete="off" style="width:90px; flex:none;" />
+        <span style="font-size:12px; color:var(--dim); white-space:nowrap;">默认 38999，被占用可改</span>
+      </div>
       <div class="risk" id="riskBox">
-        建议仅在可信的家庭网络开启，并放行防火墙 38999 端口。
+        建议仅在可信网络开启，放行防火墙对应端口。
       </div>
     </div>
 
@@ -182,6 +187,8 @@
     const panelRemote = document.getElementById('panelRemote');
     const exposeChk = document.getElementById('exposeChk');
     const riskBox = document.getElementById('riskBox');
+    const portRow = document.getElementById('portRow');
+    const portInput = document.getElementById('portInput');
     const addrInput = document.getElementById('addrInput');
     const testBtn = document.getElementById('testBtn');
     const testStatus = document.getElementById('testStatus');
@@ -213,6 +220,7 @@
       panelLocal.classList.toggle('show', mode === 'local');
       panelRemote.classList.toggle('show', mode === 'remote');
       riskBox.classList.toggle('show', mode === 'local' && exposeChk.checked);
+      portRow.style.display = (mode === 'local' && exposeChk.checked) ? 'flex' : 'none';
       // 完成按钮: 本机随时可点; 远程必须测试通过
       const ready = mode === 'local' || (mode === 'remote' && testOk && normalizeUrl(addrInput.value));
       doneBtn.disabled = !ready;
@@ -257,6 +265,7 @@
         mode,
         remoteUrl: mode === 'remote' ? normalizeUrl(addrInput.value) : '',
         localExposeLan: mode === 'local' ? exposeChk.checked : false,
+        localPort: mode === 'local' ? (parseInt(portInput.value, 10) || 38999) : 38999,
       });
     });
 
@@ -271,6 +280,7 @@
           mode = cur.mode;
           exposeChk.checked = !!cur.localExposeLan;
           if (cur.remoteUrl) addrInput.value = cur.remoteUrl;
+          if (cur.localPort) portInput.value = cur.localPort;
         }
       } catch {}
       updateUI();

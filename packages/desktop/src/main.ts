@@ -12,12 +12,13 @@ import {
   dialog,
   session,
   webContents,
+  systemPreferences,
 } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { spawn, ChildProcess } from 'child_process';
-import { createTrayIcon } from './tray-icon';
+import { createTrayIcon, createTrayImage } from './tray-icon';
 import { registerShortcut, unregisterAll, startHook, stopHook, onKeydown } from './shortcuts';
 import * as attachmentTasksStore from './attachmentTasksStore';
 import { readServerConfig, writeServerConfig, ServerConfig } from './serverConfig';
@@ -39,7 +40,7 @@ function applyServerConfig(cfg: ServerConfig) {
     API_BASE = cfg.remoteUrl;
     WEB_URL = cfg.remoteUrl;
   } else {
-    API_BASE = `http://localhost:${process.env.QUINK_PORT || '38999'}`;
+    API_BASE = `http://localhost:${cfg.localPort || 38999}`;
     WEB_URL = app.isPackaged ? API_BASE : `http://localhost:${process.env.QUINK_WEB_PORT || '24888'}`;
   }
 }
@@ -87,7 +88,7 @@ function getServerDir(): string {
   return path.join(__dirname, '..', 'server-runtime');
 }
 
-async function startServer(host: string): Promise<void> {
+async function startServer(host: string, port: number): Promise<void> {
   if (!app.isPackaged) return; // dev: server 由 pnpm dev:server 跑, 不 spawn
   if (await isServerUp()) {
     console.log('[server] 已在运行, 复用现有');
@@ -109,7 +110,7 @@ async function startServer(host: string): Promise<void> {
       QUINK_DATA_DIR: app.getPath('userData'), // 数据落 userData, 重装/升级不丢
       QUINK_WEB_DIST: path.join(serverDir, 'web-dist'), // server 同进程 serve 前端 SPA
       QUINK_HOST: host, // local 模式 host: 127.0.0.1 锁本机 / 0.0.0.0 对局域网开放 (引导页"对局域网开放")
-      QUINK_PORT: String(process.env.QUINK_PORT || 38999),
+      QUINK_PORT: String(port),
       NODE_PATH: path.join(serverDir, 'node_modules'),
     },
     stdio: 'ignore',
@@ -228,13 +229,24 @@ let authToken: string | null = null;
 let aiChatWindow: BrowserWindow | null = null;
 
 // 默认快捷键
-const DEFAULT_SHORTCUTS = {
+// Windows: 单修饰好按. macOS: ⌘⇧ 双修饰 (避开系统 ⌘Q 退出 / ⌘Space 聚焦 / ⌘⇧Q 注销 / ⌘⇧3-5 截图), Meta=Command.
+const DEFAULT_SHORTCUTS = process.platform === 'darwin' ? {
+  capture: 'Meta+Shift+Space',
+  aiChat: 'Meta+Shift+A',
+  float: 'Meta+Shift+X',
+} : {
   capture: 'Shift+Space',
   aiChat: 'Alt+Space',
   float: 'Alt+Q',
 };
 
 let currentShortcuts = { ...DEFAULT_SHORTCUTS };
+
+// 快捷键显示美化: macOS 用符号 ⌘⇧⌥⌃ 连写 (Meta+Shift+Space → ⌘⇧Space), 其他平台原样.
+function fmtShortcut(s: string): string {
+  if (process.platform !== 'darwin') return s;
+  return s.replace(/Meta/g, '⌘').replace(/Shift/g, '⇧').replace(/Alt/g, '⌥').replace(/Ctrl/g, '⌃').replace(/\+/g, '');
+}
 let nativeModuleRef: any = null;
 // 主题持久化到 userData/theme-cache.json,让启动时立即用上次主题创建 tray + mainWindow icon,
 // 否则要等 web 端 fetchMe + sync-theme IPC,首屏会看到默认 blueberry 闪一下再切到正确主题
@@ -294,11 +306,40 @@ async function loadUserShortcuts() {
     const prefs = data.data?.preferences;
     if (prefs?.shortcuts) {
       currentShortcuts = { ...DEFAULT_SHORTCUTS, ...prefs.shortcuts };
+      // macOS: preferences 里存的 Windows 风格快捷键 (含 Ctrl/Alt 非 Meta) 在 Mac 上不顺手, 回退 Mac 默认.
+      // (同账号跨平台同步 preferences, Windows 设的 Ctrl+Shift+Space 不该套到 Mac)
+      if (process.platform === 'darwin') {
+        for (const k of ['capture', 'aiChat', 'float'] as const) {
+          const v = currentShortcuts[k];
+          if (v && /\b(Ctrl|Alt)\b/.test(v) && !v.includes('Meta')) {
+            currentShortcuts[k] = DEFAULT_SHORTCUTS[k];
+          }
+        }
+      }
     }
     if (prefs?.theme && typeof prefs.theme === 'string') {
       currentTheme = prefs.theme;
     }
   } catch {}
+}
+
+// macOS: 全局快捷键 (uiohook) 需"辅助功能"权限. startHook 失败时弹窗引导用户授权 + 打开系统设置对应页.
+function promptAccessibilityPermission() {
+  if (process.platform !== 'darwin') return;
+  if (systemPreferences.isTrustedAccessibilityClient(false)) return; // 已授权, 失败是别的原因, 不弹
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'Quink 需要"辅助功能"权限',
+    message: '全局快捷键需要"辅助功能"权限',
+    detail: '快速记录 / AI 对话 / 抓取选中 等全局快捷键, 需在\n系统设置 → 隐私与安全性 → 辅助功能\n打开 Quink 的开关, 然后重启 Quink。',
+    buttons: ['打开系统设置', '稍后'],
+    defaultId: 0,
+  }).then(({ response }) => {
+    if (response === 0) {
+      systemPreferences.isTrustedAccessibilityClient(true); // 触发系统把 Quink 加进辅助功能列表
+      shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
+    }
+  });
 }
 
 // 统一的浮窗触发:优先 UIA(无感、瞬时、不碰剪贴板),失败再 Ctrl+C 兜底
@@ -420,7 +461,11 @@ function createMainWindow() {
     minHeight: 860,
     title: 'Quink - 一念',
     icon: createTrayIcon(currentTheme),
-    frame: false,
+    // Mac 用原生交通灯 (hiddenInset 隐藏标题栏背景但保留红绿灯按钮), Windows 用 frame:false 自绘标题栏.
+    // trafficLightPosition 让交通灯垂直居中到前端 36px 自绘标题栏内 (y=(36-14)/2≈11)
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 12, y: 11 } }
+      : { frame: false }),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload-main.js'),
@@ -696,7 +741,7 @@ function hideCaptureWindow() {
 function createTray() {
   // reload-shortcuts 会重新调 createTray 刷新快捷键标签，要先销毁旧的，否则托盘项堆积
   if (tray && !tray.isDestroyed()) tray.destroy();
-  const icon = createTrayIcon(currentTheme);
+  const icon = createTrayImage(currentTheme);
   tray = new Tray(icon);
   tray.setToolTip('Quink - 一念');
 
@@ -706,15 +751,15 @@ function createTray() {
       click: () => showMainWindow(),
     },
     {
-      label: `快速记录  ${currentShortcuts.capture}`,
+      label: `快速记录  ${fmtShortcut(currentShortcuts.capture)}`,
       click: () => toggleCaptureWindow(),
     },
     {
-      label: `AI 对话  ${currentShortcuts.aiChat}`,
+      label: `AI 对话  ${fmtShortcut(currentShortcuts.aiChat)}`,
       click: () => toggleAiChatWindow(),
     },
     {
-      label: `抓取选中文字  ${currentShortcuts.float}`,
+      label: `抓取选中文字  ${fmtShortcut(currentShortcuts.float)}`,
       click: () => {
         // 延迟等托盘菜单关闭、焦点回到之前的应用
         setTimeout(() => triggerFloatWindow(), 200);
@@ -1339,7 +1384,7 @@ app.whenReady().then(async () => {
       return; // 当前启动到此为止, 由 relaunch / 引导接管
     }
   } else {
-    await startServer(cfg.localExposeLan ? '0.0.0.0' : '127.0.0.1');
+    await startServer(cfg.localExposeLan ? '0.0.0.0' : '127.0.0.1', cfg.localPort);
   }
 
   // 加载持久化的附件传输任务历史 (跨 session 恢复 success/failed 终态)
@@ -1388,14 +1433,21 @@ app.whenReady().then(async () => {
   // 等用户首次按 Shift+Space 时再创建，那时 currentTheme 已经被 sync-theme IPC 更新到正确值
   createTray();
 
-  // 启动底层键盘钩子并注册默认快捷键
-  startHook();
+  // 启动底层键盘钩子并注册默认快捷键. Mac 没辅助功能权限时 startHook 返 false → 引导授权
+  const hookOk = startHook();
   applyShortcuts();
+  if (!hookOk) promptAccessibilityPermission();
 
   // 全局选中悬浮窗：快捷键触发
   tryInitSelectionGrabber();
 
   console.log('Quink Desktop is running.');
+});
+
+// Mac Cmd+Q / 菜单退出 → before-quit, 设 isQuitting 让 mainWindow close 不再 preventDefault+hide → 真退出.
+// (Windows 退出走托盘"退出"已先设 isQuitting, 这里幂等; before-quit 只在用户真要退时触发, 不破坏关到托盘)
+app.on('before-quit', () => {
+  isQuitting = true;
 });
 
 app.on('will-quit', () => {
@@ -1485,6 +1537,12 @@ function hideAiChatWindow() {
 
 app.on('window-all-closed', () => {
   // Do nothing — stay in tray
+});
+
+// Mac 点 Dock 图标 → 恢复主窗口. main 窗口 close 走 hide(不退出), Mac 没任务栏, 靠 Dock activate 唤回.
+// (activate 只在 macOS 触发, Windows 无 Dock 不受影响)
+app.on('activate', () => {
+  showMainWindow();
 });
 
 // ──────────────────────────────────

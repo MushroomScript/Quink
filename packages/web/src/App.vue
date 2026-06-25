@@ -32,6 +32,8 @@ const store = useNotesStore();
 
 const showChrome = computed(() => !['login', 'capture', 'float', 'ai-chat', 'invite'].includes(route.name as string));
 const isElectron = !!(window as any).quinkDesktop?.isElectron;
+// Mac 标题栏走原生交通灯 (main.ts titleBarStyle:hiddenInset): 左侧给交通灯留位 + 隐藏自绘窗口按钮
+const isMac = isElectron && /Mac/i.test(navigator.userAgent);
 const desk = (window as any).quinkDesktop;
 // 给 html 加 data-electron 让 CSS 能区分 Electron / 浏览器 (用于 .empty-state-center 偏移量等).
 if (isElectron) document.documentElement.setAttribute('data-electron', '');
@@ -592,13 +594,16 @@ watch(() => auth.user, (user) => {
            固定 36px (而非 h-9 = 2.25rem): 标题栏不随用户字体大小 scale, 否则 rem=18 时 h-9=40.5px 引入 .5px
            累积让下游 layout y 落在 .5 倍数 (如 batch bar btn.y=113.5), 浏览器在不同 paint context 下亚像素 round
            不一致 (一边 113 一边 114) → 字符屏幕位置差 1 像素. 固定 px 让所有累积整数, paint 一致. -->
-      <div v-if="isElectron" class="flex items-center justify-between h-[36px] pl-3 pr-2 shrink-0 select-none"
+      <div v-if="isElectron" class="relative flex items-center justify-between h-[36px] pr-2 shrink-0 select-none"
+        :class="isMac ? 'pl-[78px]' : 'pl-3'"
         style="-webkit-app-region: drag; background: rgb(var(--c-sidebar))">
-        <div class="flex items-center gap-2">
+        <div v-if="!isMac" class="flex items-center gap-2">
           <img :src="`/quink-${currentTheme}-192.png`" alt="" class="w-4 h-4" draggable="false" />
           <span class="text-xs font-semibold" style="color: var(--sb-text)">Quink - 一念</span>
         </div>
-        <div class="flex items-center" style="-webkit-app-region: no-drag">
+        <!-- Mac: 标题水平居中 (跟随其他 mac app 风格), 交通灯在左、标题居中、右侧空 -->
+        <span v-if="isMac" class="absolute left-1/2 -translate-x-1/2 text-xs font-semibold pointer-events-none" style="color: var(--sb-text)">Quink - 一念</span>
+        <div v-if="!isMac" class="flex items-center" style="-webkit-app-region: no-drag">
           <button @click="desk?.minimize()" class="w-10 h-[36px] flex items-center justify-center hover:bg-black/10 transition-colors" style="color: var(--sb-dim)">
             <PhMinus size="1rem" weight="bold" />
           </button>

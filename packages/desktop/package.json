@@ -36,7 +36,7 @@
     "productName": "Quink",
     "asar": true,
     "npmRebuild": false,
-    "asarUnpack": ["**/*.node", "build/icon-*.ico"],
+    "asarUnpack": ["**/*.node", "build/icon-*.ico", "build/trayTemplate*.png"],
     "electronVersion": "35.0.0",
     "directories": {
       "output": "dist-electron",
@@ -46,6 +46,7 @@
       "dist/**/*",
       "ui/**/*",
       "build/icon-*.ico",
+      "build/trayTemplate*.png",
       "package.json"
     ],
     "extraResources": [
