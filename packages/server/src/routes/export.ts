@@ -16,21 +16,30 @@ app.use('*', authMiddleware);
 // fork 不导出 (parent_note_id IS NULL 过滤, 跟统计同款 origin 维度)
 app.get('/', async (c) => {
   const userId = c.get('userId');
+  // 导出范围/过滤: noteIds(多选导出, 逗号分隔) / category(单选) / dateFrom~dateTo(日期范围 YYYY-MM-DD). 都不传=全量
+  const noteIdsParam = c.req.query('noteIds');
+  const category = c.req.query('category');
+  const dateFrom = c.req.query('dateFrom');
+  const dateTo = c.req.query('dateTo');
+  const type = c.req.query('type');   // 笔记类型 quink/note/todo (筛选结果导出)
+  const tag = c.req.query('tag');      // 单个标签 (筛选结果导出)
 
   const user = await db.select({ preferences: schema.users.preferences })
     .from(schema.users).where(eq(schema.users.id, userId)).get();
   const sharedDisplay = (user?.preferences as any)?.sharedDisplay || 'own';
+  // 多选导出用 all 范围拉候选 (确保选中的可见 shared 笔记也能导, 不受 preference 限制); 否则按 preference
+  const scope = noteIdsParam ? 'all' : sharedDisplay;
 
   // 拉笔记按 scope 分支
   let notes: Array<typeof schema.notes.$inferSelect>;
   const baseCondition = sql`${schema.notes.deletedAt} IS NULL AND ${schema.notes.parentNoteId} IS NULL`;
-  if (sharedDisplay === 'all' || sharedDisplay === 'others') {
+  if (scope ==='all' || scope ==='others') {
     // 我所在的 active 群列表 (导出 shared 笔记必须先确定我能看到哪些群)
     const myGroups = await db.select({ groupId: schema.groupMembers.groupId })
       .from(schema.groupMembers)
       .where(and(eq(schema.groupMembers.userId, userId), eq(schema.groupMembers.status, 'active'))).all();
     const myGroupIds = myGroups.map(g => g.groupId);
-    if (sharedDisplay === 'others') {
+    if (scope ==='others') {
       if (myGroupIds.length === 0) {
         notes = [];
       } else {
@@ -57,7 +66,7 @@ app.get('/', async (c) => {
         baseCondition,
       )).all();
     }
-  } else if (sharedDisplay === 'none') {
+  } else if (scope ==='none') {
     // 仅 private 笔记 (没有任何共享相关)
     notes = await db.select().from(schema.notes).where(and(
       eq(schema.notes.userId, userId),
@@ -72,10 +81,34 @@ app.get('/', async (c) => {
     )).all();
   }
 
-  // 获取所有文件记录
-  const files = await db.select().from(schema.files)
-    .where(eq(schema.files.userId, userId))
-    .all();
+  // JS 层叠加过滤: 多选 noteIds / 单选 category / 日期范围 (含 dateTo 当天)
+  if (noteIdsParam) {
+    const idSet = new Set(noteIdsParam.split(',').map(s => s.trim()).filter(Boolean));
+    notes = notes.filter(n => idSet.has(n.id));
+  }
+  if (category === '__uncategorized__') notes = notes.filter(n => !n.category);
+  else if (category) notes = notes.filter(n => n.category === category);
+  if (type) notes = notes.filter(n => n.type === type);
+  if (tag) notes = notes.filter(n => ((n.tags as string[]) || []).includes(tag));
+  if (dateFrom) notes = notes.filter(n => n.createdAt >= dateFrom);
+  if (dateTo) notes = notes.filter(n => n.createdAt <= dateTo + 'T23:59:59.999Z');
+
+  // 没有符合条件的笔记 → 不生成只含 meta 的空 ZIP, 返回提示让前端弹
+  if (notes.length === 0) return c.json({ error: '没有符合条件的内容可导出' }, 400);
+
+  // 只导出正文 markdown link 引用到的附件: 解析 [xx](url) 的 url, 剥 /api/uploads/ 前缀取裸名, 匹配 files.url 裸名
+  const referencedUrls = new Set<string>();
+  for (const note of notes) {
+    const re = /\]\(([^)]+)\)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(note.content || '')) !== null) {
+      const url = m[1].trim().replace(/^\/api\/uploads\//, '').replace(/^uploads\//, '');
+      if (/\.\w+$/.test(url) && !/[\/?#:]/.test(url)) referencedUrls.add(url);
+    }
+  }
+  const allFiles = await db.select().from(schema.files)
+    .where(eq(schema.files.userId, userId)).all();
+  const files = allFiles.filter(f => referencedUrls.has(f.url));
 
   // 创建 ZIP
   const archive = archiver('zip', { zlib: { level: 9 } });

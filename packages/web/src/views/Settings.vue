@@ -11,6 +11,7 @@ import { useTheme } from '@/composables/useTheme';
 import { useEscToClose } from '@/composables/useEscToClose';
 import ToggleSwitch from '@/components/ToggleSwitch.vue';
 import CustomSelect from '@/components/CustomSelect.vue';
+import DatePicker from '@/components/DatePicker.vue';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import { getCardWidthPref, setCardWidthPref, type CardWidthMode } from '@/utils/cardWidth';
 import dayjs from 'dayjs';
@@ -765,10 +766,28 @@ async function doLogoutAll() {
 const exporting = ref(false);
 const importing = ref(false);
 const importResult = ref('');
+// 导出筛选 (都不填 = 全量): 分类单选 + 日期范围 x~x
+const exportCategory = ref('');
+const exportDateFrom = ref('');
+const exportDateTo = ref('');
+const exportCategories = ref<{ name: string }[]>([]);
+api.getCategories().then(res => { exportCategories.value = res.data as any; }).catch(() => {});
+const exportCategoryOptions = computed(() => [
+  { value: '', label: '全部分类' },
+  { value: '__uncategorized__', label: '未分类' },
+  ...exportCategories.value.map(c => ({ value: c.name, label: c.name })),
+]);
 
 async function handleExport() {
   exporting.value = true;
-  try { await api.exportData(); showMsg('导出成功'); } catch (err: any) { showMsg(err.message, 'error'); }
+  try {
+    await api.exportData({
+      category: exportCategory.value || undefined,
+      dateFrom: exportDateFrom.value || undefined,
+      dateTo: exportDateTo.value || undefined,
+    });
+    showMsg('导出成功');
+  } catch (err: any) { showMsg(err.message, 'error'); }
   finally { exporting.value = false; }
 }
 
@@ -1472,7 +1491,21 @@ function goBack() {
       <!-- Export -->
       <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
         <h3 class="text-sm font-medium text-gray-800">数据导出</h3>
-        <p class="text-sm text-gray-500">将所有笔记导出为 Markdown 文件 + 附件，打包成 ZIP。</p>
+        <p class="text-sm text-gray-500">导出笔记为 Markdown + 正文引用的附件，打包成 ZIP。</p>
+        <div class="flex flex-wrap items-end gap-3">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">开始日期</label>
+            <div class="w-40"><DatePicker v-model="exportDateFrom" placeholder="不限" /></div>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">结束日期</label>
+            <div class="w-40"><DatePicker v-model="exportDateTo" placeholder="不限" /></div>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">分类</label>
+            <CustomSelect v-model="exportCategory" size="compact" class="w-40" :options="exportCategoryOptions" />
+          </div>
+        </div>
         <button @click="handleExport" :disabled="exporting"
           class="px-4 py-2 text-sm font-medium rounded-lg transition-colors" style="background: rgb(var(--c-accent) / 0.1); color: rgb(var(--c-accent))">
           {{ exporting ? '导出中' : '导出 ZIP' }}

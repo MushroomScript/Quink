@@ -65,6 +65,32 @@ async function doBatchDelete() {
   reportBatch(r, '删除');
 }
 
+// 批量导出选中笔记 + 正文引用的附件为 ZIP. 导出不改数据, 退多选后触发下载
+async function doExport() {
+  const ids = Array.from(store.selectedIds);
+  if (ids.length === 0) return;
+  store.exitSelectMode();
+  try {
+    await api.exportData({ noteIds: ids });
+    toast.show(`已导出 ${ids.length} 条`, 'success', 2000);
+  } catch (e) {
+    toast.show((e as Error).message || '导出失败', 'default', 2800);
+  }
+}
+
+// 导出当前筛选/搜索结果: 用当前列表 (store.notes) 的 id, 不管筛选条件多复杂(多标签/多类型)都准.
+// 注: 列表是分页加载的, 导出的是"当前已加载的", 量大时需先滚到底加载全
+async function doExportFiltered() {
+  const ids = store.notes.map(n => n.id);
+  if (ids.length === 0) { toast.show('当前没有可导出的内容', 'default', 2000); return; }
+  try {
+    await api.exportData({ noteIds: ids });
+    toast.show(`已导出 ${ids.length} 条`, 'success', 2000);
+  } catch (e) {
+    toast.show((e as Error).message || '导出失败', 'default', 2800);
+  }
+}
+
 // 待办页专属批量改 todoStatus: 已是目标状态的项静默跳过 (store 内过滤), toast 只报本次实际改动数
 async function doBatchSetTodoStatus(status: 'done' | 'pending') {
   const n = await store.batchSetTodoStatus(status);
@@ -621,8 +647,12 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
               @update:model-value="v => { filterDateTo = v; applyFilters() }"
             />
           </div>
+          <button @click="doExportFiltered"
+            class="text-xs font-medium px-3 py-1 rounded-lg transition-colors ml-auto shrink-0 bg-primary-light text-primary-dark hover:bg-primary/15">
+            导出结果
+          </button>
           <button @click="clearFilters"
-            class="text-xs font-medium px-3 py-1 rounded-lg transition-colors ml-auto shrink-0"
+            class="text-xs font-medium px-3 py-1 rounded-lg transition-colors shrink-0"
             :class="hasFilters ? 'text-white bg-red-400 hover:bg-red-500' : 'text-gray-400 bg-gray-100 hover:bg-gray-200'">
             清除全部筛选
           </button>
@@ -654,7 +684,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
        半透明 bg-gray-50/80 透过去能看到下方卡片轮廓 (跟回收站 sticky toolbar 同款视觉).
        Vue context 仍在 TopBar 不变, 所有按钮回调 (toggleBatchType / batchDelete 等) 照常工作.
        pt-[8px] pb-[10px] 抵消中文字符 baseline 在 line-box 内自然偏下的视觉偏差. -->
-  <Teleport to="#batch-bar-portal" defer>
+  <Teleport to="#batch-bar-slot" defer>
     <div v-if="store.selectMode"
       class="sticky top-0 z-[var(--z-sticky)] px-4 md:px-6 pt-[8px] pb-[10px] flex items-center gap-3 border-t border-gray-100 bg-gray-50/80"
       style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
@@ -683,6 +713,10 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <button ref="batchTagsBtn" @click="toggleBatchTags"
           class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
           加标签
+        </button>
+        <button @click="doExport"
+          class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+          导出
         </button>
         <button @click="confirmBatchDelete = true"
           class="px-3 py-1 text-xs rounded-lg font-medium bg-red-50 text-red-500 hover:bg-red-100 transition-colors">

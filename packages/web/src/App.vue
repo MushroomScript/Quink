@@ -30,7 +30,9 @@ const router = useRouter();
 const auth = useAuthStore();
 const store = useNotesStore();
 
-const showChrome = computed(() => !['login', 'capture', 'float', 'ai-chat', 'invite'].includes(route.name as string));
+// route.name 未定 (首次导航未 resolve) 时 showChrome=false → 走 RouterView 兜底不渲染主界面骨架,
+// 避免未登录首帧把 undefined 误判成主界面闪一下. 配合 main.ts 即时 mount (不用 router.isReady 延迟) 一起修.
+const showChrome = computed(() => !!route.name && !['login', 'capture', 'float', 'ai-chat', 'invite'].includes(route.name as string));
 const isElectron = !!(window as any).quinkDesktop?.isElectron;
 // Mac 标题栏走原生交通灯 (main.ts titleBarStyle:hiddenInset): 左侧给交通灯留位 + 隐藏自绘窗口按钮
 const isMac = isElectron && /Mac/i.test(navigator.userAgent);
@@ -641,6 +643,9 @@ watch(() => auth.user, (user) => {
                配合 .empty-state-center 在 Resources 等多层嵌套 view 内 absolute 锚到根 div 正常居中.
                h-full 不破坏滚动: 内容超出时溢出可见, main 的 overflow-y-auto 仍能滚到 batch-bar-portal 外的内容. -->
           <div id="batch-bar-portal" class="h-full">
+            <!-- batch bar 落点: 必须在 RouterView 之前. 否则 Teleport 把 batch bar 追加到 portal 末尾 = 排到笔记
+                 列表后面, sticky 钉在列表最底 (刷新直接进多选时按钮沉到屏幕底部). 空 div 不占高度, 不影响布局. -->
+            <div id="batch-bar-slot"></div>
             <RouterView v-slot="{ Component }">
               <KeepAlive :include="['inspiration', 'notes', 'todos', 'ai-page']">
                 <component :is="Component" />

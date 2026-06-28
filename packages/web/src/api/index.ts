@@ -802,12 +802,23 @@ export const api = {
   },
 
   // Export / Import
-  async exportData(): Promise<void> {
+  async exportData(params?: { noteIds?: string[]; category?: string; dateFrom?: string; dateTo?: string; type?: string; tag?: string }): Promise<void> {
     const token = getToken();
-    const res = await fetch(fullUrl('/data'), {
+    const qs = new URLSearchParams();
+    if (params?.noteIds?.length) qs.set('noteIds', params.noteIds.join(','));
+    if (params?.category) qs.set('category', params.category);
+    if (params?.dateFrom) qs.set('dateFrom', params.dateFrom);
+    if (params?.dateTo) qs.set('dateTo', params.dateTo);
+    if (params?.type) qs.set('type', params.type);
+    if (params?.tag) qs.set('tag', params.tag);
+    const query = qs.toString();
+    const res = await fetch(fullUrl('/data' + (query ? '?' + query : '')), {
       headers: token ? { 'Authorization': `Bearer ${token}` } : {},
     });
-    if (!res.ok) throw new Error('导出失败');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: '导出失败' }));
+      throw new Error(err.error || '导出失败');
+    }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
