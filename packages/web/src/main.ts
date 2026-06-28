@@ -19,7 +19,10 @@ window.addEventListener('unhandledrejection', (e) => {
   console.error('[Quink Unhandled]', e.reason);
 });
 
-app.mount('#app');
+// 等路由首次导航 (含 beforeEach 鉴权重定向) 完成后再 mount: 否则 mount 时 vue-router 首次导航还没
+// resolve, route.name=undefined 被 App.vue 的 showChrome 误判成主界面 → 未登录会先闪一下主界面骨架再
+// 跳 login. isReady() 后 route 已是最终值, 首帧直接渲染对的界面 (未登录→login / 已登录→主界面), 不闪.
+router.isReady().then(() => app.mount('#app'));
 
 // 实时获取可见视口高度，适配所有移动端浏览器（Safari/Chrome/Firefox）
 // window.innerHeight 会自动排除浏览器工具栏、地址栏、底部导航等.

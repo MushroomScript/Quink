@@ -132,6 +132,10 @@ router.beforeEach((to) => {
   if (to.query.ref) {
     return { path: `/note/${to.query.ref}`, replace: true };
   }
+  // 已登录还访问 login 页 → 直接回主界面 (避免已登录看到登录页, 跟"未登录别看主界面"对称)
+  if (to.name === 'login' && isLoggedIn()) {
+    return { path: '/quink' };
+  }
   if (!to.meta.public && !isLoggedIn()) {
     return { name: 'login' };
   }

@@ -257,11 +257,13 @@ app.get('/api/stats', authMiddleware, async (c) => {
 // fs/path 用顶部 static import (esbuild bundle 成 CJS 时 top-level await dynamic import 不被支持)
 if (WEB_DIST) {
   const indexHtmlPath = pathJoin(WEB_DIST, 'index.html');
-  const indexHtml = existsSync(indexHtmlPath) ? readFileSync(indexHtmlPath, 'utf-8') : '';
   // 静态资源 (assets / vditor / favicon / *.js / *.css 等)
   app.use('/*', serveStatic({ root: WEB_DIST }));
-  // SPA fallback: 上面没匹配到 (vue-router history 路径) 全部返回 index.html
-  app.get('*', (c) => c.html(indexHtml));
+  // SPA fallback: 上面没匹配到 (vue-router history 路径) 全部返回 index.html.
+  // 每次实时读磁盘 (不在启动时缓存成常量): web-dist 换新 build 后, 启动时缓存的旧 index.html 仍引用
+  // 已被删掉的旧 assets hash, 浏览器请求那些 js 会被本 fallback 兜成 html → MIME 错 → SPA 路由刷新白屏.
+  // index.html 才几 KB 且只有 SPA 导航刷新走这条 (静态资源走上面 serveStatic), 每次读开销可忽略.
+  app.get('*', (c) => c.html(existsSync(indexHtmlPath) ? readFileSync(indexHtmlPath, 'utf-8') : ''));
   console.log(`[web] serving SPA from ${WEB_DIST}`);
 }
 
