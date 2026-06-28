@@ -12,6 +12,7 @@ import {
   markFailedById,
   markCancelledById,
 } from '@/composables/useAttachmentTasks';
+import { useToast } from '@/composables/useToast';
 import RenameModal from './RenameModal.vue';
 import VisibilityChip from './VisibilityChip.vue';
 import CategoryPicker from './CategoryPicker.vue';
@@ -169,6 +170,7 @@ const currentAiFeatureIcon = computed(() =>
 const editorRef = ref<HTMLDivElement>();
 let vditor: Vditor | null = null;
 const dirty = ref(false);
+const toast = useToast();
 
 const isDragOver = ref(false);
 let dragCounter = 0;
@@ -256,29 +258,35 @@ async function onEditorDrop(e: DragEvent) {
   await uploadAndInsert(files);
 }
 
+// 上传单个文件 + 进传输 dock, 返回后端裸 url (失败/取消返 null). 拖拽 / 截图 / 粘贴 base64 图共用.
+async function uploadFileToUrl(file: File): Promise<string | null> {
+  const ctrl = new AbortController();
+  const taskId = await addUploadTask(file.name, file.size, ctrl);
+  try {
+    const res = await api.uploadFile(file, 'file', {
+      signal: ctrl.signal,
+      onProgress: (recv, total) => updateProgressById(taskId, recv, total),
+    });
+    markSuccessById(taskId);
+    return res.data?.url ?? null;
+  } catch (err: any) {
+    if (err?.name === 'AbortError') markCancelledById(taskId);
+    else markFailedById(taskId, err?.message || '上传失败');
+    return null;
+  }
+}
+
 async function uploadAndInsert(files: File[]) {
   vditor?.focus();
-  type UploadResult = { ok: boolean; name: string; type: string; url?: string };
-  const results = await Promise.all(files.map(async (file): Promise<UploadResult> => {
-    const ctrl = new AbortController();
-    const taskId = await addUploadTask(file.name, file.size, ctrl);
-    try {
-      const res = await api.uploadFile(file, 'file', {
-        signal: ctrl.signal,
-        onProgress: (recv, total) => updateProgressById(taskId, recv, total),
-      });
-      markSuccessById(taskId);
-      return { ok: true, name: file.name, type: file.type, url: res.data?.url };
-    } catch (err: any) {
-      if (err?.name === 'AbortError') markCancelledById(taskId);
-      else markFailedById(taskId, err?.message || '上传失败');
-      return { ok: false, name: file.name, type: file.type };
-    }
-  }));
+  const results = await Promise.all(files.map(async (file) => ({
+    name: file.name,
+    type: file.type,
+    url: await uploadFileToUrl(file),
+  })));
   vditor?.focus();
   setTimeout(() => {
     for (const r of results) {
-      if (!r.ok || !r.url) continue;
+      if (!r.url) continue;
       const url = resolveFileUrl(r.url);
       const md = r.type?.startsWith('image/')
         ? `![${r.name}](${url})\n`
@@ -286,6 +294,64 @@ async function uploadAndInsert(files: File[]) {
       vditor?.insertValue(md);
     }
   }, 80);
+}
+
+// data:image/png;base64,xxx → File (atob 解码). 解析失败返 null.
+function dataUrlToFile(dataUrl: string, name: string): File | null {
+  const m = /^data:(image\/[\w.+-]+);base64,(.*)$/i.exec(dataUrl);
+  if (!m) return null;
+  const mime = m[1];
+  try {
+    const bin = atob(m[2]);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const ext = mime.split('/')[1].split('+')[0].replace('jpeg', 'jpg');
+    return new File([arr], `${name}.${ext}`, { type: mime });
+  } catch {
+    return null;
+  }
+}
+
+// 粘贴的富文本里含 base64 内联图 (典型: 微信油猴脚本把图转成 base64) 时, 先把每张 base64 图上传换成 url
+// 再转 markdown 插入, 不让 base64 进编辑器/DB. 否则多张大 base64 内联会卡死 IR 实时渲染 + 保存序列化 (主线程饿死).
+// 失败的图直接剥掉 (绝不保留 base64). 走 vditor.lute.HTML2Md 把换好 url 的 html 转 markdown.
+async function handleRichPasteWithImages(html: string) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const base64Imgs = Array.from(doc.querySelectorAll('img'))
+    .filter((img) => (img.getAttribute('src') || '').startsWith('data:'));
+  if (!base64Imgs.length) return;
+
+  const tipId = toast.show(`正在上传 ${base64Imgs.length} 张图片...`, 'default', 60000);
+  let failed = 0;
+  const base = `pasted-${Date.now()}`;
+  await Promise.all(base64Imgs.map(async (img, i) => {
+    const file = dataUrlToFile(img.getAttribute('src') || '', `${base}-${i}`);
+    if (!file) { img.remove(); failed++; return; }
+    const url = await uploadFileToUrl(file);
+    if (url) img.setAttribute('src', resolveFileUrl(url));
+    else { img.remove(); failed++; }
+  }));
+  toast.dismiss(tipId);
+
+  // img 已换成 absolute url (跟编辑器内 path 约定一致), html2md 转出的 ![](url) 保存时再 strip 回裸名.
+  // 用 Vditor 公开方法 html2md (内部走 lute.HTML2Md); 不要碰 vditor.vditor.lute 内部对象 (外层实例上没有 lute)
+  const md = vditor?.html2md(doc.body.innerHTML) ?? '';
+  vditor?.focus();
+  setTimeout(() => {
+    if (md) vditor?.insertValue(md);
+    if (failed > 0) toast.show(`${base64Imgs.length - failed} 张图片已插入, ${failed} 张上传失败已跳过`, 'error', 3000);
+  }, 80);
+}
+
+// capture 阶段拦截粘贴: 剪贴板富文本含 base64 内联图时自己处理 (上传换 url), 抢在 Vditor 内置 paste 前 (它绑 bubble).
+// 其余 (纯文本 / 外链图 / 截图文件) 放行给 Vditor 默认逻辑, 它们不会卡.
+function onEditorPaste(e: ClipboardEvent) {
+  const html = e.clipboardData?.getData('text/html') || '';
+  if (!html.includes('data:image')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  handleRichPasteWithImages(html);
 }
 
 // 自定义 vditor toolbar tooltip: 默认 vditor tooltip 是按钮的 ::before/::after 伪元素
@@ -424,6 +490,8 @@ onMounted(() => {
       // capture 阶段拦截 Vditor 内 copy: 用户期望"按一次 Enter = 一个 \n", 但 markdown 段落分隔渲染成 <p></p> 浏览器复制时变 \n\n.
       // selection.toString() 在 contenteditable PRE 内常返空, 走 range.cloneContents() 自己 walk DOM 算干净文本 (P/DIV → \n, BR → \n)
       editorRef.value?.addEventListener('copy', onEditorCopy, true);
+      // capture 拦截 base64 富文本粘贴, 上传换 url 不让 base64 进编辑器 (微信油猴转图等多图场景会卡死)
+      editorRef.value?.addEventListener('paste', onEditorPaste, true);
     },
     input: () => {
       dirty.value = true;
@@ -438,6 +506,7 @@ onBeforeUnmount(() => {
   editorRef.value?.removeEventListener('dragover', onEditorDragOver, true);
   editorRef.value?.removeEventListener('dragleave', onEditorDragLeave, true);
   editorRef.value?.removeEventListener('drop', onEditorDrop, true);
+  editorRef.value?.removeEventListener('paste', onEditorPaste, true);
   vditor?.destroy();
   vditor = null;
 });
