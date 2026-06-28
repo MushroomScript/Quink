@@ -431,7 +431,11 @@ watchEffect(async (onCleanup) => {
   // (曾出现偶发的"编辑后列表不更新")。onCleanup 标记过期,过期结果不回写
   let cancelled = false;
   onCleanup(() => { cancelled = true; });
-  const content = props.note.content;
+  // 卡片是预览, 不必全量渲染超大笔记 (历史 base64 大笔记几十万字符 → 全量 md2html 卡死首屏渲染).
+  // ① 剥 base64 内联图 (新粘贴已走上传换 url 不产生 base64, 此为历史 / 极端数据兜底)
+  // ② 截断到覆盖卡片可见区的长度 (line-clamp 视觉再截一次). 正常短笔记 < 阈值原样渲染不受影响.
+  let content = props.note.content.replace(/!\[[^\]]*\]\(data:[^)]*\)/gi, '');
+  if (content.length > 2000) content = content.slice(0, 2000);
   try {
     // 任务列表:* [X] → - [x] (Vditor md2html 只认 - 开头的任务列表)
     // 历史污染清理:旧版 RichEditor 的播放按钮 ▶/⏸ 被 Vditor 序列化进了 markdown,这里剥掉

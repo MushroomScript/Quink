@@ -152,7 +152,10 @@ async function load() {
     const res = await api.getTrash();
     allNotes.value = res.data;
     for (const n of res.data) {
-      try { rendered.value[n.id] = await Vditor.md2html(resolveMarkdownFileUrls(n.content), { cdn: '/vditor' } as any); } catch { rendered.value[n.id] = n.content; }
+      // 同主列表 NoteCard: 剥 base64 内联图 + 截断, 防历史超大笔记全量 md2html 卡死回收站首屏
+      let c = n.content.replace(/!\[[^\]]*\]\(data:[^)]*\)/gi, '');
+      if (c.length > 2000) c = c.slice(0, 2000);
+      try { rendered.value[n.id] = await Vditor.md2html(resolveMarkdownFileUrls(c), { cdn: '/vditor' } as any); } catch { rendered.value[n.id] = c; }
     }
     applyFilter();
   } catch {}
