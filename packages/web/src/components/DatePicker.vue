@@ -286,36 +286,38 @@ onBeforeUnmount(() => {
           >{{ d.date() }}</button>
         </div>
 
-        <!-- 时间（仅 datetime）：自定义下拉，竖向单列滚动，向上展开 -->
-        <div v-if="isDateTime" class="qdp-time">
-          <span class="qdp-time-label">时间</span>
-          <div class="qdp-tdrop">
-            <button type="button" class="qdp-tbtn" :class="{ open: hourOpen }" @click="openHour">{{ hour }}</button>
-            <div v-if="hourOpen" ref="hourListEl" class="qdp-tlist">
-              <button v-for="h in hourOptions" :key="h"
-                type="button"
-                class="qdp-titem"
-                :class="{ active: hour === h }"
-                @click="selectHour(h)">{{ h }}</button>
+        <!-- 底栏: datetime 把时分框 + 今天/清空/确定 挤一行省垂直空间 (放不下缩时间框); date 只今天/清空一行 -->
+        <div class="qdp-footer" :class="{ 'qdp-footer--dt': isDateTime }">
+          <div v-if="isDateTime" class="qdp-time">
+            <span class="qdp-time-label">时间</span>
+            <div class="qdp-tdrop">
+              <button type="button" class="qdp-tbtn" :class="{ open: hourOpen }" @click="openHour">{{ hour }}</button>
+              <div v-if="hourOpen" ref="hourListEl" class="qdp-tlist">
+                <button v-for="h in hourOptions" :key="h"
+                  type="button"
+                  class="qdp-titem"
+                  :class="{ active: hour === h }"
+                  @click="selectHour(h)">{{ h }}</button>
+              </div>
+            </div>
+            <span class="qdp-time-colon">:</span>
+            <div class="qdp-tdrop">
+              <button type="button" class="qdp-tbtn" :class="{ open: minuteOpen }" @click="openMinute">{{ minute }}</button>
+              <div v-if="minuteOpen" ref="minuteListEl" class="qdp-tlist">
+                <button v-for="m in minuteOptions" :key="m"
+                  type="button"
+                  class="qdp-titem"
+                  :class="{ active: minute === m }"
+                  @click="selectMinute(m)">{{ m }}</button>
+              </div>
             </div>
           </div>
-          <span class="qdp-time-colon">:</span>
-          <div class="qdp-tdrop">
-            <button type="button" class="qdp-tbtn" :class="{ open: minuteOpen }" @click="openMinute">{{ minute }}</button>
-            <div v-if="minuteOpen" ref="minuteListEl" class="qdp-tlist">
-              <button v-for="m in minuteOptions" :key="m"
-                type="button"
-                class="qdp-titem"
-                :class="{ active: minute === m }"
-                @click="selectMinute(m)">{{ m }}</button>
-            </div>
+          <!-- 今天/清空 浅灰底, datetime 加"确定"强调收弹层 (date 选日即关无需确定) -->
+          <div class="qdp-actions">
+            <button type="button" class="qdp-btn-soft" @click="selectToday">今天</button>
+            <button type="button" class="qdp-btn-danger" @click="clear">清空</button>
+            <button v-if="isDateTime" type="button" class="qdp-btn-primary" @click="open = false">确定</button>
           </div>
-        </div>
-
-        <!-- 操作按钮 -->
-        <div class="qdp-actions">
-          <button type="button" class="qdp-btn-primary" @click="selectToday">今天</button>
-          <button type="button" class="qdp-btn-ghost" @click="clear">清空</button>
         </div>
       </div>
     </template>
@@ -469,19 +471,16 @@ onBeforeUnmount(() => {
   cursor: var(--cur-not-allowed), not-allowed;
 }
 
-/* ─── Time ─── */
+/* ─── Time ─── (margin/padding/border 移到 .qdp-footer, 这里只管时分框横排) */
 .qdp-time {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid #f3f4f6;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 .qdp-time-label {
   font-size: 12px;
   color: #6b7280;
-  margin-right: 4px;
+  margin-right: 2px;
 }
 /* 自定义时分下拉 */
 .qdp-tdrop {
@@ -497,7 +496,7 @@ onBeforeUnmount(() => {
   cursor: var(--cur-pointer), pointer;
   font-family: inherit;
   font-variant-numeric: tabular-nums;
-  min-width: 44px;
+  min-width: 38px;
 }
 .qdp-tbtn:hover { border-color: rgb(var(--c-accent) / 0.5); }
 .qdp-tbtn.open { border-color: rgb(var(--c-accent)); }
@@ -555,19 +554,34 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
-/* ─── Actions ─── */
-.qdp-actions {
+/* ─── Footer (时间 + 操作) ─── */
+.qdp-footer {
   margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f3f4f6;
+}
+.qdp-footer--dt {  /* datetime: 时分框 + 今天/清空/确定 同一行 */
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 8px;
+}
+.qdp-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;  /* date 时撑满两端; datetime 是 flex item 退化成按 gap 紧挨 */
 }
 .qdp-btn-primary,
-.qdp-btn-ghost {
+.qdp-btn-ghost,
+.qdp-btn-soft,
+.qdp-btn-danger {
   font-size: 12px;
-  padding: 4px 12px;
+  padding: 4px 11px;
   border-radius: 6px;
   border: none;
   font-family: inherit;
+  cursor: var(--cur-pointer), pointer;
+  white-space: nowrap;
 }
 .qdp-btn-primary {
   background: rgb(var(--c-accent-light));
@@ -575,6 +589,21 @@ onBeforeUnmount(() => {
 }
 .qdp-btn-primary:hover {
   background: rgb(var(--c-accent) / 0.2);
+}
+.qdp-btn-soft {  /* 今天: 浅灰底 */
+  background: #f3f4f6;
+  color: #4b5563;
+}
+.qdp-btn-soft:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+.qdp-btn-danger {  /* 清空: 淡红, 复用全局危险操作 red-50 底 / red-500 字 */
+  background: #fef2f2;
+  color: #ef4444;
+}
+.qdp-btn-danger:hover {
+  background: #fee2e2;
 }
 .qdp-btn-ghost {
   background: transparent;
@@ -627,7 +656,7 @@ onBeforeUnmount(() => {
 [data-theme="dark"] .qdp-cell.is-today {
   color: rgb(var(--c-accent));
 }
-[data-theme="dark"] .qdp-time {
+[data-theme="dark"] .qdp-footer {
   border-top-color: rgba(255, 255, 255, 0.08);
 }
 [data-theme="dark"] .qdp-time-label,
@@ -657,6 +686,21 @@ onBeforeUnmount(() => {
 [data-theme="dark"] .qdp-titem.active {
   background: rgb(var(--c-accent));
   color: white;
+}
+[data-theme="dark"] .qdp-btn-soft {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+}
+[data-theme="dark"] .qdp-btn-soft:hover {
+  background: rgba(255, 255, 255, 0.13);
+  color: rgba(255, 255, 255, 0.9);
+}
+[data-theme="dark"] .qdp-btn-danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+[data-theme="dark"] .qdp-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.25);
 }
 [data-theme="dark"] .qdp-btn-ghost {
   color: rgba(255, 255, 255, 0.4);
