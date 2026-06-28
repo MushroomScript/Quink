@@ -47,6 +47,13 @@ const CARET_HEIGHT_RATIO = 1.0; // 1em
 const CARET_LEFT_OFFSET = -1; // 左偏 1px
 const CARET_BOTTOM_EXTEND = 0.5; // caret 底部往下延伸 0.5px (caret 高度 += 0.5, 顶部不变, 底部下移 0.5)
 
+// Mac (San Francisco 字体) 字形垂直位置跟 Windows (Segoe UI) 不同, caret 几何居中在 SF 上偏 (zoom 放大后明显).
+// Mac 平台分两路微调 (layout px, 渲染 *zoom 各 zoom 视觉一致; Windows = 0 不动; 正=下移/负=上移, 值 Mac 实测定):
+//   普通 input (密码/搜索框) / Vditor 编辑器 (contenteditable) 各一档
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
+const MAC_INPUT_CARET_FIX = IS_MAC ? 0.5 : 0;
+const MAC_EDITOR_CARET_FIX = IS_MAC ? -1.5 : 0;
+
 let mirror: HTMLDivElement | null = null;
 let caret: HTMLDivElement | null = null;
 let currentInput: Editable | null = null;
@@ -250,7 +257,7 @@ function updateCaretContentEditable(el: HTMLElement) {
 
   caret!.style.display = 'block';
   caret!.style.width = CARET_WIDTH + 'px';
-  caret!.style.transform = `translate(${rLeft + CARET_LEFT_OFFSET}px, ${rTop + verticalPadding}px)`;
+  caret!.style.transform = `translate(${rLeft + CARET_LEFT_OFFSET}px, ${rTop + verticalPadding + MAC_EDITOR_CARET_FIX}px)`;
   caret!.style.height = caretHeight + 'px';
 }
 
@@ -337,7 +344,7 @@ function updateCaret() {
     caret.style.width = CARET_WIDTH + 'px';
     caret.style.height = caretHeight + 'px';
     caret.style.display = 'block';
-    caret.style.transform = `translate(${cl}px, ${ct + extraY}px)`;
+    caret.style.transform = `translate(${cl}px, ${ct + extraY + MAC_INPUT_CARET_FIX}px)`;
     return;
   }
   const markerRect = marker.getBoundingClientRect();
@@ -398,7 +405,7 @@ function updateCaret() {
 
   caret.style.width = CARET_WIDTH + 'px';
   caret.style.display = 'block';
-  caret.style.transform = `translate(${caretLeft}px, ${caretTop + extraY}px)`;
+  caret.style.transform = `translate(${caretLeft}px, ${caretTop + extraY + MAC_INPUT_CARET_FIX}px)`;
   caret.style.height = caretHeight + 'px';
 }
 
