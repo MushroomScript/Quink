@@ -265,7 +265,7 @@ export const useNotesStore = defineStore('notes', () => {
     }
   }
 
-  async function updateNote(id: string, data: Partial<Note> & { lockToken?: string; editContext?: { groupId?: string } }) {
+  async function updateNote(id: string, data: Partial<Note> & { lockToken?: string; editContext?: { groupId?: string }; skipTimestamp?: boolean }) {
     // 自动注入 version 兜底: 所有笔记 (private / shared) 改内容字段时后端必须校验 version 防多设备旧覆盖新.
     // NoteEditModal 已显式传 version, 这里给 NoteCard 切待办 / NoteDetail 改 type / cardDnd 拖改类型分类 等其它入口兜底, 调用方不用每处都加.
     // 找不到 cached note (NoteDetail 通过 URL 直接打开未入 store 的极少数 case) → 不注入, 调用方该场景需自己传 version
@@ -347,7 +347,8 @@ export const useNotesStore = defineStore('notes', () => {
           continue;
         }
         // 按编辑时间排序时编辑后笔记飞到"置顶之后第一位" 匹配 server ORDER BY (updated_at DESC)
-        if (sortBy.value === 'updated' && !res.data.pinned && idx > 0) {
+        // skipTimestamp (任务清单 checkbox toggle) 不更新 updatedAt → 也不该把笔记搬到最前
+        if (sortBy.value === 'updated' && !res.data.pinned && idx > 0 && !data.skipTimestamp) {
           const note = vs.notes[idx];
           vs.notes.splice(idx, 1);
           const insertIdx = vs.notes.findIndex((n) => !n.pinned);

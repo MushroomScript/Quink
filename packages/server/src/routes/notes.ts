@@ -69,6 +69,8 @@ const updateNoteSchema = z.object({
   editContext: z.object({
     groupId: z.string().optional(),
   }).optional(),
+  // 任务清单 checkbox 等轻量 toggle 传 true → PATCH handler 跳过 updatedAt 刷新 (蘑菇 2026-06-29)
+  skipTimestamp: z.boolean().optional(),
 }).strict();
 
 // 广播 'group-notes-changed' 给目标群所有 active 成员 (除操作者).
@@ -1635,7 +1637,10 @@ app.patch('/:id', async (c) => {
   }
 
   const now = dayjs().toISOString();
-  const updates: Record<string, any> = { updatedAt: now };
+  // skipTimestamp: 任务清单 checkbox 等轻量 toggle 不更新 updatedAt, 避免点一下笔记就按"最后编辑"排到最前
+  // (蘑菇 2026-06-29). content 仍照常存 + version 乐观锁仍 ++, 只是不刷新最后编辑时间.
+  const skipTimestamp = data.skipTimestamp === true;
+  const updates: Record<string, any> = skipTimestamp ? {} : { updatedAt: now };
 
   // isContentChange / isCollabChange / ctxGroupId / currentShareGroupIds 提前到锁校验之前定义, needLock 跟 fork 决策都用
   // 拆 isCollabChange (锁判断) vs isContentChange (audit/version):

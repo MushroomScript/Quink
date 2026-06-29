@@ -259,7 +259,7 @@ async function onContentClick(e: MouseEvent) {
   note.value.content = newContent;
   try {
     // version: 兜底 URL 直接打开 (note 不在 store viewState) 场景, store 自动注入路径走不到. res.version 回写避免连续 toggle 用旧 version
-    const res = await store.updateNote(note.value.id, { content: newContent, version: note.value.version });
+    const res = await store.updateNote(note.value.id, { content: newContent, version: note.value.version, skipTimestamp: true });
     if (res?.version != null && note.value) note.value.version = res.version;
   } catch (err) {
     if (note.value) note.value.content = oldContent;
@@ -468,7 +468,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="px-4 md:px-8 py-6">
+  <div class="px-4 md:px-8 pb-6">
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <div v-else-if="!note" class="text-center py-16">
@@ -480,8 +480,8 @@ onUnmounted(() => {
     </div>
 
     <div v-else>
-      <!-- Header -->
-      <div class="flex items-center gap-3 mb-6 flex-wrap">
+      <!-- Header: sticky 固定栏 (套 Trash toolbar 同款), 不随正文滚动. 根 div 已去顶部 padding 让 sticky 立即钉住 -->
+      <div class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-8 pt-4 pb-3 mb-4 bg-gray-50/80 flex items-center gap-3 flex-wrap">
         <button @click="goBack" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
           <PhCaretLeft size="1.25rem" weight="fill" />
         </button>

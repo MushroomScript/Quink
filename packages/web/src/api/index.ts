@@ -414,7 +414,7 @@ export const api = {
 
   // PATCH 返回可能含 forked: true + forkedFromNoteId (非作者改 / 作者从群组页改 root 多群 → fork 写入).
   // store 收到 forked 触发本 view fetchNotes (新 fork 出现 + 老 note share 状态变化), 详见 stores/notes.ts updateNote.
-  updateNote(id: string, data: Partial<Note> & { lockToken?: string; editContext?: { groupId?: string } }) {
+  updateNote(id: string, data: Partial<Note> & { lockToken?: string; editContext?: { groupId?: string }; skipTimestamp?: boolean }) {
     return request<{ data: Note; forked?: boolean; forkedFromNoteId?: string }>(`/notes/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
