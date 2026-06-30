@@ -275,6 +275,9 @@ async function onContentClick(e: MouseEvent) {
 const isEveryoneTodo = computed(() => note.value?.type === 'todo' && (note.value as any)?.todoGroupMode === 'everyone');
 const rosterOverdue = computed(() => !!(note.value as any)?.rosterDueAt && dayjs().isAfter(dayjs((note.value as any).rosterDueAt)));
 const togglingDone = ref(false);
+// Mac 的 SF 字体基线比 Windows Segoe UI 偏上, 完成胶囊里的文字/数字在 Mac 要各下移 1px 才对齐.
+// 纯 navigator 判断 (不带 isElectron) —— Mac 浏览器访问局域网部署也要 true
+const isMacOS = /Mac/i.test(navigator.userAgent);
 const showRosterDropdown = ref(false);
 // 名单下拉: 已完成靠前 (蘑菇 2026-06-30)
 const sortedRoster = computed(() => {
@@ -615,18 +618,18 @@ onUnmounted(() => {
           <button @click="onToggleTodoDone" :disabled="togglingDone"
             class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-colors shrink-0 whitespace-nowrap"
             :class="(note as any).todoDoneSummary.mine ? 'bg-primary-light text-primary-dark' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
-            <PhCheckCircle v-if="(note as any).todoDoneSummary.mine" size="0.8125rem" weight="fill" class="relative" style="top: 0.5px" />
-            <PhCircle v-else size="0.8125rem" class="relative" style="top: 0.5px" />
-            <span>{{ (note as any).todoDoneSummary.mine ? '已完成' : '我要完成' }}</span>
+            <PhCheckCircle v-if="(note as any).todoDoneSummary.mine" size="0.8125rem" weight="fill" class="relative" :style="isMacOS ? 'top: -0.5px' : 'top: 0.5px'" />
+            <PhCircle v-else size="0.8125rem" class="relative" :style="isMacOS ? 'top: -0.5px' : 'top: 0.5px'" />
+            <span :style="isMacOS ? 'position: relative; top: 0px' : ''">{{ (note as any).todoDoneSummary.mine ? '已完成' : '我要完成' }}</span>
           </button>
           <!-- 人数 + 名单▼ 同一胶囊 (none/hideProgress 不显示); 有 roster 可点开下拉看谁完成谁没 -->
-          <span v-if="!(note as any).todoDoneSummary.hideProgress" class="relative inline-block shrink-0" style="margin-top: -3px">
+          <span v-if="!(note as any).todoDoneSummary.hideProgress" class="relative inline-block shrink-0" :style="isMacOS ? 'margin-top: -4px' : 'margin-top: -3px'">
             <button v-if="(note as any).todoDoneSummary.roster" @click.stop="showRosterDropdown = !showRosterDropdown"
               class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 tabular-nums whitespace-nowrap">
-              <span style="position: relative; top: -1px">{{ (note as any).todoDoneSummary.completed }}/{{ (note as any).todoDoneSummary.total }}</span>
+              <span :style="isMacOS ? 'position: relative; top: 0px' : 'position: relative; top: -1px'">{{ (note as any).todoDoneSummary.completed }}/{{ (note as any).todoDoneSummary.total }}</span>
               <PhCaretDown size="0.7rem" weight="bold" />
             </button>
-            <span v-else class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 tabular-nums whitespace-nowrap"><span style="position: relative; top: -1px">{{ (note as any).todoDoneSummary.completed }}/{{ (note as any).todoDoneSummary.total }}</span></span>
+            <span v-else class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 tabular-nums whitespace-nowrap"><span :style="isMacOS ? 'position: relative; top: 0px' : 'position: relative; top: -1px'">{{ (note as any).todoDoneSummary.completed }}/{{ (note as any).todoDoneSummary.total }}</span></span>
             <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
               leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
               <div v-if="showRosterDropdown"

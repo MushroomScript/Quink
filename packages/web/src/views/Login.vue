@@ -175,9 +175,9 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
             <!-- 帧 4: 思考地图 -->
             <div class="shot" :class="{ active: currentFrame === 3 }" aria-hidden="true">
               <div class="map">
-                <!-- 左: 热力图 (年视图, 删了"365 天热力"标题让 mock 更紧凑. 10 行让高度跟其他帧的 mock 视觉重量均衡) -->
+                <!-- 左: 热力图 (年视图, 删了"365 天热力"标题让 mock 更紧凑. 7 行跟统计页热力图一致 (一周 7 天)) -->
                 <div class="heatmap">
-                  <span v-for="i in 10 * 14" :key="i" class="hm-cell" :style="{ '--lv': Math.max(0, Math.min(4, Math.floor((Math.sin(i * 0.7) + Math.cos(i * 0.3)) * 2 + 2))) }"></span>
+                  <span v-for="i in 7 * 14" :key="i" class="hm-cell" :style="{ '--lv': Math.max(0, Math.min(4, Math.floor((Math.sin(i * 0.7) + Math.cos(i * 0.3)) * 2 + 2))) }"></span>
                 </div>
                 <!-- 右: 饼图 + 分类 legend -->
                 <div class="map-stats">
