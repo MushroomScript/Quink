@@ -14,6 +14,8 @@ import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils
 import { PhUsersThree, PhArrowsClockwise } from '@phosphor-icons/vue';
 import {
   PhCheck,
+  PhCheckCircle,
+  PhCircle,
   PhCheckSquare,
   PhDotsThreeVertical,
   PhPushPin,
@@ -55,6 +57,11 @@ const visibleReactions = computed(() => (props.note.reactionSummary || []).filte
 const commentCount = computed(() => props.note.commentCount || 0);
 // editorCount > 0 也触发底部 meta 行显示 ("N 人编辑过")
 const showSocialMeta = computed(() => isShared.value && (visibleReactions.value.length > 0 || commentCount.value > 0 || editorCount.value > 0));
+
+// 每人完成待办 (todoGroupMode='everyone'): per-user 完成, 所有群成员可点自己的勾 + 看进度 X/N
+const isEveryoneTodo = computed(() => props.note.type === 'todo' && props.note.todoGroupMode === 'everyone');
+const rosterOverdue = computed(() => !!props.note.rosterDueAt && dayjs().isAfter(dayjs(props.note.rosterDueAt)));
+const togglingDone = ref(false);
 
 // 编辑权限胶囊只在群组上下文显示 (/groups/:id 路径), 避免污染灵感/笔记/待办主 view
 const route = useRoute();
@@ -282,6 +289,36 @@ async function onTaskCheckboxClick(e: MouseEvent, input: HTMLInputElement) {
     props.note.content = oldContent;
     input.checked = !input.checked;
     console.error('[NoteCard] toggle task failed:', err);
+  }
+}
+
+// 每人完成待办: toggle 我的完成 (per-user). 直接 mutate props.note.todoDoneSummary 让卡片即时反映
+// (个人列表 = store 笔记 / 群组 = GroupDetail 本地 ref, mutate props 两种都生效), 失败回滚. 照搬 reaction 乐观更新.
+async function onToggleTodoDone() {
+  if (togglingDone.value) return;
+  const s = props.note.todoDoneSummary;
+  if (!s) return;
+  togglingDone.value = true;
+  const prev = { ...s, roster: s.roster ? [...s.roster] : undefined };
+  const newMine = !s.mine;
+  props.note.todoDoneSummary = {
+    ...s,
+    mine: newMine,
+    completed: Math.max(0, s.completed + (newMine ? 1 : -1)),
+    roster: s.roster?.map(m => m.userId === auth.user?.id ? { ...m, done: newMine } : m),
+  };
+  try {
+    const res = await api.toggleTodoDone(props.note.id);
+    // 后端权威 summary (不含 roster, 保留本地翻转过的 roster)
+    props.note.todoDoneSummary = { ...res.data.summary, roster: props.note.todoDoneSummary?.roster, hideProgress: props.note.todoDoneSummary?.hideProgress };
+    // 跨 view 同步: 群组界面点完成 → 个人列表 Todos 同一条也更新 (props.note 可能是 GroupDetail 本地 ref, syncTodoDone 补同步 store viewState)
+    store.syncTodoDone(props.note.id, res.data.summary);
+  } catch (err) {
+    props.note.todoDoneSummary = prev; // 回滚
+    toast.show('操作失败', 'error');
+    console.error('[NoteCard] toggleTodoDone failed:', err);
+  } finally {
+    togglingDone.value = false;
   }
 }
 const showMenu = ref(false);
@@ -688,6 +725,9 @@ const typeColor: Record<string, string> = {
             {{ ((note as any).authorNickname || '?').charAt(0).toUpperCase() }}
           </div>
           <span class="truncate min-w-0">{{ (note as any).authorNickname }}</span>
+          <span v-if="note.todoDoneSummary?.groupName" class="inline-flex items-center gap-0.5 shrink-0 text-gray-400">
+            <PhUsersThree size="0.7rem" weight="fill" />{{ note.todoDoneSummary.groupName }}
+          </span>
         </span>
         <!-- 提醒铃铛: 仅 todo 且 effectiveReminder 有 due 时显示. 数据源优先 personal > group > legacy todoDue -->
         <span v-if="note.type === 'todo' && effectiveReminder.dueAt"
@@ -721,6 +761,19 @@ const typeColor: Record<string, string> = {
         <span v-for="tag in note.tags" :key="tag" class="text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
           #{{ tag }}
         </span>
+      </div>
+
+      <!-- 每人完成待办: 我的完成勾 + 进度 X/N (per-user, 所有群成员可点自己的) -->
+      <div v-if="isEveryoneTodo && note.todoDoneSummary" class="flex items-center gap-2 mt-2 flex-wrap">
+        <button @click.stop="onToggleTodoDone" :disabled="togglingDone"
+          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors"
+          :class="note.todoDoneSummary.mine ? 'bg-primary-light text-primary-dark' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
+          <PhCheckCircle v-if="note.todoDoneSummary.mine" size="1rem" weight="fill" />
+          <PhCircle v-else size="1rem" />
+          <span>{{ note.todoDoneSummary.mine ? '已完成' : '我要完成' }}</span>
+        </button>
+        <span v-if="!note.todoDoneSummary.hideProgress" class="text-[11px] text-gray-500 tabular-nums">{{ note.todoDoneSummary.completed }}/{{ note.todoDoneSummary.total }} 完成</span>
+        <span v-if="rosterOverdue" class="text-[11px] text-orange-500 font-medium">已截止</span>
       </div>
 
       <!-- 共享笔记底部 reaction + 评论计数 + 编辑人数 (readonly 展示, 点 NoteCard 走 NoteDetail 交互) -->

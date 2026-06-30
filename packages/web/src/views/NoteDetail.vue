@@ -22,6 +22,8 @@ import {
   PhMapPin,
   PhTrash,
   PhCheck,
+  PhCheckCircle,
+  PhCircle,
   PhX,
   PhArrowCounterClockwise,
   PhLightbulb,
@@ -31,6 +33,7 @@ import {
   PhBellRinging,
   PhUsersThree,
   PhCaretRight,
+  PhCaretDown,
   PhArrowsClockwise,
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
@@ -115,7 +118,7 @@ async function setEditPermission(perm: 'admin' | 'all') {
   if (!note.value) return;
   if ((note.value.editPermission || 'admin') === perm) return;
   try {
-    const res = await store.updateNote(note.value.id, { editPermission: perm } as any);
+    const res = await store.updateNote(note.value.id, { editPermission: perm, skipTimestamp: true } as any);
     // store.updateNote 不一定同步 note.value (本地 ref 来自 api.getNote, 不在 store.notes 里时 watch 失效)
     // 直接 mutate 字段保证 reactive UI 立刻反映
     note.value.editPermission = res.editPermission ?? perm;
@@ -268,6 +271,40 @@ async function onContentClick(e: MouseEvent) {
   }
 }
 
+// 每人完成待办 (todoGroupMode='everyone'): 详情完成按钮 + 名单
+const isEveryoneTodo = computed(() => note.value?.type === 'todo' && (note.value as any)?.todoGroupMode === 'everyone');
+const rosterOverdue = computed(() => !!(note.value as any)?.rosterDueAt && dayjs().isAfter(dayjs((note.value as any).rosterDueAt)));
+const togglingDone = ref(false);
+const showRosterDropdown = ref(false);
+// 名单下拉: 已完成靠前 (蘑菇 2026-06-30)
+const sortedRoster = computed(() => {
+  const r = (note.value as any)?.todoDoneSummary?.roster as Array<{ userId: string; nickname: string; avatar: string | null; done: boolean }> | undefined;
+  return r ? [...r].sort((a, b) => (b.done ? 1 : 0) - (a.done ? 1 : 0)) : [];
+});
+async function onToggleTodoDone() {
+  const s = (note.value as any)?.todoDoneSummary;
+  if (togglingDone.value || !note.value || !s) return;
+  togglingDone.value = true;
+  const prev = { ...s, roster: s.roster ? [...s.roster] : undefined };
+  const newMine = !s.mine;
+  // 乐观: 翻转我的完成 + 进度 + roster 里我那条
+  (note.value as any).todoDoneSummary = {
+    ...s, mine: newMine, completed: Math.max(0, s.completed + (newMine ? 1 : -1)),
+    roster: s.roster?.map((m: any) => m.userId === auth.user?.id ? { ...m, done: newMine } : m),
+  };
+  try {
+    const res = await api.toggleTodoDone(note.value.id);
+    (note.value as any).todoDoneSummary = { ...res.data.summary, roster: (note.value as any).todoDoneSummary?.roster, hideProgress: (note.value as any).todoDoneSummary?.hideProgress };
+    store.syncTodoDone(note.value.id, res.data.summary); // 同步个人列表 Todos
+  } catch (err) {
+    if (note.value) (note.value as any).todoDoneSummary = prev;
+    toast.show('操作失败', 'error');
+    console.error('[NoteDetail] toggleTodoDone failed:', err);
+  } finally {
+    togglingDone.value = false;
+  }
+}
+
 // 监听 content 变化触发重渲染(loadNote / 编辑保存 / task toggle 都走这里统一)
 // 防 race: 旧 content 的 renderContent 还 pending 时新内容触发,旧的若后完成会覆盖新 html。
 // onCleanup 标记过期,过期结果不回写
@@ -284,7 +321,14 @@ watch(() => note.value?.content, async (newContent, _old, onCleanup) => {
 watch(() => store.notes, () => {
   if (!note.value) return;
   const updated = store.notes.find(n => n.id === note.value!.id);
-  if (updated && updated !== note.value) note.value = updated;
+  if (updated && updated !== note.value) {
+    // 详情的 todoDoneSummary 带 roster (GET /:id enrich 名单), store 列表笔记不带 (GET /notes 不 enrich 名单).
+    // 同步时保留详情 roster, 否则点完成 → syncTodoDone 改 store → 这个 deep watch 把无 roster 的列表笔记同步回来 → 名单消失 (蘑菇 2026-06-29 踩)
+    const detailRoster = (note.value as any).todoDoneSummary?.roster;
+    note.value = updated;
+    const ts = (note.value as any).todoDoneSummary;
+    if (detailRoster && ts && !ts.roster) ts.roster = detailRoster;
+  }
 }, { deep: true });
 
 // 三点菜单 (置顶 / 移至类型 / [todo] 标记完成 / 删除); 编辑保留 header 上独立按钮高频路径
@@ -420,10 +464,14 @@ function goBack() {
     restoreRefPreview?.();
     return;
   }
-  if (window.history.length > 1) {
+  // window.history.length 不可靠 (含浏览器非 SPA 历史; 重开浏览器恢复 tab 时 length>1 但 back 退到空白).
+  // 用 Vue Router 在 history.state 记的 back (SPA 内真正的上一级路由).
+  if (window.history.state?.back) {
     router.back();
   } else {
-    router.push('/quink');
+    // 没 SPA 上一级 (重开浏览器直接进详情) → 退到 URL 路径上一级 (蘑菇 2026-06-30: /note/xxx → /note, router 再 redirect 到笔记列表), 不跳首页
+    const parent = route.path.replace(/\/[^/]+\/?$/, '') || '/quink';
+    router.push(parent);
   }
 }
 
@@ -448,6 +496,12 @@ function onReactionChangedSSE(e: any) {
   reactionSummary.value = summary;
   note.value.reactionSummary = summary;
 }
+// 别人 toggle "每人完成"待办 → 重拉详情拿自己视角的 todoDoneSummary (mine + 进度 X/N + 名单)
+function onTodoDoneChangedSSE(e: any) {
+  const noteId = e.detail?.noteId;
+  if (!note.value || noteId !== note.value.id) return;
+  loadNote();
+}
 watch(() => note.value?.reactionSummary, (newSum) => {
   if (newSum) reactionSummary.value = newSum;
 }, { immediate: true });
@@ -455,6 +509,7 @@ watch(() => note.value?.reactionSummary, (newSum) => {
 onMounted(() => {
   document.addEventListener('keydown', onKeydown);
   window.addEventListener('quink-note-reaction-changed' as any, onReactionChangedSSE);
+  window.addEventListener('quink-note-todo-done-changed' as any, onTodoDoneChangedSSE);
   loadNoteAndReminder();
 });
 
@@ -464,6 +519,7 @@ onUnmounted(() => {
   if (detailTitle) detailTitle.value = '';
   document.removeEventListener('keydown', onKeydown);
   window.removeEventListener('quink-note-reaction-changed' as any, onReactionChangedSSE);
+  window.removeEventListener('quink-note-todo-done-changed' as any, onTodoDoneChangedSSE);
 });
 </script>
 
@@ -487,14 +543,8 @@ onUnmounted(() => {
         </button>
         <div class="flex items-center gap-2 min-w-0">
           <span class="text-xs px-2 py-0.5 rounded-full font-medium shrink-0 whitespace-nowrap" :class="typeColor[note.type]">{{ typeLabels[note.type] }}</span>
-          <!-- 跟 NoteCard 同款"已分享"/作者头像 chip -->
-          <span v-if="isMyNote && isShared && sharedCount > 0"
-            class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark select-none shrink-0 whitespace-nowrap"
-            :title="`已分享到 ${sharedCount} 个群`">
-            <PhUsersThree size="0.75rem" weight="fill" />
-            <span>已分享</span>
-          </span>
-          <span v-else-if="!isMyNote && (note as any).authorNickname"
+          <!-- 作者头像 chip (非我发的); "已分享"挪到下面带 popover 的分享设置块 -->
+          <span v-if="!isMyNote && (note as any).authorNickname"
             class="inline-flex items-center gap-1 text-xs text-gray-500 select-none min-w-0"
             :title="`@${(note as any).authorNickname}`">
             <img v-if="(note as any).authorAvatar" :src="resolveFileThumbUrl((note as any).authorAvatar)"
@@ -507,7 +557,119 @@ onUnmounted(() => {
           </span>
           <span v-if="note.category" class="text-xs text-gray-400 truncate min-w-0">{{ note.category }}</span>
         </div>
-        <span class="ml-auto text-xs text-gray-400 shrink-0 whitespace-nowrap">{{ dayjs(note.createdAt).format('YYYY-MM-DD HH:mm') }}</span>
+        <!-- 分享设置 (作者+shared, 挪到 header): 已分享 popover + 编辑权限 + 授权. 群名 popover 改相对各自按钮锚定 -->
+        <template v-if="isShared && isMyNote">
+          <span class="relative inline-block shrink-0">
+            <button @click.stop="showSharedGroupsPopup = !showSharedGroupsPopup; showGrantsPopup = false"
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors whitespace-nowrap">
+              <PhUsersThree size="0.75rem" weight="fill" />
+              已分享 {{ sharedGroupIds.length }} 群
+            </button>
+            <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
+              leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
+              <div v-if="showSharedGroupsPopup && sharedGroupNames.length > 0"
+                class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[var(--z-overlay)] min-w-[160px] max-w-[280px]">
+                <div v-for="name in sharedGroupNames" :key="name" class="text-xs text-gray-600 py-1 px-2 truncate">{{ name }}</div>
+              </div>
+            </Transition>
+          </span>
+          <button @click="setEditPermission((note.editPermission || 'admin') === 'admin' ? 'all' : 'admin')"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors shrink-0 whitespace-nowrap">
+            {{ (note.editPermission || 'admin') === 'admin' ? '管理员可编辑' : '所有人可编辑' }}
+            <PhArrowsClockwise size="0.75rem" weight="bold" />
+          </button>
+          <span v-if="(note.editPermission || 'admin') === 'admin' && editGrants.length > 0" class="relative inline-block shrink-0">
+            <button @click.stop="showGrantsPopup = !showGrantsPopup; showSharedGroupsPopup = false"
+              class="px-2 py-0.5 rounded-full text-xs bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors whitespace-nowrap">
+              额外授权 {{ editGrants.length }} 人
+            </button>
+            <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
+              leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
+              <div v-if="showGrantsPopup"
+                class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[var(--z-overlay)] w-[260px] max-h-[280px] overflow-y-auto space-y-1">
+                <div v-for="g in editGrants" :key="g.userId"
+                  class="flex items-center gap-2 hover:bg-gray-50 rounded-lg p-1.5">
+                  <img v-if="g.avatar" :src="resolveFileThumbUrl(g.avatar)"
+                    @error="thumbErrorFallback($event, resolveFileUrl(g.avatar))"
+                    class="w-6 h-6 rounded-full object-cover shrink-0" alt="" />
+                  <div v-else class="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
+                    {{ (g.nickname || '?').charAt(0).toUpperCase() }}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-xs font-medium truncate">{{ g.nickname || '?' }}</div>
+                    <div class="text-[10px] text-gray-400">{{ dayjs(g.grantedAt).format('MM-DD HH:mm') }}</div>
+                  </div>
+                  <button @click="askRevokeGrant(g.userId, g.nickname || '?')"
+                    class="px-2 py-1 text-[11px] rounded-lg bg-red-50 text-red-500 hover:bg-red-100 inline-flex items-center gap-1">
+                    <PhTrash size="0.75rem" weight="bold" /> 撤销
+                  </button>
+                </div>
+              </div>
+            </Transition>
+          </span>
+          <div v-if="showSharedGroupsPopup || showGrantsPopup" class="fixed inset-0 z-[var(--z-overlay-backdrop)]"
+            @click="showSharedGroupsPopup = false; showGrantsPopup = false" />
+        </template>
+        <!-- 每人完成待办: 完成勾(下移1px) + 人数/名单同胶囊(上移1px,点▼开下拉,done靠前) (挪到固定 header) -->
+        <template v-if="isEveryoneTodo && (note as any).todoDoneSummary">
+          <button @click="onToggleTodoDone" :disabled="togglingDone"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-colors shrink-0 whitespace-nowrap"
+            :class="(note as any).todoDoneSummary.mine ? 'bg-primary-light text-primary-dark' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
+            <PhCheckCircle v-if="(note as any).todoDoneSummary.mine" size="0.8125rem" weight="fill" class="relative" style="top: 0.5px" />
+            <PhCircle v-else size="0.8125rem" class="relative" style="top: 0.5px" />
+            <span>{{ (note as any).todoDoneSummary.mine ? '已完成' : '我要完成' }}</span>
+          </button>
+          <!-- 人数 + 名单▼ 同一胶囊 (none/hideProgress 不显示); 有 roster 可点开下拉看谁完成谁没 -->
+          <span v-if="!(note as any).todoDoneSummary.hideProgress" class="relative inline-block shrink-0" style="margin-top: -3px">
+            <button v-if="(note as any).todoDoneSummary.roster" @click.stop="showRosterDropdown = !showRosterDropdown"
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 tabular-nums whitespace-nowrap">
+              <span style="position: relative; top: -1px">{{ (note as any).todoDoneSummary.completed }}/{{ (note as any).todoDoneSummary.total }}</span>
+              <PhCaretDown size="0.7rem" weight="bold" />
+            </button>
+            <span v-else class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 tabular-nums whitespace-nowrap"><span style="position: relative; top: -1px">{{ (note as any).todoDoneSummary.completed }}/{{ (note as any).todoDoneSummary.total }}</span></span>
+            <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
+              leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
+              <div v-if="showRosterDropdown"
+                class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5 z-[var(--z-overlay)] w-[200px] max-h-[260px] overflow-y-auto space-y-0.5">
+                <div v-for="m in sortedRoster" :key="m.userId"
+                  class="flex items-center gap-2 text-xs px-1.5 py-1 rounded"
+                  :class="m.done ? 'text-green-600' : 'text-gray-400'">
+                  <PhCheckCircle v-if="m.done" size="0.8125rem" weight="fill" class="relative" style="top: 0.5px" />
+                  <PhCircle v-else size="0.8125rem" class="relative" style="top: 0.5px" />
+                  <span class="truncate">{{ m.nickname }}</span>
+                </div>
+              </div>
+            </Transition>
+            <div v-if="showRosterDropdown" class="fixed inset-0 z-[var(--z-overlay-backdrop)]" @click="showRosterDropdown = false" />
+          </span>
+          <span v-if="rosterOverdue" class="text-xs text-orange-500 font-medium shrink-0">已截止</span>
+        </template>
+        <!-- 待办提醒 chips: 靠右、编辑时间左边 (从正文挪上来, 蘑菇 2026-06-30) -->
+        <div v-if="note.type === 'todo' && (myPersonalReminder || myGroupReminders.length > 0)"
+          class="ml-auto flex items-center gap-3 text-xs shrink-0">
+          <span v-if="myPersonalReminder"
+            class="inline-flex items-center gap-1 cursor-pointer hover:opacity-70 whitespace-nowrap text-amber-600"
+            :title="`${fmtReminder(myPersonalReminder.dueAt)}${myPersonalReminder.rrule ? '（重复: ' + myPersonalReminder.rrule + '）' : ''}（个人提醒）`"
+            @click="openReminderPicker">
+            <PhBellRinging v-if="myPersonalReminder.rrule" size="0.875rem" weight="fill" />
+            <PhBell v-else size="0.875rem" weight="fill" />
+            <span>个人提醒</span>
+            <span class="tabular-nums">{{ fmtReminder(myPersonalReminder.dueAt) }}</span>
+          </span>
+          <span v-if="myGroupReminders.length > 0"
+            class="inline-flex items-center gap-1 cursor-pointer hover:opacity-70 whitespace-nowrap"
+            :class="groupReminderMuted ? 'text-gray-400' : 'text-amber-600'"
+            :title="`${fmtReminder(myGroupReminders[0].dueAt)}${myGroupReminders[0].rrule ? '（重复: ' + myGroupReminders[0].rrule + '）' : ''}（群提醒${groupReminderName ? ' · ' + groupReminderName : ''}${groupReminderMuted ? ' · 已屏蔽' : ''}）`"
+            @click="toggleGroupReminderMute">
+            <PhBellSlash v-if="groupReminderMuted" size="0.875rem" weight="fill" />
+            <PhBellRinging v-else-if="myGroupReminders[0].rrule" size="0.875rem" weight="fill" />
+            <PhBell v-else size="0.875rem" weight="fill" />
+            <span>群提醒</span>
+            <span class="tabular-nums">{{ fmtReminder(myGroupReminders[0].dueAt) }}</span>
+          </span>
+        </div>
+        <span class="text-xs text-gray-400 shrink-0 whitespace-nowrap"
+          :class="{ 'ml-auto': !(note.type === 'todo' && (myPersonalReminder || myGroupReminders.length > 0)) }">{{ dayjs(note.createdAt).format('YYYY-MM-DD HH:mm') }}</span>
         <button @click="openEditModal?.(note)" class="px-3 py-1 text-xs rounded-lg hover:bg-gray-100 text-gray-400 inline-flex items-center gap-1">
           <PhPencilSimple size="0.875rem" weight="fill" />
           <span>编辑</span>
@@ -615,94 +777,6 @@ onUnmounted(() => {
         <span v-for="tag in note.tags" :key="tag" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">#{{ tag }}</span>
       </div>
 
-      <!-- 分享设置 (左, 仅作者+shared) + 提醒 chips (右, todo + 有提醒) 合并成一行. 任一条件成立都显示这行.
-           -mt-4 抵消顶部 header 的 mb-6, 视觉间距 ~8px 紧贴 (跟其他次级行同款风格) -->
-      <div v-if="(isShared && isMyNote) || (note.type === 'todo' && (myPersonalReminder || myGroupReminders.length > 0))"
-        class="-mt-4 mb-4 flex items-center gap-2 text-xs relative flex-wrap">
-        <!-- 左: 分享设置 (仅 shared + 作者本人) -->
-        <template v-if="isShared && isMyNote">
-          <button @click.stop="showSharedGroupsPopup = !showSharedGroupsPopup; showGrantsPopup = false"
-            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
-            <PhUsersThree size="0.75rem" weight="fill" />
-            已分享到 {{ sharedGroupIds.length }} 个群
-          </button>
-          <!-- 编辑权限胶囊 (单胶囊点击切换 admin/all, 后跟切换图标) -->
-          <button @click="setEditPermission((note.editPermission || 'admin') === 'admin' ? 'all' : 'admin')"
-            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
-            {{ (note.editPermission || 'admin') === 'admin' ? '管理员可编辑' : '所有人可编辑' }}
-            <PhArrowsClockwise size="0.75rem" weight="bold" />
-          </button>
-          <!-- 已授权小胶囊 (仅 editPermission=admin 时有意义: 'all' 时所有人都能改, 白名单无用; >0 条才显示).
-               包独立 relative 容器让 popover 锚定到按钮下方而非整行右边 -->
-          <span v-if="(note.editPermission || 'admin') === 'admin' && editGrants.length > 0" class="relative inline-block">
-            <button @click.stop="showGrantsPopup = !showGrantsPopup; showSharedGroupsPopup = false"
-              class="px-2 py-0.5 rounded-full bg-primary-light text-primary-dark font-medium hover:bg-primary/20 transition-colors">
-              额外授权 {{ editGrants.length }} 人
-            </button>
-            <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
-              leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
-              <div v-if="showGrantsPopup"
-                class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[var(--z-overlay)] w-[260px] max-h-[280px] overflow-y-auto space-y-1">
-                <div v-for="g in editGrants" :key="g.userId"
-                  class="flex items-center gap-2 hover:bg-gray-50 rounded-lg p-1.5">
-                  <img v-if="g.avatar" :src="resolveFileThumbUrl(g.avatar)"
-                    @error="thumbErrorFallback($event, resolveFileUrl(g.avatar))"
-                    class="w-6 h-6 rounded-full object-cover shrink-0" alt="" />
-                  <div v-else class="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
-                    {{ (g.nickname || '?').charAt(0).toUpperCase() }}
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <div class="text-xs font-medium truncate">{{ g.nickname || '?' }}</div>
-                    <div class="text-[10px] text-gray-400">{{ dayjs(g.grantedAt).format('MM-DD HH:mm') }}</div>
-                  </div>
-                  <button @click="askRevokeGrant(g.userId, g.nickname || '?')"
-                    class="px-2 py-1 text-[11px] rounded-lg bg-red-50 text-red-500 hover:bg-red-100 inline-flex items-center gap-1">
-                    <PhTrash size="0.75rem" weight="bold" /> 撤销
-                  </button>
-                </div>
-              </div>
-            </Transition>
-          </span>
-
-          <!-- 群名 popover (锚定到整行 left, 因为分享胶囊在最左) -->
-          <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
-            leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
-            <div v-if="showSharedGroupsPopup && sharedGroupNames.length > 0"
-              class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[var(--z-overlay)] min-w-[160px] max-w-[280px]">
-              <div v-for="name in sharedGroupNames" :key="name" class="text-xs text-gray-600 py-1 px-2 truncate">{{ name }}</div>
-            </div>
-          </Transition>
-
-          <!-- 共用 backdrop 关两个 popover -->
-          <div v-if="showSharedGroupsPopup || showGrantsPopup" class="fixed inset-0 z-[var(--z-overlay-backdrop)]"
-            @click="showSharedGroupsPopup = false; showGrantsPopup = false" />
-        </template>
-
-        <!-- 右: 待办提醒 chips (个人 + 群并存时一起显示, 个人在前). 点个人 chip 改个人提醒; 点群 chip 切换 mute -->
-        <div v-if="note.type === 'todo' && (myPersonalReminder || myGroupReminders.length > 0)"
-          class="ml-auto flex items-center gap-3">
-          <span v-if="myPersonalReminder"
-            class="inline-flex items-center gap-1 cursor-pointer hover:opacity-70 whitespace-nowrap text-amber-600"
-            :title="`${fmtReminder(myPersonalReminder.dueAt)}${myPersonalReminder.rrule ? '（重复: ' + myPersonalReminder.rrule + '）' : ''}（个人提醒）`"
-            @click="openReminderPicker">
-            <PhBellRinging v-if="myPersonalReminder.rrule" size="0.875rem" weight="fill" />
-            <PhBell v-else size="0.875rem" weight="fill" />
-            <span>个人提醒</span>
-            <span class="tabular-nums">{{ fmtReminder(myPersonalReminder.dueAt) }}</span>
-          </span>
-          <span v-if="myGroupReminders.length > 0"
-            class="inline-flex items-center gap-1 cursor-pointer hover:opacity-70 whitespace-nowrap"
-            :class="groupReminderMuted ? 'text-gray-400' : 'text-amber-600'"
-            :title="`${fmtReminder(myGroupReminders[0].dueAt)}${myGroupReminders[0].rrule ? '（重复: ' + myGroupReminders[0].rrule + '）' : ''}（群提醒${groupReminderName ? ' · ' + groupReminderName : ''}${groupReminderMuted ? ' · 已屏蔽' : ''}）`"
-            @click="toggleGroupReminderMute">
-            <PhBellSlash v-if="groupReminderMuted" size="0.875rem" weight="fill" />
-            <PhBellRinging v-else-if="myGroupReminders[0].rrule" size="0.875rem" weight="fill" />
-            <PhBell v-else size="0.875rem" weight="fill" />
-            <span>群提醒</span>
-            <span class="tabular-nums">{{ fmtReminder(myGroupReminders[0].dueAt) }}</span>
-          </span>
-        </div>
-      </div>
 
       <!-- 待审编辑申请 section (仅 shared + 作者本人 + 有 pending). 同意/拒绝调 API, 忽略仅本地隐藏 -->
       <section v-if="isShared && isMyNote && visibleEditRequests.length > 0"

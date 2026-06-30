@@ -26,6 +26,13 @@ export const notes = sqliteTable('notes', {
   // quink=灵感页 (原'note'), note=笔记页 (原'snippet'), todo=待办页 (不变). link 类型废弃删除.
   type: text('type', { enum: ['quink', 'note', 'todo'] }).notNull().default('quink'),
   todoStatus: text('todo_status', { enum: ['pending', 'done'] }),
+  // 群组待办子类型 (蘑菇 2026-06-29, 见 GROUP-TODO-DESIGN.md): 'group' 群级(发起人/admin 控单一 todoStatus) /
+  // 'everyone' 每人完成(per-user note_todo_done 记录 + 截止 + 可见性). null = 私有待办 / 非待办 (走 todoStatus 单字段, 现状不变). 仅 shared todo 有意义.
+  todoGroupMode: text('todo_group_mode', { enum: ['group', 'everyone'] }),
+  // 'everyone' 用: 截止时间 ISO, null=不自动完成. 超过则整条群组聚合视为完成 (运行时算, 不落字段)
+  rosterDueAt: text('roster_due_at'),
+  // 'everyone' 用: 普通成员可见性. 'count' 只看完成数量 / 'full' 看完整名单. 默认 count. 管理员总能看全名单
+  rosterVisibility: text('roster_visibility', { enum: ['count', 'full', 'none'] }),
   // todoDue / todoRemindSentAt / todoRemindRrule 三列已移除. 提醒走 note_personal_reminders / note_group_reminders 两表
   aiProcessed: integer('ai_processed', { mode: 'boolean' }).notNull().default(false),
   pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
@@ -101,6 +108,17 @@ export const noteReactions = sqliteTable('note_reactions', {
   createdAt: text('created_at').notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.noteId, table.userId, table.emoji] }),
+}));
+
+// 每人完成待办 (todoGroupMode='everyone') 的 per-user 完成记录. 照搬 noteReactions 的 per-user 模式.
+// 有记录 = 该用户完成了. 取消 = 直接 DELETE 行 (无审计需求). 复合主键 (note_id, user_id) 保证每人最多 1 条.
+// 个人列表完成态 = 我有没有记录; 群组聚合完成 = 全员 active 成员都有记录 OR 超过 notes.roster_due_at (运行时算).
+export const noteTodoDone = sqliteTable('note_todo_done', {
+  noteId: text('note_id').notNull().references(() => notes.id),
+  userId: text('user_id').notNull().references(() => users.id),
+  doneAt: text('done_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.noteId, table.userId] }),
 }));
 
 // 评论 thread: 共享笔记下挂评论, parent_id 单层 thread (二层及以下 normalize 到根 parent).

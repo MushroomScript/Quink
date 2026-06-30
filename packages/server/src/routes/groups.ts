@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db, schema } from '../db/index.js';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
@@ -406,6 +406,29 @@ app.get('/:id/notes', async (c) => {
     loadCanWriteMap(sharedForCanWrite, userId),
   ]);
 
+  // 每人完成待办 (everyone): 群 feed 显示进度 X/N + 名单 (谁完成谁没). 单群 feed → total/名单 都基于本群成员.
+  const everyoneNoteIds = rows.filter(r => r.type === 'todo' && r.todo_group_mode === 'everyone').map(r => r.id as string);
+  const isGroupAdmin = me.role === 'owner' || me.role === 'admin';
+  const todoRosterMap = new Map<string, { completed: number; total: number; mine: boolean; roster: Array<{ userId: string; nickname: string; avatar: string | null; done: boolean }> }>();
+  if (everyoneNoteIds.length > 0) {
+    const [members, doneRows] = await Promise.all([
+      db.select({ userId: schema.groupMembers.userId, nickname: schema.users.nickname, avatar: schema.users.avatar })
+        .from(schema.groupMembers).innerJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
+        .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.status, 'active'))).all(),
+      db.select({ noteId: schema.noteTodoDone.noteId, userId: schema.noteTodoDone.userId })
+        .from(schema.noteTodoDone).where(inArray(schema.noteTodoDone.noteId, everyoneNoteIds)).all(),
+    ]);
+    const doneByNote = new Map<string, Set<string>>();
+    for (const d of doneRows) { let s = doneByNote.get(d.noteId); if (!s) { s = new Set(); doneByNote.set(d.noteId, s); } s.add(d.userId); }
+    for (const nid of everyoneNoteIds) {
+      const doneSet = doneByNote.get(nid) || new Set<string>();
+      todoRosterMap.set(nid, {
+        completed: doneSet.size, total: members.length, mine: doneSet.has(userId),
+        roster: members.map(m => ({ userId: m.userId, nickname: m.nickname, avatar: m.avatar, done: doneSet.has(m.userId) })),
+      });
+    }
+  }
+
   // raw SQL 返回 snake_case, 手动映射成 camelCase (跟其他 endpoint 返回格式一致)
   const data = rows.map(r => ({
     id: r.id,
@@ -437,6 +460,22 @@ app.get('/:id/notes', async (c) => {
     reactionSummary: reactionMap.get(r.id) || [],
     commentCount: commentCountMap.get(r.id) || 0,
     editorCount: editorCountMap.get(r.id) || 0, // 非作者编辑次数, NoteCard "X 人编辑过" 显示
+    todoGroupMode: r.todo_group_mode || null,
+    rosterDueAt: r.roster_due_at || null,
+    rosterVisibility: r.roster_visibility || null,
+    // 每人完成待办: 进度 + groupDone(运行时算) + 名单 (rosterVisibility=full 或我是 admin 才给完整名单, 否则只数量)
+    todoDoneSummary: (r.type === 'todo' && r.todo_group_mode === 'everyone') ? (() => {
+      const tr = todoRosterMap.get(r.id as string);
+      if (!tr) return undefined;
+      const overdue = !!r.roster_due_at && dayjs().isAfter(dayjs(r.roster_due_at as string));
+      const showRoster = r.roster_visibility === 'full' || isGroupAdmin;
+      return {
+        completed: tr.completed, total: tr.total, mine: tr.mine,
+        groupDone: (tr.total > 0 && tr.completed >= tr.total) || overdue,
+        hideProgress: r.roster_visibility === 'none' && !isGroupAdmin, // none + 非管理员: 隐藏进度 + 名单 (只完成勾)
+        roster: showRoster ? tr.roster : undefined,
+      };
+    })() : undefined,
   }));
   return c.json({
     data,

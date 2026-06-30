@@ -221,6 +221,14 @@ sqlite.exec(`
   );
   -- 列某笔记所有 reaction: WHERE note_id=? GROUP BY emoji (复合主键 (note_id, user_id, emoji) 已自带 note_id 前缀索引, 不需额外)
 
+  -- 每人完成待办 (todoGroupMode='everyone') 的 per-user 完成记录. 有记录=该用户完成. (note_id, user_id) 复合主键防重复
+  CREATE TABLE IF NOT EXISTS note_todo_done (
+    note_id TEXT NOT NULL REFERENCES notes(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    done_at TEXT NOT NULL,
+    PRIMARY KEY (note_id, user_id)
+  );
+
   -- 评论 thread: 单层 thread (parent_id 二级及以下 normalize 到根 parent), 软删 deleted_at
   CREATE TABLE IF NOT EXISTS note_comments (
     id TEXT PRIMARY KEY,
@@ -377,6 +385,13 @@ try { sqlite.exec('ALTER TABLE notes ADD COLUMN deleted_in_group_id TEXT'); } ca
 // 群回收站查询: WHERE deleted_in_group_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC
 try { sqlite.exec('CREATE INDEX IF NOT EXISTS idx_notes_group_trash ON notes(deleted_in_group_id, deleted_at DESC) WHERE deleted_in_group_id IS NOT NULL'); } catch {}
 
+// 群组待办子类型 (GROUP-TODO-DESIGN.md): todo_group_mode 'group'(群级,admin 控) / 'everyone'(每人完成); everyone 用 roster_due_at(截止) + roster_visibility(count/full)
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN todo_group_mode TEXT'); } catch {}
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN roster_due_at TEXT'); } catch {}
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN roster_visibility TEXT'); } catch {}
+// 迁移: 现有已分享到群的待办默认归"群级待办"(group), 行为跟以前一样 (admin 控单一状态). 私有 / 未分享的不动 (留 NULL)
+try { sqlite.exec("UPDATE notes SET todo_group_mode = 'group' WHERE type = 'todo' AND visibility = 'shared' AND todo_group_mode IS NULL"); } catch {}
+
 // 通知中心. payload 默认 '{}' 跟 drizzle .default({}) 对齐, 老行 readAt 默认 NULL (= 未读).
 // 两个 INDEX: 列通知按 (user, created_at DESC); 未读数走 partial index (sqlite 支持) 只索引未读行省空间
 try { sqlite.exec(`
@@ -451,8 +466,11 @@ try { sqlite.exec(`
 try {
   const row = sqlite.prepare("SELECT value FROM config WHERE key = 'personal_reminder_migration_v1'").get() as { value: string } | undefined;
   if (!row) {
-    const pending = sqlite.prepare(`SELECT id, user_id, todo_due, todo_remind_rrule, todo_remind_sent_at
-      FROM notes WHERE todo_due IS NOT NULL AND deleted_at IS NULL`).all() as Array<{ id: string; user_id: string; todo_due: string; todo_remind_rrule: string | null; todo_remind_sent_at: string | null }>;
+    // 全新空库在上面 legacy cleanup 已 DROP 掉 todo_due 列 (本就无数据可迁); 先检测列在不在,
+    // 不在就跳过 SELECT, 避免 "no such column: todo_due" 报错 (首次启动空库必现; 老库迁过了 flag 在走不到这)
+    const hasTodoDue = (sqlite.prepare('PRAGMA table_info(notes)').all() as Array<{ name: string }>).some((c) => c.name === 'todo_due');
+    const pending = hasTodoDue ? (sqlite.prepare(`SELECT id, user_id, todo_due, todo_remind_rrule, todo_remind_sent_at
+      FROM notes WHERE todo_due IS NOT NULL AND deleted_at IS NULL`).all() as Array<{ id: string; user_id: string; todo_due: string; todo_remind_rrule: string | null; todo_remind_sent_at: string | null }>) : [];
     if (pending.length > 0) {
       const ins = sqlite.prepare(`INSERT OR IGNORE INTO note_personal_reminders (id, user_id, note_id, due_at, rrule, remind_sent_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)`);

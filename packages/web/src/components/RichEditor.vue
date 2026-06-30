@@ -16,6 +16,7 @@ import { useToast } from '@/composables/useToast';
 import RenameModal from './RenameModal.vue';
 import VisibilityChip from './VisibilityChip.vue';
 import CategoryPicker from './CategoryPicker.vue';
+import TodoModeChip from './TodoModeChip.vue';
 import {
   PhLightbulb,
   PhNotePencil,
@@ -102,7 +103,7 @@ function toggleFullscreen() {
 }
 
 const emit = defineEmits<{
-  (e: 'submit', data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[]; category: string | null }): void;
+  (e: 'submit', data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[]; category: string | null; todoGroupMode?: 'group' | 'everyone'; rosterDueAt?: string | null; rosterVisibility?: 'count' | 'full' | 'none' }): void;
   (e: 'ready'): void;
 }>();
 
@@ -113,6 +114,10 @@ const visibilityModel = ref<{ visibility: 'private' | 'shared'; sharedGroupIds: 
 });
 // 分类 chip: null = 走 AI 自动分类 (后端 autoClassify 仅在 category 为 null 时回填); 非空 = 用户手动选过, 保护不被 AI 覆盖
 const categoryModel = ref<string | null>(props.initialCategory);
+// 群组待办类型 (仅 type=todo + shared 时底栏显示 TodoModeChip). rosterDueAt 存本地 datetime, submit 转 ISO.
+const todoModeModel = ref<{ todoGroupMode: 'group' | 'everyone'; rosterDueAt: string | null; rosterVisibility: 'count' | 'full' | 'none' }>({
+  todoGroupMode: 'group', rosterDueAt: null, rosterVisibility: 'count',
+});
 
 // 命名约定: value 跟字段值一致 (quink=灵感, note=笔记, todo=待办)
 const noteTypes = [
@@ -537,7 +542,17 @@ function handleSubmit() {
   const md = stripMarkdownFileUrls(vditor.getValue().trim());
   if (!md) return;
 
-  emit('submit', { html: md, type: noteType.value, tags: [...tags.value], visibility: visibilityModel.value.visibility, sharedGroupIds: [...visibilityModel.value.sharedGroupIds], category: categoryModel.value });
+  // 群组待办类型: 仅 type=todo + shared 才带. everyone 才带截止 (本地 datetime → ISO) + 可见性.
+  const isTodoShared = noteType.value === 'todo' && visibilityModel.value.visibility === 'shared';
+  const isEveryone = isTodoShared && todoModeModel.value.todoGroupMode === 'everyone';
+  emit('submit', {
+    html: md, type: noteType.value, tags: [...tags.value],
+    visibility: visibilityModel.value.visibility, sharedGroupIds: [...visibilityModel.value.sharedGroupIds],
+    category: categoryModel.value,
+    todoGroupMode: isTodoShared ? todoModeModel.value.todoGroupMode : undefined,
+    rosterDueAt: isEveryone && todoModeModel.value.rosterDueAt ? new Date(todoModeModel.value.rosterDueAt).toISOString() : undefined,
+    rosterVisibility: isEveryone ? todoModeModel.value.rosterVisibility : undefined,
+  });
   dirty.value = false;
   // 保存后退出全屏: NoteInput 场景让用户看回到列表; NoteEditModal 场景下 modal 自身也在
   // 关闭(同一 tick 内 store.updateNote 后 showInner=false),这里只是顺手清掉状态。
@@ -557,6 +572,7 @@ function clearContent() {
   };
   // 分类同理: 发布后回到 initialCategory (默认 null = 自动), 防上次手选的分类残留到下一条 → 永远卡住 AI 不能自动
   categoryModel.value = props.initialCategory;
+  todoModeModel.value = { todoGroupMode: 'group', rosterDueAt: null, rosterVisibility: 'count' };
   dirty.value = false;
 }
 
@@ -979,6 +995,8 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         <span v-if="hintText" class="text-[11px] text-gray-400 mr-1">{{ hintText }}</span>
         <CategoryPicker v-if="showCategoryPicker" v-model="categoryModel" compact />
         <VisibilityChip v-if="showVisibilityChip" v-model="visibilityModel" compact />
+        <TodoModeChip v-if="showVisibilityChip && noteType === 'todo' && visibilityModel.visibility === 'shared'"
+          v-model="todoModeModel" :shared-group-ids="visibilityModel.sharedGroupIds" compact />
         <button v-if="showFullscreenBtn" @click="toggleFullscreen"
           class="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
           :title="isFullscreen ? '退出全屏 (Esc)' : '全屏编辑'">

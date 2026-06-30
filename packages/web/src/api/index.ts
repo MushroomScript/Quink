@@ -129,6 +129,22 @@ export interface Note {
   // 当前用户对本笔记是否有写权限. shared 笔记由后端 enrich (isAuthor || editPermission='all' || 在共享群是 admin/owner || 在 grants 白名单).
   // private 笔记不返回此字段 (作者本人无视, 别人也读不到), NoteCard 前端用 isMyNote || !isShared || canWrite 预判.
   canWrite?: boolean;
+  // 群组待办子类型 (GROUP-TODO-DESIGN.md): everyone=每人完成 / group=群级(admin 控) / null=私有 or 非待办
+  todoGroupMode?: 'group' | 'everyone' | null;
+  rosterDueAt?: string | null;                  // everyone 截止时间 (超时整条自动完成)
+  rosterVisibility?: 'count' | 'full' | 'none' | null;   // everyone 可见性: count 只看数量 / full 看名单 / none 啥都不看(只完成勾)
+  // 每人完成待办进度. completed/total 完成数, mine=我完成没, groupDone=整条聚合完成. roster 名单仅群组界面+可见时有
+  todoDoneSummary?: TodoDoneSummary;
+}
+
+export interface TodoDoneSummary {
+  completed: number;
+  total: number;
+  mine: boolean;
+  groupDone: boolean;
+  groupName?: string | null;  // everyone 待办来源群名 (个人列表显示"来自 X 群"; 群组界面已知群不带)
+  hideProgress?: boolean;     // none 可见性 + 非管理员: 隐藏 X/N 进度 + 名单, 只留"我要完成"勾
+  roster?: Array<{ userId: string; nickname: string; avatar: string | null; done: boolean }>;
 }
 
 // 编辑历史一条: NoteDetail "X 人编辑过" popover 列编辑者用. 后端 join users 给 nickname/avatar.
@@ -405,7 +421,7 @@ export const api = {
     return request<{ data: Note }>(`/notes/${id}`);
   },
 
-  createNote(data: { content: string; type?: string; category?: string; tags?: string[]; visibility?: 'private' | 'shared'; sharedGroupIds?: string[] }) {
+  createNote(data: { content: string; type?: string; category?: string; tags?: string[]; visibility?: 'private' | 'shared'; sharedGroupIds?: string[]; todoGroupMode?: 'group' | 'everyone'; rosterDueAt?: string | null; rosterVisibility?: 'count' | 'full' | 'none' }) {
     return request<{ data: Note }>('/notes', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -535,6 +551,13 @@ export const api = {
 
   listNoteReactions(noteId: string) {
     return request<{ data: NoteReactionSummaryItem[] }>(`/notes/${noteId}/reactions`);
+  },
+
+  // 每人完成待办: toggle 当前用户对这条的完成 (per-user, 任何群成员可点自己的). 返回新进度.
+  toggleTodoDone(noteId: string) {
+    return request<{ data: { action: 'done' | 'undone'; summary: TodoDoneSummary } }>(`/notes/${noteId}/todo-done`, {
+      method: 'POST',
+    });
   },
 
   // Comments: 单层 thread (parentId 后端 normalize). 软删本人+作者+admin 可操作; 编辑仅本人.

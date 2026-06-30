@@ -329,6 +329,20 @@ export function startReminderSse() {
     } catch (e) { console.error('[sse] note-reaction-changed parse failed:', e); }
   });
 
+  // note-todo-done-changed: 别人 toggle 了"每人完成"待办 → 进度 X/N 变.
+  // payload.summary 是操作者视角 (mine 是他的), 接收者不能直接用 → refreshSingleNote 拉自己视角更新主 view 列表,
+  // 再派事件给打开的 NoteDetail / GroupDetail 各自重拉 (它们的 note.value / groupNotes 是本地 ref 不在 store).
+  es.addEventListener('note-todo-done-changed', (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as { noteId: string };
+      if (isMyEvent(data)) return;
+      import('@/stores/notes').then(({ useNotesStore }) => {
+        useNotesStore().refreshSingleNote(data.noteId);
+      });
+      window.dispatchEvent(new CustomEvent('quink-note-todo-done-changed', { detail: { noteId: data.noteId } }));
+    } catch (e) { console.error('[sse] note-todo-done-changed parse failed:', e); }
+  });
+
   es.addEventListener('note-comment-added', (ev) => {
     try {
       const data = JSON.parse((ev as MessageEvent).data) as { noteId: string; comment: any };

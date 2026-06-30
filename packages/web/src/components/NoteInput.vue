@@ -16,11 +16,11 @@ const toast = useToast();
 const editorRef = ref<InstanceType<typeof RichEditor>>();
 const submitting = ref(false);
 
-async function onSubmit(data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[]; category: string | null }) {
+async function onSubmit(data: { html: string; type: string; tags: string[]; visibility: 'private' | 'shared'; sharedGroupIds: string[]; category: string | null; todoGroupMode?: 'group' | 'everyone'; rosterDueAt?: string | null; rosterVisibility?: 'count' | 'full' | 'none' }) {
   if (submitting.value) return;
   submitting.value = true;
   try {
-    const note = await store.createNote(data.html, data.type, data.tags.length ? data.tags : undefined, data.visibility, data.sharedGroupIds, data.category);
+    const note = await store.createNote(data.html, data.type, data.tags.length ? data.tags : undefined, data.visibility, data.sharedGroupIds, data.category, { todoGroupMode: data.todoGroupMode, rosterDueAt: data.rosterDueAt, rosterVisibility: data.rosterVisibility });
     editorRef.value?.clearContent();
     toast.show('已保存');
     // AI 异步打标签/分类/摘要, 后台轮询单条直到 aiProcessed=true 后 mutate 进本地 (不触发 rebuild)

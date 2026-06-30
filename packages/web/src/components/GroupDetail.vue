@@ -140,6 +140,7 @@ onMounted(() => {
   window.addEventListener('quink-group-notes-changed', onGroupNotesChanged);
   window.addEventListener('quink-edit-request-changed', onEditRequestChanged);
   window.addEventListener('quink-group-trash-changed', onGroupTrashChanged);
+  window.addEventListener('quink-note-todo-done-changed', onTodoDoneChangedSSE);
 });
 onUnmounted(() => {
   store.currentDetail = null;
@@ -147,6 +148,7 @@ onUnmounted(() => {
   window.removeEventListener('quink-group-notes-changed', onGroupNotesChanged);
   window.removeEventListener('quink-edit-request-changed', onEditRequestChanged);
   window.removeEventListener('quink-group-trash-changed', onGroupTrashChanged);
+  window.removeEventListener('quink-note-todo-done-changed', onTodoDoneChangedSSE);
 });
 
 function onEditRequestChanged() {
@@ -159,6 +161,12 @@ function onEditRequestChanged() {
 function onGroupNotesChanged(e: Event) {
   const detail = (e as CustomEvent).detail;
   if (detail?.groupId === groupId.value) loadGroupNotes(true);
+}
+
+// 别人 toggle "每人完成"待办 → 群 feed 里这条进度 X/N 变, 仅当本群有这条才重拉 (groupNotes 本地 ref 不在 store)
+function onTodoDoneChangedSSE(e: Event) {
+  const noteId = (e as CustomEvent).detail?.noteId;
+  if (noteId && groupNotes.value.some(n => n.id === noteId)) loadGroupNotes(true);
 }
 
 // 群回收站变化 (admin 删别人 / 恢复 / 永久删 / 清空) → 重拉 group detail 刷 trashCount.

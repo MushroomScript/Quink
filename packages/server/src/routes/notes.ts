@@ -41,6 +41,10 @@ const createNoteSchema = z.object({
   // 群组共享: visibility=private (默认, 仅作者) / visibility=shared 必须给 sharedGroupIds[]
   visibility: z.enum(['private', 'shared']).default('private'),
   sharedGroupIds: z.array(z.string().max(32)).max(100).optional(),
+  // 群组待办子类型 (GROUP-TODO-DESIGN.md): 仅 shared todo 有意义; 'everyone' 仅群管理员能设 (POST handler 校验)
+  todoGroupMode: z.enum(['group', 'everyone']).optional(),
+  rosterDueAt: z.string().nullable().optional(),
+  rosterVisibility: z.enum(['count', 'full', 'none']).optional(),
 }).strict();
 
 const updateNoteSchema = z.object({
@@ -71,6 +75,10 @@ const updateNoteSchema = z.object({
   }).optional(),
   // 任务清单 checkbox 等轻量 toggle 传 true → PATCH handler 跳过 updatedAt 刷新 (蘑菇 2026-06-29)
   skipTimestamp: z.boolean().optional(),
+  // 群组待办子类型 (GROUP-TODO-DESIGN.md): 'everyone' 仅群管理员能改 (PATCH handler 校验)
+  todoGroupMode: z.enum(['group', 'everyone']).optional(),
+  rosterDueAt: z.string().nullable().optional(),
+  rosterVisibility: z.enum(['count', 'full', 'none']).optional(),
 }).strict();
 
 // 广播 'group-notes-changed' 给目标群所有 active 成员 (除操作者).
@@ -116,7 +124,16 @@ app.get('/', async (c) => {
     sql`${schema.notes.deletedAt} IS NULL`, // 排除回收站
   ];
   if (scope === 'mine') {
-    conditions.push(eq(schema.notes.userId, userId));
+    // 个人列表 (GROUP-TODO-DESIGN.md): 我的笔记 (但排除我发的"群级待办" group — 群级只在群组界面显示)
+    // + 别人发的、我所在群的"每人完成待办" everyone (我需要各自完成, 混进我的列表; 靠下面 type filter 只在 Todos 露出)
+    conditions.push(sql`(
+      (${schema.notes.userId} = ${userId} AND (${schema.notes.todoGroupMode} IS NULL OR ${schema.notes.todoGroupMode} != 'group'))
+      OR (${schema.notes.userId} != ${userId} AND ${schema.notes.type} = 'todo' AND ${schema.notes.todoGroupMode} = 'everyone'
+          AND ${schema.notes.id} IN (
+            SELECT ns.note_id FROM note_shares ns
+            WHERE ns.group_id IN (SELECT group_id FROM group_members WHERE user_id = ${userId} AND status = 'active')
+          ))
+    )`);
   } else if (scope === 'private') {
     // 仅作者本人 private (任何 shared 都过滤). 对应 sharedDisplay='none'
     conditions.push(eq(schema.notes.userId, userId));
@@ -238,9 +255,9 @@ app.get('/', async (c) => {
       arr.push(s.groupId);
       sharesMap.set(s.noteId, arr);
     }
-    // scope 含他人笔记时多查 author info (mine / private 作者就是自己, 前端 auth.user 已知, 跳过)
+    // scope 含他人笔记时多查 author info. mine 现在也可能混入"别人发的 everyone 待办" → 用 results 是否含非自己笔记判断
     let authorMap: Map<string, { nickname: string; avatar: string | null }> | null = null;
-    if (scope !== 'mine' && scope !== 'private') {
+    if (results.some(n => n.userId !== userId)) {
       const authorIds = [...new Set(results.map(n => n.userId))];
       const authors = await db.select({ id: schema.users.id, nickname: schema.users.nickname, avatar: schema.users.avatar })
         .from(schema.users)
@@ -257,10 +274,13 @@ app.get('/', async (c) => {
       id: n.id, userId: n.userId, editPermission: n.editPermission,
       sharedGroupIds: sharesMap.get(n.id) || [],
     }));
-    const [{ reactionMap, commentCountMap }, editorCountMap, canWriteMap] = await Promise.all([
+    // 每人完成待办: 批量查完成聚合 (completed/total/mine)
+    const everyoneNoteIds = results.filter(n => n.type === 'todo' && n.todoGroupMode === 'everyone').map(n => n.id);
+    const [{ reactionMap, commentCountMap }, editorCountMap, canWriteMap, todoDoneMap] = await Promise.all([
       loadSocialMetaMaps(sharedNoteIds, userId),
       loadEditorCountMap(sharedNoteIds),
       loadCanWriteMap(sharedForCanWrite, userId),
+      loadTodoDoneMaps(everyoneNoteIds, userId),
     ]);
     data = results.map(n => {
       const enriched: any = { ...n, sharedGroupIds: sharesMap.get(n.id) || [] };
@@ -274,6 +294,13 @@ app.get('/', async (c) => {
         enriched.commentCount = commentCountMap.get(n.id) || 0;
         enriched.editorCount = editorCountMap.get(n.id) || 0;
         enriched.canWrite = canWriteMap.get(n.id) ?? false;
+      }
+      // 每人完成待办: 加完成聚合 + groupDone (运行时算: 全员完成 OR 超截止)
+      if (n.type === 'todo' && n.todoGroupMode === 'everyone') {
+        const s = todoDoneMap.get(n.id) || { completed: 0, total: 0, mine: false };
+        const overdue = !!n.rosterDueAt && dayjs().isAfter(dayjs(n.rosterDueAt));
+        // 个人列表: none 可见性 → 隐藏进度 (只留完成勾). 个人列表不显示名单, admin 想看完整去详情/群界面
+        enriched.todoDoneSummary = { ...s, groupDone: (s.total > 0 && s.completed >= s.total) || overdue, hideProgress: n.rosterVisibility === 'none' };
       }
       return enriched;
     });
@@ -588,6 +615,20 @@ export async function loadEditorCountMap(noteIds: string[]): Promise<Map<string,
   const out = new Map<string, number>();
   for (const [nid, set] of perNote) out.set(nid, set.size);
   return out;
+}
+
+// helper: 校验 userId 在指定群里是否 owner/admin (按 groupId 直接查, 给"创建每人完成待办"等笔记还没存的场景用)
+async function isAdminOfGroups(userId: string, groupIds: string[]): Promise<boolean> {
+  if (groupIds.length === 0) return false;
+  const myAdmin = await db.select({ role: schema.groupMembers.role })
+    .from(schema.groupMembers)
+    .where(and(
+      eq(schema.groupMembers.userId, userId),
+      eq(schema.groupMembers.status, 'active'),
+      inArray(schema.groupMembers.groupId, groupIds),
+      or(eq(schema.groupMembers.role, 'owner'), eq(schema.groupMembers.role, 'admin')),
+    )).get();
+  return !!myAdmin;
 }
 
 // helper: 校验 userId 在某 shared 笔记关联的群里是 owner/admin. 给 DELETE / 审批申请等
@@ -1190,6 +1231,96 @@ app.post('/:id/reactions', async (c) => {
   return c.json({ data: { action, summary } });
 });
 
+// 每人完成待办的聚合: 所在群 (单群) active 成员数 = total; note_todo_done 记录数 = completed; mine = 我有记录.
+// 群组聚合完成 = 全员完成 (completed>=total) OR 超过 roster_due_at (运行时算, 不落字段, 见 GROUP-TODO-DESIGN.md [C]).
+async function getTodoDoneSummary(noteId: string, userId: string, rosterDueAt: string | null): Promise<{ completed: number; total: number; mine: boolean; groupDone: boolean }> {
+  const share = await db.select({ groupId: schema.noteShares.groupId })
+    .from(schema.noteShares).where(eq(schema.noteShares.noteId, noteId)).get();
+  let total = 0;
+  if (share) {
+    const t = await db.select({ c: sql<number>`count(*)` })
+      .from(schema.groupMembers)
+      .where(and(eq(schema.groupMembers.groupId, share.groupId), eq(schema.groupMembers.status, 'active'))).get();
+    total = t?.c ?? 0;
+  }
+  const doneRows = await db.select({ userId: schema.noteTodoDone.userId })
+    .from(schema.noteTodoDone).where(eq(schema.noteTodoDone.noteId, noteId)).all();
+  const completed = doneRows.length;
+  const overdue = !!rosterDueAt && dayjs().isAfter(dayjs(rosterDueAt));
+  return { completed, total, mine: doneRows.some(r => r.userId === userId), groupDone: (total > 0 && completed >= total) || overdue };
+}
+
+// 批量版 (笔记列表 enrich 用). 传入的 noteIds 应都是 everyone 待办. 返回 Map<noteId, {completed,total,mine}>;
+// groupDone 由调用方用各自 rosterDueAt 运行时算 (避免这里再 join 一次 notes).
+async function loadTodoDoneMaps(noteIds: string[], userId: string): Promise<Map<string, { completed: number; total: number; mine: boolean; groupName: string | null }>> {
+  const map = new Map<string, { completed: number; total: number; mine: boolean; groupName: string | null }>();
+  if (noteIds.length === 0) return map;
+  const [doneRows, sharesRows] = await Promise.all([
+    db.select({ noteId: schema.noteTodoDone.noteId, userId: schema.noteTodoDone.userId })
+      .from(schema.noteTodoDone).where(inArray(schema.noteTodoDone.noteId, noteIds)).all(),
+    db.select({ noteId: schema.noteShares.noteId, groupId: schema.noteShares.groupId })
+      .from(schema.noteShares).where(inArray(schema.noteShares.noteId, noteIds)).all(),
+  ]);
+  const noteGroup = new Map<string, string>(); // noteId → groupId (everyone 限单群, 取第一个)
+  for (const s of sharesRows) if (!noteGroup.has(s.noteId)) noteGroup.set(s.noteId, s.groupId);
+  const groupIds = [...new Set(noteGroup.values())];
+  const memberCounts = new Map<string, number>();
+  const groupNames = new Map<string, string>();  // groupId → name (个人列表显示"来自 X 群")
+  if (groupIds.length > 0) {
+    const [counts, gs] = await Promise.all([
+      db.select({ groupId: schema.groupMembers.groupId, c: sql<number>`count(*)` })
+        .from(schema.groupMembers)
+        .where(and(inArray(schema.groupMembers.groupId, groupIds), eq(schema.groupMembers.status, 'active')))
+        .groupBy(schema.groupMembers.groupId).all(),
+      db.select({ id: schema.groups.id, name: schema.groups.name })
+        .from(schema.groups).where(inArray(schema.groups.id, groupIds)).all(),
+    ]);
+    for (const r of counts) memberCounts.set(r.groupId, r.c);
+    for (const g of gs) groupNames.set(g.id, g.name);
+  }
+  const doneByNote = new Map<string, Set<string>>();
+  for (const d of doneRows) {
+    let s = doneByNote.get(d.noteId); if (!s) { s = new Set(); doneByNote.set(d.noteId, s); }
+    s.add(d.userId);
+  }
+  for (const noteId of noteIds) {
+    const doneSet = doneByNote.get(noteId) || new Set<string>();
+    const gid = noteGroup.get(noteId);
+    map.set(noteId, { completed: doneSet.size, total: gid ? (memberCounts.get(gid) || 0) : 0, mine: doneSet.has(userId), groupName: gid ? (groupNames.get(gid) || null) : null });
+  }
+  return map;
+}
+
+// POST /api/notes/:id/todo-done — 每人完成待办: 当前用户 toggle 自己的完成 (照搬 reaction toggle).
+// 任何能 read 该 shared everyone 待办的群成员都能切自己的 (不碰笔记内容, 不要编辑锁/admin).
+app.post('/:id/todo-done', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const { id } = c.req.param();
+  const note = await getNoteForAccess(userId, id, 'read');
+  if (!note) return c.json({ error: '笔记不存在' }, 404);
+  if (note.type !== 'todo' || note.todoGroupMode !== 'everyone') {
+    return c.json({ error: '只有"每人完成"待办支持此操作' }, 400);
+  }
+  const existing = await db.select().from(schema.noteTodoDone)
+    .where(and(eq(schema.noteTodoDone.noteId, id), eq(schema.noteTodoDone.userId, userId))).get();
+  let action: 'done' | 'undone';
+  if (existing) {
+    await db.delete(schema.noteTodoDone)
+      .where(and(eq(schema.noteTodoDone.noteId, id), eq(schema.noteTodoDone.userId, userId)));
+    action = 'undone';
+  } else {
+    await db.insert(schema.noteTodoDone).values({ noteId: id, userId, doneAt: dayjs().toISOString() });
+    action = 'done';
+  }
+  const summary = await getTodoDoneSummary(id, userId, note.rosterDueAt);
+  // SSE: 群其他成员 (聚合进度变) + 本人其他设备
+  broadcastNoteSocial(id, 'note-todo-done-changed', { noteId: id, summary }, userId, _ocid)
+    .catch(e => console.error('[todo-done] broadcast failed:', e));
+  publish(userId, 'note-todo-done-changed', { noteId: id, summary }, _ocid);
+  return c.json({ data: { action, summary } });
+});
+
 // GET /api/notes/:id/reactions — 列汇总, 含 mine 标记 (用户已加的 emoji)
 app.get('/:id/reactions', async (c) => {
   const userId = c.get('userId');
@@ -1435,6 +1566,28 @@ app.get('/:id', async (c) => {
     enriched.commentCount = commentCountMap.get(id) || 0;
     enriched.editorCount = editorCountMap.get(id) || 0;
     enriched.canWrite = canWriteMap.get(id) ?? false;
+    // 每人完成待办: 详情显示进度 + 名单 (rosterVisibility=full 或我是 admin 才给名单) + 群名. 单群 → 名单基于该群成员.
+    if (note.type === 'todo' && note.todoGroupMode === 'everyone' && shares.length > 0) {
+      const gid = shares[0].groupId;
+      const [members, doneRows, grp] = await Promise.all([
+        db.select({ userId: schema.groupMembers.userId, nickname: schema.users.nickname, avatar: schema.users.avatar })
+          .from(schema.groupMembers).innerJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
+          .where(and(eq(schema.groupMembers.groupId, gid), eq(schema.groupMembers.status, 'active'))).all(),
+        db.select({ userId: schema.noteTodoDone.userId }).from(schema.noteTodoDone).where(eq(schema.noteTodoDone.noteId, id)).all(),
+        db.select({ name: schema.groups.name }).from(schema.groups).where(eq(schema.groups.id, gid)).get(),
+      ]);
+      const doneSet = new Set(doneRows.map(d => d.userId));
+      const isAdmin = await isAdminOfGroups(userId, [gid]);
+      const showRoster = note.rosterVisibility === 'full' || isAdmin;
+      const overdue = !!note.rosterDueAt && dayjs().isAfter(dayjs(note.rosterDueAt));
+      enriched.todoDoneSummary = {
+        completed: doneSet.size, total: members.length, mine: doneSet.has(userId),
+        groupDone: (members.length > 0 && doneSet.size >= members.length) || overdue,
+        groupName: grp?.name ?? null,
+        hideProgress: note.rosterVisibility === 'none' && !isAdmin, // none + 非管理员: 隐藏进度 + 名单 (只完成勾)
+        roster: showRoster ? members.map(m => ({ userId: m.userId, nickname: m.nickname, avatar: m.avatar, done: doneSet.has(m.userId) })) : undefined,
+      };
+    }
   }
   return c.json({ data: enriched });
 });
@@ -1461,6 +1614,27 @@ app.post('/', async (c) => {
     if (err) return c.json({ error: err }, 403);
   }
 
+  // 群组待办子类型 (GROUP-TODO-DESIGN.md): 仅 shared todo 有意义
+  let todoGroupMode: 'group' | 'everyone' | null = null;
+  let rosterDueAt: string | null = null;
+  let rosterVisibility: 'count' | 'full' | 'none' | null = null;
+  if (parsed.data.type === 'todo' && visibility === 'shared') {
+    if (parsed.data.todoGroupMode === 'everyone') {
+      // 每人完成待办: 仅群管理员能发, 限单群 (聚合 X/N + 名单语义才清晰)
+      if (sharedGroupIds.length !== 1) {
+        return c.json({ error: '"每人完成"待办只能分享到 1 个群' }, 400);
+      }
+      if (!(await isAdminOfGroups(userId, sharedGroupIds))) {
+        return c.json({ error: '只有群管理员能发"每人完成"待办' }, 403);
+      }
+      todoGroupMode = 'everyone';
+      rosterDueAt = parsed.data.rosterDueAt ?? null;
+      rosterVisibility = parsed.data.rosterVisibility ?? 'count';
+    } else {
+      todoGroupMode = 'group'; // 默认群级待办 (任何成员可发, 发起人+admin 控完成)
+    }
+  }
+
   const now = dayjs().toISOString();
   const note = {
     id: nanoid(12),
@@ -1471,6 +1645,9 @@ app.post('/', async (c) => {
     category: parsed.data.category ?? null,
     tags: parsed.data.tags ?? [],
     todoStatus: parsed.data.type === 'todo' ? 'pending' as const : null,
+    todoGroupMode,
+    rosterDueAt,
+    rosterVisibility,
     summary: null,
     aiProcessed: false,
     pinned: false,
@@ -1718,6 +1895,19 @@ app.patch('/:id', async (c) => {
   if (data.pinned !== undefined) updates.pinned = data.pinned;
   // 改编辑权限. 仅作者能改 (上面已校验非作者传过来直接 403)
   if (data.editPermission !== undefined) updates.editPermission = data.editPermission;
+  // 群组待办类型/截止/可见性 (GROUP-TODO-DESIGN.md): 都是群管理操作, shared 笔记才有意义, 只有群管理员能改.
+  // everyone 限单群 (聚合 X/N + 名单语义清晰). 私有笔记前端不传这些字段, 传了也忽略.
+  if (existing.visibility === 'shared' && (data.todoGroupMode !== undefined || data.rosterDueAt !== undefined || data.rosterVisibility !== undefined)) {
+    if (!(await isAdminOfGroups(userId, currentShareGroupIds))) {
+      return c.json({ error: '只有群管理员能改待办类型/截止/可见性' }, 403);
+    }
+    if (data.todoGroupMode === 'everyone' && currentShareGroupIds.length !== 1) {
+      return c.json({ error: '"每人完成"待办只能在单群笔记上设置' }, 400);
+    }
+    if (data.todoGroupMode !== undefined) updates.todoGroupMode = data.todoGroupMode;
+    if (data.rosterDueAt !== undefined) updates.rosterDueAt = data.rosterDueAt;
+    if (data.rosterVisibility !== undefined) updates.rosterVisibility = data.rosterVisibility;
+  }
 
   // COW fork 决策. shared 笔记被"群组页打开编辑"的非作者 / 作者改 → 可能 fork 到该群专属版本.
   // (isContentChange / ctxGroupId / currentShareGroupIds 已在锁校验之前定义, 复用)

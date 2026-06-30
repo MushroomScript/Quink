@@ -24,11 +24,17 @@ useInfiniteScroll(() => store.loadMore(), sentinels);
 // 数据变更前主动 snapshot 所有卡片位置，避免 onLeave 钩子里拿到的是 v-if 切换后的错位坐标
 watch(() => vs.notes.length, () => snapshotCards(), { flush: 'sync' });
 
+// 待办完成态: everyone(每人完成) 看"我个人完成 OR 整条已结束"(超时/全员, 蘑菇 A: 超时做不了的也归已完成);
+// 群级 / 私有待办看 todoStatus (现状不变)
+function isTodoDone(n: any): boolean {
+  if (n.todoGroupMode === 'everyone') return !!n.todoDoneSummary?.mine || !!n.todoDoneSummary?.groupDone;
+  return n.todoStatus === 'done';
+}
 const pendingTodos = computed(() =>
-  vs.notes.filter((n) => n.type === 'todo' && n.todoStatus !== 'done')
+  vs.notes.filter((n) => n.type === 'todo' && !isTodoDone(n))
 );
 const doneTodos = computed(() =>
-  vs.notes.filter((n) => n.type === 'todo' && n.todoStatus === 'done')
+  vs.notes.filter((n) => n.type === 'todo' && isTodoDone(n))
 );
 // TopBar 钩多类型时, vs.notes 会包含非 todo 卡片(server 按 types 返回). 单独一组显示, 不区分 pending/done.
 const otherNotes = computed(() =>

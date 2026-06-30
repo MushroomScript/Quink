@@ -52,6 +52,11 @@ const router = createRouter({
       meta: { title: '资源' },
     },
     {
+      // 详情 URL 父路径 /note (无 id) 没有内容页 → 重定向到笔记列表. 详情页返回键没 SPA 上一级时退到这 (蘑菇 2026-06-30)
+      path: '/note',
+      redirect: '/notes',
+    },
+    {
       path: '/note/:id',
       name: 'note-detail',
       component: () => import('@/views/NoteDetail.vue'),

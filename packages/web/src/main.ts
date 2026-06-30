@@ -11,6 +11,19 @@ const app = createApp(App);
 app.use(createPinia());
 app.use(router);
 
+// build 后旧页面动态 import 的 chunk hash 变 (旧文件被新 build 删) → 加载 404 → 路由切换卡死 (页面点不动必须手刷).
+// 监听 chunk 加载失败 → 自动刷新拿新版. 10s 窗口防 server 真挂时无限刷.
+function reloadForNewVersion() {
+  const k = 'quink_reload_at';
+  if (Date.now() - Number(sessionStorage.getItem(k) || 0) < 10000) return;
+  sessionStorage.setItem(k, String(Date.now()));
+  window.location.reload();
+}
+window.addEventListener('vite:preloadError', reloadForNewVersion);
+router.onError((err: any) => {
+  if (/dynamically imported module|module script failed|Failed to fetch/i.test(err?.message || '')) reloadForNewVersion();
+});
+
 // 全局错误捕获，防止白屏
 app.config.errorHandler = (err, vm, info) => {
   console.error('[Quink Error]', err, info);

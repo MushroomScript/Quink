@@ -231,8 +231,8 @@ export const useNotesStore = defineStore('notes', () => {
 
   // createNote 加 visibility + sharedGroupIds 透传给 server
   // category: null = 走 AI 自动分类 (后端 autoClassify 仅在 category 为 null 时回填); 非空 = 用户手动选过, 保护不被 AI 覆盖
-  async function createNote(content: string, type: string = 'quink', tags?: string[], visibility: 'private' | 'shared' = 'private', sharedGroupIds: string[] = [], category: string | null = null) {
-    const res = await api.createNote({ content, type, tags, visibility, sharedGroupIds, category: category ?? undefined });
+  async function createNote(content: string, type: string = 'quink', tags?: string[], visibility: 'private' | 'shared' = 'private', sharedGroupIds: string[] = [], category: string | null = null, todoOpts?: { todoGroupMode?: 'group' | 'everyone'; rosterDueAt?: string | null; rosterVisibility?: 'count' | 'full' | 'none' }) {
+    const res = await api.createNote({ content, type, tags, visibility, sharedGroupIds, category: category ?? undefined, ...todoOpts });
     // 按新笔记 type 决定加到哪个 viewState, 不绑当前 activeView. 这样跨 view 创建 (如在灵感页
     // 用 Capture 创建 type=todo) 切到对应 view 立刻看到, 不用等 fetchNotes.
     const targetViewKey = typeToView[res.data.type];
@@ -473,6 +473,16 @@ export const useNotesStore = defineStore('notes', () => {
     const note = vs.notes.find((n) => n.id === id);
     if (!note || note.type !== 'todo') return;
     await setTodoStatus([id], note.todoStatus === 'done' ? 'pending' : 'done');
+  }
+
+  // 每人完成待办: 把某条的最新完成进度同步到所有 viewState 的本地副本 (NoteCard onToggleTodoDone 调).
+  // 解决"群组界面点完成 → 个人列表 Todos 不刷新": 群组界面 props.note 是 GroupDetail 本地 ref 不在 store,
+  // NoteCard 自己 mutate 它即时; 这里补同步 store viewState (Todos 切回时已是新进度, 不用手动刷新). 保留各自本地 roster.
+  function syncTodoDone(noteId: string, summary: { completed: number; total: number; mine: boolean; groupDone: boolean }) {
+    for (const k of Object.keys(_viewState) as ViewKey[]) {
+      const n = _viewState[k].notes.find((x) => x.id === noteId);
+      if (n) n.todoDoneSummary = { ...summary, roster: n.todoDoneSummary?.roster, hideProgress: n.todoDoneSummary?.hideProgress };
+    }
   }
 
   // 把 GET /api/notes/:id 拿到的最新数据同步到所有 view 的本地副本.
@@ -718,6 +728,7 @@ export const useNotesStore = defineStore('notes', () => {
     undoDelete,
     togglePin,
     toggleTodo,
+    syncTodoDone,
     selectMode,
     selectedIds,
     toggleSelectMode,
