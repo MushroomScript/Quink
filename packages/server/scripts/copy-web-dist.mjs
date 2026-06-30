@@ -21,4 +21,13 @@ if (!existsSync(join(src, 'index.html'))) {
 
 rmSync(dest, { recursive: true, force: true });
 cpSync(src, dest, { recursive: true });
-console.log(`[copy-web-dist] ${src} -> ${dest}`);
+
+// 裁 vditor 省 ~38MB. 依据 RichEditor.vue 的 vditor 配置: mode 'ir' + toolbar 只有基础格式 + code/inline-code
+// (留 highlight.js 代码高亮); preview 默认数学引擎 katex (删冗余 mathjax); toolbar 无任何图表按钮 (删图表库).
+// 删了用户万一手写 ```mermaid 等不渲染降级源码, 个人笔记基本不用. 二合一 server-runtime 不走这脚本不受影响.
+const vd = join(dest, 'vditor', 'dist');
+rmSync(join(vd, 'ts'), { recursive: true, force: true }); // TS 源码运行不需要 (14MB)
+for (const lib of ['mathjax', 'mermaid', 'graphviz', 'markmap', 'plantuml', 'echarts', 'abcjs', 'flowchart.js', 'smiles-drawer']) {
+  rmSync(join(vd, 'js', lib), { recursive: true, force: true });
+}
+console.log(`[copy-web-dist] ${src} -> ${dest} (已裁 vditor: 删 ts + mathjax + 图表库)`);
