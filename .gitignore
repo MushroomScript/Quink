@@ -26,6 +26,12 @@ packages/desktop/server-runtime/
 # TypeScript incremental build cache (vue-tsc -b / tsc --incremental 生成)
 *.tsbuildinfo
 
+# vue-tsc -b 编译产物 (web 源是 .vue/.ts, build 模式 emit 的 .js/.d.ts/.map 不入库)
+packages/web/src/**/*.js
+packages/web/src/**/*.js.map
+packages/web/src/**/*.d.ts
+packages/web/src/**/*.d.ts.map
+
 # Rust build output
 packages/native/target/
 packages/native/*.node
@@ -72,6 +78,9 @@ scripts/
 !packages/desktop/scripts/
 packages/desktop/scripts/*
 !packages/desktop/scripts/prepare-server-runtime.mjs
+!packages/server/scripts/
+packages/server/scripts/*
+!packages/server/scripts/copy-web-dist.mjs
 
 # 临时调试截图 (MCP 截图给蘑菇看 / 视觉对比, 用完删 + 同步移除此规则)
 .tmp-*.png

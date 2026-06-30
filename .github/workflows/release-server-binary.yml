@@ -22,6 +22,13 @@ jobs:
         with:
           node-version: '22'
 
+      # node-gyp 10 子目录 require distutils, Python 3.12+ 已移除. 装 Python 3.11 让 better-sqlite3/sharp
+      # 的 native rebuild 在 mac/linux 跑通 (跟 desktop workflow 一致). Windows 走 MSBuild 不受影响.
+      - name: Setup Python 3.11 (node-gyp distutils compat)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       # pin pnpm 10 (跟 Dockerfile / desktop workflow 一致)
       - name: Install pnpm
         run: npm install -g pnpm@10
@@ -51,20 +58,33 @@ jobs:
           Add-MpPreference -ExclusionProcess node.exe -ErrorAction SilentlyContinue
           Write-Host "Defender real-time monitoring disabled + workspace excluded"
 
-      # 顺序: tsc → esbuild bundle → pkg
-      - name: Build server (tsc → esbuild → pkg)
-        run: pnpm --filter @quink/server run build:binary
-
-      - name: Rename Linux/Mac binaries (pkg 输出无扩展, 重命名好认)
-        if: matrix.os != 'windows-latest'
-        run: |
-          cd packages/server/dist-binary
-          ls -la
-          for f in quink-server-*; do
-            mv "$f" "${f}-${{ matrix.os }}" 2>/dev/null || true
-          done
-          ls -la
+      # 前端要打进 server 二进制 (单文件含 SPA): copy vditor 静态文件 → build web → copy-web-dist
+      # 到 node_modules/quink-web-dist (pkg assets 引用它). 不做这步 server 二进制起来前端 404.
+      - name: Build web (打进 server 二进制的前端 SPA)
         shell: bash
+        run: |
+          mkdir -p packages/web/public/vditor
+          cp -r node_modules/vditor/dist packages/web/public/vditor/dist
+          pnpm --filter @quink/web build
+
+      # 每个 runner 只 build 自己平台的 target —— better-sqlite3/sharp native 不能跨平台编译, pkg 全
+      # targets 会产其他平台的坏包. 产物名 quink-server-<platform>-<arch> 已含平台 arch, 不用再 rename.
+      - name: Build server binary (current platform, tsc → esbuild → copy-web → pkg)
+        shell: bash
+        run: |
+          cd packages/server
+          node scripts/copy-web-dist.mjs
+          pnpm run build
+          pnpm run build:bundle
+          case "${{ matrix.os }}" in
+            windows-latest) TARGET=node22-win-x64 ;;
+            macos-latest)   TARGET=node22-macos-arm64 ;;
+            ubuntu-latest)  TARGET=node22-linux-x64 ;;
+          esac
+          echo "pkg target: $TARGET"
+          pnpm exec pkg . --targets "$TARGET"
+          chmod +x dist-binary/quink-server-* 2>/dev/null || true
+          ls -la dist-binary/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
