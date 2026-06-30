@@ -17,7 +17,7 @@
     "build:runtime": "pnpm --filter @quink/server build && pnpm --filter @quink/server build:bundle && pnpm --filter @quink/web build && node scripts/prepare-server-runtime.mjs",
     "pack": "tsc && pnpm run build:runtime && electron-builder --dir",
     "dist": "tsc && pnpm run build:runtime && electron-builder",
-    "dist:win": "tsc && pnpm run build:runtime && electron-builder --win",
+    "dist:win": "tsc && pnpm run build:runtime && node -e \"require('fs').rmSync('dist-electron',{recursive:true,force:true})\" && electron-builder --win",
     "dist:mac": "tsc && pnpm run build:runtime && electron-builder --mac",
     "dist:linux": "tsc && pnpm run build:runtime && electron-builder --linux"
   },

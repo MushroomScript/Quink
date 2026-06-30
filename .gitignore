@@ -4,6 +4,7 @@ dist-bundle/
 dist-binary/
 /web-dist/
 dist-electron/
+/release/
 .env
 .env.local
 *.db
