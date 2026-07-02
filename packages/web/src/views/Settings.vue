@@ -22,7 +22,7 @@ const notesStore = useNotesStore();
 const toast = useToast();
 const currentTheme = useTheme();
 
-const activeTab = ref('profile');
+const activeTab = ref(localStorage.getItem('quink_settings_tab') || 'profile');
 const saving = ref(false);
 
 // ── Profile ──
@@ -492,6 +492,12 @@ const tabs = [
   { id: 'export', label: '导出' },
   { id: 'about', label: '关于' },
 ];
+
+// 记住上次打开的 tab: activeTab 初值已从 localStorage 恢复, 这里校验防旧 tab id 残留 + 切换时写回
+if (!tabs.some((t) => t.id === activeTab.value)) activeTab.value = 'profile';
+watch(activeTab, (v) => {
+  try { localStorage.setItem('quink_settings_tab', v); } catch {}
+});
 
 onMounted(async () => {
   // 拿系统默认下载目录的真实路径 (Windows 跟 *nix 表达不同), Settings 显示用
@@ -1426,14 +1432,20 @@ function goBack() {
           <p class="text-xs text-gray-400 -mt-1">{{ channelTypeOptions.find(o => o.id === editingChannel?.type)?.description }}</p>
 
           <!-- browser 特殊: 没有配置字段, 只显示授权状态 -->
-          <div v-if="editingChannel.type === 'browser'" class="rounded-lg bg-white border border-gray-200 px-3 py-2 text-xs flex items-center justify-between">
-            <span class="text-gray-600">浏览器通知权限：
-              <span :class="browserPermission === 'granted' ? 'text-green-600' : browserPermission === 'denied' ? 'text-red-500' : 'text-gray-400'">
-                {{ browserPermission === 'granted' ? '已授权' : browserPermission === 'denied' ? '已拒绝' : '未授权' }}
+          <div v-if="editingChannel.type === 'browser'" class="rounded-lg bg-white border border-gray-200 px-3 py-2 text-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-gray-600">浏览器通知权限：
+                <span :class="browserPermission === 'granted' ? 'text-green-600' : browserPermission === 'denied' ? 'text-red-500' : 'text-gray-400'">
+                  {{ browserPermission === 'granted' ? '已授权' : browserPermission === 'denied' ? '已拒绝' : '未授权' }}
+                </span>
               </span>
-            </span>
-            <button v-if="browserPermission !== 'granted'" @click="requestBrowserPermission"
-              class="text-primary hover:underline">立即授权</button>
+              <button v-if="browserPermission === 'default'" @click="requestBrowserPermission"
+                class="text-primary hover:underline">立即授权</button>
+            </div>
+            <!-- denied 时浏览器不再弹授权框, "立即授权"点了无效, 提示用户去浏览器设置手动开 -->
+            <p v-if="browserPermission === 'denied'" class="text-gray-400 mt-1.5 leading-relaxed">
+              已被浏览器屏蔽，请点击地址栏左侧的网站信息图标，将「通知」改为允许后刷新页面。
+            </p>
           </div>
 
           <!-- 其他类型: 按 channelTypeFields 表动态渲染 -->
