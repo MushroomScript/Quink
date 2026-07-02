@@ -499,9 +499,12 @@ onUnmounted(() => {
             @error="thumbErrorFallback($event, resolveFileUrl(auth.avatar))"
             draggable="false" alt="头像"
             class="w-7 h-7 rounded-full object-cover aspect-square" />
-          <div v-else class="w-7 h-7 rounded-full bg-primary/30 text-primary flex items-center justify-center text-sm font-bold">
-            {{ getInitial(auth.nickname) }}
-          </div>
+          <!-- SVG 几何居中: dominant-baseline=central 按几何中心对齐圆心, 矢量缩放不受像素 snapping → 各比例稳定. dy=-1 是真人视觉校准 (central 真实渲染略偏下), dy 用 viewBox 单位随缩放等比, 不破坏跨比例一致 -->
+          <svg v-else viewBox="0 0 28 28" class="w-7 h-7" aria-hidden="true">
+            <circle cx="14" cy="14" r="14" style="fill: rgb(var(--c-accent) / 0.3)" />
+            <text x="14" y="14" text-anchor="middle" dominant-baseline="central" dy="-1" font-size="14" font-weight="700"
+              style="fill: rgb(var(--c-accent))">{{ getInitial(auth.nickname) }}</text>
+          </svg>
           <span v-if="notificationsStore.unread.total > 0"
             class="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-400/90 rounded-full" />
         </div>
