@@ -838,7 +838,7 @@ function goBack() {
     <!-- Tabs (sticky 锁顶, -mx 抵消 root padding 占全宽, 顶部 box-shadow 分隔.
          背景走 --c-body 不透明 (跟页面同色融为一体): 之前用 bg-gray-50 在 dark 主题下被 style.css 覆盖成 5% 白半透明,
          sticky 锁顶时下面卡片透过来视觉脏 → 改用主题变量保证 7 套主题都不透明) -->
-    <div class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-8 pt-[8px] mb-6 flex flex-wrap gap-1 border-b border-gray-200"
+    <div class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-8 pt-[8px] mb-6 flex flex-wrap justify-center gap-1 border-b border-gray-200"
       style="background-color: var(--c-body); box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <button
         v-for="tab in tabs"
@@ -856,6 +856,8 @@ function goBack() {
       </button>
     </div>
 
+    <!-- 内容区居中限宽 (tab 栏在外保持全宽, 分隔线不被截断); max-w-2xl 表单舒适宽度 -->
+    <div class="max-w-2xl mx-auto">
     <!-- ═══ 基本信息 ═══ -->
     <div v-if="activeTab === 'profile'" class="space-y-6">
       <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
@@ -1568,6 +1570,7 @@ function goBack() {
 
         <p class="text-center text-[10px] text-gray-300 mt-6">Made with ❤️ by Mushroom</p>
       </div>
+    </div>
     </div>
 
     <!-- 改回收站保留时间触发"立即永久删除 N 条"时的确认弹窗 (CLAUDE.md: 危险操作必须弹窗确认) -->
