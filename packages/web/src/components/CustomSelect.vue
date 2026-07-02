@@ -107,9 +107,12 @@ function positionPopup() {
   const layoutVH = window.innerHeight / zoom;
   const layoutVW = window.innerWidth / zoom;
   const spaceBelow = layoutVH - rBottom;
-  const top = spaceBelow >= estHeight + 8
-    ? rBottom + 4
-    : Math.max(8, rTop - estHeight - 4);
+  const openDown = spaceBelow >= estHeight + 8;
+  const top = openDown ? rBottom + 4 : Math.max(8, rTop - estHeight - 4);
+  // maxHeight clamp 到弹出方向可用空间 (spaceBelow/rTop): 否则 CSS zoom 放大后菜单顶破视口, 超出的滚动区
+  // 够不到 → 150% 下长下拉(提醒频率等)翻不到后面. 100% 时可用空间 > maxHeight, clamp 无影响.
+  const availH = Math.max(120, (openDown ? spaceBelow : rTop) - 8);
+  const clampedMaxH = Math.min(props.maxHeight, availH);
   // 宽度策略: minWidth = trigger (popup 至少跟 trigger 一样宽, 视觉对齐),
   // 不写 width 让 popup 自然撑开到最宽 .qsel-item 的内容宽度 (item 自带 white-space: nowrap),
   // maxWidth viewport - 16 兜底防止超长选项跑出屏幕。
@@ -119,7 +122,7 @@ function positionPopup() {
     left: `${rLeft}px`,
     minWidth: `${rWidth}px`,
     maxWidth: `${layoutVW - 16}px`,
-    maxHeight: `${props.maxHeight}px`,
+    maxHeight: `${clampedMaxH}px`,
   };
   // 二次校正: nextTick 拿到 popup 实际 (撑开后) 宽度 + 高度
   // - 上方场景: estHeight 是粗估, 撑开后真实 popupH 可能更大 → 重算 top 防止 popup 跟 trigger 重叠
