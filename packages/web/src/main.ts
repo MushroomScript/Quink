@@ -41,8 +41,12 @@ app.mount('#app');
 // CSS zoom 修正: html 上有 zoom (Quink "显示比例" 功能) 时, innerHeight 是 zoomed value,
 // 把它设到 CSS px 字段会被 zoom 再乘一次, 导致 #app height 是视口的 zoom 倍.
 // zoom=1.5 时登录页卡片"快挨着屏幕底端"就是这个 bug. 除以 zoom 还原 unzoomed CSS px
-function setAppHeight() {
-  const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+function setAppHeight(zoomOverride?: unknown) {
+  // zoom 优先用 applyZoomLevel 切换时传入的确切值 (typeof number); 否则 (resize/orientationchange 触发时传的是 Event)
+  // 退回读 inline style.zoom. 关键: 切 CSS zoom 时绝不读 getComputedStyle().zoom — 它的 computed 值更新滞后一帧,
+  // setAppHeight 那刻会拿到旧 zoom=1 → --app-height=innerHeight 错, #app 被 zoom 放大顶破视口 → 切换不居中、刷新才对.
+  // Electron 端不设 style.zoom (走 setZoomFactor), 读到空 → zoom=1, 此时 innerHeight 已是逻辑值, 正确.
+  const zoom = typeof zoomOverride === 'number' ? zoomOverride : (parseFloat(document.documentElement.style.zoom) || 1);
   const cssHeight = window.innerHeight / zoom;
   document.documentElement.style.setProperty('--app-height', `${cssHeight}px`);
 }

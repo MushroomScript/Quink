@@ -668,6 +668,10 @@ async function savePreferences(silent = false) {
     } else {
       (document.documentElement.style as any).zoom = (prefs.zoomLevel / 100).toString();
     }
+    // 改 zoom 后必须重算 --app-height, 否则 #app 高度用旧 zoom 算、被新 zoom 放大顶破视口 → 切换不居中、刷新才对.
+    // (真凶: 设置页改显示比例走的是这里、不走 App.vue 的 applyZoomLevel, 之前一直漏了这处重算.)
+    // 传确切 zoom 不让 setAppHeight 读 DOM (getComputedStyle 切换后滞后一帧); Electron 走 setZoomFactor 不改 CSS 布局故传 1.
+    try { (window as any).__quink_setAppHeight?.((window as any).quinkDesktop?.isElectron ? 1 : prefs.zoomLevel / 100); } catch {}
     if (!silent) showMsg('已保存');
   } catch (err: any) {
     showMsg('保存失败: ' + err.message, 'error');
