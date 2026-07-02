@@ -696,7 +696,28 @@ export const useNotesStore = defineStore('notes', () => {
     return r;
   }
 
+  // 账号切换时清空 (auth clearUserData 调): 三个 view 笔记 + 筛选/多选/文件筛选, sortBy/sharedDisplay 复位默认
+  // (新账号 applyUserPreferences 会重设这两个偏好)
+  function reset() {
+    for (const k of Object.keys(_viewState) as ViewKey[]) {
+      Object.assign(_viewState[k], createInitState());
+    }
+    activeView.value = '';
+    searchQuery.value = '';
+    filterCategory.value = '';
+    filterType.value = '';
+    isFiltering.value = false;
+    fileCategory.value = 'all';
+    fileDateFrom.value = '';
+    fileDateTo.value = '';
+    selectMode.value = false;
+    selectedIds.value = new Set();
+    sortBy.value = 'created';
+    sharedDisplay.value = 'own';
+  }
+
   return {
+    reset,
     notes,
     loading,
     total,

@@ -1,6 +1,9 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { api, setToken, isLoggedIn, resetRedirectFlag, type User } from '@/api';
+import { useNotesStore } from './notes';
+import { useGroupsStore } from './groups';
+import { useNotificationsStore } from './notifications';
 
 // Electron 桌面端注入的接口
 declare global {
@@ -27,11 +30,25 @@ export const useAuthStore = defineStore('auth', () => {
   const nickname = computed(() => user.value?.nickname || '');
   const avatar = computed(() => user.value?.avatar || '');
 
+  // 账号切换时清所有用户数据 store, 防旧账号 notes/groups/通知残留到新账号 (原来只 logout 清 user/token,
+  // notes/groups/通知 store 不清 → 新号登录先看到旧号笔记, 刷新 app 重建 store 才消失)
+  function clearUserData() {
+    useNotesStore().reset();
+    useGroupsStore().reset();
+    useNotificationsStore().reset();
+    // account-scoped localStorage: 草稿(含笔记内容, 隐私) + 置顶分类(存的是账号的分类 id, 换号会错乱).
+    // 其余 quink_ 键是设备偏好(下载目录/卡片宽度/提示已读)或登录后被 applyUserPreferences 覆盖(主题/缩放), 不清.
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith('quink_draft') || k === 'quink_pinned_categories') localStorage.removeItem(k);
+    }
+  }
+
   async function register(username: string, password: string, nickname: string) {
     const res = await api.register({ username, password, nickname });
     setToken(res.data.token);
     resetRedirectFlag();
     syncTokenToDesktop(res.data.token);
+    clearUserData();
     user.value = res.data.user;
     return res.data.user;
   }
@@ -41,6 +58,7 @@ export const useAuthStore = defineStore('auth', () => {
     setToken(res.data.token);
     resetRedirectFlag();
     syncTokenToDesktop(res.data.token);
+    clearUserData();
     user.value = res.data.user;
     return res.data.user;
   }
@@ -83,6 +101,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout() {
+    clearUserData();
     user.value = null;
     setToken(null);
     syncTokenToDesktop(null);

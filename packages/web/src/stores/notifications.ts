@@ -188,6 +188,15 @@ export const useNotificationsStore = defineStore('notifications', () => {
     loadUnreadCount().catch(() => {});
   }
 
+  // 账号切换时清空 (auth clearUserData 调): 通知列表 + 分页 + 未读数
+  function reset() {
+    items.value = [];
+    total.value = 0;
+    page.value = 1;
+    currentTab.value = '';
+    unread.value = { total: 0, content: 0, reminder: 0, group: 0 };
+  }
+
   return {
     items,
     total,
@@ -203,6 +212,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
     markReadAll,
     deleteOne,
     clearAll,
+    reset,
     handleNotificationNew,
     handleNotificationChanged,
   };
