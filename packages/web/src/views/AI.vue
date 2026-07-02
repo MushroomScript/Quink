@@ -810,7 +810,7 @@ async function retryLastMessage() {
       </div>
       <div ref="messagesEl" data-drop-target="ai-page" class="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 py-6 space-y-4">
         <!-- 空状态 -->
-        <div v-if="!currentConvId || messages.length === 0" class="text-center py-16">
+        <div v-if="!currentConvId || messages.length === 0" class="min-h-full flex flex-col items-center justify-center text-center">
           <div class="mb-3 flex justify-center text-gray-300">
             <PhSparkle size="3rem" weight="fill" />
           </div>
