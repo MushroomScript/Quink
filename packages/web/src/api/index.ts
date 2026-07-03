@@ -421,7 +421,7 @@ export const api = {
     return request<{ data: Note }>(`/notes/${id}`);
   },
 
-  createNote(data: { content: string; type?: string; category?: string; tags?: string[]; visibility?: 'private' | 'shared'; sharedGroupIds?: string[]; todoGroupMode?: 'group' | 'everyone'; rosterDueAt?: string | null; rosterVisibility?: 'count' | 'full' | 'none' }) {
+  createNote(data: { content: string; type?: string; category?: string; tags?: string[]; visibility?: 'private' | 'shared'; sharedGroupIds?: string[]; todoGroupMode?: 'group' | 'everyone'; rosterDueAt?: string | null; rosterVisibility?: 'count' | 'full' | 'none'; simplifyContent?: boolean }) {
     return request<{ data: Note }>('/notes', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -796,10 +796,10 @@ export const api = {
   },
 
   // AI Process
-  aiProcess(feature: string, content: string, prompt?: string) {
+  aiProcess(feature: string, content: string, prompt?: string, targetLang?: string) {
     return request<{ data: { result: string } }>('/ai/process', {
       method: 'POST',
-      body: JSON.stringify({ feature, content, prompt }),
+      body: JSON.stringify({ feature, content, prompt, targetLang }),
     });
   },
 

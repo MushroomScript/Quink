@@ -129,6 +129,12 @@ const router = createRouter({
       component: () => import('@/views/AiChat.vue'),
       meta: { public: false, hideChrome: true },
     },
+    {
+      path: '/translate-result',
+      name: 'translate-result',
+      component: () => import('@/views/TranslateResult.vue'),
+      meta: { public: false, hideChrome: true },
+    },
   ],
 });
 

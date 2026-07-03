@@ -28,11 +28,18 @@ contextBridge.exposeInMainWorld('quinkDesktop', {
 contextBridge.exposeInMainWorld('quink', {
   saveNote: (content: string, type: string) => ipcRenderer.invoke('save-note', content, type),
   hideWindow: () => ipcRenderer.send('hide-window'),
+  // 划词翻译: float 拿到译文后让 main 弹独立对照窗口 (原文 | 译文)
+  openTranslateResult: (original: string, translated: string, lang: string) => ipcRenderer.send('open-translate-result', { original, translated, lang }),
   noteSaved: (noteId?: string) => ipcRenderer.send('note-saved', noteId),
   // Vditor 等异步组件加载完后调用，让主进程延迟到此刻才 show 窗口，避免布局跳变
   notifyContentReady: () => ipcRenderer.send('content-ready'),
   onWindowShown: (callback: () => void) => {
     ipcRenderer.on('window-shown', () => callback());
+  },
+  // float 持久窗口: 每次唤出 main 通过这个 IPC 传新选中文字 (不重新 loadURL)
+  onFloatText: (callback: (text: string) => void) => {
+    ipcRenderer.removeAllListeners('float-text');
+    ipcRenderer.on('float-text', (_e, text: string) => callback(text));
   },
   onWindowHidden: (callback: () => void) => {
     ipcRenderer.on('window-hidden', () => callback());

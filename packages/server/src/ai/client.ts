@@ -476,16 +476,46 @@ export async function autoSummary(userId: string, content: string): Promise<stri
 }
 
 /**
+ * 精简笔记内容 (float「AI整理」后台执行). 独立 feature, 用 getPrompt 取用户自定义精简提示词.
+ * 返回精简后文本; 失败/太短返回 null (调用方保留原文兜底).
+ */
+export async function autoSimplify(userId: string, content: string): Promise<string | null> {
+  const config = await getConfigForFeature(userId, 'simplify');
+  if (!config) return null;
+
+  const prompt = await getPrompt(userId, 'simplify');
+  // 保留原文换行/段落 (精简后回填笔记要保格式), 不走 cleanContent (它把 \s+ 压成单空格吃掉换行)
+  const text = content.replace(/<[^>]*>/g, '').trim();
+  if (text.length < 5) return null;
+
+  try {
+    const result = await callAi(config, '你是一个写作助手。', prompt.replace('{content}', text));
+    return result.trim() || null;
+  } catch (err) {
+    console.error('Auto-simplify failed:', err);
+    return null;
+  }
+}
+
+/**
  * Generic AI call for polish/expand/write features.
  */
-export async function aiProcess(userId: string, feature: AiFeature, content: string, customPrompt?: string): Promise<string> {
+export async function aiProcess(userId: string, feature: AiFeature, content: string, customPrompt?: string, targetLang?: string): Promise<string> {
   const config = await getConfigForFeature(userId, feature);
   if (!config) throw new Error('未配置 AI 模型，请在设置中添加 AI 配置');
 
   const prompt = customPrompt || await getPrompt(userId, feature);
-  const text = cleanContent(content);
+  // 保留原文段落/换行 (translate/polish/expand/write 要按原格式返回); 不走 cleanContent ——
+  // 它的 \s+→单空格会把换行全压成空格, 导致译文/润色结果堆成一整段没换行
+  const text = content.replace(/<[^>]*>/g, '').trim();
 
-  const result = await callAi(config, '你是一个写作助手。', prompt.replace('{content}', text));
+  // translate 的 prompt 带 {targetLang} 占位, 由调用方传入目标语种 (前端划词按中文占比自动判语向 /
+  // 翻译窗口内二次选语言). 对不含占位符的 polish/expand/write 是无害 no-op.
+  const filled = prompt
+    .replace(/\{targetLang\}/g, targetLang || '英语')
+    .replace('{content}', text);
+
+  const result = await callAi(config, '你是一个写作助手。', filled);
   return result;
 }
 

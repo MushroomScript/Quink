@@ -358,6 +358,8 @@ const aiFeatures = [
   { key: 'expand', label: 'AI 扩充' },
   { key: 'write', label: 'AI 写文' },
   { key: 'chat', label: 'AI 对话' },
+  { key: 'simplify', label: 'AI 整理' },
+  { key: 'translate', label: 'AI 翻译' },
 ];
 
 // 3 个 auto_* feature 在提示词 tab 栏上带迷你开关 (开关从偏好设置搬到这里).

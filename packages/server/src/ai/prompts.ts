@@ -1,13 +1,15 @@
-export const AI_FEATURES = ['auto_tag', 'auto_classify', 'auto_summary', 'polish', 'expand', 'write', 'chat'] as const;
+export const AI_FEATURES = ['auto_tag', 'auto_classify', 'auto_summary', 'simplify', 'polish', 'expand', 'write', 'translate', 'chat'] as const;
 export type AiFeature = typeof AI_FEATURES[number];
 
 export const AI_FEATURE_LABELS: Record<AiFeature, string> = {
   auto_tag: '自动标签',
   auto_classify: '自动分类',
   auto_summary: '自动摘要',
+  simplify: 'AI 整理',
   polish: 'AI 润色',
   expand: 'AI 扩充',
   write: 'AI 写文',
+  translate: 'AI 翻译',
   chat: 'AI 对话',
 };
 
@@ -48,6 +50,15 @@ export const DEFAULT_PROMPTS: Record<AiFeature, string> = {
 笔记内容：
 {content}`,
 
+  simplify: `请精简以下内容，去掉冗余啰嗦的部分，保留核心要点，让它更清爽好读。
+要求：
+- 保留原意的关键信息，不要遗漏要点
+- 保持原有格式结构（标题、列表、代码块、表格等），图片标记位置不变
+- 直接返回精简后的内容，不要添加说明
+
+原文：
+{content}`,
+
   polish: `请润色以下内容，使其语言更流畅、表达更专业。
 要求：
 - 保持原意不变
@@ -77,6 +88,14 @@ export const DEFAULT_PROMPTS: Record<AiFeature, string> = {
 - 直接返回文章内容
 
 主题/大纲：
+{content}`,
+
+  translate: `请将以下内容翻译成{targetLang}。
+要求：
+- 保持原有格式结构（标题、列表、代码块、表格等），图片标记位置不变
+- 只返回译文本身，不要添加任何解释或注释
+
+原文：
 {content}`,
 
   chat: `你是 Quink（一念）笔记助手。

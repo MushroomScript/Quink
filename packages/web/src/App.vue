@@ -32,7 +32,7 @@ const store = useNotesStore();
 
 // route.name 未定 (首次导航未 resolve) 时 showChrome=false → 走 RouterView 兜底不渲染主界面骨架,
 // 避免未登录首帧把 undefined 误判成主界面闪一下. 配合 main.ts 即时 mount (不用 router.isReady 延迟) 一起修.
-const showChrome = computed(() => !!route.name && !['login', 'capture', 'float', 'ai-chat', 'invite'].includes(route.name as string));
+const showChrome = computed(() => !!route.name && !['login', 'capture', 'float', 'ai-chat', 'translate-result', 'invite'].includes(route.name as string));
 const isElectron = !!(window as any).quinkDesktop?.isElectron;
 // Mac 标题栏走原生交通灯 (main.ts titleBarStyle:hiddenInset): 左侧给交通灯留位 + 隐藏自绘窗口按钮
 const isMac = isElectron && /Mac/i.test(navigator.userAgent);
@@ -236,12 +236,17 @@ function applyZoomLevel(level: number) {
     // 自己 IPC. 但 isElectron=true 让这分支跑, 走过清 CSS zoom 那一行就足够防双重.
     (document.documentElement.style as any).zoom = '';
     try { (window as any).quinkDesktop.syncZoom(level); } catch {}
+    // Electron 端走 setZoomFactor, window.innerHeight 已是逻辑值 (缩放体现在 devicePixelRatio, 不在 innerHeight),
+    // setAppHeight 传 1 即可. 传 level/100 会把 --app-height 多除一次 factor → #app 高度腰斩. 主窗口靠 syncZoom
+    // → main 改物理尺寸触发的 resize 事件重算 (zoom=1) 掩盖了; 但 float 快捷窗口 syncZoom 是 no-op stub, 不触发
+    // resize, 腰斩值不被覆盖 → 胶囊 bar 高度只剩 ~1/5 (padding 固定, 吃掉腰斩后剩余高度的大头).
+    try { (window as any).__quink_setAppHeight?.(1); } catch {}
   } else {
     (document.documentElement.style as any).zoom = (level / 100).toString();
+    // Web/PWA 端 CSS zoom: innerHeight 是 zoomed value, 除 factor 还原 unzoomed CSS px. 直接传确切 zoom 不让
+    // setAppHeight 读 DOM (getComputedStyle 滞后 / style.zoom 边界全绕开), 保证切换即刻用新比例算 → 不用刷新就居中.
+    try { (window as any).__quink_setAppHeight?.(level / 100); } catch {}
   }
-  // CSS zoom 改变后 --app-height 必须重算. 直接把确切 zoom (level/100) 传给 setAppHeight, 不让它读 DOM
-  // (getComputedStyle 滞后 / style.zoom 边界全绕开), 保证切换即刻用新比例算 → 不用刷新就居中.
-  try { (window as any).__quink_setAppHeight?.(level / 100); } catch {}
 }
 
 // HMR 友好：模块级保存上次挂的副作用，重 mount 时先清理旧的，避免 capture 阶段旧 handler

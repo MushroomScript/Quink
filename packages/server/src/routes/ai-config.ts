@@ -262,13 +262,13 @@ app.post('/test', async (c) => {
 app.post('/process', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id');
-  const { feature, content, prompt: customPrompt } = await c.req.json();
+  const { feature, content, prompt: customPrompt, targetLang } = await c.req.json();
 
   if (!AI_FEATURES.includes(feature)) return c.json({ error: '未知功能' }, 400);
   if (!content?.trim()) return c.json({ error: '内容不能为空' }, 400);
 
   try {
-    const result = await aiProcess(userId, feature, content, customPrompt || undefined);
+    const result = await aiProcess(userId, feature, content, customPrompt || undefined, targetLang || undefined);
     return c.json({ data: { result } });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);

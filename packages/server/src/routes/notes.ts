@@ -5,7 +5,7 @@ import { eq, desc, like, or, and, sql, inArray, isNull } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { authMiddleware } from '../auth.js';
-import { autoTag, autoClassify, autoSummary } from '../ai/client.js';
+import { autoTag, autoClassify, autoSummary, autoSimplify } from '../ai/client.js';
 import { toPinyinSearchable } from '../utils/pinyin.js';
 import { publish } from '../reminder/bus.js';
 import { logAudit } from '../utils/auditLog.js';
@@ -45,6 +45,8 @@ const createNoteSchema = z.object({
   todoGroupMode: z.enum(['group', 'everyone']).optional(),
   rosterDueAt: z.string().nullable().optional(),
   rosterVisibility: z.enum(['count', 'full', 'none']).optional(),
+  // float「AI整理」: true 时创建后后台 AI 精简 content 回填 (只对这条生效, 不污染普通新建笔记)
+  simplifyContent: z.boolean().optional(),
 }).strict();
 
 const updateNoteSchema = z.object({
@@ -1666,8 +1668,8 @@ app.post('/', async (c) => {
     }
   });
 
-  // 异步 AI 处理（不阻塞响应）
-  processNoteWithAi(userId, note.id, note.content, note.tags as string[]).catch(() => {});
+  // 异步 AI 处理（不阻塞响应）. simplifyContent=true (float「AI整理」) 时额外后台精简 content
+  processNoteWithAi(userId, note.id, note.content, note.tags as string[], { simplifyContent: parsed.data.simplifyContent, originClientId: _ocid }).catch(() => {});
   // 通知目标群成员有新笔记 (前端 sse handler 收到后在群详情页 reload feed)
   broadcastNoteShared(sharedGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
   // 多设备同步: 给作者本人所有设备 publish (broadcastNoteShared 排除发起人, 同账号其他设备一起被排除; 私有笔记不走 broadcast 也漏)
@@ -2263,7 +2265,7 @@ app.delete('/:id', async (c) => {
  * 不阻塞笔记保存，后台静默执行
  * 巨型 content 跳过 AI 处理防大账单
  */
-async function processNoteWithAi(userId: string, noteId: string, content: string, existingTags: string[]) {
+async function processNoteWithAi(userId: string, noteId: string, content: string, existingTags: string[], opts?: { simplifyContent?: boolean; originClientId?: string }) {
   try {
     if (content.length > NOTE_AI_SKIP_THRESHOLD) {
       await db.update(schema.notes).set({ aiProcessed: true }).where(eq(schema.notes.id, noteId));
@@ -2291,11 +2293,14 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
     // "语音备忘" / 日期 / 文件名当垃圾标签. 阈值 5 跟 autoTag 内部 cleanContent < 5
     // 跳过门槛对齐, 但用 plainTextLen 度量 (剥过附件 markdown), 让真正的纯附件笔记被拦下.
     const TAG_MIN_PLAIN_LEN = 5;
-    const [tags, category, summary] = await Promise.all([
+    // float「AI整理」: 后台精简 content (仅 simplifyContent=true 时跑, 否则不碰 content; autoSimplify 内部判太短)
+    const simplifyEnabled = opts?.simplifyContent === true;
+    const [tags, category, summary, simplified] = await Promise.all([
       // 用户已自己写了标签 → 直接用; 关了自动标签 / 纯附件笔记 → 留空; 否则 AI 生成
       existingTags.length > 0 ? Promise.resolve(existingTags) : (tagEnabled && plainTextLen >= TAG_MIN_PLAIN_LEN ? autoTag(userId, content) : Promise.resolve([] as string[])),
       categorizeEnabled && plainTextLen >= TAG_MIN_PLAIN_LEN ? autoClassify(userId, content) : Promise.resolve(null),
       summaryEnabled && plainTextLen >= summaryMinLen ? autoSummary(userId, content) : Promise.resolve(null),
+      simplifyEnabled ? autoSimplify(userId, content) : Promise.resolve(null),
     ]);
 
     // AI 异步回填可能跟用户立即 PATCH 撞 race. 仅在原值仍为 null/空时回填,
@@ -2311,9 +2316,17 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
     // 返回值要么在 categories 表里要么是 null. category 表只在注册 seed / 用户手动添加时增长.
     if (category && !fresh.category) updates.category = category;
     if (summary && !fresh.summary) updates.summary = summary;
+    // 精简结果直接覆盖 content (float「AI整理」语义就是精简后存). content 变了搜索索引 contentPinyin 也要跟着更新.
+    if (simplified) {
+      updates.content = simplified;
+      updates.contentPinyin = toPinyinSearchable(simplified);
+    }
 
     await db.update(schema.notes).set(updates).where(eq(schema.notes.id, noteId));
-    console.log(`[AI] Note ${noteId}: tags=${JSON.stringify(tags)}, category=${category}, summary=${summary}`);
+    // 精简改了 content 必须 publish note-updated: float 是独立窗口存完即关, 主窗口靠 note-created 插入原文卡片
+    // 但不会自己轮询这条 (syncNoteCreated 只插入不轮询), 只有这条 SSE 能让主窗口 refreshSingleNote 回填精简版
+    if (simplified) publish(userId, 'note-updated', { noteId }, opts?.originClientId);
+    console.log(`[AI] Note ${noteId}: tags=${JSON.stringify(tags)}, category=${category}, summary=${summary}, simplified=${!!simplified}`);
   } catch (err) {
     console.error(`[AI] Failed to process note ${noteId}:`, err);
   }

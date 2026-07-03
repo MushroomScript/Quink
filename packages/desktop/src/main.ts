@@ -223,6 +223,8 @@ let mainWindow: BrowserWindow | null = null;
 let setupWindow: BrowserWindow | null = null;
 let captureWindow: BrowserWindow | null = null;
 let floatWindow: BrowserWindow | null = null;
+let lastFloatText = ''; // 最近一次弹 float 用的文字, toggle 关闭后再按却读不到选中时兜底重弹
+let translateWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let authToken: string | null = null;
@@ -279,6 +281,17 @@ const THEME_BG: Record<string, string> = {
   lemon: '#fcfaf0',
   cloud: '#f5f6f8',
   dark: '#131318',
+};
+
+// 每个主题的侧边栏色(跟 style.css --c-sidebar 一致). Windows float 实色窗口背景用它 → 整窗一块 sidebar 色圆角矩形
+const THEME_SIDEBAR: Record<string, string> = {
+  blueberry: '#f0f2ff',
+  lavender: '#f5f0ff',
+  mint: '#eefcf7',
+  peach: '#fff4f2',
+  lemon: '#fffcf0',
+  cloud: '#f5f7fa',
+  dark: '#16161e',
 };
 
 // 每个主题的 accent-dark RGB(跟 style.css 一致),用于 toast 背景
@@ -342,27 +355,46 @@ function promptAccessibilityPermission() {
   });
 }
 
-// 统一的浮窗触发:优先 UIA(无感、瞬时、不碰剪贴板),失败再 Ctrl+C 兜底
+// 快捷键开关: 开着就关; 没开就立即弹窗 (胶囊上是静态按钮, 不显示选中文字本身 → 窗口无需等读取, 秒开),
+// 选中文字后台异步读进去 (点按钮时才真正用到文字, 那时早读完了). 反复开关同一段不会每次卡在读取上.
 async function triggerFloatWindow() {
-  // 1) UIA 优先:浏览器 / UWP / Office / 大部分现代应用支持
+  if (floatWindow && !floatWindow.isDestroyed() && floatWindow.isVisible()) {
+    floatWindow.hide();
+    return;
+  }
+  showFloatWindow(lastFloatText); // 先用上次文字占位立即弹
+  refreshFloatSelection();         // 再后台读当前选中, 读到就更新
+}
+
+// 读当前选中文字, 更新到已弹出的 float (不重新弹/不重定位). UIA 无感优先, 失败 Ctrl+C 兜底
+async function refreshFloatSelection() {
   if (nativeModuleRef?.readSelectionUia) {
     try {
       const sel = await nativeModuleRef.readSelectionUia();
-      if (sel && sel.text && sel.text.trim().length >= 1) {
-        if (!isOwnWindow(sel.hwnd)) {
-          showFloatWindow(sel.text.trim(), sel.x, sel.y);
-          return;
-        }
+      const t = sel?.text?.trim();
+      if (t && t.length >= 1 && !isOwnWindow(sel.hwnd)) {
+        updateFloatText(t);
+        return;
       }
     } catch (e) {
       console.log('[Float] UIA read failed:', e);
     }
   }
-  // 2) Ctrl+C fallback:Notepad / 老 Win32 / Qt 等
+  // UIA 没读到 → Ctrl+C 兜底 (记事本/老 Win32/Qt): grabSelection 异步结果走 onSelection → updateFloatText;
+  // 无 native 则直接读剪贴板
   if (nativeModuleRef?.grabSelection) {
     nativeModuleRef.grabSelection();
   } else {
-    grabAndShowFloat();
+    const t = clipboard.readText();
+    if (t && t.trim()) updateFloatText(t.trim());
+  }
+}
+
+// 只把选中文字更新到已弹出的 float (IPC 推文字 + 更新缓存), 不重新定位/show
+function updateFloatText(text: string) {
+  lastFloatText = text;
+  if (floatWindow && !floatWindow.isDestroyed()) {
+    floatWindow.webContents.send('float-text', text.slice(0, 2000));
   }
 }
 
@@ -1279,12 +1311,10 @@ ipcMain.on('sync-theme', (_event, theme: string) => {
     aiChatWindow.destroy();
     aiChatWindow = null;
   }
-  // floatWindow 不受影响（生命周期不同），仍同步主题
+  // float 持久窗口: 切主题跟 Capture/AiChat 一样销毁, 下次触发用新主题重建 (防 hidden 窗口 GPU paint cache 残旧主题)
   if (floatWindow && !floatWindow.isDestroyed()) {
-    floatWindow.webContents.executeJavaScript(
-      `document.documentElement.setAttribute('data-theme','${theme}')`
-    ).catch(() => {});
-    floatWindow.setBackgroundColor(THEME_BG[theme] || '#ffffff');
+    floatWindow.destroy();
+    floatWindow = null;
   }
   // 主窗口任务栏图标用 setIcon（窗口不会重复注册，setIcon 在 Win11 上安全）
   const themedIcon = createTrayIcon(theme);
@@ -1338,6 +1368,29 @@ function getAiChatSize(zoomLevel: number): { width: number; height: number; minW
     height: Math.round(560 * factor),
     minWidth: Math.round(400 * factor),
     minHeight: Math.round(400 * factor),
+  };
+}
+
+// 选中文字悬浮窗尺寸按 zoom 比例缩放: 320×54 是默认 100% 基准 (胶囊内容 300×34 + 四周 10px 投影留白, 见 FloatingMenu.vue)。
+// 跟 Capture 一样窗口物理尺寸 × factor + did-finish-load 后 setZoomFactor, 否则内容继承 origin zoom level 被放大却裁切。
+function getFloatSize(zoomLevel: number): { width: number; height: number } {
+  const factor = zoomLevel / 100;
+  // Windows: 窗口 200×34 (3 按钮, Win11 系统圆角 + 系统投影, 无 CSS 投影留白);
+  // Mac: 220×54 (含四周 10px 投影留白, transparent + CSS 投影)
+  if (process.platform === 'win32') {
+    return { width: Math.round(200 * factor), height: Math.round(34 * factor) };
+  }
+  return { width: Math.round(220 * factor), height: Math.round(54 * factor) };
+}
+
+// 翻译结果窗口尺寸按 zoom 比例缩放: 640×420 是默认 100% 基准, min 跟着缩. 可 resize (读长文).
+function getTranslateSize(zoomLevel: number): { width: number; height: number; minWidth: number; minHeight: number } {
+  const factor = zoomLevel / 100;
+  return {
+    width: Math.round(640 * factor),
+    height: Math.round(420 * factor),
+    minWidth: Math.round(420 * factor),
+    minHeight: Math.round(260 * factor),
   };
 }
 
@@ -1498,6 +1551,64 @@ function createAiChatWindow() {
   aiChatWindow.on('closed', () => { aiChatWindow = null; });
 }
 
+// ──────────────────────────────────
+//  翻译结果窗口 (划词翻译, 左右对照)
+// ──────────────────────────────────
+function createTranslateWindow(original: string, translated: string, lang: string) {
+  // 每次新建, 关掉上一个 (翻译结果一次性; 上次 hideWindow 只 hide 未销毁, 在这里 close 掉)
+  if (translateWindow && !translateWindow.isDestroyed()) {
+    translateWindow.close();
+    translateWindow = null;
+  }
+
+  // 居中鼠标所在显示器
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const { width, height, minWidth, minHeight } = getTranslateSize(currentZoomLevel);
+  const x = Math.round(area.x + (area.width - width) / 2);
+  const y = Math.round(area.y + (area.height - height) / 2);
+
+  translateWindow = new BrowserWindow({
+    width, height, x, y, minWidth, minHeight,
+    frame: false,
+    resizable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    transparent: false,
+    backgroundColor: THEME_BG[currentTheme] || '#ffffff',
+    roundedCorners: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  const o = encodeURIComponent(original.slice(0, 5000));
+  const t = encodeURIComponent(translated.slice(0, 5000));
+  const l = encodeURIComponent(lang || '');
+  translateWindow.loadURL(`${WEB_URL}/translate-result?o=${o}&t=${t}&lang=${l}`);
+  hookZoomChanged(translateWindow);
+  // did-finish-load 后显式 setZoomFactor, 防新窗口 factor 默认 1.0 跟物理不匹配 (同 AiChat/Capture)
+  translateWindow.webContents.once('did-finish-load', () => {
+    if (!translateWindow || translateWindow.isDestroyed()) return;
+    applyZoomToWebContents(translateWindow.webContents, currentZoomLevel / 100);
+  });
+  translateWindow.once('ready-to-show', () => {
+    translateWindow?.show();
+    translateWindow?.focus();
+  });
+  translateWindow.on('closed', () => { translateWindow = null; });
+}
+
+// float 拿到译文后触发: 弹独立对照窗口. 同步主题 + 显示比例 (float 发起时主窗口可能刚改过),
+// 保证 backgroundColor + 尺寸 + zoom 用最新值
+ipcMain.on('open-translate-result', async (_event, payload: { original: string; translated: string; lang: string }) => {
+  await ensureCurrentTheme();
+  await ensureCurrentZoomLevel();
+  createTranslateWindow(payload?.original || '', payload?.translated || '', payload?.lang || '中文');
+});
+
 async function toggleAiChatWindow() {
   if (!aiChatWindow) {
     await ensureCurrentTheme(); // 创建前同步主题，保证 backgroundColor 用最新值
@@ -1549,21 +1660,36 @@ app.on('activate', () => {
 //  全局悬浮窗（选中文字后弹出）
 // ──────────────────────────────────
 
-function showFloatWindow(text: string, x: number, y: number) {
+async function showFloatWindow(text: string) {
   if (!authToken) { console.log('[Float] no auth token, skip'); return; }
+  lastFloatText = text; // 缓存当前文字 (占位; 后台读到选中后由 updateFloatText 覆盖)
 
+  await ensureCurrentZoomLevel();
+
+  // 位置: 直接用 Electron 的鼠标坐标 (本来就是 DIP, 无物理/DIP 转换问题), float 中心对齐鼠标.
+  // 不用 native 传的选中文字坐标 — 那是 GetCursorPos 物理像素, 系统缩放≠100% 时窗口位置会偏
+  const cursor = screen.getCursorScreenPoint();
+  const area = screen.getDisplayNearestPoint(cursor).workArea;
+  const { width: winW, height: winH } = getFloatSize(currentZoomLevel);
+  // 窗口左上角 = 鼠标 - 半个窗口 → float 正中对准鼠标, 下面 px/py 再夹到工作区内防出屏
+  const anchorX = cursor.x - Math.round(winW / 2), anchorY = cursor.y - Math.round(winH / 2);
+  const px = Math.round(Math.max(area.x, Math.min(anchorX, area.x + area.width - winW - 10)));
+  const py = Math.round(Math.max(area.y, Math.min(anchorY, area.y + area.height - winH - 10)));
+
+  // 持久窗口: 已存在直接复用 (挪到鼠标新位置 + IPC 传新选中文字 + show), 不销毁重建 → 秒开
   if (floatWindow && !floatWindow.isDestroyed()) {
-    floatWindow.close();
+    floatWindow.setBounds({ x: px, y: py, width: winW, height: winH });
+    applyZoomToWebContents(floatWindow.webContents, currentZoomLevel / 100);
+    floatWindow.webContents.send('float-text', text.slice(0, 2000));
+    floatWindow.show();
+    floatWindow.focus();
+    floatWindow.webContents.send('window-shown');
+    return;
   }
 
-  // 多显示器：找到鼠标所在的显示器
-  const cursorDisplay = screen.getDisplayNearestPoint({ x, y });
-  const bounds = cursorDisplay.workArea;
-  const winW = 300;
-  const winH = 32;
-  const px = Math.max(bounds.x, Math.min(x + 10, bounds.x + bounds.width - winW - 10));
-  const py = Math.max(bounds.y, Math.min(y + 10, bounds.y + bounds.height - winH - 10));
-
+  // 首次创建 (懒加载, 之后持久 hide/show, 秒开)
+  await ensureCurrentTheme();
+  const isWin = process.platform === 'win32';
   floatWindow = new BrowserWindow({
     width: winW,
     height: winH,
@@ -1574,31 +1700,45 @@ function showFloatWindow(text: string, x: number, y: number) {
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
-    transparent: false,
-    backgroundColor: '#ffffff',
-    roundedCorners: true,
+    // Windows: 实色背景避开"透明+置顶窗口失焦"的 inactive caption; roundedCorners 用 Win11 自带系统圆角.
+    // 背景用侧边栏色 → 整窗一块 sidebar 色, float-bar 撑满同色不露底. Mac: 保持 transparent 药丸 + CSS 投影
+    transparent: !isWin,
+    backgroundColor: isWin ? (THEME_SIDEBAR[currentTheme] || '#ffffff') : '#00000000',
+    roundedCorners: true, // Win11 给无边框窗口上系统圆角 (放弃 native 裁药丸: 裁药丸四角会露半透明边框)
+    hasShadow: isWin, // Win11 圆角矩形的系统投影跟随圆角, 不再露角
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+  hookZoomChanged(floatWindow);
 
   const encodedText = encodeURIComponent(text.slice(0, 2000));
   floatWindow.loadURL(`${WEB_URL}/float?text=${encodedText}`);
 
-  floatWindow.once('ready-to-show', () => {
-    floatWindow?.show();
+  // 内容缩放对齐窗口物理尺寸: 清 origin 残留 zoom level + setZoomFactor(factor). did-finish-load 而非
+  // dom-ready — 后者 setZoomFactor 可能被 navigation 完成时 reset (跟 Capture/AiChat 一致)
+  floatWindow.webContents.once('did-finish-load', () => {
+    if (floatWindow && !floatWindow.isDestroyed()) {
+      applyZoomToWebContents(floatWindow.webContents, currentZoomLevel / 100);
+      // 首次创建期间后台可能刚读到选中, 渲染器 listener 就绪后补发一次最新文字 (防首开竞态丢字)
+      floatWindow.webContents.send('float-text', lastFloatText.slice(0, 2000));
+    }
   });
 
-  // 失焦自动关闭
+  floatWindow.once('ready-to-show', () => {
+    floatWindow?.show();
+    floatWindow?.focus();
+  });
+
+  // 失焦自动隐藏 (去 transparent 后 hide 不再触发那条 caption). 80ms 防抖: 躲过 focus 抖动又不显拖沓
   floatWindow.on('blur', () => {
     setTimeout(() => {
-      if (floatWindow && !floatWindow.isDestroyed()) {
-        floatWindow.close();
-        floatWindow = null;
+      if (floatWindow && !floatWindow.isDestroyed() && !floatWindow.isFocused()) {
+        floatWindow.hide();
       }
-    }, 200);
+    }, 80);
   });
 
   floatWindow.on('closed', () => {
@@ -1611,8 +1751,9 @@ function tryInitSelectionGrabber() {
     nativeModuleRef = require(path.join(__dirname, '..', '..', 'native', 'index.js'));
     // 剪贴板 fallback 成功后回调,直接弹浮窗
     nativeModuleRef.onSelection((event: { text: string; x: number; y: number }) => {
+      // Ctrl+C 兜底读到的选中 → 更新到已弹出的 float (窗口已在 triggerFloatWindow 里先弹好)
       if (event.text && event.text.trim()) {
-        showFloatWindow(event.text.trim(), event.x, event.y);
+        updateFloatText(event.text.trim());
       }
     });
   } catch {
@@ -1620,15 +1761,6 @@ function tryInitSelectionGrabber() {
   }
 
   console.log('Selection grabber ready.');
-}
-
-function grabAndShowFloat() {
-  // 兜底方案：直接读剪贴板（需用户先 Ctrl+C）
-  const text = clipboard.readText();
-  if (text && text.trim()) {
-    const pos = screen.getCursorScreenPoint();
-    showFloatWindow(text.trim(), pos.x, pos.y);
-  }
 }
 
 function tryStopSelectionMonitor() {}
