@@ -45,8 +45,7 @@ async function submit() {
       class="w-full px-4 py-3 text-sm outline-none resize-none text-gray-800 placeholder-gray-400"
       @keydown.ctrl.enter="submit"
     />
-    <div class="flex items-center justify-between gap-2 px-4 py-2 bg-gray-50 border-t border-gray-100">
-      <span class="text-[11px] text-gray-400 flex-1 truncate">纯文本，到电脑端可二次编辑</span>
+    <div class="flex items-center justify-end gap-2 px-4 py-2 bg-gray-50 border-t border-gray-100">
       <VisibilityChip v-model="visibilityModel" compact />
       <button @click="submit" :disabled="!content.trim() || submitting"
         class="px-4 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-40 transition-colors"

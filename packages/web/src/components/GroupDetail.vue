@@ -15,6 +15,7 @@ import {
   PhEye, PhEyeSlash, PhBell, PhDotsThreeVertical,
 } from '@phosphor-icons/vue';
 import NoteCard from './NoteCard.vue';
+import { useMasonry } from '@/composables/useMasonry';
 import type { Note, GroupNoteEditRequestRow, GroupMemberInfo } from '@/api';
 
 const props = defineProps<{ groupId: string }>();
@@ -125,6 +126,14 @@ function loadMoreGroupNotes() {
   groupNotesPage.value++;
   loadGroupNotes(false);
 }
+
+// 群内笔记瀑布流: 复用全局 useMasonry + .notes-masonry CSS, 跟其他 view 一致的多列响应式.
+// 之前单列 space-y-3 全宽 (桌面 ~924px) 显得过宽且不随屏变. 无 sentinel (保留下方"加载更多"按钮).
+const masonryRoot = ref<HTMLElement>();
+const { columns: groupNoteColumns } = useMasonry(() => groupNotes.value, masonryRoot);
+
+// 群成员默认折叠 (蘑菇要求), 点标题行展开/收起
+const membersExpanded = ref(false);
 
 // 群级"接收本群通知"开关已移除. 想关单条群提醒走 NoteCard 三点菜单"屏蔽此待办群提醒"
 
@@ -690,128 +699,145 @@ async function saveAnnouncement() {
           </div>
         </section>
 
-        <!-- 主体两栏: 左 群内笔记, 右 群公告 + 群组成员. 移动端堆叠 (笔记流在上, 公告成员在下, 各自全宽) -->
+        <!-- 群公告 + 成员 (移到笔记上方). 桌面并排, 移动堆叠. 成员默认折叠 -->
         <div class="flex flex-col md:flex-row gap-5 items-start">
-          <!-- 左: 群内笔记 -->
-          <section class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-3">
-              <h3 class="text-sm font-medium">群内笔记</h3>
-              <span class="text-xs text-gray-400 tabular-nums">{{ groupNotesTotal }}</span>
-            </div>
-            <div v-if="groupNotes.length === 0 && !groupNotesLoading" class="text-center py-12">
-              <div class="mb-3 flex justify-center text-gray-300">
-                <PhNote size="2.5rem" weight="fill" />
-              </div>
-              <p class="text-gray-500 text-sm">还没有共享内容</p>
-              <p class="text-gray-400 text-xs mt-1">在编辑器底栏选择本群可见性, 内容会出现在这里</p>
-            </div>
-            <div v-else class="space-y-3">
-              <NoteCard v-for="n in groupNotes" :key="n.id" :note="n" />
-            </div>
-            <div v-if="groupNotes.length < groupNotesTotal" class="text-center mt-4">
-              <button @click="loadMoreGroupNotes" :disabled="groupNotesLoading"
-                class="px-4 py-1.5 text-xs rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50">
-                {{ groupNotesLoading ? '加载中...' : `加载更多 (${groupNotes.length}/${groupNotesTotal})` }}
+          <!-- 群公告 -->
+          <section class="w-full md:flex-1 min-w-0 bg-gray-50 rounded-xl p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-sm font-medium inline-flex items-center gap-1.5">
+                <PhMegaphone size="0.875rem" weight="fill" class="text-primary-dark" /> 群公告
+              </h3>
+              <button v-if="isOwnerOrAdmin && !announcementEditing" @click="startEditAnnouncement"
+                class="text-xs text-primary-dark hover:underline">
+                {{ detail.announcement ? '编辑' : '发布' }}
               </button>
+            </div>
+            <!-- 编辑态 -->
+            <div v-if="announcementEditing" class="space-y-2">
+              <textarea ref="announcementInputEl" v-model="announcementInput" rows="6" maxlength="2000"
+                class="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded resize-y outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder="写点群成员需要知道的事..."></textarea>
+              <div class="flex justify-end gap-2">
+                <button @click="cancelEditAnnouncement"
+                  class="px-2 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
+                <button @click="saveAnnouncement"
+                  class="px-3 py-1 text-xs rounded-lg bg-primary text-white hover:bg-primary-dark">保存</button>
+              </div>
+            </div>
+            <!-- 显示态: 已有公告 (line-clamp 5 行截断, 长内容点"查看全文"弹 Modal) -->
+            <template v-else-if="detail.announcement">
+              <p class="text-xs text-gray-700 break-words leading-5 announcement-clamp">{{ detail.announcement }}</p>
+              <div v-if="detail.announcementUpdatedByNickname || announcementShouldExpand"
+                class="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-gray-200">
+                <span class="text-[10px] text-gray-400 truncate">
+                  <template v-if="detail.announcementUpdatedByNickname">
+                    {{ detail.announcementUpdatedByNickname }} · {{ dayjs(detail.announcementUpdatedAt).format('MM-DD HH:mm') }}
+                  </template>
+                </span>
+                <button v-if="announcementShouldExpand" @click="announcementDetailOpen = true"
+                  class="px-2 py-0.5 text-[10px] rounded-full bg-primary-light text-primary-dark hover:bg-primary/20 shrink-0">
+                  查看全文
+                </button>
+              </div>
+            </template>
+            <!-- 显示态: 无公告 -->
+            <div v-else-if="isOwnerOrAdmin"
+              @click="startEditAnnouncement"
+              class="text-xs text-gray-400 italic cursor-pointer hover:text-primary-dark py-2">
+              暂无公告, 点击发布
+            </div>
+            <div v-else class="text-xs text-gray-400 italic py-2">
+              群主还没发公告
             </div>
           </section>
 
-          <!-- 右: 公告 + 成员 (桌面固定 13rem, 移动端全宽堆到笔记流下方) -->
-          <aside class="w-full md:w-52 shrink-0 space-y-5">
-            <!-- 群公告 -->
-            <section class="bg-gray-50 rounded-xl p-4">
-              <div class="flex items-center justify-between mb-2">
-                <h3 class="text-sm font-medium inline-flex items-center gap-1.5">
-                  <PhMegaphone size="0.875rem" weight="fill" class="text-primary-dark" /> 群公告
-                </h3>
-                <button v-if="isOwnerOrAdmin && !announcementEditing" @click="startEditAnnouncement"
-                  class="text-xs text-primary-dark hover:underline">
-                  {{ detail.announcement ? '编辑' : '发布' }}
-                </button>
-              </div>
-              <!-- 编辑态 -->
-              <div v-if="announcementEditing" class="space-y-2">
-                <textarea ref="announcementInputEl" v-model="announcementInput" rows="6" maxlength="2000"
-                  class="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded resize-y outline-none focus:ring-2 focus:ring-primary/20"
-                  placeholder="写点群成员需要知道的事..."></textarea>
-                <div class="flex justify-end gap-2">
-                  <button @click="cancelEditAnnouncement"
-                    class="px-2 py-1 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">取消</button>
-                  <button @click="saveAnnouncement"
-                    class="px-3 py-1 text-xs rounded-lg bg-primary text-white hover:bg-primary-dark">保存</button>
-                </div>
-              </div>
-              <!-- 显示态: 已有公告 (line-clamp 5 行截断, 长内容点"查看全文"弹 Modal).
-                   leading-5 (20px) 整数像素, 避免 150% DPI 下浮点行距子像素舍入 1px 偏差 -->
-              <template v-else-if="detail.announcement">
-                <p class="text-xs text-gray-700 break-words leading-5 announcement-clamp">{{ detail.announcement }}</p>
-                <div v-if="detail.announcementUpdatedByNickname || announcementShouldExpand"
-                  class="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-gray-200">
-                  <span class="text-[10px] text-gray-400 truncate">
-                    <template v-if="detail.announcementUpdatedByNickname">
-                      {{ detail.announcementUpdatedByNickname }} · {{ dayjs(detail.announcementUpdatedAt).format('MM-DD HH:mm') }}
-                    </template>
-                  </span>
-                  <button v-if="announcementShouldExpand" @click="announcementDetailOpen = true"
-                    class="px-2 py-0.5 text-[10px] rounded-full bg-primary-light text-primary-dark hover:bg-primary/20 shrink-0">
-                    查看全文
-                  </button>
-                </div>
-              </template>
-              <!-- 显示态: 无公告 (owner/admin 点击发布 / 普通成员只看 placeholder) -->
-              <div v-else-if="isOwnerOrAdmin"
-                @click="startEditAnnouncement"
-                class="text-xs text-gray-400 italic cursor-pointer hover:text-primary-dark py-2">
-                暂无公告, 点击发布
-              </div>
-              <div v-else class="text-xs text-gray-400 italic py-2">
-                群主还没发公告
-              </div>
-            </section>
-
-            <!-- 群级"接收本群通知"开关已移除 (实际只控 group-reminder-set 一种), 单条群提醒走卡片三点菜单 -->
-
-            <!-- 群组成员 -->
-            <section>
-              <h3 class="text-sm font-medium mb-3">群组成员 ({{ detail.memberCount }})</h3>
-              <div class="space-y-0.5">
-                <div v-for="m in sortedMembers" :key="m.userId"
-                  @contextmenu.prevent="openCtxMenu($event, m)"
-                  class="group/member flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
-                  :title="m.online ? '在线' : '离线'">
-                  <!-- 头像 + 在线圆点 (右下角) -->
-                  <div class="relative shrink-0">
+          <!-- 群组成员 (可折叠, 默认折叠. 折叠态显示头像叠放预览, 点标题展开全部) -->
+          <section class="w-full md:w-72 shrink-0 bg-gray-50 rounded-xl p-4">
+            <button @click="membersExpanded = !membersExpanded" class="w-full flex items-center justify-between gap-2 text-left">
+              <h3 class="text-sm font-medium shrink-0">群组成员 ({{ detail.memberCount }})</h3>
+              <div class="flex items-center gap-1.5 min-w-0">
+                <!-- 折叠态: 前 5 个头像叠放 + 溢出计数 -->
+                <div v-if="!membersExpanded" class="flex -space-x-2 shrink-0">
+                  <template v-for="m in sortedMembers.slice(0, 5)" :key="m.userId">
                     <img v-if="m.avatar" :src="resolveFileThumbUrl(m.avatar)"
                       @error="thumbErrorFallback($event, resolveFileUrl(m.avatar))"
-                      alt="" class="w-7 h-7 rounded-full object-cover" />
-                    <div v-else class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold">
+                      alt="" class="w-6 h-6 rounded-full object-cover ring-2 ring-gray-50" />
+                    <div v-else class="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold ring-2 ring-gray-50">
                       {{ (m.nickname || m.username).charAt(0).toUpperCase() }}
                     </div>
-                    <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-gray-50"
-                      :class="m.online ? 'bg-emerald-500' : 'bg-gray-300'" />
+                  </template>
+                  <div v-if="sortedMembers.length > 5"
+                    class="w-6 h-6 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center text-[9px] font-medium ring-2 ring-gray-50">
+                    +{{ sortedMembers.length - 5 }}
                   </div>
-                  <div class="flex-1 min-w-0 text-sm truncate">
-                    {{ m.nickname }}
-                    <span v-if="m.userId === auth.user?.id" class="text-[10px] text-primary-dark ml-0.5">(我)</span>
-                  </div>
-                  <span class="text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0" :class="{
-                    'bg-amber-100 text-amber-700': m.role === 'owner',
-                    'bg-sky-100 text-sky-700': m.role === 'admin',
-                    'bg-gray-100 text-gray-500': m.role === 'member',
-                  }">
-                    {{ m.role === 'owner' ? '创建者' : m.role === 'admin' ? '管理员' : '成员' }}
-                  </span>
-                  <!-- 移动端/触屏: "更多"按钮弹操作菜单 (桌面仍可右键). 仅对该成员有可用操作时才显示 -->
-                  <button v-if="buildMemberActions(m).length" @click.stop="openCtxMenu($event, m)"
-                    class="shrink-0 -mr-1 p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover/member:opacity-100 touch-actions transition-opacity"
-                    title="成员操作">
-                    <PhDotsThreeVertical size="1rem" weight="bold" />
-                  </button>
                 </div>
+                <PhCaretDown size="0.875rem" weight="bold" class="text-gray-400 transition-transform shrink-0" :class="membersExpanded ? 'rotate-180' : ''" />
               </div>
-            </section>
-          </aside>
+            </button>
+            <!-- 展开态: 全部成员 (每行头像 + 名字 + role + 更多操作) -->
+            <div v-if="membersExpanded" class="mt-3 space-y-0.5">
+              <div v-for="m in sortedMembers" :key="m.userId"
+                @contextmenu.prevent="openCtxMenu($event, m)"
+                class="group/member flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white transition-colors"
+                :title="m.online ? '在线' : '离线'">
+                <!-- 头像 + 在线圆点 (右下角) -->
+                <div class="relative shrink-0">
+                  <img v-if="m.avatar" :src="resolveFileThumbUrl(m.avatar)"
+                    @error="thumbErrorFallback($event, resolveFileUrl(m.avatar))"
+                    alt="" class="w-7 h-7 rounded-full object-cover" />
+                  <div v-else class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold">
+                    {{ (m.nickname || m.username).charAt(0).toUpperCase() }}
+                  </div>
+                  <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-gray-50"
+                    :class="m.online ? 'bg-emerald-500' : 'bg-gray-300'" />
+                </div>
+                <div class="flex-1 min-w-0 text-sm truncate">
+                  {{ m.nickname }}
+                  <span v-if="m.userId === auth.user?.id" class="text-[10px] text-primary-dark ml-0.5">(我)</span>
+                </div>
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0" :class="{
+                  'bg-amber-100 text-amber-700': m.role === 'owner',
+                  'bg-sky-100 text-sky-700': m.role === 'admin',
+                  'bg-gray-100 text-gray-500': m.role === 'member',
+                }">
+                  {{ m.role === 'owner' ? '创建者' : m.role === 'admin' ? '管理员' : '成员' }}
+                </span>
+                <!-- 移动端/触屏: "更多"按钮弹操作菜单 (桌面仍可右键). 仅对该成员有可用操作时才显示 -->
+                <button v-if="buildMemberActions(m).length" @click.stop="openCtxMenu($event, m)"
+                  class="shrink-0 -mr-1 p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover/member:opacity-100 touch-actions transition-opacity"
+                  title="成员操作">
+                  <PhDotsThreeVertical size="1rem" weight="bold" />
+                </button>
+              </div>
+            </div>
+          </section>
         </div>
+
+        <!-- 群内笔记 (全宽 masonry 多列, 跟其他 view 一致的响应式分列) -->
+        <section>
+          <div class="flex items-center gap-2 mb-3">
+            <h3 class="text-sm font-medium">群内笔记</h3>
+            <span class="text-xs text-gray-400 tabular-nums">{{ groupNotesTotal }}</span>
+          </div>
+          <div v-if="groupNotes.length === 0 && !groupNotesLoading" class="text-center py-12">
+            <div class="mb-3 flex justify-center text-gray-300">
+              <PhNote size="2.5rem" weight="fill" />
+            </div>
+            <p class="text-gray-500 text-sm">还没有共享内容</p>
+            <p class="text-gray-400 text-xs mt-1">在编辑器底栏选择本群可见性, 内容会出现在这里</p>
+          </div>
+          <div v-else ref="masonryRoot" class="notes-masonry">
+            <div v-for="(col, ci) in groupNoteColumns" :key="ci" class="masonry-col">
+              <NoteCard v-for="n in col" :key="n.id" :note="n" />
+            </div>
+          </div>
+          <div v-if="groupNotes.length < groupNotesTotal" class="text-center mt-4">
+            <button @click="loadMoreGroupNotes" :disabled="groupNotesLoading"
+              class="px-4 py-1.5 text-xs rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50">
+              {{ groupNotesLoading ? '加载中...' : `加载更多 (${groupNotes.length}/${groupNotesTotal})` }}
+            </button>
+          </div>
+        </section>
       </div>
 
       <!-- 弹窗 + 右键菜单 -->

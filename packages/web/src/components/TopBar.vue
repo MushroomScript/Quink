@@ -381,6 +381,10 @@ function clearFilters() {
     store.fileDateTo = '';
     return;
   }
+  // 清搜索框: "清除全部筛选"按钮直接调本函数, 之前不清 searchText/searchQuery →
+  // 点了搜索词还在列表仍被过滤 (ESC/收起漏斗是先清 searchText 再调本函数才没暴露这个).
+  searchText.value = '';
+  store.searchQuery = '';
   store.filterCategory = '';
   filterTags.value = [];
   filterTypes.value = getDefaultFilterTypes();
@@ -503,7 +507,9 @@ onMounted(() => {
     const tag = e.detail;
     if (tag && !filterTags.value.includes(tag)) {
       filterTags.value = [tag];
-      filterTypes.value = getDefaultFilterTypes();
+      // 点标签显示所有类型含该标签的笔记 (不限落地 view 的默认类型). 之前重置成 getDefaultFilterTypes()
+      // = 灵感页 ['quink'], 导致只打在 note/todo 的标签点了被 type=quink 卡死显示 0 条.
+      filterTypes.value = ['quink', 'note', 'todo'];
       showFilters.value = true;
       doSearch(true);
     }

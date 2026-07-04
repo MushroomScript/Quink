@@ -86,6 +86,12 @@ const heatmapData = computed(() => {
   return weeks;
 });
 
+// 移动端热力图: 52 周挤窄屏 cell 太小看不清, 只显示最近 13 周 (约 3 个月, cell 明显变大). 桌面仍全年.
+const HEATMAP_MOBILE_WEEKS = 13;
+const isNarrow = ref(false);
+function updateNarrow() { isNarrow.value = window.innerWidth < 768; }
+const displayWeeks = computed(() => isNarrow.value ? heatmapData.value.slice(-HEATMAP_MOBILE_WEEKS) : heatmapData.value);
+
 // 热力图 cell hover tooltip(fixed + Teleport,Teleport 到 body 跨过祖先容器)
 type TooltipPart = { label: string; count: number };
 const tooltip = ref<{ visible: boolean; date: string; parts: TooltipPart[]; top: string; left: string }>({
@@ -289,12 +295,15 @@ async function load() {
 function onRefresh() { load(); }
 onMounted(() => {
   load();
+  updateNarrow();
+  window.addEventListener('resize', updateNarrow);
   window.addEventListener('quink-refresh', onRefresh);
   // 监听 [data-theme] 变化触发 ECharts pieOption 重算(主题切换时 legend/label/border 颜色跟随)
   themeObserver = new MutationObserver(() => { themeRev.value++; });
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 });
 onUnmounted(() => {
+  window.removeEventListener('resize', updateNarrow);
   window.removeEventListener('quink-refresh', onRefresh);
   themeObserver?.disconnect();
 });
@@ -323,8 +332,8 @@ onUnmounted(() => {
       <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6" style="container-type: inline-size">
         <h3 class="text-sm font-medium text-gray-800 mb-4">记录热力图</h3>
         <!-- 原 .overflow-x-auto 包裹层已删(grid minmax(0,1fr) 永不溢出,且其 overflow-x:auto 被隐式提升到 overflow-y:auto 导致 hover scale 触发滚动条) -->
-        <div class="grid" style="grid-template-columns: repeat(52, minmax(0, 1fr)); gap: 0.3cqw">
-          <template v-for="(week, wi) in heatmapData" :key="wi">
+        <div class="grid" :style="`grid-template-columns: repeat(${displayWeeks.length}, minmax(0, 1fr)); gap: 0.3cqw`">
+          <template v-for="(week, wi) in displayWeeks" :key="wi">
             <div class="flex flex-col" style="gap: 0.3cqw">
               <div v-for="cell in week" :key="cell.date"
                 class="aspect-square heatmap-cell"
@@ -339,7 +348,7 @@ onUnmounted(() => {
         <!-- 图例用跟热力图相同的 grid 模板(52 列 + 0.3cqw gap),前 6 列填内容,剩余空:
              少=col1、4 色块=col2-5、多=col6,严格跟热力图前 6 列对齐 -->
         <div class="grid mt-3 text-gray-400"
-          style="grid-template-columns: repeat(52, minmax(0, 1fr)); gap: 0.3cqw; font-size: 1cqw">
+          :style="`grid-template-columns: repeat(${displayWeeks.length}, minmax(0, 1fr)); gap: 0.3cqw; font-size: max(9px, 1cqw)`">
           <div class="flex items-center justify-center">少</div>
           <div class="bg-gray-100" style="aspect-ratio: 1; border-radius: 25%"></div>
           <div style="aspect-ratio: 1; border-radius: 25%; background: var(--heatmap-low)"></div>

@@ -101,7 +101,11 @@ function onDocClick(e: MouseEvent) {
   const t = e.target as HTMLElement;
   if (chipEl.value?.contains(t)) return; // 点 chip 本身让 toggleOpen 处理
   if (popoverEl.value?.contains(t)) return;
+  // 点外部: 先关 popover 并"消费"这次点击 (capture 阶段 stopPropagation 阻止事件继续到目标).
+  // 否则同一次 click 既关 popover 又触发下方目标 (如笔记卡片 → 进入详情). 用户需再点一次才落到目标.
   open.value = false;
+  e.stopPropagation();
+  e.preventDefault();
 }
 
 function onResize() { if (open.value) recalcPosition(); }

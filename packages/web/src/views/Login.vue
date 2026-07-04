@@ -79,7 +79,7 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
         <div class="glow glow-b" aria-hidden="true"></div>
 
         <header class="brand-mini">
-          <img :src="`/quink-${currentTheme}-192.png`" alt="" class="logo-mini" draggable="false" />
+          <img src="/quink-blueberry-192.png" alt="" class="logo-mini" draggable="false" />
           <span>Quink</span>
         </header>
 
@@ -228,7 +228,7 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
         <div class="form-card">
           <!-- 移动端独有: 顶部小 brand (md+ 时由左侧 brand-mini 承担) -->
           <header class="brand-mobile">
-            <img :src="`/quink-${currentTheme}-192.png`" alt="" class="logo-mini" draggable="false" />
+            <img src="/quink-blueberry-192.png" alt="" class="logo-mini" draggable="false" />
             <div>
               <div class="brand-name">Quink</div>
               <div class="brand-slogan">一念，即记。</div>
@@ -997,10 +997,20 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
   .left {
     display: none;
   }
+  .login-page {
+    /* 移动端沉浸: 主题色斜向渐变铺满, 表单用白卡浮起 (焦点在卡片, 背景柔和衬托, 不再"上有色下白"分界) */
+    background: linear-gradient(165deg, rgb(var(--c-accent-light)) 0%, rgb(var(--c-accent) / 0.12) 40%, #eef1f8 100%);
+  }
   .right {
-    padding: clamp(24px, 6vw, 40px) clamp(20px, 5vw, 32px);
-    /* 移动端右侧带一点主题色光晕 (顶部 30%), 让背景不至于全白单调 */
-    background: radial-gradient(at 30% 20%, rgb(var(--c-accent) / 0.1), transparent 60%), #ffffff;
+    padding: clamp(24px, 7vw, 40px) clamp(20px, 5vw, 32px);
+    background: transparent;
+  }
+  .form-card {
+    background: rgba(255, 255, 255, 0.97);
+    border-radius: 24px;
+    padding: 30px 24px 26px;
+    box-shadow: 0 24px 60px rgb(var(--c-accent) / 0.18), 0 6px 18px rgba(15, 23, 42, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.7);
   }
   .brand-mobile {
     display: flex;
