@@ -225,16 +225,15 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
 
       <!-- ── 右侧表单 ── -->
       <main class="right">
+        <!-- 移动端沉浸 hero: 主题色区放大 logo + slogan (桌面隐藏, 桌面走左侧 hero) -->
+        <header class="mobile-hero">
+          <div class="mobile-hero-logo">
+            <img src="/quink-blueberry-192.png" alt="" draggable="false" />
+          </div>
+          <div class="mobile-hero-name">Quink</div>
+          <div class="mobile-hero-slogan">一念，即记。</div>
+        </header>
         <div class="form-card">
-          <!-- 移动端独有: 顶部小 brand (md+ 时由左侧 brand-mini 承担) -->
-          <header class="brand-mobile">
-            <img src="/quink-blueberry-192.png" alt="" class="logo-mini" draggable="false" />
-            <div>
-              <div class="brand-name">Quink</div>
-              <div class="brand-slogan">一念，即记。</div>
-            </div>
-          </header>
-
           <h3 class="form-title">{{ isRegister ? '创建账号' : '欢迎回来' }}</h3>
           <p class="form-sub">{{ isRegister ? '开始记录你的第一念' : '灵感正在等你回来' }}</p>
 
@@ -843,25 +842,9 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
   max-width: 360px;
 }
 
-/* 移动端 brand 区, 桌面隐藏 */
-.brand-mobile {
+/* 移动 hero (桌面隐藏; 移动端 media query 内显示为沉浸品牌区) */
+.mobile-hero {
   display: none;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 28px;
-}
-.brand-mobile .logo-mini { width: 44px; height: 44px; border-radius: 11px; }
-.brand-mobile .brand-name {
-  font-size: 18px;
-  font-weight: 700;
-  color: #0f172a;
-  letter-spacing: 0.5px;
-}
-.brand-mobile .brand-slogan {
-  font-size: 12px;
-  color: #64748b;
-  margin-top: 2px;
-  letter-spacing: 1px;
 }
 
 .form-title {
@@ -997,20 +980,85 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
   .left {
     display: none;
   }
+  /* 移动端不跟随主题色 (蓝绿撞色难看): 极浅蓝灰底 + 品牌蓝 logo/按钮, 蓝色系自协调 */
   .login-page {
-    /* 移动端沉浸: 主题色斜向渐变铺满, 表单用白卡浮起 (焦点在卡片, 背景柔和衬托, 不再"上有色下白"分界) */
-    background: linear-gradient(165deg, rgb(var(--c-accent-light)) 0%, rgb(var(--c-accent) / 0.12) 40%, #eef1f8 100%);
+    background: #f4f6fb;
   }
   .right {
-    padding: clamp(24px, 7vw, 40px) clamp(20px, 5vw, 32px);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
     background: transparent;
   }
+  /* 移动端去掉右侧主题色光晕 (桌面用的 ::before/::after 装饰) */
+  .right::before, .right::after {
+    display: none;
+  }
+  /* 移动 hero: logo + 品牌名 + slogan, 深色字在浅底上 */
+  .mobile-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: clamp(24px, 5vh, 40px) 24px clamp(26px, 5vh, 38px);
+    text-align: center;
+  }
+  .mobile-hero-logo {
+    width: 62px;
+    height: 62px;
+    border-radius: 17px;
+    overflow: hidden;
+    background: #f4f6fb;  /* = hero 底色, 裁剩的极少透明边融入 hero 无浅边 */
+    box-shadow: 0 12px 30px rgba(37, 99, 235, 0.28);
+  }
+  .mobile-hero-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scale(1.3);  /* 裁掉图片四周透明 padding (12%), 保留白 Q */
+  }
+  .mobile-hero-name {
+    font-size: 26px;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: 2px;
+    text-indent: 2px;  /* 补偿 letter-spacing 造成的整体右偏, 视觉居中 */
+  }
+  .mobile-hero-slogan {
+    font-size: 13px;
+    color: #94a3b8;
+    letter-spacing: 4px;
+    text-indent: 9px;  /* 补偿 letter-spacing + 末尾圆角句号"。"右半空白造成的视觉左偏, 往右挪 */
+  }
+  /* 表单白卡: flex-1 撑满 hero 以下 (贴底顶部大圆角), 内部表单垂直居中让上下留白对称 */
   .form-card {
-    background: rgba(255, 255, 255, 0.97);
-    border-radius: 24px;
-    padding: 30px 24px 26px;
-    box-shadow: 0 24px 60px rgb(var(--c-accent) / 0.18), 0 6px 18px rgba(15, 23, 42, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.7);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: #ffffff;
+    border-radius: 30px 30px 0 0;
+    padding: 24px 26px calc(24px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -8px 36px rgba(15, 23, 42, 0.07);
+    width: 100%;
+    max-width: none;
+  }
+  /* 移动端去掉标题 "欢迎回来" + 副标题 (蘑菇要求, 更简约, 直接进表单) */
+  .form-title, .form-sub { display: none; }
+  /* 移动端按钮 + input focus 用品牌蓝 (不跟主题色, 跟 logo 呼应) */
+  .btn-primary {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  }
+  .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 8px 26px rgba(37, 99, 235, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+  .field input:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  }
+  .switch-btn:hover {
+    color: #2563eb;
   }
   .brand-mobile {
     display: flex;
