@@ -11,7 +11,7 @@ import { useToast } from '@/composables/useToast';
 import type { Note, PersonalReminderRow, GroupReminderRow } from '@/api';
 import { api } from '@/api';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
-import { PhUsersThree, PhArrowsClockwise } from '@phosphor-icons/vue';
+import { PhUsersThree } from '@phosphor-icons/vue';
 import {
   PhCheck,
   PhCheckCircle,
@@ -165,18 +165,6 @@ async function handleTogglePin() {
   }
 }
 
-// 作者本人可在卡片直接切换 editPermission. store.updateNote 只同步主 view 的 vs.notes,
-// GroupDetail.groupNotes 是组件本地 ref → 必须 mutate props.note 让 reactive UI 立刻反映
-async function setEditPermission(perm: 'admin' | 'all') {
-  if ((props.note.editPermission || 'admin') === perm) return;
-  try {
-    const res = await store.updateNote(props.note.id, { editPermission: perm } as any);
-    (props.note as any).editPermission = res.editPermission ?? perm;
-    toast.show(perm === 'admin' ? '已设为仅管理员可编辑' : '已设为所有人可编辑', 'success');
-  } catch (e: any) {
-    toast.show(e?.message || '操作失败', 'error');
-  }
-}
 const router = useRouter();
 const toast = useToast();
 const openEditModal = inject<(note: Note) => void>('openEditModal');
@@ -706,13 +694,6 @@ const typeColor: Record<string, string> = {
           <PhUsersThree size="0.75rem" weight="fill" />
           <span>已分享</span>
         </span>
-        <!-- 编辑权限胶囊 (仅作者本人 + shared 笔记 + 群组上下文). 单胶囊点击在 admin/all 间切换, 后跟切换图标 -->
-        <button v-if="isMyNote && isShared && inGroupContext"
-          @click.stop="setEditPermission((note.editPermission || 'admin') === 'admin' ? 'all' : 'admin')"
-          class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-primary-light text-primary-dark hover:bg-primary/20 transition-colors select-none whitespace-nowrap">
-          {{ (note.editPermission || 'admin') === 'admin' ? '管理员可编辑' : '所有人可编辑' }}
-          <PhArrowsClockwise size="0.625rem" weight="bold" />
-        </button>
         <!-- 作者头像 + nickname: 头像 shrink-0 保留, nickname min-w-0+truncate 让它跟 category 一起做"可压缩担当".
              不让整 span shrink-0, 否则 nickname 强占空间挤爆 NoteCard 右边把三点推出卡片外 (已知问题: 三点出卡片点不到) -->
         <span v-else-if="!isMyNote && (note as any).authorNickname"

@@ -6,6 +6,7 @@ import { useNotesStore } from '@/stores/notes';
 import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import RichEditor from './RichEditor.vue';
+import VisibilityChip from './VisibilityChip.vue';
 import { api, type Note } from '@/api';
 import { PhXCircle } from '@phosphor-icons/vue';
 
@@ -22,6 +23,15 @@ const isMyNote = computed(() => !props.note.userId || props.note.userId === auth
 const saving = ref(false);
 const editorRef = ref<InstanceType<typeof RichEditor>>();
 const modalCardRef = ref<HTMLElement>();
+
+// 移动端: 二次编辑降级成纯文本 (对齐灵感主页 MobileInput), 只编辑正文 + 可见性,
+// 类型/标签/分类保持 note 原值不改 (要改去电脑端). 沿用项目 isMobile 模式, 只初始化读一次.
+const isMobile = ref(window.innerWidth < 768);
+const mobileContent = ref(props.note.content || '');
+const mobileVisibility = ref<{ visibility: 'private' | 'shared'; sharedGroupIds: string[] }>({
+  visibility: (props.note as any).visibility || 'private',
+  sharedGroupIds: [...((props.note as any).sharedGroupIds || [])],
+});
 const showConfirm = ref(false);
 
 // 从 router path 自动识别群上下文. /groups/:gid 形式 → editContext.groupId, 否则 undefined (主视图改).
@@ -243,6 +253,20 @@ async function onSubmit(data: { html: string; type: string; tags: string[]; visi
   } finally { saving.value = false; }
 }
 
+// 移动端纯文本提交: 正文取 textarea, 类型/标签/分类沿用 note 原值 (移动端不改),
+// 可见性取 chip. 复用 onSubmit 完成 patch 组装 / 锁 / version / 错误处理.
+function onMobileSubmit() {
+  if (!mobileContent.value.trim() || saving.value) return;
+  onSubmit({
+    html: mobileContent.value.trim(),
+    type: props.note.type,
+    tags: props.note.tags || [],
+    visibility: mobileVisibility.value.visibility,
+    sharedGroupIds: mobileVisibility.value.sharedGroupIds,
+    category: props.note.category ?? null,
+  });
+}
+
 function startClose() {
   // 关闭瞬间用 cloneNode 把 vditor-wrapper 替换成静态 HTML 副本。
   // 用 chrome-devtools-mcp + MutationObserver 实测的 root cause:
@@ -268,7 +292,11 @@ function startClose() {
 }
 
 function tryClose() {
-  if (editorRef.value?.isDirty) {
+  // 移动端无 RichEditor, dirty 用 textarea 内容跟原文比; 桌面走 RichEditor.isDirty
+  const dirty = isMobile.value
+    ? mobileContent.value.trim() !== (props.note.content || '').trim()
+    : editorRef.value?.isDirty;
+  if (dirty) {
     showConfirm.value = true;
   } else {
     startClose();
@@ -333,8 +361,22 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- Shared RichEditor -->
-        <div class="overflow-hidden">
+        <!-- 移动端: 纯文本编辑 (对齐灵感主页 MobileInput, 不带 类型/标签/分类). 正文 textarea + 可见性 + 保存 -->
+        <template v-if="isMobile">
+          <textarea v-model="mobileContent" placeholder="编辑内容..."
+            class="flex-1 min-h-[50vh] w-full px-5 py-4 text-sm outline-none resize-none text-gray-800 placeholder-gray-400 overflow-y-auto"
+            @keydown.ctrl.enter="onMobileSubmit"></textarea>
+          <div class="flex items-center justify-end gap-2 px-5 py-3 bg-gray-50 border-t border-gray-100">
+            <VisibilityChip v-if="isMyNote && !editGroupId" v-model="mobileVisibility" compact />
+            <button @click="onMobileSubmit" :disabled="!mobileContent.trim() || saving"
+              class="px-4 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-40 transition-colors"
+              style="background: rgb(var(--c-accent))">
+              {{ saving ? '...' : '保存' }}
+            </button>
+          </div>
+        </template>
+        <!-- 桌面端: 富文本 RichEditor -->
+        <div v-else class="overflow-hidden">
           <RichEditor
             ref="editorRef"
             :initial-content="note.content"

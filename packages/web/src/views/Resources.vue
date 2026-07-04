@@ -1037,8 +1037,8 @@ onUnmounted(() => {
     <div v-if="loading" class="text-center py-12 text-gray-400 text-sm">加载中...</div>
 
     <template v-else>
-      <!-- 子目录里 ".." 上级卡片独立提到列表顶部, 不在 TransitionGroup 内,
-           这样空文件夹时 ".." 仍在 "此处暂无文件" 提示上方而非下方 -->
+      <!-- 子目录里 ".." 上级卡片独立提到列表顶部, 不在 TransitionGroup 内 (放在文件/文件夹网格之前).
+           空状态提示已改为仅根目录全空时显示 (currentFolderId === null), 空文件夹只留 ".." 卡片 -->
       <div v-if="currentFolderId !== null" class="mb-4">
         <div v-if="viewMode === 'grid'" class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));">
           <div :data-drop-folder="parentFolderId || 'root'"
@@ -1068,7 +1068,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="filtered.length === 0 && filteredFolders.length === 0" class="empty-state-center">
+      <div v-if="currentFolderId === null && filtered.length === 0 && filteredFolders.length === 0" class="empty-state-center">
         <div class="mb-3 flex justify-center text-gray-300">
           <PhFolder size="3rem" weight="fill" />
         </div>
