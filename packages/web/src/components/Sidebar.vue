@@ -666,7 +666,7 @@ onUnmounted(() => {
               : { color: 'var(--sb-dim)' }">
             <PhFolderOpen size="0.875rem" weight="fill" />
             <span class="flex-1 truncate">{{ entry.cat.name }}</span>
-            <button @click.stop="confirmDelete(entry.cat)" @pointerdown.stop class="opacity-0 group-hover:opacity-100 text-[10px] hover:text-red-400" style="color: var(--sb-dim)">✕</button>
+            <button @click.stop="confirmDelete(entry.cat)" @pointerdown.stop class="opacity-0 group-hover:opacity-100 touch-actions text-[10px] hover:text-red-400" style="color: var(--sb-dim)">✕</button>
           </div>
         </template>
       </TransitionGroup>

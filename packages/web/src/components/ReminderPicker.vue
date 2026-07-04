@@ -296,13 +296,13 @@ const canSave = computed(() => !saveBlockReason.value);
         <!-- 单栏: w-96 + 高度自然 (内容紧贴, 短). 双栏: w-768 + h-480 整体放大.
              宽度必须 ≥ 2*w-96=768 否则右栏溢出被 overflow-hidden 裁切 -->
         <div class="relative bg-white rounded-xl shadow-xl flex flex-col reminder-picker overflow-hidden transition-[width,height] duration-300 ease-out"
-             :class="advancedOpen ? 'w-[768px] h-[480px]' : 'w-96'">
+             :class="advancedOpen ? 'w-[90vw] max-h-[85vh] md:w-[768px] md:h-[480px] md:max-h-none' : 'w-[90vw] md:w-96'">
 
-          <!-- 顶部内容区 (左右两栏), 占满高度减去 footer -->
-          <div class="flex-1 min-h-0 flex">
+          <!-- 顶部内容区 (左右两栏, 移动端纵向堆叠), 占满高度减去 footer -->
+          <div class="flex-1 min-h-0 flex flex-col md:flex-row">
 
             <!-- ── 左栏: 基础设置 (始终显示, 自然高度紧贴排列, 不强制拉高) ── -->
-            <div class="w-96 p-5 shrink-0 overflow-y-auto">
+            <div class="w-full md:w-96 p-5 shrink-0 overflow-y-auto">
               <p class="text-sm text-gray-700 mb-3 font-medium">设置提醒</p>
 
               <label class="block text-xs text-gray-500 mb-1">提醒时间</label>
@@ -344,7 +344,7 @@ const canSave = computed(() => !saveBlockReason.value);
             </div>
 
             <!-- ── 右栏: 高级规则 (advancedOpen 才显示) ── -->
-            <div v-if="advancedOpen" class="w-96 p-5 shrink-0 border-l border-gray-200 reminder-picker-right space-y-3 overflow-y-auto">
+            <div v-if="advancedOpen" class="w-full md:w-96 p-5 shrink-0 border-t md:border-t-0 md:border-l border-gray-200 reminder-picker-right space-y-3 overflow-y-auto">
               <p class="text-sm text-gray-700 font-medium">高级规则</p>
 
             <!-- GUI: 频率 / 间隔 / 周几 / 月日 / 结束条件 -->

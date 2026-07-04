@@ -7,7 +7,7 @@ import GroupDetail from '@/components/GroupDetail.vue';
 import GroupActionModal from '@/components/GroupActionModal.vue';
 import { resolveFileUrl, resolveFileThumbUrl, thumbErrorFallback } from '@/utils/fileUrl';
 import {
-  PhUsersThree, PhPlus, PhCaretLeft, PhCaretRight,
+  PhUsersThree, PhPlus, PhCaretLeft, PhCaretRight, PhCaretDown,
 } from '@phosphor-icons/vue';
 
 const route = useRoute();
@@ -18,6 +18,10 @@ const notesStore = useNotesStore();
 
 // 当前选中群 id (从 route.params 拿)
 const selectedId = computed(() => String(route.params.id || ''));
+// 当前选中的群对象 (移动端顶部切换栏显示群名/头像用)
+const currentGroup = computed(() => store.groups.find(g => g.id === selectedId.value) || null);
+// 移动端群切换下拉开关 (桌面走左侧常驻列表, md:hidden 不受影响)
+const mobilePickerOpen = ref(false);
 
 // 左侧群列表折叠 (localStorage 持久化)
 const COLLAPSED_KEY = 'quink_groups_sidebar_collapsed';
@@ -80,6 +84,7 @@ onUnmounted(() => {
 
 // route 切回 /groups (无 id) 时也跳 (e.g. 解散群跳回 /groups, 自动选下一个)
 watch(selectedId, async (id) => {
+  mobilePickerOpen.value = false; // 切群后收起移动端下拉
   if (id) {
     localStorage.setItem(LAST_GROUP_KEY, id);
   } else {
@@ -164,25 +169,75 @@ function selectGroup(id: string) {
       </div>
     </div>
 
-    <!-- 右侧详情区 -->
-    <div class="flex-1 min-w-0 relative">
-      <!-- 选中群: 渲染 GroupDetail. key=selectedId 让切群时 mount 新组件 (避开 watch 时机 race) -->
-      <GroupDetail v-if="selectedId" :group-id="selectedId" :key="selectedId" />
-
-      <!-- 空状态: 只在 ready (loadGroups + autoSelect 完成) 后仍无群组时显示, 避免 loading 闪.
-           用 empty-state-center 跟其他 view 统一对齐 viewport 中线 (absolute 锚定到 .flex-1 min-w-0 relative 父容器) -->
-      <div v-else-if="ready && store.groups.length === 0" class="empty-state-center">
-        <div>
-          <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-primary/10 text-primary-dark flex items-center justify-center">
-            <PhUsersThree size="2rem" weight="fill" />
-          </div>
-          <p class="text-sm text-gray-500 mb-1">还没有群组</p>
-          <p class="text-xs text-gray-400">点左侧 "+ 加入 / 新建" 开始</p>
+    <!-- 右侧详情区 (移动端顶部加群切换栏 → 竖向 flex) -->
+    <div class="flex-1 min-w-0 relative flex flex-col">
+      <!-- 移动端群切换栏 (md:hidden): 当前群名下拉 + 加入/新建. 桌面走左侧常驻列表. 开下拉时提 z 盖过 backdrop -->
+      <div v-if="store.groups.length > 0" class="md:hidden shrink-0 relative" :class="mobilePickerOpen ? 'z-[var(--z-overlay)]' : ''">
+        <div class="flex items-center gap-2 px-4 py-2 border-b border-gray-100 bg-gray-50/60">
+          <button @click="mobilePickerOpen = !mobilePickerOpen"
+            class="flex-1 min-w-0 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-sm text-gray-700">
+            <div class="w-6 h-6 shrink-0 rounded-lg overflow-hidden bg-primary/15 text-primary-dark flex items-center justify-center">
+              <img v-if="currentGroup?.avatar" :src="resolveFileThumbUrl(currentGroup.avatar)"
+                @error="thumbErrorFallback($event, resolveFileUrl(currentGroup.avatar))" class="w-full h-full object-cover" alt="" />
+              <PhUsersThree v-else size="0.875rem" weight="fill" />
+            </div>
+            <span class="flex-1 truncate text-left">{{ currentGroup?.name || '选择群组' }}</span>
+            <PhCaretDown size="0.875rem" weight="bold" class="shrink-0 text-gray-400 transition-transform" :class="mobilePickerOpen ? 'rotate-180' : ''" />
+          </button>
+          <button @click="showGroupAction = true" class="shrink-0 p-2 rounded-lg text-white"
+            style="background: rgb(var(--c-accent))" title="加入 / 新建群组">
+            <PhPlus size="0.875rem" weight="bold" />
+          </button>
         </div>
+        <!-- 下拉群列表 (点当前群名展开) -->
+        <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="opacity-0 -translate-y-1"
+          leave-active-class="transition duration-100 ease-in" leave-to-class="opacity-0 -translate-y-1">
+          <div v-if="mobilePickerOpen" class="absolute top-full left-0 right-0 max-h-[60vh] overflow-y-auto bg-white shadow-xl border-b border-gray-200 py-1">
+            <button v-for="g in store.groups" :key="g.id" @click="selectGroup(g.id)"
+              class="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left transition-colors"
+              :class="selectedId === g.id ? 'bg-primary-light/60 text-primary-dark font-medium' : 'text-gray-600 hover:bg-gray-50'">
+              <div class="w-7 h-7 shrink-0 rounded-lg overflow-hidden bg-primary/15 text-primary-dark flex items-center justify-center">
+                <img v-if="g.avatar" :src="resolveFileThumbUrl(g.avatar)"
+                  @error="thumbErrorFallback($event, resolveFileUrl(g.avatar))" class="w-full h-full object-cover" alt="" />
+                <PhUsersThree v-else size="1rem" weight="fill" />
+              </div>
+              <span class="flex-1 truncate">{{ g.name }}</span>
+              <span v-if="store.pendingCount[g.id]"
+                class="shrink-0 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 bg-red-400/80 text-white text-[10px] leading-none font-semibold tabular-nums rounded-full">
+                {{ store.pendingCount[g.id] > 99 ? '99+' : store.pendingCount[g.id] }}
+              </span>
+            </button>
+          </div>
+        </Transition>
       </div>
 
-      <!-- 手机端: 群列表显示为顶部下拉 (暂不做, 桌面端为主) -->
+      <!-- 详情 / 空状态 wrapper (flex-1 撑满切换栏以下高度) -->
+      <div class="flex-1 min-h-0 relative">
+        <!-- 选中群: 渲染 GroupDetail. key=selectedId 让切群时 mount 新组件 (避开 watch 时机 race) -->
+        <GroupDetail v-if="selectedId" :group-id="selectedId" :key="selectedId" />
+
+        <!-- 空状态: 只在 ready (loadGroups + autoSelect 完成) 后仍无群组时显示, 避免 loading 闪.
+             用 empty-state-center 跟其他 view 统一对齐 viewport 中线 -->
+        <div v-else-if="ready && store.groups.length === 0" class="empty-state-center">
+          <div>
+            <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-primary/10 text-primary-dark flex items-center justify-center">
+              <PhUsersThree size="2rem" weight="fill" />
+            </div>
+            <p class="text-sm text-gray-500 mb-1">还没有群组</p>
+            <p class="hidden md:block text-xs text-gray-400">点左侧 "+ 加入 / 新建" 开始</p>
+            <!-- 移动端无左侧列表/切换栏, 空状态直接给加入按钮 -->
+            <button @click="showGroupAction = true"
+              class="md:hidden mt-3 px-4 py-2 rounded-lg text-white text-sm inline-flex items-center gap-1"
+              style="background: rgb(var(--c-accent))">
+              <PhPlus size="0.875rem" weight="bold" /> 加入 / 新建
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
+
+    <!-- 移动端群下拉 backdrop (透明, 点外部收起. 切换栏开下拉时 z 更高不被盖) -->
+    <div v-if="mobilePickerOpen" class="md:hidden fixed inset-0 z-[var(--z-overlay-backdrop)]" @click="mobilePickerOpen = false" />
 
     <!-- 加入 / 新建群组弹窗 (Tab 切换): 移到 Groups.vue 集中管理 -->
     <GroupActionModal v-if="showGroupAction" @close="showGroupAction = false" />

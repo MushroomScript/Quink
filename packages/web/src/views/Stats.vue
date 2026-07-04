@@ -306,7 +306,7 @@ onUnmounted(() => {
 
     <template v-else>
       <!-- 顶部卡片：灵感/笔记/待办/资源/标签/回收站/活跃天数;hover scale + shadow,relative+z-10 让浮起来盖到邻居上;点击跳对应 view(活跃天数 path=null 不跳) -->
-      <div class="grid grid-cols-7 gap-3 mb-6">
+      <div class="grid grid-cols-3 md:grid-cols-7 gap-2 md:gap-3 mb-6">
         <div v-for="card in topCards" :key="card.label"
           class="bg-white rounded-xl border border-gray-200 p-3 flex flex-col items-center text-center relative transition-all duration-200 hover:scale-105 hover:shadow-md hover:z-[var(--z-sticky)]"
           :class="card.path ? 'cursor-pointer' : 'cursor-default'"
@@ -353,13 +353,13 @@ onUnmounted(() => {
       <div class="bg-white rounded-xl border border-gray-200 p-6">
         <h3 class="text-sm font-medium text-gray-800 mb-4">分类分布</h3>
         <!-- justify-center: 整体居中(避免大屏拉伸);gap-y 给 hover scale 1.06 留缓冲不让相邻 item 撞 -->
-        <div v-if="categoryData.length" class="flex items-center gap-8 justify-center flex-wrap">
+        <div v-if="categoryData.length" class="flex flex-col md:flex-row items-center gap-4 md:gap-8 justify-center">
           <VChart ref="chartRef" :option="pieOption" autoresize
-            class="shrink-0" style="width: 440px; height: 380px"
+            class="shrink-0 w-full max-w-[360px] h-[300px] md:w-[440px] md:max-w-none md:h-[380px]"
             @mouseover="onChartMouseOver" @mouseout="onChartMouseOut"
             @click="(p: any) => p.componentType === 'series' && p.data && isClickableCategory(p.data) && onCategoryClick(p.data.name)" />
           <!-- 2 列网格;折叠态(Top 10)完全展开不滚动;展开"其他"显示全部时加 max-h + 滚动,卡片高度稳定;px-2 给 hover scale 1.06 留水平缓冲避免被 overflow 裁 -->
-          <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 w-[320px] py-2 px-2"
+          <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 w-full max-w-[320px] md:w-[320px] py-2 px-2"
             :class="{ 'max-h-[380px] overflow-y-auto scrollbar-hide': showAllCategories }">
             <div v-for="(item, i) in categoryData" :key="item.name"
               class="legend-item flex items-center gap-1.5 text-xs px-2 py-1.5 rounded-md transition-all min-w-0"

@@ -12,7 +12,7 @@ import dayjs from 'dayjs';
 import {
   PhUsersThree, PhCopy, PhArrowsClockwise, PhX, PhCheck, PhTrash,
   PhCaretRight, PhCaretDown, PhPencilSimple, PhCamera, PhNote, PhMegaphone,
-  PhEye, PhEyeSlash, PhBell,
+  PhEye, PhEyeSlash, PhBell, PhDotsThreeVertical,
 } from '@phosphor-icons/vue';
 import NoteCard from './NoteCard.vue';
 import type { Note, GroupNoteEditRequestRow, GroupMemberInfo } from '@/api';
@@ -325,7 +325,8 @@ type CtxItem = { label: string; action: () => void; danger?: boolean };
 const ctxMenu = ref<{ x: number; y: number; items: CtxItem[] } | null>(null);
 useEscToClose(ctxMenu, null);
 
-function openCtxMenu(e: MouseEvent, m: GroupMemberInfo) {
+// 成员可用操作 (桌面右键菜单 + 移动端"更多"按钮共用同一数据源, 避免两处权限判断漂移)
+function buildMemberActions(m: GroupMemberInfo): CtxItem[] {
   const items: CtxItem[] = [];
   const isSelf = m.userId === auth.user?.id;
   if (isSelf) {
@@ -342,6 +343,11 @@ function openCtxMenu(e: MouseEvent, m: GroupMemberInfo) {
     // admin 只能对 member 操作 (不能动其他 admin / owner)
     items.push({ label: '移出群组', danger: true, action: () => askRemoveMember(m.userId, m.nickname || m.username) });
   }
+  return items;
+}
+
+function openCtxMenu(e: MouseEvent, m: GroupMemberInfo) {
+  const items = buildMemberActions(m);
   if (items.length === 0) return; // 无可用操作 → 静默 (浏览器原生右键也不弹)
   // 边界检测: 防菜单溢出视口右下
   // 网页端 CSS zoom 下 e.clientX/Y / window.innerWidth/Height 都是 zoomed 坐标, 设到 fixed style.left/top 会被 zoom 再乘一次飞出视口.
@@ -505,7 +511,7 @@ async function saveAnnouncement() {
       </div>
       <div v-else-if="detail" class="space-y-5">
         <!-- Header: 头像 + 群名 + 角色 [邀请胶囊] [解散] -->
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 flex-wrap">
           <div class="relative w-12 h-12 shrink-0 group/avatar"
             :class="isOwner ? 'cursor-pointer' : ''"
             @click="pickAvatar">
@@ -530,13 +536,13 @@ async function saveAnnouncement() {
             </div>
             <div v-else class="flex items-center gap-1 group">
               <h2 class="text-lg font-medium truncate">{{ detail.name }}</h2>
-              <button v-if="isOwner" @click="startEditName" class="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-600 transition-opacity">
+              <button v-if="isOwner" @click="startEditName" class="opacity-0 group-hover:opacity-100 touch-actions text-gray-400 hover:text-gray-600 transition-opacity">
                 <PhPencilSimple size="0.875rem" />
               </button>
             </div>
             <div class="text-xs text-gray-400 mt-0.5">{{ detail.memberCount }} 位成员 · {{ isOwner ? '创建者' : detail.myRole === 'admin' ? '管理员' : '成员' }}</div>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <!-- 安全审计 S6: 群内隐身切换. 隐身时其他成员看不到我在线, 但我仍能收所有消息提醒 -->
             <button @click="togglePresenceMode" :disabled="togglingPresence"
               class="px-3 py-1 text-xs rounded-lg font-medium inline-flex items-center gap-1 transition-colors"
@@ -684,8 +690,8 @@ async function saveAnnouncement() {
           </div>
         </section>
 
-        <!-- 主体两栏: 左 群内笔记, 右 群公告 + 群组成员 -->
-        <div class="flex gap-5 items-start">
+        <!-- 主体两栏: 左 群内笔记, 右 群公告 + 群组成员. 移动端堆叠 (笔记流在上, 公告成员在下, 各自全宽) -->
+        <div class="flex flex-col md:flex-row gap-5 items-start">
           <!-- 左: 群内笔记 -->
           <section class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-3">
@@ -710,8 +716,8 @@ async function saveAnnouncement() {
             </div>
           </section>
 
-          <!-- 右: 公告 + 成员 (固定 13rem, 容纳头像 + 昵称 + chip) -->
-          <aside class="w-52 shrink-0 space-y-5">
+          <!-- 右: 公告 + 成员 (桌面固定 13rem, 移动端全宽堆到笔记流下方) -->
+          <aside class="w-full md:w-52 shrink-0 space-y-5">
             <!-- 群公告 -->
             <section class="bg-gray-50 rounded-xl p-4">
               <div class="flex items-center justify-between mb-2">
@@ -771,8 +777,8 @@ async function saveAnnouncement() {
               <div class="space-y-0.5">
                 <div v-for="m in sortedMembers" :key="m.userId"
                   @contextmenu.prevent="openCtxMenu($event, m)"
-                  class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
-                  :title="m.online ? '在线 · 右键操作' : '离线 · 右键操作'">
+                  class="group/member flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+                  :title="m.online ? '在线' : '离线'">
                   <!-- 头像 + 在线圆点 (右下角) -->
                   <div class="relative shrink-0">
                     <img v-if="m.avatar" :src="resolveFileThumbUrl(m.avatar)"
@@ -795,6 +801,12 @@ async function saveAnnouncement() {
                   }">
                     {{ m.role === 'owner' ? '创建者' : m.role === 'admin' ? '管理员' : '成员' }}
                   </span>
+                  <!-- 移动端/触屏: "更多"按钮弹操作菜单 (桌面仍可右键). 仅对该成员有可用操作时才显示 -->
+                  <button v-if="buildMemberActions(m).length" @click.stop="openCtxMenu($event, m)"
+                    class="shrink-0 -mr-1 p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover/member:opacity-100 touch-actions transition-opacity"
+                    title="成员操作">
+                    <PhDotsThreeVertical size="1rem" weight="bold" />
+                  </button>
                 </div>
               </div>
             </section>

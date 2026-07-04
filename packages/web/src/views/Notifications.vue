@@ -196,7 +196,7 @@ async function doClear() {
             <button
               v-if="!n.readAt"
               @click="onMarkRead(n.id, $event)"
-              class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-primary-light"
+              class="shrink-0 opacity-0 group-hover:opacity-100 touch-actions transition-opacity p-1 rounded hover:bg-primary-light"
               style="color: var(--sb-dim)"
               title="标已读"
             >
@@ -204,7 +204,7 @@ async function doClear() {
             </button>
             <button
               @click="onDelete(n.id, $event)"
-              class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-100 hover:text-red-500"
+              class="shrink-0 opacity-0 group-hover:opacity-100 touch-actions transition-opacity p-1 rounded hover:bg-red-100 hover:text-red-500"
               style="color: var(--sb-dim)"
               title="删除"
             >

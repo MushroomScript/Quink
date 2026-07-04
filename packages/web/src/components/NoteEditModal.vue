@@ -383,7 +383,7 @@ onBeforeUnmount(() => {
     <Transition name="modal-fade">
     <div v-if="showRequestPerm" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
       <div class="absolute inset-0 bg-black/30" @click="cancelEditRequest" />
-      <div class="relative bg-white rounded-xl shadow-xl p-6 w-96">
+      <div class="relative bg-white rounded-xl shadow-xl p-6 w-96 max-w-[90vw]">
         <p class="text-sm text-gray-700 font-medium mb-1">申请编辑权限</p>
         <p class="text-xs text-gray-400 mb-3">
           {{ requestPermLabel === 'admin' ? '这条笔记仅管理员可编辑' : '这条笔记所有人可编辑' }}, 提交申请后由作者或群管理员审批

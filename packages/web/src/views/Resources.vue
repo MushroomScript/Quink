@@ -946,11 +946,11 @@ onUnmounted(() => {
     @drop="onExtDrop">
     <!-- Sticky toolbar — 在 wrapper 之外, 不被 blur. data-resources-toolbar 给遮罩计算 top 用 (遮罩贴它的下边线) -->
     <div data-resources-toolbar
-      class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-6 pt-[8px] pb-[10px] mb-4 flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50"
+      class="sticky top-0 z-[var(--z-sticky)] -mx-4 md:-mx-8 px-4 md:px-6 pt-[8px] pb-[10px] mb-4 flex items-center justify-between gap-x-3 gap-y-2 flex-wrap border-t border-gray-100 bg-gray-50"
       style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
       <template v-if="selectMode">
-        <p class="text-xs text-primary-dark font-medium">已选 {{ selectedIds.size }} 项</p>
-        <div class="flex items-center gap-2">
+        <p class="text-xs text-primary-dark font-medium shrink-0">已选 {{ selectedIds.size }} 项</p>
+        <div class="flex items-center gap-2 flex-wrap">
           <button @click="selectAllFiles" :disabled="filtered.length === 0 || selectedIds.size === filtered.length"
             class="px-3 py-1 text-xs rounded-lg font-medium bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             全选
@@ -998,7 +998,7 @@ onUnmounted(() => {
           </div>
         </div>
         <!-- 右侧: 粘贴 + 清除筛选 + 选择 + 新建文件夹 + 上传 -->
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 flex-wrap">
           <button v-if="cutBuffer" @click="pasteHere"
             :disabled="cutBuffer.sourceFolderId === currentFolderId"
             class="px-3 py-1 text-xs rounded-lg font-medium bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors inline-flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1097,7 +1097,7 @@ onUnmounted(() => {
                 <span class="text-xs text-gray-400">文件夹</span>
               </div>
             </div>
-            <div v-if="!selectMode" class="flex items-center border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div v-if="!selectMode" class="flex items-center border-t border-gray-50 opacity-0 group-hover:opacity-100 touch-actions transition-opacity">
               <button v-if="hasSearchQuery" @click.stop="openFolderLocation(folder)" title="打开所在位置"
                 class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-gray-50 hover:text-primary">
                 <PhFolderOpen size="0.875rem" weight="bold" />
@@ -1166,7 +1166,7 @@ onUnmounted(() => {
                 <span class="text-xs text-gray-400">{{ formatDate(f.createdAt) }}</span>
               </div>
             </div>
-            <div v-if="!selectMode" class="flex items-center border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div v-if="!selectMode" class="flex items-center border-t border-gray-50 opacity-0 group-hover:opacity-100 touch-actions transition-opacity">
               <button v-if="hasSearchQuery" @click.stop="openFileLocation(f)" title="打开所在位置"
                 class="flex-1 flex items-center justify-center py-1.5 text-gray-500 hover:bg-gray-50 hover:text-primary">
                 <PhFolderOpen size="0.875rem" weight="bold" />
@@ -1207,10 +1207,10 @@ onUnmounted(() => {
               <PhFolderSimple size="1.25rem" weight="fill" class="text-primary-dark" />
             </div>
             <div class="flex-[5] min-w-0 text-xs font-medium text-gray-700 truncate" :title="folder.name">{{ folder.name }}</div>
-            <!-- audio 占位区 (文件行用), 文件夹行留空保持列位置一致 -->
-            <div class="w-48 shrink-0"></div>
+            <!-- audio 占位区 (文件行用), 文件夹行留空保持列位置一致. 移动端隐藏 (列表简化为 缩略图+名称+操作) -->
+            <div class="hidden md:block w-48 shrink-0"></div>
             <!-- hover icons 固定 w-[120px] 占位防止 hover 切换时列位置抖动 -->
-            <div class="w-[120px] shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="w-[120px] shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 touch-actions transition-opacity">
               <button v-if="hasSearchQuery" @click.stop="openFolderLocation(folder)" title="打开所在位置"
                 class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
                 <PhFolderOpen size="0.875rem" weight="bold" />
@@ -1228,13 +1228,13 @@ onUnmounted(() => {
                 <PhTrash size="0.875rem" weight="bold" />
               </button>
             </div>
-            <div class="flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">—</div>
-            <div class="flex-[2] min-w-0 text-xs text-gray-400">文件夹</div>
-            <div class="flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">{{ formatDate(folder.createdAt) }}</div>
+            <div class="hidden md:block flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">—</div>
+            <div class="hidden md:block flex-[2] min-w-0 text-xs text-gray-400">文件夹</div>
+            <div class="hidden md:block flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">{{ formatDate(folder.createdAt) }}</div>
           </div>
           <!-- Files 后 -->
           <div v-for="f in filtered" :key="f.id" :data-file-id="f.id"
-            class="bg-white rounded-lg border px-3 py-2 group hover:shadow-sm transition-all duration-200 cursor-default flex items-center gap-3"
+            class="bg-white rounded-lg border px-3 py-2 group hover:shadow-sm transition-all duration-200 cursor-default flex items-center gap-3 flex-wrap md:flex-nowrap"
             :class="[
               selectedIds.has(f.id) ? 'border-primary ring-2 ring-primary' : 'border-gray-200',
               focusedItemKey === 'file-' + f.id ? 'focus-ring' : ''
@@ -1260,14 +1260,14 @@ onUnmounted(() => {
               <PhFile v-else size="1.25rem" weight="fill" class="text-gray-400" />
             </div>
             <div class="flex-[5] min-w-0 text-xs font-medium text-gray-700 truncate" :title="f.filename">{{ f.filename }}</div>
-            <!-- audio 区固定 w-48 占位, 所有行都占同样宽度 → 列位置永远一致 (audio 行渲染 player, 其他行空白) -->
-            <div class="w-48 shrink-0">
+            <!-- audio 区: 桌面固定 w-48 占位对齐列; 移动端 audio 文件让 player 换行占满 (w-full 触发 flex-wrap + order-last 排到操作之后), 非 audio 直接隐藏不占位 -->
+            <div class="shrink-0 order-last md:order-none" :class="isAudio(f) ? 'w-full md:w-48' : 'hidden md:block w-48'">
               <div v-if="isAudio(f)" @click.stop>
                 <AudioPlayer :src="resolveFileUrl(f.url)" hideBars />
               </div>
             </div>
             <!-- hover icons 固定 w-[120px] 占位防止 hover/selectMode 切换时列位置抖动. selectMode 时按钮不渲染但 div 仍占位 -->
-            <div class="w-[120px] shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="w-[120px] shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 touch-actions transition-opacity">
               <template v-if="!selectMode">
                 <button v-if="hasSearchQuery" @click.stop="openFileLocation(f)" title="打开所在位置"
                   class="p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary rounded">
@@ -1287,9 +1287,9 @@ onUnmounted(() => {
                 </button>
               </template>
             </div>
-            <div class="flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">{{ formatSize(f.size) }}</div>
-            <div class="flex-[2] min-w-0 text-xs text-gray-400">{{ categoryLabel(f) }}</div>
-            <div class="flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">{{ formatDate(f.createdAt) }}</div>
+            <div class="hidden md:block flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">{{ formatSize(f.size) }}</div>
+            <div class="hidden md:block flex-[2] min-w-0 text-xs text-gray-400">{{ categoryLabel(f) }}</div>
+            <div class="hidden md:block flex-[2] min-w-0 text-xs text-gray-400 tabular-nums">{{ formatDate(f.createdAt) }}</div>
           </div>
         </TransitionGroup>
       </template>

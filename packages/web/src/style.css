@@ -135,6 +135,14 @@
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 
+/* 触屏设备(无 hover 能力)上, 让桌面靠 hover 才浮现的操作按钮常显.
+   桌面(有 hover)不受影响, 保留 opacity-0 group-hover:opacity-100 的悬浮精致感.
+   用法: 给已带 opacity-0 group-hover:opacity-100 的元素追加 .touch-actions.
+   抽自 CommentThread.vue 已验证的 @media(hover:none) 兜底写法, 全局复用. */
+@media (hover: none) {
+  .touch-actions { opacity: 1 !important; }
+}
+
 /* ══ 空状态居中 (统一对齐 viewport 中线) ══
    各 view "暂无数据" 提示统一用这个 class. absolute 浮在 main 容器内 (main 自带 position:relative),
    padding-bottom = TopBar(+Electron 标题栏) 高度, 让 flex items-center 把内容中心上移到 viewport 中线.

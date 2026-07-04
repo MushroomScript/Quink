@@ -877,7 +877,7 @@ const typeColor: Record<string, string> = {
       <Transition name="modal">
         <div v-if="showRequestPerm" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
           <div class="absolute inset-0 bg-black/30" @click="showRequestPerm = false" />
-          <div class="relative bg-white rounded-xl shadow-xl p-5 w-96">
+          <div class="relative bg-white rounded-xl shadow-xl p-5 w-96 max-w-[90vw]">
             <p class="text-sm text-gray-700 font-medium mb-1">申请编辑权限</p>
             <p class="text-xs text-gray-400 mb-3">
               {{ (note.editPermission || 'admin') === 'admin' ? '这条笔记仅管理员可编辑' : '这条笔记所有人可编辑' }}, 提交后由作者或群管理员审批

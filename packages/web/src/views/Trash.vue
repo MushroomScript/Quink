@@ -398,7 +398,7 @@ function onLeave(el: Element, done: () => void) {
               </div>
             </div>
             <!-- selectMode 时隐藏底部单条按钮区, 避免"选中"和"单条操作"语义冲突 -->
-            <div v-if="!selectMode" class="flex items-center gap-1 px-3 py-2 border-t border-gray-50 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div v-if="!selectMode" class="flex items-center gap-1 px-3 py-2 border-t border-gray-50 opacity-0 group-hover:opacity-100 touch-actions transition-opacity">
               <button @click.stop="confirmRestoreId = n.id" class="px-3 py-1 text-xs bg-primary-light text-primary-dark hover:opacity-80 rounded-lg transition-colors">
                 恢复
               </button>

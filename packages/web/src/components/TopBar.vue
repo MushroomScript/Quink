@@ -536,7 +536,7 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <button @click="toggleMobileSidebar?.()" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 md:hidden" title="菜单">
           <PhList size="1.25rem" weight="fill" />
         </button>
-        <button v-if="!hideRefresh" @click="refresh" class="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors hidden md:block" title="刷新">
+        <button v-if="!hideRefresh" @click="refresh" class="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors" title="刷新">
           <!-- 用 CSS animation 一次完整 360° 旋转 (跟 spinning state 同步 600ms); 之前用 transition transform 在 fetchNotes 极快返回时只看到一瞬抖动 -->
           <PhArrowsClockwise size="0.875rem" weight="fill" :class="{ 'refresh-spin': spinning }" />
         </button>
@@ -686,12 +686,12 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
        pt-[8px] pb-[10px] 抵消中文字符 baseline 在 line-box 内自然偏下的视觉偏差. -->
   <Teleport to="#batch-bar-slot" defer>
     <div v-if="store.selectMode"
-      class="sticky top-0 z-[var(--z-sticky)] px-4 md:px-6 pt-[8px] pb-[10px] flex items-center gap-3 border-t border-gray-100 bg-gray-50/80"
+      class="sticky top-0 z-[var(--z-sticky)] px-4 md:px-6 pt-[8px] pb-[10px] flex items-center gap-3 border-t border-gray-100 bg-gray-50/80 overflow-x-auto scrollbar-hide"
       style="box-shadow: 0 1px 3px var(--c-topbar-shadow), 0 1px 0 var(--sb-border)">
-      <span class="text-xs text-gray-500">已选 {{ store.selectedIds.size }} 项</span>
-      <button @click="store.selectAll()" class="text-xs text-primary hover:underline">全选</button>
-      <button @click="store.toggleSelectMode()" class="text-xs text-gray-400 hover:underline">退出选择</button>
-      <div class="ml-auto flex items-center gap-2">
+      <span class="text-xs text-gray-500 shrink-0 whitespace-nowrap">已选 {{ store.selectedIds.size }} 项</span>
+      <button @click="store.selectAll()" class="text-xs text-primary hover:underline shrink-0">全选</button>
+      <button @click="store.toggleSelectMode()" class="text-xs text-gray-400 hover:underline shrink-0 whitespace-nowrap">退出选择</button>
+      <div class="ml-auto flex items-center gap-2 shrink-0">
         <!-- 顺序: (待办页) 标记已完成 / 标记未完成 → 移至类型 → 移动分类 → 加标签 → 删除 (跨类型操作前置, 跟分类语义优先级一致) -->
         <!-- 待办页专属: 批量改 todoStatus, 已是目标状态 / 非 todo 项静默跳过 -->
         <button v-if="store.filterType === 'todo'" @click="doBatchSetTodoStatus('done')"
