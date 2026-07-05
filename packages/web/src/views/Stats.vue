@@ -170,7 +170,7 @@ function onHeatmapTouchMove(e: TouchEvent) {
 function onHeatmapTouchEnd() {
   if (!heatmapTouchMoved && heatmapTapWasVisible && tooltip.value.visible) {
     const cell = cellByDate.value.get(tooltip.value.date);
-    if (cell) { tooltip.value.visible = false; store.pendingDateFilter = cell.date; router.push('/quink'); }
+    if (cell) { tooltip.value.visible = false; notesStore.pendingDateFilter = cell.date; router.push('/quink'); }
   }
 }
 // 桌面 hover 显示; 移动端不用 hover (触屏 hover 会闪一下就没), 走 click 常驻
@@ -183,14 +183,14 @@ function onCellLeave() {
   tooltip.value.visible = false;
 }
 
-// 点 cell: 有记录的天跳到灵感页并按该日筛选. 走 store.pendingDateFilter 一次性传递 (不带 url query,
+// 点 cell: 有记录的天跳到灵感页并按该日筛选. 走 notesStore.pendingDateFilter 一次性传递 (不带 url query,
 // 避免日期进网址 → 清筛选后刷新重现). Inspiration onActivated 消费后派 quink-filter-date 给 TopBar 同步 chip
 // 空 cell 不响应,避免跳过去空列表
 function onCellClick(_e: MouseEvent, cell: CellData) {
   if (isNarrow.value) return;  // 移动端走 touch handlers (onHeatmapTouch*)
   if (!cell.count) return;
   tooltip.value.visible = false;
-  store.pendingDateFilter = cell.date;
+  notesStore.pendingDateFilter = cell.date;
   router.push('/quink');
 }
 

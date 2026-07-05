@@ -129,7 +129,7 @@ function loadMoreGroupNotes() {
 
 // 群内笔记瀑布流 (仅移动端): 复用全局 useMasonry + .notes-masonry CSS 多列响应式.
 // 桌面端按蘑菇要求走改动前单列 space-y-3, 故 masonry 只在 isMobile 分支渲染 (columns 桌面端空跑无害).
-const masonryRoot = ref<HTMLElement>();
+const masonryRoot = ref<HTMLElement | null>(null);
 const { columns: groupNoteColumns } = useMasonry(() => groupNotes.value, masonryRoot);
 
 // isMobile: 桌面端恢复改动前布局 (右侧栏 + 单列 + 成员铺开), 移动端走折叠 + masonry.
