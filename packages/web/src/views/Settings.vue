@@ -977,7 +977,8 @@ function goBack() {
         <!-- 主题色: 第一项无 border-t, pb-3 给下方留空间跟下一项 pt-3 对称 -->
         <div class="pb-3">
           <label class="block text-xs font-medium text-gray-500 mb-2">主题色</label>
-          <div class="flex gap-3">
+          <!-- 移动端 4 列换行 (7 主题分 2 行, 图标不被挤扁), 桌面 7 列一行 -->
+          <div class="grid grid-cols-4 md:grid-cols-7 gap-3">
             <button v-for="t in [
               { value: 'blueberry', label: '蓝莓', color: '#748ffc' },
               { value: 'lavender', label: '薰衣草', color: '#a78bfa' },
