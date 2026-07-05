@@ -156,6 +156,7 @@ async function confirmBatchTags() {
 }
 const searchInput = ref<HTMLInputElement>();
 const searchBoxEl = ref<HTMLElement>();
+const mobileSearchBoxEl = ref<HTMLElement>();
 const tagSuggestPos = ref({ top: '0px', left: '0px', width: '0px' });
 const searchText = ref('');
 const searchFocused = ref(false);
@@ -266,11 +267,14 @@ const typeOptions = [
 // 资源页日期弹窗(按钮 + 弹窗 + 位置)
 const dateFilterOpen = ref(false);
 const dateFilterBtn = ref<HTMLElement>();
+const mobileDateFilterBtn = ref<HTMLElement>();
 const dateFilterPos = ref({ top: '0px', right: '0px' });
 function openDateFilter() {
   if (dateFilterOpen.value) { dateFilterOpen.value = false; return; }
-  if (dateFilterBtn.value) {
-    const r = unzoomRect(dateFilterBtn.value);
+  // 移动端用移动日期按钮定位; 桌面 dateFilterBtn 是 md:hidden, 移动端 rect 全 0 会让弹窗错位
+  const btn = window.innerWidth < 768 ? mobileDateFilterBtn.value : dateFilterBtn.value;
+  if (btn) {
+    const r = unzoomRect(btn);
     const { vw } = unzoomViewport();
     dateFilterPos.value = {
       top: `${r.bottom + 4}px`,
@@ -335,8 +339,10 @@ function doSearch(immediate = false) {
 }
 
 function updateTagSuggestPos() {
-  if (!searchBoxEl.value) return;
-  const r = unzoomRect(searchBoxEl.value);
+  // 移动端搜索展开时用移动搜索框定位; 桌面 searchBoxEl 是 md:hidden, 移动端 rect 全 0 会让下拉堆左上角
+  const el = showMobileSearch.value ? mobileSearchBoxEl.value : searchBoxEl.value;
+  if (!el) return;
+  const r = unzoomRect(el);
   tagSuggestPos.value = {
     top: `${r.bottom + 4}px`,
     left: `${r.left}px`,
@@ -594,6 +600,16 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
         <button @click="showMobileSearch = !showMobileSearch" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 md:hidden">
           <PhMagnifyingGlass size="1.25rem" weight="fill" />
         </button>
+        <!-- Mobile filter toggle (漏斗, 仅笔记页; 点开下方竖排筛选面板) -->
+        <button v-if="searchScope === 'notes'" @click="toggleFilters" class="p-1.5 rounded-lg transition-colors md:hidden"
+          :class="showFilters || hasFilters ? 'bg-primary-light text-primary-dark' : 'hover:bg-gray-100 text-gray-400'">
+          <PhFunnel size="1.25rem" weight="fill" />
+        </button>
+        <!-- Mobile date filter toggle (日历, 仅资源页; 点开日期筛选弹窗, 复用桌面弹窗) -->
+        <button v-if="searchScope === 'files'" ref="mobileDateFilterBtn" @click="openDateFilter" class="p-1.5 rounded-lg transition-colors md:hidden"
+          :class="dateFilterOpen || hasFilters ? 'bg-primary-light text-primary-dark' : 'hover:bg-gray-100 text-gray-400'">
+          <PhCalendarBlank size="1.25rem" weight="fill" />
+        </button>
 
         <!-- 笔记页: PhFunnel + 横向 filter bar;资源页: PhCalendarBlank + 下方日期弹窗;标签页: invisible 占位保持搜索框对齐 -->
         <button v-if="searchScope === 'files'" ref="dateFilterBtn" @click="openDateFilter"
@@ -614,12 +630,68 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
 
     <!-- Mobile search bar (expanded) -->
     <div v-if="showMobileSearch" class="px-3 pb-2 md:hidden" style="background: var(--c-topbar)">
-      <div class="relative">
+      <div ref="mobileSearchBoxEl" class="relative">
         <input v-model="searchText" @input="onSearch" type="text" :placeholder="searchPlaceholder"
           class="w-full pl-9 pr-3 py-2 bg-gray-100/80 border-0 rounded-full text-sm outline-none focus:bg-white focus:ring-2 focus:ring-primary/30 placeholder-gray-400" autofocus />
         <PhMagnifyingGlass size="1rem" weight="fill" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
       </div>
     </div>
+
+    <!-- Mobile filter panel (漏斗展开, 竖排堆叠, md:hidden. 逻辑/state 全复用桌面 filter bar) -->
+    <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="opacity-0 -translate-y-1"
+      leave-active-class="transition duration-100 ease-in" leave-to-class="opacity-0 -translate-y-1">
+      <div v-if="showFilters && searchScope === 'notes'" class="px-3 pb-3 space-y-2.5 md:hidden" style="background: var(--c-topbar)">
+        <!-- 类型 -->
+        <div class="flex items-start gap-2">
+          <span class="text-xs text-gray-400 w-8 shrink-0 pt-1.5">类型</span>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <button v-for="t in typeOptions" :key="t.value" @click="toggleType(t.value)"
+              class="px-2.5 py-1 rounded-full text-xs font-medium transition-all inline-flex items-center gap-1"
+              :class="filterTypes.includes(t.value) ? 'bg-primary text-white shadow-sm' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'">
+              <component :is="t.icon" size="0.75rem" weight="fill" />
+              {{ t.label }}
+            </button>
+          </div>
+        </div>
+        <!-- 时间 -->
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-400 w-8 shrink-0">时间</span>
+          <div class="flex items-center gap-1.5 flex-1 min-w-0">
+            <div class="flex-1 min-w-0">
+              <DatePicker :model-value="filterDateFrom" placeholder="开始" @update:model-value="v => { filterDateFrom = v; applyFilters() }" />
+            </div>
+            <span class="text-xs text-gray-400 shrink-0">-</span>
+            <div class="flex-1 min-w-0">
+              <DatePicker :model-value="filterDateTo" placeholder="结束" @update:model-value="v => { filterDateTo = v; applyFilters() }" />
+            </div>
+          </div>
+        </div>
+        <!-- 已选: 分类 + 标签 chip -->
+        <div v-if="store.filterCategory || filterTags.length" class="flex items-start gap-2">
+          <span class="text-xs text-gray-400 w-8 shrink-0 pt-1">已选</span>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span v-if="store.filterCategory" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium"
+              style="background: #FFE0CC; color: #D46B27">
+              <span class="truncate max-w-[120px] inline-flex items-center gap-1"><PhFolderOpen size="0.75rem" weight="fill" />{{ store.filterCategory === '__uncategorized__' ? '未分类' : store.filterCategory }}</span>
+              <button @click="clearCategory()" class="hover:opacity-60 shrink-0">×</button>
+            </span>
+            <span v-for="t in filterTags" :key="t" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-primary-light text-primary-dark">
+              <PhTag size="0.75rem" weight="fill" />
+              <span>{{ t }}</span>
+              <button @click="removeTag(t)" class="hover:opacity-60">×</button>
+            </span>
+          </div>
+        </div>
+        <!-- 清除 -->
+        <div class="flex justify-end">
+          <button @click="clearFilters"
+            class="text-xs font-medium px-3 py-1 rounded-lg transition-colors"
+            :class="hasFilters ? 'text-white bg-red-400 hover:bg-red-500' : 'text-gray-400 bg-gray-100 hover:bg-gray-200'">
+            清除全部筛选
+          </button>
+        </div>
+      </div>
+    </Transition>
 
     <!-- 笔记页横向 filter bar(标签/资源页都不显示横向 bar,它们各自有专属交互) -->
     <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="opacity-0 -translate-y-1"
@@ -751,11 +823,18 @@ onUnmounted(() => { document.removeEventListener('keydown', handleKeydown); });
           </div>
         </div>
         <!-- 即时搜索已生效,"确定"语义就是关弹窗(用户心理舒服);清除按钮挪到资源页 chip 行 -->
-        <button @click="dateFilterOpen = false"
-          class="mt-3 w-full inline-flex items-center justify-center gap-1 text-xs py-1.5 rounded-lg bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
-          <PhCheck size="0.875rem" weight="fill" />
-          <span>确定</span>
-        </button>
+        <div class="mt-3 flex gap-2">
+          <!-- 移动端补个清除 (桌面清除在资源页 chip 行, 故 md:hidden) -->
+          <button @click="clearDateFilter"
+            class="md:hidden flex-1 inline-flex items-center justify-center gap-1 text-xs py-1.5 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+            清除
+          </button>
+          <button @click="dateFilterOpen = false"
+            class="flex-1 inline-flex items-center justify-center gap-1 text-xs py-1.5 rounded-lg bg-primary-light text-primary-dark hover:bg-primary/15 transition-colors">
+            <PhCheck size="0.875rem" weight="fill" />
+            <span>确定</span>
+          </button>
+        </div>
       </div>
     </Transition>
     <div v-if="dateFilterOpen" class="fixed inset-0 z-[var(--z-overlay-backdrop)]" @click="dateFilterOpen = false" />

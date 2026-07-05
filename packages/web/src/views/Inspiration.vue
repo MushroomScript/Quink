@@ -41,21 +41,23 @@ async function viewRefresh() {
 onActivated(() => {
   store.activeView = 'inspiration';
   store.currentRefresh = viewRefresh;
-  // 跨视图跳转: ?date=YYYY-MM-DD 从统计页热力图过来; ?tag=xxx 从笔记编辑器/标签云过来。
-  // 两条线都只设 store + 派事件给 TopBar,数据由 TopBar 监听器 doSearch(true) 统一拉,
-  // 避免"Inspiration 拉一次 + TopBar 又拉一次"的重复请求 + UI 闪烁。
-  const dateQuery = route.query.date as string;
-  if (dateQuery) {
+  // 跨视图跳转: 热力图点日期 / 标签云点标签 → 灵感页. 改走 store 一次性字段 (pendingDateFilter /
+  // pendingTagFilter), 不再走 url query — 避免筛选进网址, 清筛选后刷新又被 query 重新应用。
+  // 只设 store + 派事件给 TopBar, 数据由 TopBar 监听器 doSearch(true) 统一拉 (避免双拉双闪)。消费后立即清空。
+  const dateFilter = store.pendingDateFilter;
+  if (dateFilter) {
+    store.pendingDateFilter = '';
     store.filterType = '';
     store.searchQuery = '';
-    window.dispatchEvent(new CustomEvent('quink-filter-date', { detail: dateQuery }));
+    window.dispatchEvent(new CustomEvent('quink-filter-date', { detail: dateFilter }));
     return;
   }
-  const tagQuery = route.query.tag as string;
-  if (tagQuery) {
+  const tagFilter = store.pendingTagFilter;
+  if (tagFilter) {
+    store.pendingTagFilter = '';
     store.filterType = '';
     store.searchQuery = '';
-    window.dispatchEvent(new CustomEvent('quink-filter-tag', { detail: tagQuery }));
+    window.dispatchEvent(new CustomEvent('quink-filter-tag', { detail: tagFilter }));
     return;
   }
   store.filterType = 'quink';

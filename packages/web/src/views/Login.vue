@@ -79,7 +79,7 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
         <div class="glow glow-b" aria-hidden="true"></div>
 
         <header class="brand-mini">
-          <img src="/quink-blueberry-192.png" alt="" class="logo-mini" draggable="false" />
+          <img :src="`/quink-${currentTheme}-192.png`" alt="" class="logo-mini" draggable="false" />
           <span>Quink</span>
         </header>
 
@@ -228,7 +228,7 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
         <!-- 移动端沉浸 hero: 主题色区放大 logo + slogan (桌面隐藏, 桌面走左侧 hero) -->
         <header class="mobile-hero">
           <div class="mobile-hero-logo">
-            <img src="/quink-blueberry-192.png" alt="" draggable="false" />
+            <img :src="`/quink-${currentTheme}-192.png`" alt="" draggable="false" />
           </div>
           <div class="mobile-hero-name">Quink</div>
           <div class="mobile-hero-slogan">一念，即记。</div>
@@ -1045,24 +1045,7 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
   }
   /* 移动端去掉标题 "欢迎回来" + 副标题 (蘑菇要求, 更简约, 直接进表单) */
   .form-title, .form-sub { display: none; }
-  /* 移动端按钮 + input focus 用品牌蓝 (不跟主题色, 跟 logo 呼应) */
-  .btn-primary {
-    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  }
-  .btn-primary:hover:not(:disabled) {
-    box-shadow: 0 8px 26px rgba(37, 99, 235, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.25);
-  }
-  .field input:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
-  }
-  .switch-btn:hover {
-    color: #2563eb;
-  }
-  .brand-mobile {
-    display: flex;
-  }
+  /* 登录按钮 / input focus / switch 跟主题色 (继承桌面, 不再写死品牌蓝) —— 跟 logo 一致跟随主题 */
 }
 
 /* 中屏低高度 (笔记本 1366×768 等): 控制 hero 字号 + 截图高度避免溢出 */

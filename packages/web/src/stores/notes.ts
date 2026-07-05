@@ -71,6 +71,10 @@ export const useNotesStore = defineStore('notes', () => {
   const searchQuery = ref('');
   const filterCategory = ref('');
   const filterType = ref('');
+  // 跨视图跳转筛选的一次性传递 (Tags 点标签 / Stats 热力图点日期 → 灵感页). 走 store 不走 url query,
+  // 避免筛选进网址 → 清筛选后刷新又被 query 重新应用. 灵感页 onActivated 消费后立即清空.
+  const pendingTagFilter = ref('');
+  const pendingDateFilter = ref('');
   // 是否有用户主动的筛选 (搜索/分类/标签/类型/日期)。由 TopBar watchEffect 写入,
   // 各 view 用它隐藏顶部 NoteInput 编辑区,避免筛选状态下还让用户新写笔记
   const isFiltering = ref(false);
@@ -729,6 +733,8 @@ export const useNotesStore = defineStore('notes', () => {
     searchQuery,
     filterCategory,
     filterType,
+    pendingTagFilter,
+    pendingDateFilter,
     isFiltering,
     fileCategory,
     fileDateFrom,

@@ -86,22 +86,32 @@ const heatmapData = computed(() => {
   return weeks;
 });
 
-// 移动端热力图: 52 周挤窄屏 cell 太小看不清, 只显示最近 13 周 (约 3 个月, cell 明显变大). 桌面仍全年.
-const HEATMAP_MOBILE_WEEKS = 13;
+// 移动端热力图: 列数跟容器宽自适应 (cell 固定 ~22px + gap 4px, 屏越宽显示越多周), 竖向仍 7 天/周. 桌面仍全年.
+const HEATMAP_CELL_PX = 22;
+const HEATMAP_GAP_PX = 4;
 const isNarrow = ref(false);
-function updateNarrow() { isNarrow.value = window.innerWidth < 768; }
-const displayWeeks = computed(() => isNarrow.value ? heatmapData.value.slice(-HEATMAP_MOBILE_WEEKS) : heatmapData.value);
+const heatmapGridEl = ref<HTMLElement>();
+const heatmapCols = ref(13);
+function updateHeatmapCols() {
+  if (!isNarrow.value) return;
+  const w = heatmapGridEl.value?.clientWidth || 0;
+  if (w > 0) heatmapCols.value = Math.max(7, Math.floor((w + HEATMAP_GAP_PX) / (HEATMAP_CELL_PX + HEATMAP_GAP_PX)));
+}
+function updateNarrow() { isNarrow.value = window.innerWidth < 768; updateHeatmapCols(); }
+// 移动端 gap 用 px (间距明显不随容器缩); 桌面保持 0.3cqw (52 列等比)
+const heatmapGap = computed(() => isNarrow.value ? `${HEATMAP_GAP_PX}px` : '0.3cqw');
+const displayWeeks = computed(() => isNarrow.value ? heatmapData.value.slice(-heatmapCols.value) : heatmapData.value);
 
 // 热力图 cell hover tooltip(fixed + Teleport,Teleport 到 body 跨过祖先容器)
 type TooltipPart = { label: string; count: number };
 const tooltip = ref<{ visible: boolean; date: string; parts: TooltipPart[]; top: string; left: string }>({
   visible: false, date: '', parts: [], top: '0px', left: '0px',
 });
-function onCellEnter(e: MouseEvent, cell: CellData) {
+function showTooltipEl(el: HTMLElement, cell: CellData) {
   // 无记录的天不弹 tooltip(空白 cell 没信息可显示)
   if (!cell.count) return;
   // unzoomRect: CSS zoom 下 tooltip 位置归一坐标系防错位
-  const rect = unzoomRect(e.currentTarget as HTMLElement);
+  const rect = unzoomRect(el);
   const parts: TooltipPart[] = [];
   if (cell.quinkCount) parts.push({ label: '灵感', count: cell.quinkCount });
   if (cell.noteCount) parts.push({ label: '笔记', count: cell.noteCount });
@@ -114,14 +124,74 @@ function onCellEnter(e: MouseEvent, cell: CellData) {
     left: `${rect.left + rect.width / 2}px`,
   };
 }
-function onCellLeave() { tooltip.value.visible = false; }
+function showTooltip(e: MouseEvent, cell: CellData) {
+  showTooltipEl(e.currentTarget as HTMLElement, cell);
+}
+// 移动端热力图: 按住/滑动 → 用触摸点找下方 cell (data-date) 显示 tooltip, 跟饼图同款 (grid 上 touch-none 防页面滚).
+// 纯 tap 已显示着的格子才跳转搜索; 滑动/第一次点只切换显示不跳转.
+const cellByDate = computed(() => {
+  const m = new Map<string, CellData>();
+  for (const week of displayWeeks.value) for (const cell of week) m.set(cell.date, cell);
+  return m;
+});
+function cellAtPoint(clientX: number, clientY: number): { el: HTMLElement; cell: CellData } | null {
+  const grid = heatmapGridEl.value;
+  const cols = displayWeeks.value.length;
+  if (!grid || !cols) return null;
+  // 用比例定位, 不靠 elementFromPoint (点到 4px 间隙会漏). rect 跟 clientX 同为 CSS zoom 后坐标,
+  // 相除得比例天然消掉 zoom. gap 均摊进比例 → 点到格子间隙也归入最近格子, 必中.
+  const rect = grid.getBoundingClientRect();
+  const fx = (clientX - rect.left) / rect.width;
+  const fy = (clientY - rect.top) / rect.height;
+  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return null;
+  const col = Math.min(cols - 1, Math.floor(fx * cols));
+  const row = Math.min(6, Math.floor(fy * 7));
+  const cell = displayWeeks.value[col]?.[row];
+  // grid 直接子 = 每周 flex-col (template v-for 不产 DOM), 其 children[row] = 当天 cell
+  const cellEl = (grid.children[col] as HTMLElement | undefined)?.children[row] as HTMLElement | undefined;
+  if (!cell || !cellEl) return null;
+  return { el: cellEl, cell };
+}
+let heatmapTouchMoved = false;
+let heatmapTapWasVisible = false;
+function onHeatmapTouchStart(e: TouchEvent) {
+  const t = e.touches[0]; if (!t) return;
+  heatmapTouchMoved = false;
+  const hit = cellAtPoint(t.clientX, t.clientY);
+  heatmapTapWasVisible = !!hit && tooltip.value.visible && tooltip.value.date === hit.cell.date;
+  if (hit?.cell.count) showTooltipEl(hit.el, hit.cell);
+}
+function onHeatmapTouchMove(e: TouchEvent) {
+  const t = e.touches[0]; if (!t) return;
+  heatmapTouchMoved = true;
+  const hit = cellAtPoint(t.clientX, t.clientY);
+  if (hit?.cell.count) showTooltipEl(hit.el, hit.cell);
+}
+function onHeatmapTouchEnd() {
+  if (!heatmapTouchMoved && heatmapTapWasVisible && tooltip.value.visible) {
+    const cell = cellByDate.value.get(tooltip.value.date);
+    if (cell) { tooltip.value.visible = false; store.pendingDateFilter = cell.date; router.push('/quink'); }
+  }
+}
+// 桌面 hover 显示; 移动端不用 hover (触屏 hover 会闪一下就没), 走 click 常驻
+function onCellEnter(e: MouseEvent, cell: CellData) {
+  if (isNarrow.value) return;
+  showTooltip(e, cell);
+}
+function onCellLeave() {
+  if (isNarrow.value) return;  // 移动端 tooltip 单击常驻, 不随 leave 隐藏
+  tooltip.value.visible = false;
+}
 
-// 点 cell: 有记录的天跳到灵感页并按该日筛选(query.date 由 Inspiration.vue 接收 + 派 quink-filter-date 给 TopBar 同步 chip)
+// 点 cell: 有记录的天跳到灵感页并按该日筛选. 走 store.pendingDateFilter 一次性传递 (不带 url query,
+// 避免日期进网址 → 清筛选后刷新重现). Inspiration onActivated 消费后派 quink-filter-date 给 TopBar 同步 chip
 // 空 cell 不响应,避免跳过去空列表
-function onCellClick(cell: CellData) {
+function onCellClick(_e: MouseEvent, cell: CellData) {
+  if (isNarrow.value) return;  // 移动端走 touch handlers (onHeatmapTouch*)
   if (!cell.count) return;
   tooltip.value.visible = false;
-  router.push({ path: '/quink', query: { date: cell.date } });
+  store.pendingDateFilter = cell.date;
+  router.push('/quink');
 }
 
 // 项目自有调色板(13 色,避免 10 色循环重复)
@@ -220,7 +290,7 @@ const pieOption = computed(() => {
         borderJoin: 'round',
       },
       label: {
-        show: true,
+        show: !isNarrow.value,
         position: 'outer',
         formatter: '{b}',
         color: dark ? 'rgba(255,255,255,0.85)' : '#1f2937',
@@ -239,6 +309,58 @@ const pieOption = computed(() => {
     }],
   };
 });
+
+// 移动端饼图: normal label 不显示(避免字挤没), 手动 touch 控制 —— 按住/滑动实时高亮跟随的块
+// (统一走 selectPie 先灭旧再亮新, 单一高亮无残留), 纯 tap 已选中的块才搜索. 桌面走 click 直接搜索.
+const selectedPieIdx = ref<number | null>(null);
+function selectPie(idx: number) {
+  if (selectedPieIdx.value === idx) return;
+  if (selectedPieIdx.value !== null) chartRef.value?.dispatchAction?.({ type: 'downplay', seriesIndex: 0, dataIndex: selectedPieIdx.value });
+  selectedPieIdx.value = idx;
+  chartRef.value?.dispatchAction?.({ type: 'highlight', seriesIndex: 0, dataIndex: idx });
+}
+// 触摸点相对圆心的角度 → 扇区 index. atan2(dx, -dy): 正上方(12点)为 0、顺时针 0~360,
+// 匹配 ECharts pie 默认 startAngle 90(top) + 顺时针; 按 categoryData 顺序累积占比定位.
+function pieIdxFromTouch(clientX: number, clientY: number, rect: DOMRect): number {
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  let ang = Math.atan2(clientX - cx, cy - clientY) * 180 / Math.PI;
+  if (ang < 0) ang += 360;
+  const total = categoryData.value.reduce((s: number, d: any) => s + d.value, 0) || 1;
+  let acc = 0;
+  for (let i = 0; i < categoryData.value.length; i++) {
+    acc += categoryData.value[i].value / total * 360;
+    if (ang < acc) return i;
+  }
+  return categoryData.value.length - 1;
+}
+let pieTouchMoved = false;
+let pieTapWasSelected = false;
+function onPieTouchStart(e: TouchEvent) {
+  const t = e.touches[0]; if (!t) return;
+  pieTouchMoved = false;
+  const idx = pieIdxFromTouch(t.clientX, t.clientY, (e.currentTarget as HTMLElement).getBoundingClientRect());
+  pieTapWasSelected = selectedPieIdx.value === idx;
+  selectPie(idx);
+}
+function onPieTouchMove(e: TouchEvent) {
+  const t = e.touches[0]; if (!t) return;
+  pieTouchMoved = true;
+  const idx = pieIdxFromTouch(t.clientX, t.clientY, (e.currentTarget as HTMLElement).getBoundingClientRect());
+  selectPie(idx);
+}
+function onPieTouchEnd() {
+  // 纯 tap(没滑动) 且点的是"之前已选中"的块 → 搜索; 否则只是选中显示 (第一次点亮)
+  if (!pieTouchMoved && pieTapWasSelected && selectedPieIdx.value !== null) {
+    const cat = categoryData.value[selectedPieIdx.value];
+    if (cat && isClickableCategory(cat)) onCategoryClick(cat.name);
+  }
+}
+function onPieClick(p: any) {
+  if (isNarrow.value) return;  // 移动端走 touch, click 跳过
+  if (p.componentType !== 'series' || !p.data) return;
+  if (isClickableCategory(p.data)) onCategoryClick(p.data.name);
+}
 
 // 双向联动: 饼图 hover → 同步 hoveredPieIdx;右侧 list hover → dispatchAction 触发饼图 emphasis
 function onChartMouseOver(params: any) {
@@ -332,23 +454,25 @@ onUnmounted(() => {
       <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6" style="container-type: inline-size">
         <h3 class="text-sm font-medium text-gray-800 mb-4">记录热力图</h3>
         <!-- 原 .overflow-x-auto 包裹层已删(grid minmax(0,1fr) 永不溢出,且其 overflow-x:auto 被隐式提升到 overflow-y:auto 导致 hover scale 触发滚动条) -->
-        <div class="grid" :style="`grid-template-columns: repeat(${displayWeeks.length}, minmax(0, 1fr)); gap: 0.3cqw`">
+        <div ref="heatmapGridEl" class="grid touch-none md:touch-auto"
+          @touchstart.passive="onHeatmapTouchStart" @touchmove.passive="onHeatmapTouchMove" @touchend="onHeatmapTouchEnd"
+          :style="`grid-template-columns: repeat(${displayWeeks.length}, minmax(0, 1fr)); gap: ${heatmapGap}`">
           <template v-for="(week, wi) in displayWeeks" :key="wi">
-            <div class="flex flex-col" style="gap: 0.3cqw">
+            <div class="flex flex-col" :style="`gap: ${heatmapGap}`">
               <div v-for="cell in week" :key="cell.date"
                 class="aspect-square heatmap-cell"
                 :class="{ 'heatmap-cell-empty': !cell.count }"
                 :style="{ background: cellOpacity(cell.count) || 'var(--heatmap-empty, #f1f5f9)', borderRadius: '25%' }"
                 @mouseenter="onCellEnter($event, cell)"
                 @mouseleave="onCellLeave()"
-                @click="onCellClick(cell)" />
+                @click="onCellClick($event, cell)" />
             </div>
           </template>
         </div>
         <!-- 图例用跟热力图相同的 grid 模板(52 列 + 0.3cqw gap),前 6 列填内容,剩余空:
              少=col1、4 色块=col2-5、多=col6,严格跟热力图前 6 列对齐 -->
         <div class="grid mt-3 text-gray-400"
-          :style="`grid-template-columns: repeat(${displayWeeks.length}, minmax(0, 1fr)); gap: 0.3cqw; font-size: max(9px, 1cqw)`">
+          :style="`grid-template-columns: repeat(${displayWeeks.length}, minmax(0, 1fr)); gap: ${heatmapGap}; font-size: max(9px, 1cqw)`">
           <div class="flex items-center justify-center">少</div>
           <div class="bg-gray-100" style="aspect-ratio: 1; border-radius: 25%"></div>
           <div style="aspect-ratio: 1; border-radius: 25%; background: var(--heatmap-low)"></div>
@@ -364,9 +488,10 @@ onUnmounted(() => {
         <!-- justify-center: 整体居中(避免大屏拉伸);gap-y 给 hover scale 1.06 留缓冲不让相邻 item 撞 -->
         <div v-if="categoryData.length" class="flex flex-col md:flex-row items-center gap-4 md:gap-8 justify-center">
           <VChart ref="chartRef" :option="pieOption" autoresize
-            class="shrink-0 w-full max-w-[360px] h-[300px] md:w-[440px] md:max-w-none md:h-[380px]"
+            class="shrink-0 w-full max-w-[360px] h-[300px] md:w-[440px] md:max-w-none md:h-[380px] touch-none md:touch-auto"
             @mouseover="onChartMouseOver" @mouseout="onChartMouseOut"
-            @click="(p: any) => p.componentType === 'series' && p.data && isClickableCategory(p.data) && onCategoryClick(p.data.name)" />
+            @touchstart.passive="onPieTouchStart" @touchmove.passive="onPieTouchMove" @touchend="onPieTouchEnd"
+            @click="onPieClick" />
           <!-- 2 列网格;折叠态(Top 10)完全展开不滚动;展开"其他"显示全部时加 max-h + 滚动,卡片高度稳定;px-2 给 hover scale 1.06 留水平缓冲避免被 overflow 裁 -->
           <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 w-full max-w-[320px] md:w-[320px] py-2 px-2"
             :class="{ 'max-h-[380px] overflow-y-auto scrollbar-hide': showAllCategories }">

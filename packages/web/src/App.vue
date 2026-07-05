@@ -202,14 +202,8 @@ function friendlyAttachmentError(err: string | undefined, filename: string): str
 function applyUserPreferences(user: any) {
   if (!user) return;
   const prefs = user.preferences || {};
-  // 服务端可能返回不完整 preferences（慢启动 / 数据迁移等边缘 case），
-  // hard fallback 'blueberry' / 16 会覆盖 localStorage 里的正确值 → 用户感受"变默认"。
-  // 只在拿到明确值时才覆盖，缺失时保留 inline script 已经应用的本地缓存值。
-  if (prefs.theme) {
-    document.documentElement.setAttribute('data-theme', prefs.theme);
-    localStorage.setItem('quink_theme', prefs.theme);
-  }
-  applyZoomLevel(prefs.zoomLevel || 100);
+  // theme / zoomLevel 已改为设备本地 (localStorage 不跟账号): onMounted 启动时已从 localStorage 应用,
+  // 这里不再从账号 prefs 覆盖 (每台设备独立记自己的比例/主题).
   // 同步排序偏好到 notesStore (放 App.vue 全局加载点而非只放 Settings: Settings 是路由进去才 mount,
   // 用户启动 app 直接进 Inspiration 时 store.sortBy 必须已是用户偏好, 否则首次 fetchNotes 用默认 'created'
   // 跟用户设定的 'updated' 不一致). 缺失字段不覆盖 (保留 store 默认 'created').
@@ -262,6 +256,11 @@ const { open: openImagePreview } = useImagePreview();
 
 onMounted(async () => {
   initAudioBubbleHandler();
+  // 显示比例 + 主题: 设备本地 (localStorage 不跟账号) → 启动即应用, 不等 fetchMe、不受未登录 return 影响.
+  // inline script 已即时应用防闪, 这里 applyZoomLevel 做完整应用 (Electron syncZoom + setAppHeight 重算).
+  const localTheme = localStorage.getItem('quink_theme');
+  if (localTheme) document.documentElement.setAttribute('data-theme', localTheme);
+  applyZoomLevel(parseInt(localStorage.getItem('quink_zoom_level') || '') || 100);
   // 把 localStorage 中存的下载目录推给 main, will-download 用它. 没设过的话 main 默认 ~/Downloads
   try {
     const dlDir = localStorage.getItem('quink_download_dir');

@@ -40,7 +40,9 @@ async function load() {
 }
 
 function filterByTag(tag: string) {
-  router.push({ path: '/quink', query: { tag } });
+  // 走 store 一次性传递, 不带 url query (标签不进网址, 清筛选后刷新不会重现)
+  store.pendingTagFilter = tag;
+  router.push('/quink');
 }
 
 async function renameTag() {

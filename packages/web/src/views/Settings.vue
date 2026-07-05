@@ -513,11 +513,16 @@ onMounted(async () => {
     const userPrefs = auth.user.preferences || {};
     // 白名单：只把 prefs 已声明的字段从 userPrefs 拷过来；xfyun 嵌套对象单独合并避免覆盖默认结构
     for (const k of Object.keys(prefs) as Array<keyof typeof prefs>) {
+      // theme / zoomLevel 设备本地, 从 localStorage 读不从后端 (下面单独设)
+      if (k === 'theme' || k === 'zoomLevel') continue;
       const v = (userPrefs as any)[k];
       if (v === undefined) continue;
       if (k === 'xfyun') Object.assign(prefs.xfyun, v);
       else (prefs as any)[k] = v;
     }
+    // theme / zoomLevel 设备本地: 从 localStorage 读 (每台设备独立记, 不跟账号)
+    prefs.theme = localStorage.getItem('quink_theme') || 'blueberry';
+    prefs.zoomLevel = parseInt(localStorage.getItem('quink_zoom_level') || '') || 100;
     if (userPrefs.shortcuts) {
       shortcuts.value = { ...shortcuts.value, ...userPrefs.shortcuts };
     }
@@ -657,8 +662,10 @@ function cancelRetentionChange() {
 // 拼一份完整 preferences：保留 userPrefs 中未托管的字段（aiBindings、shortcuts 等），prefs 顶层覆盖之
 // 同时清理老 fontSize 字段 (zoom 改造后 prefs.zoomLevel 是真值, 防止 buildPrefs 把老 fontSize 又带回 DB)
 function buildPrefs() {
-  const { fontSize: _legacy, ...rest } = (auth.user?.preferences || {}) as any;
-  return { ...rest, ...prefs };
+  // theme / zoomLevel 是设备本地偏好 (localStorage 不跟账号), 从 rest 跟 prefs 都摘掉, 不写进后端 preferences
+  const { fontSize: _legacy, theme: _t, zoomLevel: _z, ...rest } = (auth.user?.preferences || {}) as any;
+  const { theme: _t2, zoomLevel: _z2, ...prefsRest } = prefs;
+  return { ...rest, ...prefsRest };
 }
 
 async function savePreferences(silent = false) {
