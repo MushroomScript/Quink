@@ -91,6 +91,8 @@ export interface Note {
   userId?: string;
   content: string;
   summary: string | null;
+  // 用户主动删除摘要后 = true, autoProcess 不再自动回填 (蘑菇 2026-07-06). 手动写 / AI 生成 → 复位 false
+  summaryLocked?: boolean;
   category: string | null;
   tags: string[];
   // 命名约定: quink=灵感, note=笔记, todo=待办. link 类型已废弃删

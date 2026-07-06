@@ -701,7 +701,10 @@ function clearContent() {
 // ── Tags ──
 function addTag() {
   const t = tagInput.value.trim();
-  if (t && !tags.value.includes(t)) tags.value.push(t);
+  if (!t) return;
+  // 已存在: 提示 + 不关弹窗让用户改输入 (蘑菇 2026-07-06)
+  if (tags.value.includes(t)) { toast.show(`标签 #${t} 已存在`, 'default'); tagInput.value = ''; return; }
+  tags.value.push(t);
   tagInput.value = '';
   showTagInput.value = false;
 }

@@ -31,6 +31,7 @@ sqlite.exec(`
     user_id TEXT NOT NULL REFERENCES users(id),
     content TEXT NOT NULL,
     summary TEXT,
+    summary_locked INTEGER NOT NULL DEFAULT 0,
     category TEXT,
     tags TEXT DEFAULT '[]',
     type TEXT NOT NULL DEFAULT 'quink',
@@ -262,6 +263,8 @@ sqlite.exec(`
 // Migrate: notes.todo_remind_sent_at + todo_remind_rrule (提醒功能, 复用 todoDue 作触发时间)
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN todo_remind_sent_at TEXT'); } catch {}
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN todo_remind_rrule TEXT'); } catch {}
+// Migrate: notes.summary_locked (蘑菇 2026-07-06 手动删摘要不让 AI 自动回填)
+try { sqlite.exec('ALTER TABLE notes ADD COLUMN summary_locked INTEGER NOT NULL DEFAULT 0'); } catch {}
 // Migrate: files.folder_id (资源页文件夹: null = 根目录, 非 null = 在指定 folders.id 下)
 try { sqlite.exec('ALTER TABLE files ADD COLUMN folder_id TEXT'); } catch {}
 

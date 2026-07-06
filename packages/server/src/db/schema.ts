@@ -20,6 +20,8 @@ export const notes = sqliteTable('notes', {
   // 全拼 + 首字母拼接串(toPinyinSearchable 生成),让搜索框支持拼音输入"zb/zhoubao"命中"周报"
   contentPinyin: text('content_pinyin'),
   summary: text('summary'),
+  // 用户主动删除摘要后 = true, autoProcess 不再自动回填 (蘑菇 2026-07-06: 删了就是不想要). 手动写 / AI 生成 → 复位 false
+  summaryLocked: integer('summary_locked', { mode: 'boolean' }).notNull().default(false),
   category: text('category'), // e.g. "编程/经验记录"
   tags: text('tags', { mode: 'json' }).$type<string[]>().default([]),
   // 命名重整: type 字段值重新对齐 UI. 历史 quirk 已修正:

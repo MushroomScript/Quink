@@ -80,9 +80,13 @@ async function saveSummaryEdit() {
   // 跟当前值一样, 不发请求 (skipTimestamp 但仍会走版本乐观锁, 无意义)
   if (trimmed === (note.value.summary || '')) { summaryEditing.value = false; return; }
   try {
-    // skipTimestamp 让 updatedAt 不动 (跟改 editPermission 等元数据一致 - 摘要属于附加信息)
-    await store.updateNote(note.value.id, { summary: trimmed, version: note.value.version, skipTimestamp: true } as any);
-    if (note.value) { note.value.summary = trimmed; if ((note.value as any).version !== undefined) (note.value as any).version += 1; }
+    // 用户手动填了摘要 → 复位 summaryLocked=false (说明想要摘要); skipTimestamp 让 updatedAt 不动
+    await store.updateNote(note.value.id, { summary: trimmed, summaryLocked: false, version: note.value.version, skipTimestamp: true } as any);
+    if (note.value) {
+      note.value.summary = trimmed;
+      (note.value as any).summaryLocked = false;
+      if ((note.value as any).version !== undefined) (note.value as any).version += 1;
+    }
     summaryEditing.value = false;
   } catch (err: any) {
     toast.show(err?.message || '保存失败', 'error');
@@ -92,10 +96,13 @@ async function deleteSummary() {
   if (!note.value) return;
   summaryConfirmDelete.value = false;
   try {
-    // '' 空字符串: 后端 z.string().max(2000).optional() 接受, 存进 DB 空串, NoteCard/Detail v-if 判 falsy 隐藏.
-    // 后续 auto-process 时 !fresh.summary 判 true, AI 可能重新填 (蘑菇拍板接受这个行为, 不加 summary_locked 字段)
-    await store.updateNote(note.value.id, { summary: '', version: note.value.version, skipTimestamp: true } as any);
-    if (note.value) { note.value.summary = ''; if ((note.value as any).version !== undefined) (note.value as any).version += 1; }
+    // summaryLocked=true 阻止 AI 后续 autoProcess 自动回填 (蘑菇 2026-07-06: 删了就不想要). 手动写 / 点 AI 生成 → 复位
+    await store.updateNote(note.value.id, { summary: '', summaryLocked: true, version: note.value.version, skipTimestamp: true } as any);
+    if (note.value) {
+      note.value.summary = '';
+      (note.value as any).summaryLocked = true;
+      if ((note.value as any).version !== undefined) (note.value as any).version += 1;
+    }
   } catch (err: any) {
     toast.show(err?.message || '删除失败', 'error');
   }
@@ -104,8 +111,12 @@ async function regenerateSummary() {
   if (!note.value || summaryRegenerating.value) return;
   summaryRegenerating.value = true;
   try {
+    // 后端 regenerate endpoint 已同时清 summaryLocked=false, 前端本地也 mutate 保持一致
     const res = await api.regenerateNoteSummary(note.value.id);
-    if (note.value) note.value.summary = res.data.summary;
+    if (note.value) {
+      note.value.summary = res.data.summary;
+      (note.value as any).summaryLocked = false;
+    }
   } catch (err: any) {
     toast.show(err?.message || 'AI 生成失败', 'error');
   } finally {
@@ -170,7 +181,8 @@ async function addTag() {
   const t = addTagInput.value.trim();
   if (!t || !note.value) return;
   const cur = note.value.tags || [];
-  if (cur.includes(t)) { addTagInput.value = ''; addTagOpen.value = false; return; } // 已存在, 静默关掉
+  // 已存在: 提示 + 不关弹窗让用户改输入 (蘑菇 2026-07-06: 之前静默用户以为没生效)
+  if (cur.includes(t)) { toast.show(`标签 #${t} 已存在`, 'default'); addTagInput.value = ''; return; }
   await persistNoteField('tags', [...cur, t]);
   addTagInput.value = '';
   addTagOpen.value = false;
@@ -979,13 +991,13 @@ onUnmounted(() => {
               </button>
             </span>
           </span>
-          <!-- 移动端串排常驻按钮 (md: 断点上隐藏) -->
-          <span v-if="canEditMeta" class="md:hidden inline-flex items-center gap-1 ml-1">
-            <button @click="startRenameTag(tag)" class="text-gray-400 hover:text-primary" title="重命名标签">
-              <PhPencilSimple size="0.625rem" weight="fill" />
+          <!-- 移动端串排常驻按钮 (md: 断点上隐藏). p-1.5 让触摸区 ~28px 更好点 (蘑菇 2026-07-06) -->
+          <span v-if="canEditMeta" class="md:hidden inline-flex items-center gap-0.5 ml-1">
+            <button @click="startRenameTag(tag)" class="p-1.5 text-gray-400 hover:text-primary" title="重命名标签">
+              <PhPencilSimple size="0.75rem" weight="fill" />
             </button>
-            <button @click="removeTag(tag)" class="text-gray-400 hover:text-red-500" title="从本笔记摘掉">
-              <PhX size="0.625rem" weight="bold" />
+            <button @click="removeTag(tag)" class="p-1.5 text-gray-400 hover:text-red-500" title="从本笔记摘掉">
+              <PhX size="0.75rem" weight="bold" />
             </button>
           </span>
         </span>

@@ -127,12 +127,12 @@ watch(() => visibleTags.value.length, () => snapshotCards(), { flush: 'sync' });
               <PhXCircle size="0.75rem" weight="fill" />
             </button>
           </span>
-          <!-- 移动端常驻按钮 (md: 断点上隐藏) -->
+          <!-- 移动端常驻按钮 (md: 断点上隐藏). p-2 让触摸区 ~32px 更好点 (蘑菇 2026-07-06) -->
           <span class="md:hidden inline-flex items-center gap-0.5">
-            <button @click.stop="editingTag = tag; newName = tag" class="p-1 rounded-full hover:bg-white/50" title="重命名">
+            <button @click.stop="editingTag = tag; newName = tag" class="p-2 rounded-full hover:bg-white/50" title="重命名">
               <PhPencilSimple size="0.75rem" weight="fill" />
             </button>
-            <button @click.stop="confirmDeleteTag = tag" class="p-1 rounded-full hover:bg-red-100 hover:text-red-500" title="删除">
+            <button @click.stop="confirmDeleteTag = tag" class="p-2 rounded-full hover:bg-red-100 hover:text-red-500" title="删除">
               <PhXCircle size="0.75rem" weight="fill" />
             </button>
           </span>

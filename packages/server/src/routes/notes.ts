@@ -52,6 +52,8 @@ const createNoteSchema = z.object({
 const updateNoteSchema = z.object({
   content: z.string().min(1).max(NOTE_CONTENT_MAX).optional(),
   summary: z.string().max(2000).optional(),
+  // 蘑菇 2026-07-06: 手动删除摘要 → 传 true 阻止 AI 自动回填. 手动填内容 / 触发 regenerate → 前端传 false 复位
+  summaryLocked: z.boolean().optional(),
   // null = 用户改回"自动" (清空 category 让后续 AI 可重新分类); undefined = 不动 category 字段; 字符串 = 手动选定.
   // refine 同 createNoteSchema 拒字符串 "未分类" (系统保留名)
   category: z.string().max(200).nullable().optional().refine((v) => v !== '未分类', { message: '"未分类" 是系统保留名, 笔记 category 字段不能设成此字符串 (用 null 表示未分类)' }),
@@ -1345,8 +1347,9 @@ app.post('/:id/summary/regenerate', async (c) => {
   if (!note) return c.json({ error: '笔记不存在或无编辑权限' }, 404);
   const newSummary = await autoSummary(userId, note.content);
   if (!newSummary) return c.json({ error: 'AI 未返回摘要 (可能笔记太短或未配置 AI)' }, 400);
+  // AI 生成 = 用户想要摘要, 清除 summaryLocked 让后续 autoProcess 也能回填 (蘑菇 2026-07-06)
   await db.update(schema.notes)
-    .set({ summary: newSummary, updatedAt: dayjs().toISOString() })
+    .set({ summary: newSummary, summaryLocked: false, updatedAt: dayjs().toISOString() })
     .where(eq(schema.notes.id, id));
   // 多设备 / 共享群同步: 复用现有 note-updated 事件, 其他设备 refreshSingleNote 会拉最新 summary
   publish(userId, 'note-updated', { noteId: id }, _ocid);
@@ -1904,6 +1907,7 @@ app.patch('/:id', async (c) => {
     updates.contentPinyin = toPinyinSearchable(data.content);
   }
   if (data.summary !== undefined) updates.summary = data.summary;
+  if (data.summaryLocked !== undefined) updates.summaryLocked = data.summaryLocked;
   if (data.category !== undefined) updates.category = data.category;
   if (data.tags !== undefined) updates.tags = data.tags;
   if (data.type !== undefined) updates.type = data.type;
@@ -2335,7 +2339,8 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
     // 不再"AI 返回新分类就自动 insert". autoClassify 已经在内部用 {categories} 限定 + 校验,
     // 返回值要么在 categories 表里要么是 null. category 表只在注册 seed / 用户手动添加时增长.
     if (category && !fresh.category) updates.category = category;
-    if (summary && !fresh.summary) updates.summary = summary;
+    // summaryLocked: 用户主动删除过摘要 → autoProcess 不再回填 (蘑菇 2026-07-06)
+    if (summary && !fresh.summary && !fresh.summaryLocked) updates.summary = summary;
     // 精简结果直接覆盖 content (float「AI整理」语义就是精简后存). content 变了搜索索引 contentPinyin 也要跟着更新.
     if (simplified) {
       updates.content = simplified;
