@@ -1347,14 +1347,16 @@ app.post('/:id/summary/regenerate', async (c) => {
   if (!note) return c.json({ error: '笔记不存在或无编辑权限' }, 404);
   const newSummary = await autoSummary(userId, note.content);
   if (!newSummary) return c.json({ error: 'AI 未返回摘要 (可能笔记太短或未配置 AI)' }, 400);
-  // AI 生成 = 用户想要摘要, 清除 summaryLocked 让后续 autoProcess 也能回填 (蘑菇 2026-07-06)
+  // AI 生成 = 用户想要摘要, 清除 summaryLocked 让后续 autoProcess 也能回填 (蘑菇 2026-07-06).
+  // version+1 递增: regenerate 后前端拿新 version 更新 note.value, 防随后"编辑内容"时后端拒 version_conflict.
+  const newVersion = note.version + 1;
   await db.update(schema.notes)
-    .set({ summary: newSummary, summaryLocked: false, updatedAt: dayjs().toISOString() })
+    .set({ summary: newSummary, summaryLocked: false, version: newVersion, updatedAt: dayjs().toISOString() })
     .where(eq(schema.notes.id, id));
   // 多设备 / 共享群同步: 复用现有 note-updated 事件, 其他设备 refreshSingleNote 会拉最新 summary
   publish(userId, 'note-updated', { noteId: id }, _ocid);
   await logAudit(c, 'note.summary.regenerate', 'note', id, { length: newSummary.length });
-  return c.json({ data: { summary: newSummary } });
+  return c.json({ data: { summary: newSummary, version: newVersion } });
 });
 
 const createCommentSchema = z.object({

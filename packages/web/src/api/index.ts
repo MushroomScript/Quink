@@ -440,9 +440,9 @@ export const api = {
   },
 
   // 手动触发 AI 重新生成摘要 (跟 autoProcess 里 auto_summary 同一路 config/prompt). 权限跟改正文一致.
-  // 返回值 { summary } 直接覆盖本地; 其他设备走 SSE note-updated 拉最新版本
+  // 返回 { summary, version } 让前端 mutate note.value.version 防随后编辑内容冲突 (蘑菇 2026-07-06)
   regenerateNoteSummary(id: string) {
-    return request<{ data: { summary: string } }>(`/notes/${id}/summary/regenerate`, {
+    return request<{ data: { summary: string; version: number } }>(`/notes/${id}/summary/regenerate`, {
       method: 'POST',
     });
   },

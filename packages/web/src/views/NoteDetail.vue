@@ -80,12 +80,13 @@ async function saveSummaryEdit() {
   // 跟当前值一样, 不发请求 (skipTimestamp 但仍会走版本乐观锁, 无意义)
   if (trimmed === (note.value.summary || '')) { summaryEditing.value = false; return; }
   try {
-    // 用户手动填了摘要 → 复位 summaryLocked=false (说明想要摘要); skipTimestamp 让 updatedAt 不动
-    await store.updateNote(note.value.id, { summary: trimmed, summaryLocked: false, version: note.value.version, skipTimestamp: true } as any);
+    // 用户手动填了摘要 → 复位 summaryLocked=false (说明想要摘要); skipTimestamp 让 updatedAt 不动.
+    // 版本用 store.updateNote 返回的权威值 (蘑菇 2026-07-06: 本地 +=1 后再"编辑内容"报冲突 - 用 res.data.version 保证跟后端一致)
+    const updated: any = await store.updateNote(note.value.id, { summary: trimmed, summaryLocked: false, version: note.value.version, skipTimestamp: true } as any);
     if (note.value) {
       note.value.summary = trimmed;
       (note.value as any).summaryLocked = false;
-      if ((note.value as any).version !== undefined) (note.value as any).version += 1;
+      if (updated?.version !== undefined) (note.value as any).version = updated.version;
     }
     summaryEditing.value = false;
   } catch (err: any) {
@@ -97,11 +98,11 @@ async function deleteSummary() {
   summaryConfirmDelete.value = false;
   try {
     // summaryLocked=true 阻止 AI 后续 autoProcess 自动回填 (蘑菇 2026-07-06: 删了就不想要). 手动写 / 点 AI 生成 → 复位
-    await store.updateNote(note.value.id, { summary: '', summaryLocked: true, version: note.value.version, skipTimestamp: true } as any);
+    const updated: any = await store.updateNote(note.value.id, { summary: '', summaryLocked: true, version: note.value.version, skipTimestamp: true } as any);
     if (note.value) {
       note.value.summary = '';
       (note.value as any).summaryLocked = true;
-      if ((note.value as any).version !== undefined) (note.value as any).version += 1;
+      if (updated?.version !== undefined) (note.value as any).version = updated.version;
     }
   } catch (err: any) {
     toast.show(err?.message || '删除失败', 'error');
@@ -111,11 +112,12 @@ async function regenerateSummary() {
   if (!note.value || summaryRegenerating.value) return;
   summaryRegenerating.value = true;
   try {
-    // 后端 regenerate endpoint 已同时清 summaryLocked=false, 前端本地也 mutate 保持一致
+    // 后端 regenerate endpoint 走独立 DB update 会自增 version, 返回新 version 让前端同步 (蘑菇 2026-07-06: 防"编辑内容"冲突)
     const res = await api.regenerateNoteSummary(note.value.id);
     if (note.value) {
       note.value.summary = res.data.summary;
       (note.value as any).summaryLocked = false;
+      if (res.data.version !== undefined) (note.value as any).version = res.data.version;
     }
   } catch (err: any) {
     toast.show(err?.message || 'AI 生成失败', 'error');
@@ -168,10 +170,11 @@ async function saveRenameTag() {
 async function persistNoteField(field: 'tags' | 'category', value: any) {
   if (!note.value) return;
   try {
-    await store.updateNote(note.value.id, { [field]: value, version: note.value.version, skipTimestamp: true } as any);
+    const updated: any = await store.updateNote(note.value.id, { [field]: value, version: note.value.version, skipTimestamp: true } as any);
     if (note.value) {
       (note.value as any)[field] = value;
-      if ((note.value as any).version !== undefined) (note.value as any).version += 1;
+      // version 用 store.updateNote 返回的权威值防冲突 (蘑菇 2026-07-06)
+      if (updated?.version !== undefined) (note.value as any).version = updated.version;
     }
   } catch (err: any) {
     toast.show(err?.message || '保存失败', 'error');
