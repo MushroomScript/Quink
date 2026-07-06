@@ -964,7 +964,7 @@ onUnmounted(() => {
           @click.self="summaryConfirmDelete = false">
           <div class="bg-white rounded-xl p-5 max-w-sm w-[85%] shadow-xl">
             <h3 class="text-sm font-medium mb-2 text-gray-800">删除摘要?</h3>
-            <p class="text-xs text-gray-500 mb-4">删除后本条笔记不再显示摘要 (下次编辑正文时 AI 仍可能重新生成一条).</p>
+            <p class="text-xs text-gray-500 mb-4">删除后本条笔记不再显示摘要, AI 也不会自动重新生成. 想要摘要可点右上"AI 生成"按钮.</p>
             <div class="flex justify-end gap-2">
               <button @click="summaryConfirmDelete = false"
                 class="px-3 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">取消</button>
