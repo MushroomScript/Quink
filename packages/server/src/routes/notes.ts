@@ -1334,6 +1334,26 @@ app.get('/:id/reactions', async (c) => {
   return c.json({ data: summary });
 });
 
+// POST /api/notes/:id/summary/regenerate — 手动触发 AI 重生成摘要 (跟 autoProcess 里的 autoSummary 同一路 prompt/config).
+// 权限: 'write' (跟改正文一致 - 有 canWrite 就能改). 返回新 summary. 不需要 lockToken (单字段单点操作,
+// 不像 updateNote 那样涉及多字段协作冲突; 且 AI 生成期间用户手动改 summary 撞车属极小概率, 由前端 SSE 触发 refetch 兜底).
+app.post('/:id/summary/regenerate', async (c) => {
+  const userId = c.get('userId');
+  const _ocid = c.req.header('X-Quink-Client-Id');
+  const { id } = c.req.param();
+  const note = await getNoteForAccess(userId, id, 'write');
+  if (!note) return c.json({ error: '笔记不存在或无编辑权限' }, 404);
+  const newSummary = await autoSummary(userId, note.content);
+  if (!newSummary) return c.json({ error: 'AI 未返回摘要 (可能笔记太短或未配置 AI)' }, 400);
+  await db.update(schema.notes)
+    .set({ summary: newSummary, updatedAt: dayjs().toISOString() })
+    .where(eq(schema.notes.id, id));
+  // 多设备 / 共享群同步: 复用现有 note-updated 事件, 其他设备 refreshSingleNote 会拉最新 summary
+  publish(userId, 'note-updated', { noteId: id }, _ocid);
+  await logAudit(c, 'note.summary.regenerate', 'note', id, { length: newSummary.length });
+  return c.json({ data: { summary: newSummary } });
+});
+
 const createCommentSchema = z.object({
   content: z.string().trim().min(1).max(COMMENT_MAX_LEN),
   parentId: z.string().nullable().optional(),

@@ -2,6 +2,7 @@
 import { ref, withDefaults } from 'vue';
 import { useNotesStore } from '@/stores/notes';
 import VisibilityChip from './VisibilityChip.vue';
+import CategoryPicker from './CategoryPicker.vue';
 
 // 跟 NoteInput 对齐: 主界面编辑器 type 强制走 view 对应的 defaultType,
 // 避免在 /notes / /todos 编辑器写的内容默认变成灵感 (D1 错配)。
@@ -18,16 +19,19 @@ const visibilityModel = ref<{ visibility: 'private' | 'shared'; sharedGroupIds: 
   visibility: 'private',
   sharedGroupIds: [],
 });
+// 分类 chip: null = 走 AI 自动分类 (跟 RichEditor initialCategory 同语义). 用户手动选后透传给 store.createNote 保护不被 AI 覆盖.
+const categoryModel = ref<string | null>(null);
 
 async function submit() {
   const text = content.value.trim();
   if (!text || submitting.value) return;
   submitting.value = true;
   try {
-    const note = await store.createNote(text, props.defaultType, undefined, visibilityModel.value.visibility, visibilityModel.value.sharedGroupIds);
+    const note = await store.createNote(text, props.defaultType, undefined, visibilityModel.value.visibility, visibilityModel.value.sharedGroupIds, categoryModel.value);
     content.value = '';
-    // 发布后 visibility 重置成 private (跟 RichEditor clearContent 同款), 防上次选的群残留下一条
+    // 发布后 visibility / category 重置成默认 (跟 RichEditor clearContent 同款), 防上次选的群/分类残留下一条
     visibilityModel.value = { visibility: 'private', sharedGroupIds: [] };
+    categoryModel.value = null;
     showToast.value = true;
     setTimeout(() => (showToast.value = false), 1500);
     // AI 异步打标签/分类/摘要, 后台轮询单条直到 aiProcessed=true 后 mutate 进本地 (不触发 rebuild)
@@ -46,6 +50,7 @@ async function submit() {
       @keydown.ctrl.enter="submit"
     />
     <div class="flex items-center justify-end gap-2 px-4 py-2 bg-gray-50 border-t border-gray-100">
+      <CategoryPicker v-model="categoryModel" compact />
       <VisibilityChip v-model="visibilityModel" compact />
       <button @click="submit" :disabled="!content.trim() || submitting"
         class="px-4 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-40 transition-colors"

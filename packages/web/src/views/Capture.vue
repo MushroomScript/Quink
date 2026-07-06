@@ -226,14 +226,14 @@ onUnmounted(() => {
 .capture-drag .vditor-toolbar {
   padding: 0.125rem 0.375rem !important;
 }
-.capture-drag .vditor-wrapper .vditor-toolbar__item button,
+.capture-drag .vditor-wrapper .vditor-toolbar__item > button,
 .capture-drag .vditor-wrapper .vditor-toolbar__item > span,
-.capture-drag .vditor-wrapper .vditor-toolbar__item [data-type="upload"] {
+.capture-drag .vditor-wrapper .vditor-toolbar__item > [data-type="upload"] {
   height: 1.75rem !important;
   width: 1.75rem !important;
 }
-.capture-drag .vditor-wrapper .vditor-toolbar__item button svg,
-.capture-drag .vditor-wrapper .vditor-toolbar__item [data-type="upload"] svg {
+.capture-drag .vditor-wrapper .vditor-toolbar__item > button svg,
+.capture-drag .vditor-wrapper .vditor-toolbar__item > [data-type="upload"] svg {
   height: 0.875rem !important;
   width: 0.875rem !important;
 }
@@ -249,9 +249,9 @@ onUnmounted(() => {
 .capture-drag .vditor-wrapper .vditor-toolbar__item {
   float: none !important;
 }
-.capture-drag .vditor-wrapper .vditor-toolbar__item button,
+.capture-drag .vditor-wrapper .vditor-toolbar__item > button,
 .capture-drag .vditor-wrapper .vditor-toolbar__item > span,
-.capture-drag .vditor-wrapper .vditor-toolbar__item [data-type="upload"] {
+.capture-drag .vditor-wrapper .vditor-toolbar__item > [data-type="upload"] {
   /* flex 居中后再固定下移 1px 微调视觉重心 */
   transform: translateY(1px) !important;
 }

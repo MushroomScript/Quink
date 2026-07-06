@@ -437,6 +437,14 @@ export const api = {
     });
   },
 
+  // 手动触发 AI 重新生成摘要 (跟 autoProcess 里 auto_summary 同一路 config/prompt). 权限跟改正文一致.
+  // 返回值 { summary } 直接覆盖本地; 其他设备走 SSE note-updated 拉最新版本
+  regenerateNoteSummary(id: string) {
+    return request<{ data: { summary: string } }>(`/notes/${id}/summary/regenerate`, {
+      method: 'POST',
+    });
+  },
+
   // 返回 sharedGroupIds (空数组 = private 笔记). 给 store.deleteNote 派 quink-group-notes-changed
   // 事件让操作者自己的 GroupDetail 重拉 (本地 ref 自管, 收不到自己的 SSE)
   // groupId 参数: admin 删别人共享笔记时从群组上下文传, 让后端写 deletedInGroupId 进群回收站

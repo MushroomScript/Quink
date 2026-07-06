@@ -293,7 +293,7 @@ html[data-electron] { --empty-state-offset: 84px; }  /* Electron 移动 (罕见)
 [data-theme="dark"] .vditor { --panel-background-color: #1e1e2a; --textarea-background-color: #1e1e2a; }
 [data-theme="dark"] .vditor-reset { color: #e2e8f0 !important; }
 [data-theme="dark"] .vditor-toolbar { background: rgba(255,255,255,0.03) !important; border-color: rgba(255,255,255,0.06) !important; }
-[data-theme="dark"] .vditor-toolbar__item button { color: #94a3b8; }
+[data-theme="dark"] .vditor-toolbar__item > button { color: #94a3b8; }
 /* Scrollbar dark */
 [data-theme="dark"] ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); }
 [data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
@@ -325,7 +325,8 @@ html[data-electron] { --empty-state-offset: 84px; }  /* Electron 移动 (罕见)
 .sep { width: 1px; height: 16px; background: #e2e8f0; margin: 0 4px; flex-shrink: 0; }
 .popup-input { padding: 4px 8px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 12px; outline: none; }
 .popup-input:focus { border-color: #60a5fa; }
-.popup-btn { padding: 4px 10px; background: rgb(var(--c-accent)); color: white; font-size: 12px; border: none; border-radius: 6px; cursor: var(--cur-pointer), pointer; }
+/* white-space:nowrap 防移动端 flex 空间紧时 button 文字被压成竖排 (蘑菇 2026-07-06 反馈) */
+.popup-btn { padding: 4px 10px; background: rgb(var(--c-accent)); color: white; font-size: 12px; border: none; border-radius: 6px; cursor: var(--cur-pointer), pointer; white-space: nowrap; }
 
 /* ── Note Content (Markdown rendered) ── */
 .note-content { font-size: 14px; line-height: 1.6; overflow-wrap: break-word; word-break: break-word; }
@@ -479,10 +480,23 @@ body.resources-dragging * {
 .editor-area-wrap {
   display: grid;
   grid-template-rows: 1fr;
+  /* 关键: 编辑区整体升到卡片流之上. Vditor headings/emoji 下拉面板会溢出到编辑器 wrapper 底部下方,
+     跟下面 masonry 卡片流的第一行卡片 (.bg-white rounded-2xl relative auto) 有像素重叠.
+     卡片是 position:relative + z:auto (在 painting order 里高于 static, 会盖住 wrapper 内 static 的溢出),
+     所以给 wrap 显式 z-index 让整个编辑区高过卡片. relative 触发 z-index 生效.
+     z:5 局部叠加不进全局 scale (低于所有 --z-* modal/overlay/sticky, 只与 masonry 卡片竞争) */
+  position: relative;
+  z-index: 5;
 }
 .editor-area-wrap > * {
-  overflow: hidden;
   min-height: 0;
+}
+/* overflow:hidden 只在动画过程需要 (grid 0fr 裁塌缩内容); 静止展开时用 visible,
+   否则会裁掉 Vditor headings/emoji 下拉面板溢出编辑器 wrapper 底部的部分
+   (典型: 标题下拉 6 项面板高 166px, 塞不进编辑器 wrapper, 六级标题被裁 - 蘑菇 2026-07-06 修) */
+.editor-area-enter-active > *,
+.editor-area-leave-active > * {
+  overflow: hidden;
 }
 .editor-area-enter-active,
 .editor-area-leave-active {

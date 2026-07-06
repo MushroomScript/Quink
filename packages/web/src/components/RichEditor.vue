@@ -31,7 +31,39 @@ import {
   PhRecord,
   PhArrowsOut,
   PhArrowsIn,
+  PhX,
 } from '@phosphor-icons/vue';
+
+// 常用 emoji 套装 (48 个) + 中文名映射 (给悬浮 tooltip 用).
+// Vditor 默认只 8 个 (👍 👎 😕 👀 ❤️ 🚀 😄 🎉), 蘑菇 2026-07-06 扩到 48. key 是 Vditor 面板 data-key
+// (英文名, 单独存 unicode 会被 CJK 输入法当组合键搅乱), value 是 emoji unicode.
+// 顺序按情绪 (笑/思考/负面) → 动作手势 → 符号 分类, 用户按面板浏览有节奏.
+const EMOJI_MAP: Record<string, string> = {
+  smile: '😀', laughing: '😄', joy: '😂', rofl: '🤣', sweat_smile: '😅',
+  slight_smile: '🙂', blush: '😊', innocent: '😇', heart_eyes: '😍', kiss: '😘',
+  wink: '😉', hug: '🤗', thinking: '🤔', neutral: '😐', no_mouth: '😶',
+  eye_roll: '🙄', smirk: '😏', unamused: '😒', pensive: '😔', worried: '😟',
+  confused: '😕', frown: '🙁', cry: '😢', sob: '😭', huff: '😤',
+  angry: '😠', rage: '😡', flushed: '😳', pleading: '🥺', scream: '😱',
+  sleep: '😴', eyes: '👀',
+  thumbs_up: '👍', thumbs_down: '👎', clap: '👏', pray: '🙏', muscle: '💪',
+  handshake: '🤝', ok_hand: '👌',
+  heart: '❤️', broken_heart: '💔', fire: '🔥', sparkles: '✨', tada: '🎉',
+  star: '⭐', check: '✅', cross: '❌', question: '❓', hundred: '💯',
+};
+const EMOJI_ZH: Record<string, string> = {
+  smile: '微笑', laughing: '大笑', joy: '笑哭', rofl: '笑翻', sweat_smile: '苦笑',
+  slight_smile: '浅笑', blush: '羞涩', innocent: '天使', heart_eyes: '花痴', kiss: '飞吻',
+  wink: '眨眼', hug: '抱抱', thinking: '思考', neutral: '无表情', no_mouth: '无语',
+  eye_roll: '翻白眼', smirk: '坏笑', unamused: '不爽', pensive: '沉思', worried: '担心',
+  confused: '困惑', frown: '不高兴', cry: '哭泣', sob: '大哭', huff: '生气',
+  angry: '愤怒', rage: '暴怒', flushed: '脸红', pleading: '求求了', scream: '惊恐',
+  sleep: '睡觉', eyes: '看',
+  thumbs_up: '赞', thumbs_down: '踩', clap: '鼓掌', pray: '祈祷', muscle: '加油',
+  handshake: '握手', ok_hand: 'OK',
+  heart: '爱心', broken_heart: '心碎', fire: '火', sparkles: '闪亮', tada: '庆祝',
+  star: '星星', check: '对', cross: '错', question: '问号', hundred: '满分',
+};
 
 const props = withDefaults(defineProps<{
   initialContent?: string;
@@ -136,19 +168,41 @@ const refResults = ref<any[]>([]);
 const refBtnEl = ref<HTMLElement>();
 const liveTextEl = ref<HTMLElement>();
 const tagBtnEl = ref<HTMLElement>();
+// popup input ref: v-if + Teleport 场景 HTML autofocus 属性不 fire (activeElement 保持在 Vditor PRE),
+// 用 watch + nextTick + .focus() 主动聚焦 (蘑菇 2026-07-06 反馈)
+const tagInputRef = ref<HTMLInputElement | null>(null);
+const refInputRef = ref<HTMLInputElement | null>(null);
+watch(showTagInput, (v) => { if (v) nextTick(() => tagInputRef.value?.focus()); });
+watch(showRefSearch, (v) => { if (v) nextTick(() => refInputRef.value?.focus()); });
 
 function getPopupPos(el: HTMLElement | undefined, width: number) {
   if (!el) return { display: 'none' };
-  const r = el.getBoundingClientRect();
+  // 移动端 (< 768px) 直接居中显示 (蘑菇 2026-07-06 反馈: 类似弹窗移动端一律居中).
+  // fixed left:50% top:50% + translate 是纯 CSS 位移, 不受 zoom / rect 影响, 天然稳.
+  if (window.innerWidth < 768) {
+    return {
+      position: 'fixed' as const,
+      top: '50%', left: '50%',
+      transform: 'translate(-50%, -50%)',
+      zIndex: 9999,
+      maxHeight: '80vh',
+    };
+  }
+  // 桌面: CSS zoom 下裸 getBoundingClientRect 是 zoom 后视觉坐标, 设进 fixed inline top/left px 会被 zoom 再乘一次 → 偏 (zoom-1)*100%.
+  // 用 unzoomRect + unzoomViewport 归一到 layout px, 让 fixed 元素渲染时 zoom 一次回到目标视觉位置. 详见 utils/zoom.ts + ZOOM.md.
+  const r = unzoomRect(el);
+  const { vw, vh } = unzoomViewport();
   const maxH = Math.max(r.top - 8, 100);
+  // popup 左对齐按钮向右展开 (蘑菇 2026-07-06 反馈: 之前 r.right - width 导致 popup 太靠左).
+  // 右边超屏 → 向左移让贴屏幕右边 8px 边距; 左边最少 8px 边距.
+  const rawLeft = r.left;
+  const left = Math.max(8, Math.min(rawLeft, vw - width - 8));
   return {
     position: 'fixed' as const,
-    bottom: `${window.innerHeight - r.top + 4}px`,
-    left: `${Math.max(r.right - width, 8)}px`,
+    bottom: `${vh - r.top + 4}px`,
+    left: `${left}px`,
     zIndex: 9999, // var(--z-overlay), JS inline 取不到 CSS var, 跟 scale 保持同档, 见根 Z-INDEX-SCALE.md
     maxHeight: `${maxH}px`,
-    display: 'flex',
-    flexDirection: 'column' as const,
   };
 }
 
@@ -359,15 +413,76 @@ function onEditorPaste(e: ClipboardEvent) {
   handleRichPasteWithImages(html);
 }
 
+// ── 列表项内粘贴多行纯文本 → 每行拆成独立列表项 ──
+// 问题: Vditor 粘贴纯文本走 Md2VditorIRDOM, 多行无空行文本在 markdown 里是"同段软换行",
+// 会全挤进当前一个 <li> (一个勾选框 / 一个列表项), 跟用户"一行一个待办"预期不符 (手动按 Enter 才逐项拆).
+// 解法: 光标在列表项内且粘贴多行纯文本时, 第一行 execCommand 接续当前项, 其余行按当前列表类型
+// (task / 有序 / 无序) 各拼 marker 走 insertMD 建新项. 富文本 (带 a/strong/img 等格式标签) 放行给 Vditor.
+function pasteFindListItem(node: Node | null): HTMLElement | null {
+  if (!node) return null;
+  const el = node.nodeType === 3 ? node.parentElement : (node as HTMLElement);
+  return el ? el.closest('li') : null;
+}
+// 剪贴板 html 是否"纯文本级": 只有 html/body/div/p/br/span 等结构包裹算纯文本 (记事本/终端/微信 常为空或仅结构标签),
+// 含 a/strong/img 等格式标签算富文本 → 放行 (富文本每行拆项需 html2md 保格式, 暂不做)
+function pasteIsPlainish(html: string): boolean {
+  if (!html) return true;
+  const cleaned = html
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<\/?(html|head|body|meta|span|div|p|br|o:p)[^>]*>/gi, '')
+    .replace(/&nbsp;/g, ' ')
+    .trim();
+  return !/<[a-z]/i.test(cleaned);
+}
+function onListPaste(e: ClipboardEvent) {
+  const textPlain = e.clipboardData?.getData('text/plain') || '';
+  if (!textPlain) return;
+  if (!pasteIsPlainish(e.clipboardData?.getData('text/html') || '')) return; // 富文本放行
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const li = pasteFindListItem(sel.getRangeAt(0).startContainer);
+  if (!li) return; // 不在列表项, 放行
+  const lines = textPlain.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '');
+  if (lines.length <= 1) return; // 单行 / 全空, 放行给 Vditor 默认
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  // 新项 marker: 有序 = `1. ` (Vditor insertMD 后自动重编号); 无序 / task = 当前 li 的 bullet (无 data-marker 属性则默认 `-`).
+  // 关键: 无序 / task 必须把当前 li + 父列表的 data-marker 也写成同一 bullet, 否则新项与当前项 marker 不同
+  // (典型: 点"任务列表"按钮建的空项 Vditor 默认 `*`, 我的新项 `-`), CommonMark 会当成两个独立列表 → 保存重载后列表分裂 + 多余空行.
+  const parent = li.parentElement;
+  let prefix: string;
+  if (parent?.tagName === 'OL') {
+    prefix = '1. ';
+  } else {
+    const dm = li.getAttribute('data-marker');
+    const bullet = dm && /^[-*+]$/.test(dm) ? dm : '-';
+    li.setAttribute('data-marker', bullet);
+    parent?.setAttribute('data-marker', bullet);
+    prefix = li.classList.contains('vditor-task') ? `${bullet} [ ] ` : `${bullet} `;
+  }
+  document.execCommand('insertText', false, lines[0]); // 第一行接续当前项 (有选中则替换选中)
+  vditor?.insertMD(lines.slice(1).map((l) => prefix + l).join('\n')); // 其余行各建独立新项
+}
+
 // 自定义 vditor toolbar tooltip: 默认 vditor tooltip 是按钮的 ::before/::after 伪元素
 // 被 App.vue main 的 overflow-y-auto 裁切(尤其飞向上方时)。改用 Teleport 到 body 的
 // 自定义 tooltip,固定定位 + z-index 最顶,脱离任何 overflow 控制,永远朝上显示完整
 const customTooltip = ref({ visible: false, text: '', top: 0, left: 0 });
 function onToolbarMouseOver(e: MouseEvent) {
-  const btn = (e.target as HTMLElement)?.closest?.('.vditor-tooltipped') as HTMLElement | null;
-  if (!btn) return;
-  const label = btn.getAttribute('aria-label');
-  if (!label) return;
+  const t = e.target as HTMLElement;
+  // 两种触发源: 工具栏图标 (.vditor-tooltipped, 走 aria-label) / emoji 面板 button (走 data-key + EMOJI_ZH 中文名映射).
+  let btn = t?.closest?.('.vditor-tooltipped') as HTMLElement | null;
+  let label = btn?.getAttribute('aria-label') || '';
+  if (!btn) {
+    const emojiBtn = t?.closest?.('.vditor-emojis button') as HTMLElement | null;
+    if (emojiBtn) {
+      const key = emojiBtn.getAttribute('data-key') || '';
+      const zh = EMOJI_ZH[key];
+      if (zh) { btn = emojiBtn; label = zh; }
+    }
+  }
+  if (!btn || !label) return;
   // unzoomRect + unzoomViewport: CSS zoom 下 rect 跟 viewport 归一到 unzoomed 防 tooltip 错位
   const r = unzoomRect(btn);
   const { vw } = unzoomViewport();
@@ -389,6 +504,7 @@ function onToolbarMouseOver(e: MouseEvent) {
 function onToolbarMouseOut(e: MouseEvent) {
   const related = e.relatedTarget as HTMLElement | null;
   if (related?.closest?.('.vditor-tooltipped')) return;
+  if (related?.closest?.('.vditor-emojis button')) return; // 在 emoji 面板 button 间移动不隐藏
   customTooltip.value.visible = false;
 }
 
@@ -413,6 +529,9 @@ onMounted(() => {
     counter: { enable: false },
     preview: { actions: [] },
     cache: { enable: false },
+    // emoji 面板扩到 48 个 (Vditor 默认 8). emojiTail 为空 → 底部 tip 条渲染空, 我们 CSS 直接隐藏它;
+    // hover 的英文名 tip 走底部 tail Vditor 内置逻辑, 我们改用 customTooltip 顶部浮层显示中文名
+    hint: { emoji: EMOJI_MAP },
     upload: {
       url: '/api/upload/file',
       fieldName: 'file',
@@ -495,6 +614,8 @@ onMounted(() => {
       // capture 阶段拦截 Vditor 内 copy: 用户期望"按一次 Enter = 一个 \n", 但 markdown 段落分隔渲染成 <p></p> 浏览器复制时变 \n\n.
       // selection.toString() 在 contenteditable PRE 内常返空, 走 range.cloneContents() 自己 walk DOM 算干净文本 (P/DIV → \n, BR → \n)
       editorRef.value?.addEventListener('copy', onEditorCopy, true);
+      // capture 拦截: 列表项内粘贴多行纯文本 → 每行拆成独立列表项 (抢在 onEditorPaste / Vditor 前)
+      editorRef.value?.addEventListener('paste', onListPaste, true);
       // capture 拦截 base64 富文本粘贴, 上传换 url 不让 base64 进编辑器 (微信油猴转图等多图场景会卡死)
       editorRef.value?.addEventListener('paste', onEditorPaste, true);
     },
@@ -511,6 +632,7 @@ onBeforeUnmount(() => {
   editorRef.value?.removeEventListener('dragover', onEditorDragOver, true);
   editorRef.value?.removeEventListener('dragleave', onEditorDragLeave, true);
   editorRef.value?.removeEventListener('drop', onEditorDrop, true);
+  editorRef.value?.removeEventListener('paste', onListPaste, true);
   editorRef.value?.removeEventListener('paste', onEditorPaste, true);
   vditor?.destroy();
   vditor = null;
@@ -1060,10 +1182,26 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
       </div>
     </div>
 
-    <!-- Tags display. hideTags=true 时整行隐藏 (非作者不能改 tag, 显示也无意义) -->
+    <!-- Tags display: hideTags=true 时整行隐藏 (非作者不能改 tag, 显示也无意义).
+         桌面 hover 时右侧 slide in 叉号 (蘑菇 2026-07-06: 编辑器 tag 少不推挤, slide 视觉更好),
+         移动端叉号常驻. -->
     <div v-if="tags.length && !hideTags" class="flex flex-wrap gap-1 px-4 py-2 border-t border-gray-50">
-      <span v-for="tag in tags" :key="tag" class="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-        #{{ tag }} <button @click="removeTag(tag)" class="text-gray-400 hover:text-red-500">&times;</button>
+      <span v-for="tag in tags" :key="tag"
+        class="group/tag inline-flex items-center text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full transition-all overflow-hidden">
+        <span>#{{ tag }}</span>
+        <!-- 桌面 slide-in -->
+        <span
+          class="hidden md:inline-flex max-w-0 md:group-hover/tag:max-w-[24px] transition-all overflow-hidden whitespace-nowrap">
+          <span class="ml-1 inline-flex items-center">
+            <button @click="removeTag(tag)" class="text-gray-500 hover:text-red-500" title="删除标签">
+              <PhX size="0.75rem" weight="bold" />
+            </button>
+          </span>
+        </span>
+        <!-- 移动端常驻叉号 -->
+        <button @click="removeTag(tag)" class="md:hidden ml-1 text-gray-400 hover:text-red-500" title="删除标签">
+          <PhX size="0.625rem" weight="bold" />
+        </button>
       </span>
     </div>
   </div>
@@ -1074,11 +1212,12 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
     <!-- Tag popup -->
     <div v-if="showTagInput" class="bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex items-center gap-2 whitespace-nowrap"
       :style="getPopupPos(tagBtnEl, 220)">
-      <input v-model="tagInput" @keydown.enter="addTag" @click.stop placeholder="输入标签回车添加" class="popup-input w-40" />
+      <input ref="tagInputRef" v-model="tagInput" @keydown.enter="addTag" @click.stop placeholder="输入标签回车添加" class="popup-input w-40" />
       <button @click.stop="addTag" class="popup-btn shrink-0">添加</button>
     </div>
-    <!-- Reference popup -->
-    <div v-if="showRefSearch" class="bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-64"
+    <!-- Reference popup: flex flex-col 让搜索结果列表 flex-1 + 输入框 shrink-0 竖排.
+         之前依赖 getPopupPos 返回的 flexDirection column, 但那影响 tag popup 让按钮竖排 (蘑菇 2026-07-06 修), 拆到 class 里 -->
+    <div v-if="showRefSearch" class="bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-64 flex flex-col"
       :style="getPopupPos(refBtnEl, 256)">
       <div v-if="refResults.length" class="flex-1 min-h-0 overflow-y-auto space-y-1 mb-1">
         <button v-for="r in refResults" :key="r.id" @click.stop="insertRef(r)" class="w-full text-left px-2 py-1.5 rounded hover:bg-gray-50 text-xs text-gray-600 truncate">
@@ -1086,7 +1225,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
         </button>
       </div>
       <div v-else-if="refQuery.trim()" class="text-xs text-gray-400 py-2 text-center mb-1">无结果</div>
-      <input v-model="refQuery" @input="searchRefs" @click.stop placeholder="搜索笔记..." class="popup-input w-full shrink-0" />
+      <input ref="refInputRef" v-model="refQuery" @input="searchRefs" @click.stop placeholder="搜索笔记..." class="popup-input w-full shrink-0" />
     </div>
   </Teleport>
 
@@ -1168,6 +1307,11 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 .vditor-wrapper .vditor-toolbar__item {
   padding: 0 !important;
   margin: 0 1px !important;
+  /* 关键: 给 .vditor-toolbar__item 显式 z-index 让它成为 stacking context.
+     否则里面 .vditor-hint / .vditor-panel (position:absolute + z:999) 溢出 wrapper 时,
+     虽然 z 数值很大, 但没被 stacking context 隔离, 会被 main 后续 static 子节点按 DOM 顺序遮住
+     (最典型: headings 下拉六级标题被卡片流覆盖). z:1 局部叠加, 不进全局 scale (见 Z-INDEX-SCALE.md quirks 段). */
+  z-index: 1;
 }
 /* upload 项是 <div>(Vditor 源码硬编码 s = name==="upload" ? "div" : "button"),其他工具项才是 button。
    所有针对 button 的样式都要把 [data-type="upload"] 接上,否则尺寸 / 颜色 / hover 灰底全失效。 */
@@ -1175,10 +1319,13 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
    保证 hover 灰底位置一致 + svg 在灰底中央。
    button 默认 inline-block + svg baseline 排版会让位置略偏,统一 flex 后所有图标视觉对齐。
    transform translateY(3px) 让整行按钮 (连带 hover 灰底) 视觉下移,
-   抵消 flex 居中相对 baseline 位置整体偏高的差值。transform 不影响 toolbar 实际高度。 */
-.vditor-wrapper .vditor-toolbar__item button,
+   抵消 flex 居中相对 baseline 位置整体偏高的差值。transform 不影响 toolbar 实际高度。
+   注: 用直接子 `>` 只选工具栏第一层 button/span (图标本身); Vditor 把 headings/emoji 下拉面板
+   (.vditor-hint / .vditor-panel) 也塞在 .vditor-toolbar__item 里, 面板内 button 是孙子层.
+   不加 `>` 会把下拉里的文字 button 也压成 28×28 方块导致标题下拉一行 2 项文字被裁 (蘑菇 2026-07-06 修). */
+.vditor-wrapper .vditor-toolbar__item > button,
 .vditor-wrapper .vditor-toolbar__item > span,
-.vditor-wrapper .vditor-toolbar__item [data-type="upload"] {
+.vditor-wrapper .vditor-toolbar__item > [data-type="upload"] {
   color: #64748b;
   height: 28px !important;
   width: 28px !important;
@@ -1189,18 +1336,18 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
   cursor: var(--cur-pointer), pointer;
   transform: translateY(3px);
 }
-.vditor-wrapper .vditor-toolbar__item button svg,
-.vditor-wrapper .vditor-toolbar__item [data-type="upload"] svg {
+.vditor-wrapper .vditor-toolbar__item > button svg,
+.vditor-wrapper .vditor-toolbar__item > [data-type="upload"] svg {
   height: 14px !important;
   width: 14px !important;
 }
-.vditor-wrapper .vditor-toolbar__item button:hover,
-.vditor-wrapper .vditor-toolbar__item [data-type="upload"]:hover {
+.vditor-wrapper .vditor-toolbar__item > button:hover,
+.vditor-wrapper .vditor-toolbar__item > [data-type="upload"]:hover {
   color: #1e293b;
   background: #f1f5f9;
   border-radius: 6px;
 }
-.vditor-wrapper .vditor-toolbar__item--current button {
+.vditor-wrapper .vditor-toolbar__item--current > button {
   color: rgb(var(--c-accent)) !important;
   background: rgb(var(--c-accent-light)) !important;
   border-radius: 6px;
@@ -1277,11 +1424,37 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 .vditor-wrapper .vditor-hint, .vditor-wrapper .vditor-panel--arrow {
   z-index: 999 !important;
 }
+/* emoji 面板底部 tail 条 (Vditor 用来显 hover 的英文 data-key + emojiTail 说明) 隐藏,
+   我们改用 customTooltip 顶部浮层显示中文名 (见 script 里 EMOJI_ZH + onToolbarMouseOver) */
+.vditor-wrapper .vditor-emojis__tail {
+  display: none !important;
+}
+/* Vditor 默认 emoji 面板 auto 宽度 (~80px) + inline-block 按钮 → 只能一行 2 个, 49 个 emoji 面板超高.
+   改成 grid 布局, 高度封顶 + 溢出滚动 (显 3 行 / ~24 个, 剩余滚动).
+   列宽用 auto-fill + 固定 32px (不用 repeat(8, 1fr) 均分): zoom 放大时 1fr 均分会因 subpixel
+   计算把第 8 列挤到可见区外, 视觉上变成一行 7 个 (蘑菇 2026-07-06 反馈).
+   scrollbar-gutter:stable 预留滚动条空间, 出滚动条前后布局不跳; 面板 width:280 稳定容 8 列 (32*8+gap≈272). */
+.vditor-wrapper .vditor-emojis {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, 32px);
+  justify-content: start;
+  gap: 2px;
+  /* 300px 是为了给 scrollbar-gutter:stable 预留的 15px 滚动条空间留富余 (300 - 15 = 285 可用,
+     8 列 32px + 7 gap 2px = 270, 富余 15px). 之前 280 时 zoom 150% 场景挤到 7 个 (蘑菇 2026-07-06 反馈). */
+  width: 300px;
+  max-height: 240px !important;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.vditor-wrapper .vditor-emojis button {
+  width: 32px !important;
+  padding: 4px !important;
+}
 /* Dark mode */
 [data-theme="dark"] .vditor-wrapper .vditor-toolbar { border-bottom-color: rgba(255,255,255,0.06) !important; }
-[data-theme="dark"] .vditor-wrapper .vditor-toolbar__item button,
+[data-theme="dark"] .vditor-wrapper .vditor-toolbar__item > button,
 [data-theme="dark"] .vditor-wrapper .vditor-toolbar__item > span { color: #94a3b8; }
-[data-theme="dark"] .vditor-wrapper .vditor-toolbar__item button:hover { color: #e2e8f0; background: rgba(255,255,255,0.08); }
+[data-theme="dark"] .vditor-wrapper .vditor-toolbar__item > button:hover { color: #e2e8f0; background: rgba(255,255,255,0.08); }
 [data-theme="dark"] .vditor-wrapper .vditor-reset { color: #e2e8f0; }
 [data-theme="dark"] .vditor-wrapper .vditor-reset::before { color: rgba(255,255,255,0.25) !important; }
 </style>

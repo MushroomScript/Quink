@@ -105,19 +105,37 @@ watch(() => visibleTags.value.length, () => snapshotCards(), { flush: 'sync' });
         <p class="text-gray-400 text-xs mt-1">笔记保存后 AI 会自动生成标签</p>
       </div>
 
+      <!-- Tag chip 交互 (蘑菇 2026-07-06 统一 NoteDetail): 桌面 hover 时 overlay 覆盖 tag 名 (编辑 + 叉号);
+           移动端 tag 名 + 常驻按钮串排 (无 hover 事件, 隐藏 = 找不到入口). tag 名 span 单独点也触发筛选跳转 -->
+      <!-- Tag chip 交互 (蘑菇 2026-07-06 改回 overlay 靠右方案): 桌面 hover 时右侧图标 absolute 浮动覆盖 chip 尾部,
+           chip 宽度不变不推挤后面 (Tags 页 363 个 tag flex-wrap 重排会卡). 图标区加自身底色 + shadow 分层, 视觉上像"chip 尾巴变操作按钮".
+           移动端 tag 名 + 常驻按钮串排. tag 名点击触发筛选跳转. -->
       <TransitionGroup tag="div" data-animated-list class="flex flex-wrap gap-2" :css="false" @leave="fadeOutLeave">
         <div v-for="tag in visibleTags" :key="tag"
-          class="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 rounded-full group transition-all duration-200 hover:scale-105 hover:shadow-md cursor-pointer"
+          class="group/tag relative inline-flex items-center gap-1.5 pl-3 pr-3 py-1.5 rounded-full hover:shadow-md cursor-pointer"
           style="background: rgb(var(--c-accent-light)); color: rgb(var(--c-accent-dark))">
           <span class="text-sm cursor-pointer hover:opacity-70" @click="filterByTag(tag)">#{{ tag }}</span>
-          <div class="flex gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-            <button @click="editingTag = tag; newName = tag" class="p-1 rounded-full hover:bg-white/50" title="重命名">
+          <!-- 桌面 hover 时右侧 overlay: absolute right-0 靠右浮动, chip 宽度不变.
+               自身 bg + 左侧 box-shadow fade 让 overlay 跟 chip 底色融合边界柔和 (视觉像"tag 尾巴长出操作区"). -->
+          <span
+            class="hidden md:group-hover/tag:inline-flex absolute right-0 top-0 bottom-0 items-center gap-0.5 pl-3 pr-2 rounded-r-full"
+            style="background: rgb(var(--c-accent-light)); box-shadow: -10px 0 8px -4px rgb(var(--c-accent-light))">
+            <button @click.stop="editingTag = tag; newName = tag" class="p-1 rounded-full hover:bg-white/50" title="重命名">
               <PhPencilSimple size="0.75rem" weight="fill" />
             </button>
-            <button @click="confirmDeleteTag = tag" class="p-1 rounded-full hover:bg-red-100 hover:text-red-500" title="删除">
+            <button @click.stop="confirmDeleteTag = tag" class="p-1 rounded-full hover:bg-red-100 hover:text-red-500" title="删除">
               <PhXCircle size="0.75rem" weight="fill" />
             </button>
-          </div>
+          </span>
+          <!-- 移动端常驻按钮 (md: 断点上隐藏) -->
+          <span class="md:hidden inline-flex items-center gap-0.5">
+            <button @click.stop="editingTag = tag; newName = tag" class="p-1 rounded-full hover:bg-white/50" title="重命名">
+              <PhPencilSimple size="0.75rem" weight="fill" />
+            </button>
+            <button @click.stop="confirmDeleteTag = tag" class="p-1 rounded-full hover:bg-red-100 hover:text-red-500" title="删除">
+              <PhXCircle size="0.75rem" weight="fill" />
+            </button>
+          </span>
         </div>
       </TransitionGroup>
     </template>
@@ -130,7 +148,7 @@ watch(() => visibleTags.value.length, () => snapshotCards(), { flush: 'sync' });
           <div class="relative bg-white rounded-xl shadow-xl p-6 w-80 space-y-4">
             <h3 class="text-sm font-medium text-gray-800">重命名标签</h3>
             <p class="text-xs text-gray-400">将 #{{ editingTag }} 重命名为：</p>
-            <input v-model="newName" @keydown.enter="renameTag" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary" />
+            <input v-model="newName" @keydown.enter="renameTag" autofocus class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary" />
             <div class="flex gap-2 justify-end">
               <button @click="editingTag = ''" class="px-4 py-1.5 text-xs text-gray-500 rounded-lg border border-gray-200 hover:bg-gray-50">取消</button>
               <button @click="renameTag" class="px-4 py-1.5 text-white text-xs font-medium rounded-lg" style="background: rgb(var(--c-accent))">确定</button>

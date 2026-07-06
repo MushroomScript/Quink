@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, inject, watch, type Ref } from 'vue';
+import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick, type Ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useNotesStore } from '@/stores/notes';
 import { useAuthStore } from '@/stores/auth';
@@ -35,12 +35,15 @@ import {
   PhCaretRight,
   PhCaretDown,
   PhArrowsClockwise,
+  PhSparkle,
+  PhPlus,
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
 import ReminderPicker from '@/components/ReminderPicker.vue';
 import ReactionBar from '@/components/ReactionBar.vue';
 import CommentThread from '@/components/CommentThread.vue';
+import CategoryPicker from '@/components/CategoryPicker.vue';
 import type { NoteReactionSummaryItem } from '@/api';
 
 dayjs.extend(relativeTime);
@@ -59,6 +62,128 @@ const loading = ref(true);
 // 详情页分享设置
 const isMyNote = computed(() => note.value && (!note.value.userId || note.value.userId === auth.user?.id));
 const isShared = computed(() => note.value?.visibility === 'shared');
+// 元数据 (摘要/tag/category) 编辑权限: 跟正文一致 (作者本人 / private 笔记 / shared 有 canWrite). NoteCard.vue 同款 canEdit 逻辑.
+const canEditMeta = computed(() => isMyNote.value || !isShared.value || !!(note.value as any)?.canWrite);
+// 摘要行内编辑状态: 编辑模式 + textarea 缓冲值 + AI 重生成 loading + 删除确认弹窗
+const summaryEditing = ref(false);
+const summaryDraft = ref('');
+const summaryRegenerating = ref(false);
+const summaryConfirmDelete = ref(false);
+function openSummaryEdit() {
+  summaryDraft.value = note.value?.summary || '';
+  summaryEditing.value = true;
+}
+function cancelSummaryEdit() { summaryEditing.value = false; }
+async function saveSummaryEdit() {
+  if (!note.value) return;
+  const trimmed = summaryDraft.value.trim();
+  // 跟当前值一样, 不发请求 (skipTimestamp 但仍会走版本乐观锁, 无意义)
+  if (trimmed === (note.value.summary || '')) { summaryEditing.value = false; return; }
+  try {
+    // skipTimestamp 让 updatedAt 不动 (跟改 editPermission 等元数据一致 - 摘要属于附加信息)
+    await store.updateNote(note.value.id, { summary: trimmed, version: note.value.version, skipTimestamp: true } as any);
+    if (note.value) { note.value.summary = trimmed; if ((note.value as any).version !== undefined) (note.value as any).version += 1; }
+    summaryEditing.value = false;
+  } catch (err: any) {
+    toast.show(err?.message || '保存失败', 'error');
+  }
+}
+async function deleteSummary() {
+  if (!note.value) return;
+  summaryConfirmDelete.value = false;
+  try {
+    // '' 空字符串: 后端 z.string().max(2000).optional() 接受, 存进 DB 空串, NoteCard/Detail v-if 判 falsy 隐藏.
+    // 后续 auto-process 时 !fresh.summary 判 true, AI 可能重新填 (蘑菇拍板接受这个行为, 不加 summary_locked 字段)
+    await store.updateNote(note.value.id, { summary: '', version: note.value.version, skipTimestamp: true } as any);
+    if (note.value) { note.value.summary = ''; if ((note.value as any).version !== undefined) (note.value as any).version += 1; }
+  } catch (err: any) {
+    toast.show(err?.message || '删除失败', 'error');
+  }
+}
+async function regenerateSummary() {
+  if (!note.value || summaryRegenerating.value) return;
+  summaryRegenerating.value = true;
+  try {
+    const res = await api.regenerateNoteSummary(note.value.id);
+    if (note.value) note.value.summary = res.data.summary;
+  } catch (err: any) {
+    toast.show(err?.message || 'AI 生成失败', 'error');
+  } finally {
+    summaryRegenerating.value = false;
+  }
+}
+
+// ── Tag / Category 编辑 (蘑菇 2026-07-06 详情页双端可编辑元数据) ──
+// tag chip: 桌面 hover 编辑/叉号 overlay 覆盖 tag 名; 移动端串排常驻按钮 (跟 Tags 页移动端一致).
+// 编辑 = rename 本笔记 tag (弹小 modal), 叉号 = 从本笔记摘掉 tag.
+// 尾部 + chip 弹 popover 输入新 tag. category: CategoryPicker 双向绑定 → updateNote.
+// addTag popover 样式: 移动端居中 (纯 CSS translate 不受 zoom 影响);
+// 桌面走 unzoomRect 归一 (CSS zoom 下裸 rect 会让 fixed 元素被 zoom 再乘一次 → 偏, 详见 ZOOM.md).
+// 依赖 addTagOpen 做 recompute 触发, 每次打开都重新 read window.innerWidth (兼容 resize / 横竖屏切换).
+const addTagPopupStyle = computed(() => {
+  if (!addTagOpen.value) return {};
+  if (window.innerWidth < 768) {
+    return { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
+  }
+  if (!addTagBtnEl.value) return {};
+  const r = unzoomRect(addTagBtnEl.value);
+  return { top: `${r.bottom + 6}px`, left: `${r.left}px` };
+});
+const addTagOpen = ref(false); // + chip popover 显隐
+const addTagInput = ref('');
+const addTagBtnEl = ref<HTMLElement | null>(null);
+// input ref: v-if + Teleport 场景 HTML autofocus 属性不 fire, 用 watch + nextTick + .focus() 主动聚焦
+const addTagInputEl = ref<HTMLInputElement | null>(null);
+watch(addTagOpen, (v) => { if (v) nextTick(() => addTagInputEl.value?.focus()); });
+// rename tag: 点 tag 编辑图标 → 打开小 modal 改名 → 在本笔记 tags 数组内 replace
+const renamingTag = ref(''); // 旧 tag 名 (非空 = modal 打开)
+const renamingTagNew = ref('');
+function startRenameTag(tag: string) {
+  renamingTag.value = tag;
+  renamingTagNew.value = tag;
+}
+function cancelRenameTag() { renamingTag.value = ''; renamingTagNew.value = ''; }
+async function saveRenameTag() {
+  const oldName = renamingTag.value;
+  const newName = renamingTagNew.value.trim();
+  if (!oldName || !newName || !note.value) { cancelRenameTag(); return; }
+  if (newName === oldName) { cancelRenameTag(); return; }
+  const cur = note.value.tags || [];
+  // 若目标名已存在, 直接删旧的 (视觉去重). 否则 replace.
+  const next = cur.includes(newName) ? cur.filter(t => t !== oldName) : cur.map(t => t === oldName ? newName : t);
+  await persistNoteField('tags', next);
+  cancelRenameTag();
+}
+async function persistNoteField(field: 'tags' | 'category', value: any) {
+  if (!note.value) return;
+  try {
+    await store.updateNote(note.value.id, { [field]: value, version: note.value.version, skipTimestamp: true } as any);
+    if (note.value) {
+      (note.value as any)[field] = value;
+      if ((note.value as any).version !== undefined) (note.value as any).version += 1;
+    }
+  } catch (err: any) {
+    toast.show(err?.message || '保存失败', 'error');
+  }
+}
+async function addTag() {
+  const t = addTagInput.value.trim();
+  if (!t || !note.value) return;
+  const cur = note.value.tags || [];
+  if (cur.includes(t)) { addTagInput.value = ''; addTagOpen.value = false; return; } // 已存在, 静默关掉
+  await persistNoteField('tags', [...cur, t]);
+  addTagInput.value = '';
+  addTagOpen.value = false;
+}
+async function removeTag(tag: string) {
+  if (!note.value) return;
+  const cur = note.value.tags || [];
+  await persistNoteField('tags', cur.filter(t => t !== tag));
+}
+// CategoryPicker v-model 触发 → 直接透传后端. null = "自动" (让 AI 重新写); 字符串 = 手动.
+async function updateCategory(val: string | null) {
+  await persistNoteField('category', val);
+}
 const sharedGroupIds = computed(() => note.value?.sharedGroupIds ?? []);
 const sharedGroupNames = computed(() =>
   sharedGroupIds.value.map(id => groupsStore.groups.find(g => g.id === id)?.name).filter(Boolean) as string[]
@@ -558,7 +683,9 @@ onUnmounted(() => {
             </div>
             <span class="truncate min-w-0">{{ (note as any).authorNickname }}</span>
           </span>
-          <span v-if="note.category" class="text-xs text-gray-400 truncate min-w-0">{{ note.category }}</span>
+          <!-- Category: 有编辑权限 → CategoryPicker chip (可打开选/清); 无权限 → 只读 span -->
+          <CategoryPicker v-if="canEditMeta" :modelValue="note.category" @update:modelValue="updateCategory" compact />
+          <span v-else-if="note.category" class="text-xs text-gray-400 truncate min-w-0">{{ note.category }}</span>
         </div>
         <!-- 分享设置 (作者+shared, 挪到 header): 已分享 popover + 编辑权限 + 授权. 群名 popover 改相对各自按钮锚定 -->
         <template v-if="isShared && isMyNote">
@@ -772,13 +899,139 @@ onUnmounted(() => {
         </Transition>
       </Teleport>
 
-      <!-- Summary -->
-      <p v-if="note.summary" class="text-sm text-gray-500 italic mb-4">{{ note.summary }}</p>
-
-      <!-- Tags -->
-      <div v-if="note.tags?.length" class="flex flex-wrap gap-1.5 mb-4">
-        <span v-for="tag in note.tags" :key="tag" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">#{{ tag }}</span>
+      <!-- Summary: 有摘要 → 展示 + hover 出编辑/AI重生成/删除 按钮; 无摘要 + 有编辑权 → 只留 AI 生成小按钮.
+           两种状态共存在同一 group 容器方便 hover 联动. AI 生成 loading 时禁用其他按钮避 race. -->
+      <div v-if="note.summary || canEditMeta" class="mb-4 group/summary">
+        <!-- 有摘要 + 非编辑模式: 摘要文字 + 右侧 hover 按钮 -->
+        <div v-if="note.summary && !summaryEditing" class="flex items-start gap-2">
+          <p class="text-sm text-gray-500 italic flex-1 min-w-0">{{ note.summary }}</p>
+          <!-- 按钮组: 移动端始终显示 (无 hover 事件, 隐藏 = 用户找不到入口);
+               桌面 (md:) 默认隐藏 + hover 摘要行才显, 避免干扰阅读 -->
+          <div v-if="canEditMeta"
+            class="shrink-0 flex items-center gap-0.5 md:opacity-0 md:group-hover/summary:opacity-100 transition-opacity">
+            <button @click="openSummaryEdit" :disabled="summaryRegenerating"
+              class="p-2 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed" title="编辑摘要">
+              <PhPencilSimple size="0.875rem" weight="fill" />
+            </button>
+            <button @click="regenerateSummary" :disabled="summaryRegenerating"
+              class="p-2 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed"
+              :title="summaryRegenerating ? 'AI 生成中...' : 'AI 重新生成'">
+              <PhSparkle size="0.875rem" weight="fill" :class="summaryRegenerating ? 'animate-pulse' : ''" />
+            </button>
+            <button @click="summaryConfirmDelete = true" :disabled="summaryRegenerating"
+              class="p-2 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 disabled:opacity-40 disabled:cursor-not-allowed" title="删除摘要">
+              <PhTrash size="0.875rem" weight="fill" />
+            </button>
+          </div>
+        </div>
+        <!-- 编辑模式: textarea + 保存/取消 -->
+        <div v-else-if="summaryEditing">
+          <textarea v-model="summaryDraft" maxlength="2000" rows="2"
+            class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary resize-none text-gray-600 bg-white"
+            placeholder="给这条笔记写一段摘要..." />
+          <div class="flex justify-end gap-2 mt-1">
+            <button @click="cancelSummaryEdit"
+              class="px-3 py-1 text-xs text-gray-500 rounded-lg hover:bg-gray-100">取消</button>
+            <button @click="saveSummaryEdit"
+              class="px-3 py-1 text-xs bg-primary-light text-primary-dark font-medium rounded-lg hover:bg-primary hover:text-white">保存</button>
+          </div>
+        </div>
+        <!-- 无摘要 + 有权限: 一个"生成摘要"入口按钮 (灰色 dashed 提示) -->
+        <button v-else-if="canEditMeta" @click="regenerateSummary" :disabled="summaryRegenerating"
+          class="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed">
+          <PhSparkle size="0.875rem" weight="fill" :class="summaryRegenerating ? 'animate-pulse' : ''" />
+          <span>{{ summaryRegenerating ? '生成中...' : 'AI 生成摘要' }}</span>
+        </button>
       </div>
+      <!-- 删除摘要确认弹窗 (Teleport 到 body 避免祖先 overflow 裁; 蘑菇约定: 危险操作必须弹窗确认不能原地切按钮文案) -->
+      <Teleport to="body">
+        <div v-if="summaryConfirmDelete" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center"
+          @click.self="summaryConfirmDelete = false">
+          <div class="bg-white rounded-xl p-5 max-w-sm w-[85%] shadow-xl">
+            <h3 class="text-sm font-medium mb-2 text-gray-800">删除摘要?</h3>
+            <p class="text-xs text-gray-500 mb-4">删除后本条笔记不再显示摘要 (下次编辑正文时 AI 仍可能重新生成一条).</p>
+            <div class="flex justify-end gap-2">
+              <button @click="summaryConfirmDelete = false"
+                class="px-3 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">取消</button>
+              <button @click="deleteSummary"
+                class="px-3 py-1.5 text-xs bg-red-50 text-red-500 font-medium rounded-lg hover:bg-red-100">删除</button>
+            </div>
+          </div>
+        </div>
+      </Teleport>
+
+      <!-- Tags: 桌面 hover 时 overlay 覆盖 tag 名 (编辑 + 叉号); 移动端串排常驻按钮 (跟 Tags 页移动端一致).
+           空 tag 且无权限则整行隐藏; 空 tag 且有权限只显示 + chip 让用户加. -->
+      <div v-if="note.tags?.length || canEditMeta" class="flex flex-wrap gap-1.5 mb-4">
+        <span v-for="tag in note.tags || []" :key="tag"
+          class="group/tag inline-flex items-center text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full transition-all overflow-hidden">
+          <span>#{{ tag }}</span>
+          <!-- 桌面 hover 时右侧 slide in (蘑菇 2026-07-06 改回: 详情页 tag 少不推挤, slide 视觉更好. Tags 页因 363 tag 才用 overlay 防卡).
+               max-w-0 折叠隐藏, hover 时展开. -->
+          <span v-if="canEditMeta"
+            class="hidden md:inline-flex max-w-0 md:group-hover/tag:max-w-[40px] transition-all overflow-hidden whitespace-nowrap">
+            <span class="ml-1 inline-flex items-center gap-1">
+              <button @click="startRenameTag(tag)" class="text-gray-500 hover:text-primary" title="重命名标签">
+                <PhPencilSimple size="0.75rem" weight="fill" />
+              </button>
+              <button @click="removeTag(tag)" class="text-gray-500 hover:text-red-500" title="从本笔记摘掉">
+                <PhX size="0.75rem" weight="bold" />
+              </button>
+            </span>
+          </span>
+          <!-- 移动端串排常驻按钮 (md: 断点上隐藏) -->
+          <span v-if="canEditMeta" class="md:hidden inline-flex items-center gap-1 ml-1">
+            <button @click="startRenameTag(tag)" class="text-gray-400 hover:text-primary" title="重命名标签">
+              <PhPencilSimple size="0.625rem" weight="fill" />
+            </button>
+            <button @click="removeTag(tag)" class="text-gray-400 hover:text-red-500" title="从本笔记摘掉">
+              <PhX size="0.625rem" weight="bold" />
+            </button>
+          </span>
+        </span>
+        <!-- 尾部 + chip (仅有权限时). dashed 边框提示可添加, 点击弹 popover 输入 -->
+        <button v-if="canEditMeta" ref="addTagBtnEl" @click.stop="addTagOpen = !addTagOpen"
+          class="inline-flex items-center gap-0.5 text-xs bg-gray-50 text-gray-400 hover:bg-primary-light hover:text-primary-dark px-2 py-0.5 rounded-full border border-dashed border-gray-300 hover:border-transparent transition-colors">
+          <PhPlus size="0.625rem" weight="bold" />
+          <span>标签</span>
+        </button>
+      </div>
+      <!-- 加 tag popover: 移动端居中固定 (避免出屏幕, 蘑菇 2026-07-06 反馈); 桌面锚定 addTagBtnEl 下方 -->
+      <Teleport to="body">
+        <div v-if="addTagOpen" class="fixed inset-0" style="z-index: var(--z-overlay-backdrop)" @click="addTagOpen = false" />
+        <Transition enter-active-class="transition duration-100 ease-out" enter-from-class="opacity-0 scale-95"
+          leave-active-class="transition duration-75 ease-in" leave-to-class="opacity-0 scale-95">
+          <div v-if="addTagOpen"
+            class="fixed z-[var(--z-overlay)] bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex items-center gap-2"
+            :style="addTagPopupStyle">
+            <input ref="addTagInputEl" v-model="addTagInput" @keydown.enter="addTag" @click.stop placeholder="输入标签回车添加"
+              class="text-xs outline-none border border-gray-200 rounded px-2 py-1 w-40 min-w-0 focus:border-primary" />
+            <!-- shrink-0 + whitespace-nowrap: 防移动端 flex 压缩 button 让"添加"两字换行成竖排 (蘑菇 2026-07-06 反馈) -->
+            <button @click.stop="addTag"
+              class="text-xs px-2 py-1 bg-primary-light text-primary-dark font-medium rounded hover:bg-primary hover:text-white shrink-0 whitespace-nowrap">添加</button>
+          </div>
+        </Transition>
+      </Teleport>
+      <!-- 重命名 tag modal: Teleport + 背景 + 居中卡片 (跟 Tags.vue 同款设计). ESC 取消由用户点背景 / 点取消. -->
+      <Teleport to="body">
+        <Transition name="modal">
+          <div v-if="renamingTag" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center">
+            <div class="absolute inset-0 bg-black/30" @click="cancelRenameTag" />
+            <div class="relative bg-white rounded-xl p-5 max-w-sm w-[85%] shadow-xl">
+              <h3 class="text-sm font-medium mb-2 text-gray-800">重命名标签</h3>
+              <p class="text-xs text-gray-400 mb-3">将 #{{ renamingTag }} 重命名为:</p>
+              <input v-model="renamingTagNew" @keydown.enter="saveRenameTag" autofocus
+                class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-primary text-gray-700" />
+              <div class="flex justify-end gap-2 mt-4">
+                <button @click="cancelRenameTag"
+                  class="px-3 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">取消</button>
+                <button @click="saveRenameTag"
+                  class="px-3 py-1.5 text-xs bg-primary-light text-primary-dark font-medium rounded-lg hover:bg-primary hover:text-white">保存</button>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </Teleport>
 
 
       <!-- 待审编辑申请 section (仅 shared + 作者本人 + 有 pending). 同意/拒绝调 API, 忽略仅本地隐藏 -->
