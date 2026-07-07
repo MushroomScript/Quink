@@ -805,12 +805,73 @@ export const api = {
     return request<{ data: { feature: string; prompt: string } }>(`/ai/prompts/${feature}`, { method: 'DELETE' });
   },
 
-  // AI Process
-  aiProcess(feature: string, content: string, prompt?: string, targetLang?: string) {
-    return request<{ data: { result: string } }>('/ai/process', {
+  // AI Process (润色 / 扩充 / 写文 / 整理 / 翻译). 走 SSE 流式:
+  //   - 本地 ollama 长输出可能几分钟, request 的 30s total timeout 撑不住
+  //   - max_tokens 从后端 preferences.aiChatMaxTokens 读, 不再前端硬编码
+  //   - 无 total timeout, 由调用方用 AbortController + stall timeout (60s 无 chunk 就 abort) 兜底
+  // 参数:
+  //   onDelta: 每收一段文本调用一次, 组件可追加到 aiResult 显示打字机效果
+  //   signal: 可选 AbortSignal, 传入后组件可中止 (stall / 用户主动取消)
+  // 返回: 完整拼接的结果字符串 (等 done 事件后)
+  async aiProcess(
+    feature: string,
+    content: string,
+    prompt: string | undefined,
+    targetLang: string | undefined,
+    onDelta: (chunk: string) => void,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const token = getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    try {
+      const { getClientId } = await import('@/utils/clientId');
+      headers['X-Quink-Client-Id'] = getClientId();
+    } catch { /* 兜底 */ }
+
+    const res = await fetch(fullUrl('/ai/process'), {
       method: 'POST',
+      headers,
       body: JSON.stringify({ feature, content, prompt, targetLang }),
+      signal,
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'AI 处理失败' }));
+      throw new Error(err.error || 'AI 处理失败');
+    }
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let full = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // SSE 帧以 `\n\n` 分隔, 每行以 `data: ` 起头
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() || '';
+      for (const frame of frames) {
+        for (const line of frame.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'delta' && typeof data.content === 'string') {
+              full += data.content;
+              onDelta(data.content);
+            } else if (data.type === 'error') {
+              throw new Error(data.error || 'AI 处理失败');
+            } else if (data.type === 'done') {
+              return full;
+            }
+          } catch (e: any) {
+            // JSON 半帧 buffer 情况: 静默; 真实 error type 已 rethrow, 走上层
+            if (e.message && !e.message.startsWith('Unexpected') && !e.message.includes('JSON')) throw e;
+          }
+        }
+      }
+    }
+    return full;
   },
 
   async transcribe(audioBlob: Blob): Promise<{ data: { text: string } }> {

@@ -184,6 +184,12 @@ app.post('/conversations/:id/messages', async (c) => {
     { role: 'user', content: question },
   ];
 
+  // 客户端断开 → abort 上游 AI fetch (Ollama 单线程占用问题, 同 /ai/process)
+  const upstreamCtrl = new AbortController();
+  const clientSignal = c.req.raw.signal;
+  if (clientSignal?.aborted) upstreamCtrl.abort();
+  else clientSignal?.addEventListener('abort', () => upstreamCtrl.abort());
+
   // SSE 响应
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
@@ -196,6 +202,8 @@ app.post('/conversations/:id/messages', async (c) => {
         config, messages, TOOL_DEFINITIONS,
         (name, args) => executeTool(userId, name, args),
         (event) => { write({ type: 'tool_call', name: event.name, args: event.args }); },
+        5,
+        upstreamCtrl.signal,
       );
 
       const reader = aiStream.getReader();
@@ -239,8 +247,9 @@ app.post('/conversations/:id/messages', async (c) => {
         } catch {}
       }
     } catch (err: any) {
+      // 客户端断开触发的 AbortError: 静默 (客户端已不听, 上游 fetch 已停)
+      if (err.name === 'AbortError') return;
       console.error('[AI Chat] error:', err);
-      // 客户端可能已断开导致 stream 关闭, write 自身也可能抛, 包 try-catch 避免传到 finally 之后还出错
       try { await write({ type: 'error', error: err.message || 'AI 调用失败' }); } catch {}
     } finally {
       // writer.close() 在 stream 已关闭时同步抛 TypeError(ERR_INVALID_STATE), 不 catch 会让 async IIFE 顶层 unhandled → Node 进程崩 → 所有后续请求 500

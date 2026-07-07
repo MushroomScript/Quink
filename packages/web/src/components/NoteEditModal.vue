@@ -50,6 +50,80 @@ const lockToken = ref<string | null>(null);
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 const showInner = ref(false);
 
+// Modal 高度 JS 硬测硬设. 用 zoom 校正 window.innerHeight, 否则 CSS zoom>1 时 80vh 超 layout viewport.
+// (App.vue applyZoomLevel 给 <html> 加 CSS zoom, innerHeight 是 layout viewport 不缩; element px 是 CSS 空间, zoom 后 layout size = px * zoom)
+let contentRo: ResizeObserver | null = null;
+// modal 打开时的自然高度 (vditor init 稳定后记录). 作为后续 measure 的高度上限, 避免展开 aiPanel 时 modal 突然涨到 80vh.
+// 允许自由 shrink (Apply 后内容变少 modal 也变小), 只统一上限让展开/不展开视觉大小一致
+let initialH = 0;
+let initialHTimer: ReturnType<typeof setTimeout> | null = null;
+
+function measureAndClampModal() {
+  const el = modalCardRef.value;
+  if (!el) return;
+  const body = el.querySelector<HTMLElement>('[data-modal-body]');
+  if (!body) return;
+  const headerH = (el.children[0] as HTMLElement | undefined)?.offsetHeight || 0;
+  // 临时移除 body max-height, scrollHeight 才是内容真实需求
+  const prev = body.style.maxHeight;
+  body.style.maxHeight = 'none';
+  const bodyWant = body.scrollHeight;
+  body.style.maxHeight = prev;
+  const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+  const vhCap = Math.floor(window.innerHeight / zoom * 0.8);
+  // 已记录 initialH → 用它做 cap (aiPanel 展开时不涨, body 内滚); 未记录 (首次 measure) → 用 80vh 兜底
+  const cap = initialH > 0 ? Math.min(initialH, vhCap) : vhCap;
+  const target = Math.min(headerH + bodyWant, cap);
+  const targetBodyMax = target - headerH;
+  const currentH = parseFloat(el.style.height) || el.getBoundingClientRect().height / zoom;
+  const currentBodyMax = parseFloat(body.style.maxHeight) || Infinity;
+  // 分开 diff: 首次 measure modal 自然高度可能已 == target 但 body 还没 max 限制, 至少 set 一次; 之后 diff 防 ResizeObserver 死锁
+  if (Math.abs(currentH - target) > 1 || Math.abs(currentBodyMax - targetBodyMax) > 1) {
+    el.style.height = `${target}px`;
+    body.style.maxHeight = `${targetBodyMax}px`;
+  }
+}
+
+function setupModalObservers() {
+  const el = modalCardRef.value;
+  if (!el) return;
+  const body = el.querySelector<HTMLElement>('[data-modal-body]');
+  if (!body) return;
+  contentRo?.disconnect();
+  contentRo = new ResizeObserver(() => {
+    requestAnimationFrame(measureAndClampModal);
+  });
+  const first = body.firstElementChild as HTMLElement | null;
+  if (first) contentRo.observe(first);
+}
+
+function onWinResize() {
+  requestAnimationFrame(measureAndClampModal);
+}
+
+watch(showInner, async (v) => {
+  if (v) {
+    await nextTick();
+    await nextTick();
+    initialH = 0; // 清 initial 让 measure 用 80vh 拿自然高度, 直到 vditor init 稳定后再固定 initialH
+    measureAndClampModal();
+    setupModalObservers();
+    // vditor init 需要几百 ms (加载 wasm/css 展开内容 render). 延后 500ms 拿"稳定后"的 modal 高度作为 initialH.
+    // 首次刷新时若太早记录, vditor 还没撑起来 initialH 会记成 200 之类, 之后 cap 死住让 modal 一直很矮.
+    if (initialHTimer) clearTimeout(initialHTimer);
+    initialHTimer = setTimeout(() => {
+      const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+      initialH = parseFloat(modalCardRef.value?.style.height || '0')
+        || (modalCardRef.value?.getBoundingClientRect().height ?? 0) / zoom;
+    }, 500);
+  } else {
+    initialH = 0;
+    if (initialHTimer) { clearTimeout(initialHTimer); initialHTimer = null; }
+    contentRo?.disconnect();
+    contentRo = null;
+  }
+});
+
 // 申请编辑权弹窗 (无 write 权限的人点编辑 → 不进编辑器, 弹申请理由对话框)
 const showRequestPerm = ref(false);
 const requestPermLabel = ref<'admin' | 'all'>('admin');
@@ -268,6 +342,8 @@ function onMobileSubmit() {
 }
 
 function startClose() {
+  // 立刻停麦克风: onBeforeUnmount 要等 Transition leave 完才 fire, 期间录音 stream 还在, 浏览器 tab 麦克风红点延迟消失
+  editorRef.value?.stopMedia?.();
   // 关闭瞬间用 cloneNode 把 vditor-wrapper 替换成静态 HTML 副本。
   // 用 chrome-devtools-mcp + MutationObserver 实测的 root cause:
   //   按 Esc 后 ~3ms 内 vditor.destroy() 就被触发(Vue Transition leave 期间 RichEditor
@@ -327,9 +403,15 @@ function onKeydown(e: KeyboardEvent) {
 
 // document level + capture 阶段挂载: 比 NoteDetail.onKeydown 的 bubble 阶段更早执行,
 // 而且不依赖 focus 在 modal 内(focus 在 body 时事件也能被拦截)
-onMounted(() => { document.addEventListener('keydown', onKeydown, true); });
+onMounted(() => {
+  document.addEventListener('keydown', onKeydown, true);
+  window.addEventListener('resize', onWinResize);
+});
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown, true);
+  window.removeEventListener('resize', onWinResize);
+  contentRo?.disconnect();
+  if (initialHTimer) { clearTimeout(initialHTimer); initialHTimer = null; }
   // 关 modal 同时释放编辑锁 (fetch keepalive 保证 page unload 也能发出)
   releaseLockOnUnmount();
 });
@@ -342,12 +424,13 @@ onBeforeUnmount(() => {
          - 非全屏: scale(0.95)→scale(1) 期间 vditor 内 cursor 视觉位置跟着缩放 (cursor 实际在末尾但视觉飘半个字),
            Vditor IR 没法控制 cursor 抗 scale, caret-color: transparent 也救不回. 改 fade 彻底解决 focusEnd cursor 飘动. -->
     <Transition name="modal-fade" @after-leave="onAfterLeave">
-    <div v-if="showInner" class="fixed inset-0 z-[var(--z-modal-edit)] flex items-center justify-center">
+    <div v-if="showInner" class="fixed inset-0 z-[var(--z-modal-edit)] grid place-items-center">
       <!-- Backdrop: 毛玻璃 -->
       <div class="absolute inset-0 bg-black/40 backdrop-blur-md" @click="tryClose" />
 
-      <!-- Modal -->
-      <div ref="modalCardRef" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[80vh] flex flex-col overflow-hidden ring-1 ring-black/5">
+      <!-- Modal 无 h/max-h, 由 measureAndClampModal 动态 set style.height. Body 同理动态 max-height. -->
+
+      <div ref="modalCardRef" class="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl mx-4 flex flex-col overflow-hidden ring-1 ring-black/5">
         <!-- Header -->
         <div class="flex items-center justify-between px-5 py-3 bg-gray-50/80">
           <span class="text-xs font-medium text-gray-500">编辑笔记</span>
@@ -375,8 +458,8 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </template>
-        <!-- 桌面端: 富文本 RichEditor -->
-        <div v-else class="overflow-hidden">
+        <!-- 桌面端 RichEditor. data-modal-body: measureAndClampModal 定位用. min-h-0: 打破 flex item min-content 保护 -->
+        <div v-else data-modal-body class="min-h-0 overflow-y-auto">
           <RichEditor
             ref="editorRef"
             :initial-content="note.content"

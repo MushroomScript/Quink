@@ -8,7 +8,7 @@ import { publish } from '../reminder/bus.js';
 import crypto from 'crypto';
 import dayjs from 'dayjs';
 import { DEFAULT_PROMPTS, AI_FEATURES, AI_FEATURE_LABELS } from '../ai/prompts.js';
-import { aiProcess } from '../ai/client.js';
+import { getConfigForFeature, getPrompt, callAiStream, type ChatMessage } from '../ai/client.js';
 import { UPLOAD_DIR } from '../config/paths.js';
 
 const app = new Hono();
@@ -258,7 +258,10 @@ app.post('/test', async (c) => {
   }
 });
 
-// ── AI Process (polish/expand/write) ──
+// ── AI Process (polish/expand/write/simplify/translate) —— SSE 流式响应 ──
+// 改成流式的动因: 蘑菇 2026-07-07 提"几千字润色被截断". max_tokens 从设置读 (aiChatMaxTokens 复用),
+// 输出量大 → 客户端逐 chunk 显示打字机效果, 无 total timeout (由前端 stall timeout 兜底: 60s 无 chunk 才 abort).
+// 前端消费格式跟 /ai/chat 对齐: `data: {type:'delta',content}` / `data: {type:'done'}` / `data: {type:'error',error}`.
 app.post('/process', async (c) => {
   const userId = c.get('userId');
   const _ocid = c.req.header('X-Quink-Client-Id');
@@ -267,12 +270,62 @@ app.post('/process', async (c) => {
   if (!AI_FEATURES.includes(feature)) return c.json({ error: '未知功能' }, 400);
   if (!content?.trim()) return c.json({ error: '内容不能为空' }, 400);
 
-  try {
-    const result = await aiProcess(userId, feature, content, customPrompt || undefined, targetLang || undefined);
-    return c.json({ data: { result } });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
+  const config = await getConfigForFeature(userId, feature);
+  if (!config) return c.json({ error: '未配置 AI 模型，请在设置中添加 AI 配置' }, 400);
+
+  // maxTokens 从用户 preferences 读, 复用 aiChatMaxTokens (aiProcess 跟 chat 输出量级近似, 无必要单独字段).
+  // 默认 8192; 用户想放开可在设置里调 aiChatMaxTokens.
+  const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+  const prefs = (user as any)?.preferences || {};
+  const maxTokens = prefs.aiChatMaxTokens || 8192;
+
+  const promptTpl = customPrompt || await getPrompt(userId, feature);
+  // 保留原文段落/换行 (translate/polish/expand/write 要按原格式返回); 跟 aiProcess() 内部原逻辑对齐.
+  const text = content.replace(/<[^>]*>/g, '').trim();
+  const filled = promptTpl
+    .replace(/\{targetLang\}/g, targetLang || '英语')
+    .replace('{content}', text);
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: '你是一个写作助手。' },
+    { role: 'user', content: filled },
+  ];
+
+  // 客户端断开 → abort 上游 Ollama fetch. 否则前端 stopAi 只 abort 前端 fetch, 后端到 Ollama 的连接继续跑,
+  // 单线程本地模型 (Ollama qwen) 会一直占着, 下一个请求卡住直到上一次跑完.
+  const upstreamCtrl = new AbortController();
+  const clientSignal = c.req.raw.signal;
+  if (clientSignal?.aborted) upstreamCtrl.abort();
+  else clientSignal?.addEventListener('abort', () => upstreamCtrl.abort());
+
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const write = (obj: any) => writer.write(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+
+  (async () => {
+    try {
+      const stream = await callAiStream(config, messages, maxTokens, upstreamCtrl.signal);
+      const reader = stream.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await write({ type: 'delta', content: value });
+      }
+      await write({ type: 'done' });
+    } catch (err: any) {
+      // 客户端断开触发的 AbortError: 静默 (客户端已不听, 上游 fetch 已停, 目的达到)
+      if (err.name === 'AbortError') return;
+      console.error('[AI Process] error:', err);
+      try { await write({ type: 'error', error: err.message || 'AI 处理失败' }); } catch {}
+    } finally {
+      try { await writer.close(); } catch {}
+    }
+  })();
+
+  return new Response(readable, {
+    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+  });
 });
 
 // POST /api/ai/transcribe — 语音转文字

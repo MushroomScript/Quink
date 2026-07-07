@@ -121,6 +121,18 @@ export const useNotesStore = defineStore('notes', () => {
     return _viewState[key];
   }
 
+  // fetch 覆盖 store 时保留 local 更新的 note (防 hover-navigate 触发的 fetch 拿到 stale version 覆盖已 updateNote 完成的.
+  // 场景: cardDnd 拖卡 hover 切 view → 新 view mount fetchNotes 跟 drop 的 updateNote 并发, fetch 返回时 backend
+  // 可能还没 apply update, 拿旧 version=5. 若 fetch 之后完成, 会用 stale 5 覆盖已经 Object.assign 更新的 store version=6.
+  // 结果 second drop 用 stale version 撞 version_conflict. 逐条比较 version, local 更新的保留)
+  function mergeKeepNewer(fresh: Note[], local: Note[]): Note[] {
+    const localMap = new Map(local.map(n => [n.id, n]));
+    return fresh.map(f => {
+      const l = localMap.get(f.id);
+      return l && (l.version || 0) > (f.version || 0) ? l : f;
+    });
+  }
+
   async function fetchNotes(
     extra?: { tag?: string; tags?: string; types?: string; dateFrom?: string; dateTo?: string },
     opts: { append?: boolean; keepCount?: boolean } = {}
@@ -191,7 +203,7 @@ export const useNotesStore = defineStore('notes', () => {
         const localIds = new Set(vs.notes.map(n => n.id));
         const hasNewIds = res.data.some(n => !localIds.has(n.id));
         if (hasNewIds) {
-          vs.notes = res.data;
+          vs.notes = mergeKeepNewer(res.data, vs.notes);
         } else {
           // 删消失的 id (从尾往前 splice 防 index 漂移)
           for (let i = vs.notes.length - 1; i >= 0; i--) {
@@ -204,7 +216,7 @@ export const useNotesStore = defineStore('notes', () => {
           }
         }
       } else {
-        vs.notes = res.data;
+        vs.notes = mergeKeepNewer(res.data, vs.notes);
       }
       vs.total = res.pagination.total;
       if (opts.keepCount) {

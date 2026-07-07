@@ -87,7 +87,9 @@ function buildEndpoint(config: AiConfig): string {
   return `${base}/v1/chat/completions`;
 }
 
-async function callAi(config: AiConfig, systemPrompt: string, userMessage: string): Promise<string> {
+// maxTokens 默认 1024 够 tag/classify/summary 短输出用. polish/expand/write/simplify/translate/chat
+// 这类"输出可能上千 tokens" 的 feature 调用时传 8192, 否则本地 ollama / 云端都会在 1024 处硬截.
+async function callAi(config: AiConfig, systemPrompt: string, userMessage: string, maxTokens = 1024): Promise<string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const endpoint = buildEndpoint(config);
 
@@ -100,7 +102,7 @@ async function callAi(config: AiConfig, systemPrompt: string, userMessage: strin
       headers,
       body: JSON.stringify({
         model: config.model,
-        max_tokens: 1024,
+        max_tokens: maxTokens,
         system: systemPrompt,
         messages: [{ role: 'user', content: userMessage }],
       }),
@@ -122,7 +124,7 @@ async function callAi(config: AiConfig, systemPrompt: string, userMessage: strin
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage },
         ],
-        max_tokens: 1024,
+        max_tokens: maxTokens,
         temperature: 0.3,
       }),
     });
@@ -133,12 +135,15 @@ async function callAi(config: AiConfig, systemPrompt: string, userMessage: strin
   }
 }
 
+// 长输出 feature (润色 / 扩充 / 写文 / 整理 / 翻译 / 对话) 用: 覆盖 callAi 默认 1024 上限
+const LONG_OUTPUT_MAX_TOKENS = 8192;
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string | Array<{ type: string; text?: string; image_url?: { url: string }; source?: { type: string; media_type: string; data: string } }>;
 }
 
-export async function callAiStream(config: AiConfig, messages: ChatMessage[], maxTokens = 2048): Promise<ReadableStream<string>> {
+export async function callAiStream(config: AiConfig, messages: ChatMessage[], maxTokens = 2048, signal?: AbortSignal): Promise<ReadableStream<string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const endpoint = buildEndpoint(config);
 
@@ -159,6 +164,7 @@ export async function callAiStream(config: AiConfig, messages: ChatMessage[], ma
         system: typeof systemMsg?.content === 'string' ? systemMsg.content : '',
         messages: nonSystem.map(m => ({ role: m.role, content: m.content })),
       }),
+      signal,
     });
     if (!res.ok) throw new Error(`Anthropic API error: ${res.status}`);
 
@@ -200,6 +206,7 @@ export async function callAiStream(config: AiConfig, messages: ChatMessage[], ma
         temperature: 0.3,
         stream: true,
       }),
+      signal,
     });
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
 
@@ -230,7 +237,7 @@ export async function callAiStream(config: AiConfig, messages: ChatMessage[], ma
   }
 }
 
-export { getConfigForFeature, buildEndpoint };
+export { getConfigForFeature, getPrompt, buildEndpoint };
 
 // ── Function Calling 工具调用循环 ──
 
@@ -238,7 +245,7 @@ interface ToolCallResult {
   toolCalls: { name: string; args: any; id: string }[];
 }
 
-async function callAiNonStream(config: AiConfig, messages: ChatMessage[], tools?: any[]): Promise<{ content: string | null; toolCalls: { name: string; args: any; id: string }[] }> {
+async function callAiNonStream(config: AiConfig, messages: ChatMessage[], tools?: any[], signal?: AbortSignal): Promise<{ content: string | null; toolCalls: { name: string; args: any; id: string }[] }> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const endpoint = buildEndpoint(config);
 
@@ -253,7 +260,7 @@ async function callAiNonStream(config: AiConfig, messages: ChatMessage[], tools?
       messages: nonSystem.map(m => ({ role: m.role, content: m.content })),
     };
     if (tools?.length) body.tools = tools.map(t => ({ name: t.function.name, description: t.function.description, input_schema: t.function.parameters }));
-    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) });
+    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal });
     if (!res.ok) throw new Error(`Anthropic API error: ${res.status} ${await res.text()}`);
     const data = await res.json() as any;
     const textBlock = data.content?.find((b: any) => b.type === 'text');
@@ -270,7 +277,7 @@ async function callAiNonStream(config: AiConfig, messages: ChatMessage[], tools?
       max_tokens: 2048, temperature: 0.3,
     };
     if (tools?.length) body.tools = tools;
-    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) });
+    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal });
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status} ${await res.text()}`);
     const data = await res.json() as any;
     const choice = data.choices?.[0]?.message;
@@ -297,6 +304,7 @@ export async function callAiWithToolLoop(
   executeToolFn: (name: string, args: any) => Promise<{ result: string; noteIds: string[] }>,
   onToolCall?: (event: ToolCallEvent) => void,
   maxRounds = 5,
+  signal?: AbortSignal,
 ): Promise<{ stream: ReadableStream<string>; noteIds: string[] }> {
   const allNoteIds: string[] = [];
   const msgsCopy = [...messages];
@@ -307,7 +315,7 @@ export async function callAiWithToolLoop(
     const t0 = Date.now();
 
     try {
-      response = await callAiNonStream(config, msgsCopy, supportsTools ? tools : undefined);
+      response = await callAiNonStream(config, msgsCopy, supportsTools ? tools : undefined, signal);
     } catch (err: any) {
       if (err.message.includes('400') && supportsTools) {
         supportsTools = false;
@@ -317,7 +325,7 @@ export async function callAiWithToolLoop(
         if (sysIdx >= 0 && typeof msgsCopy[sysIdx].content === 'string' && !(msgsCopy[sysIdx].content as string).includes('可用工具')) {
           msgsCopy[sysIdx] = { ...msgsCopy[sysIdx], content: msgsCopy[sysIdx].content + '\n\n' + TOOLS_PROMPT };
         }
-        response = await callAiNonStream(config, msgsCopy);
+        response = await callAiNonStream(config, msgsCopy, undefined, signal);
       } else {
         throw err;
       }
@@ -334,7 +342,7 @@ export async function callAiWithToolLoop(
       if (sysIdx >= 0 && typeof msgsCopy[sysIdx].content === 'string' && !(msgsCopy[sysIdx].content as string).includes('可用工具')) {
         msgsCopy[sysIdx] = { ...msgsCopy[sysIdx], content: (msgsCopy[sysIdx].content as string) + '\n\n' + TOOLS_PROMPT };
       }
-      response = await callAiNonStream(config, msgsCopy);
+      response = await callAiNonStream(config, msgsCopy, undefined, signal);
       console.log(`[AI] round 0: prompt-mode retry, toolCalls=${response.toolCalls.length}, hasToolTag=${response.content?.includes('<tool>')}`);
     }
 
@@ -373,7 +381,7 @@ export async function callAiWithToolLoop(
     }
 
     // 无工具调用 → 最终回答，用流式输出
-    const finalStream = await callAiStream(config, msgsCopy, 2048);
+    const finalStream = await callAiStream(config, msgsCopy, 2048, signal);
     return { stream: finalStream, noteIds: [...new Set(allNoteIds)] };
   }
 
@@ -489,7 +497,7 @@ export async function autoSimplify(userId: string, content: string): Promise<str
   if (text.length < 5) return null;
 
   try {
-    const result = await callAi(config, '你是一个写作助手。', prompt.replace('{content}', text));
+    const result = await callAi(config, '你是一个写作助手。', prompt.replace('{content}', text), LONG_OUTPUT_MAX_TOKENS);
     return result.trim() || null;
   } catch (err) {
     console.error('Auto-simplify failed:', err);
@@ -497,27 +505,8 @@ export async function autoSimplify(userId: string, content: string): Promise<str
   }
 }
 
-/**
- * Generic AI call for polish/expand/write features.
- */
-export async function aiProcess(userId: string, feature: AiFeature, content: string, customPrompt?: string, targetLang?: string): Promise<string> {
-  const config = await getConfigForFeature(userId, feature);
-  if (!config) throw new Error('未配置 AI 模型，请在设置中添加 AI 配置');
-
-  const prompt = customPrompt || await getPrompt(userId, feature);
-  // 保留原文段落/换行 (translate/polish/expand/write 要按原格式返回); 不走 cleanContent ——
-  // 它的 \s+→单空格会把换行全压成空格, 导致译文/润色结果堆成一整段没换行
-  const text = content.replace(/<[^>]*>/g, '').trim();
-
-  // translate 的 prompt 带 {targetLang} 占位, 由调用方传入目标语种 (前端划词按中文占比自动判语向 /
-  // 翻译窗口内二次选语言). 对不含占位符的 polish/expand/write 是无害 no-op.
-  const filled = prompt
-    .replace(/\{targetLang\}/g, targetLang || '英语')
-    .replace('{content}', text);
-
-  const result = await callAi(config, '你是一个写作助手。', filled);
-  return result;
-}
+// 原 aiProcess (非流式 polish/expand/write) 已在 2026-07-07 改造为 SSE 流式, 逻辑内联到 routes/ai-config.ts POST /process.
+// 保留 callAiStream + getConfigForFeature + getPrompt export 给该 handler 用.
 
 /**
  * AI chat with context (for RAG).
@@ -529,7 +518,7 @@ export async function aiChat(userId: string, question: string, context: string):
   const prompt = await getPrompt(userId, 'chat');
   const filledPrompt = prompt.replace('{context}', context).replace('{content}', question);
 
-  const result = await callAi(config, filledPrompt, question);
+  const result = await callAi(config, filledPrompt, question, LONG_OUTPUT_MAX_TOKENS);
   return result;
 }
 

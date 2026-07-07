@@ -69,10 +69,11 @@ const HOVER_NAV_MS = 400;
 
 // dropzone target → sidebar nav 路径. 返回 null = 该 target 不参与 hover-navigate (cat: / action:trash 等).
 // 跟 cardLeave.ts 的 TYPE_TO_NAV_PATH 同源映射 (type→view 全局只此两处, 加 view 时记得两边都改).
+// Sidebar 用 type:quink / type:note / type:todo 作 data-drop-target (见 Sidebar.vue mainNav dropType).
 function hoverTargetToNavPath(target: string): string | null {
   if (target === 'action:ai') return '/ai';
-  if (target === 'type:note') return '/';
-  if (target === 'type:snippet') return '/notes';
+  if (target === 'type:quink') return '/quink';
+  if (target === 'type:note') return '/notes';
   if (target === 'type:todo') return '/todos';
   return null;
 }

@@ -98,7 +98,8 @@ router.beforeEach((to, from) => {
   }
 });
 
-const keepAlivePaths = ['/', '/notes', '/todos', '/ai'];
+// 灵感页 path 从 / 改到 /quink 后 (router/index.ts redirect / → /quink), 主视图实际命中的是 /quink; 保留 / 是死值
+const keepAlivePaths = ['/quink', '/notes', '/todos', '/ai'];
 let pendingScroll: number | null = null;
 
 router.afterEach((to) => {

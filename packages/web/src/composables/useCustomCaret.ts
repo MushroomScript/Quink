@@ -60,6 +60,22 @@ let currentInput: Editable | null = null;
 let composing = false;
 let rafId = 0;
 
+// 找最近的可滚动祖先 (overflow-y != visible). 用于 caret 在 Vditor / max-height textarea
+// 等"内部滚动"的编辑区里, 当光标所在行被父容器 scroll 出可视区时把自定义 caret 藏起来.
+// 原生浏览器 caret 会被父 overflow 自动裁掉, 但我们的 caret 是 body 下 fixed 元素不受父 overflow 影响,
+// 必须手动 clip. 不判断 overflow=visible; 到 body 停止 (整页 scroll 由 window listener 触发重算, caret 位置自然跟上).
+function findScrollClipAncestor(el: Element | null): Element | null {
+  let cur = el?.parentElement || null;
+  while (cur && cur !== document.body) {
+    const cs = getComputedStyle(cur);
+    if (cs.overflowY === 'auto' || cs.overflowY === 'scroll' || cs.overflowY === 'hidden') {
+      return cur;
+    }
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
 function isEligible(el: Element | null): el is Editable {
   if (!el) return false;
   if (el instanceof HTMLTextAreaElement) {
@@ -255,6 +271,19 @@ function updateCaretContentEditable(el: HTMLElement) {
   // Vditor 几何居中(用 baseHeight, 让 caret 顶部位置跟原 baseHeight 时一致) + 1px 下移
   const verticalPadding = Math.max(0, (rHeight - baseHeight) / 2) + 1;
 
+  // 祖先 scroll clip: caret 所在行滚出可滚动祖先可视区时藏起来. 原生 caret 被父 overflow 自动裁, 但我们
+  // 的 caret 是 body 下 fixed 元素不受父 overflow 影响, 必须手动 clip. Vditor 内部滚动时命中这里.
+  const clipParent = findScrollClipAncestor(el);
+  if (clipParent) {
+    const cp = clipParent.getBoundingClientRect();
+    const cpTop = cp.top / zoom;
+    const cpBottom = cp.bottom / zoom;
+    if (rTop + Math.max(rHeight, caretHeight) < cpTop || rTop > cpBottom) {
+      caret!.style.display = 'none';
+      return;
+    }
+  }
+
   caret!.style.display = 'block';
   caret!.style.width = CARET_WIDTH + 'px';
   caret!.style.transform = `translate(${rLeft + CARET_LEFT_OFFSET}px, ${rTop + verticalPadding + MAC_EDITOR_CARET_FIX}px)`;
@@ -401,6 +430,20 @@ function updateCaret() {
       caretTop + caretHeight < minTop || caretTop > maxBottom) {
     caret.style.display = 'none';
     return;
+  }
+
+  // 祖先 scroll clip: textarea 在 max-height + overflow-y-auto 的父容器里被滚出可视区时藏起来.
+  // input 本身的 padding box 判断只处理 textarea 自身 scroll, 祖先 scroll 要单独判. window 级 scroll listener
+  // (attachListeners 里 window scroll capture) 保证祖先滚动时会重算 caret.
+  const clipParent = findScrollClipAncestor(el);
+  if (clipParent) {
+    const cp = clipParent.getBoundingClientRect();
+    const cpTop = cp.top / zoom;
+    const cpBottom = cp.bottom / zoom;
+    if (caretTop + caretHeight < cpTop || caretTop > cpBottom) {
+      caret.style.display = 'none';
+      return;
+    }
   }
 
   caret.style.width = CARET_WIDTH + 'px';

@@ -102,9 +102,9 @@
     </div>
 
     <div class="type-bar">
-      <button class="type-btn active" data-type="note">💡 灵感</button>
+      <button class="type-btn active" data-type="quink">💡 灵感</button>
       <button class="type-btn" data-type="todo">✅ 待办</button>
-      <button class="type-btn" data-type="snippet">📝 笔记</button>
+      <button class="type-btn" data-type="note">📝 笔记</button>
     </div>
 
     <div class="input-area">
@@ -124,7 +124,8 @@
     const saveBtn = document.getElementById('saveBtn');
     const toast = document.getElementById('toast');
     const typeBtns = document.querySelectorAll('.type-btn');
-    const types = ['note', 'todo', 'snippet'];
+    // 顺序跟按钮 DOM 一致: 灵感 → 待办 → 笔记. 类型名跟 schema.ts notes.type enum (quink|note|todo) 对齐
+    const types = ['quink', 'todo', 'note'];
     let currentTypeIdx = 0;
 
     typeBtns.forEach((btn, i) => {

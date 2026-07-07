@@ -213,6 +213,15 @@ const aiPromptText = ref('');
 const aiProcessing = ref(false);
 const aiResult = ref('');
 const aiError = ref('');
+const aiResultEl = ref<HTMLTextAreaElement | null>(null);
+
+// 流式追加时自动 scroll 到底部, 打字机效果不用用户手滚跟随.
+// 简单粗暴 scroll to bottom: 流式期间用户主动往上滚看历史内容的情况罕见, 强制跟随反而符合预期.
+watch(aiResult, async () => {
+  await nextTick();
+  const el = aiResultEl.value;
+  if (el) el.scrollTop = el.scrollHeight;
+});
 
 // 三个图标都比文字基线整体下移 1px，并按各自重心偏差再细调对齐：
 // PhBookOpen 顶部空白 -1，PhPenNib 重心偏上 +1，PhSparkle 居中为 0
@@ -634,6 +643,10 @@ onBeforeUnmount(() => {
   editorRef.value?.removeEventListener('drop', onEditorDrop, true);
   editorRef.value?.removeEventListener('paste', onListPaste, true);
   editorRef.value?.removeEventListener('paste', onEditorPaste, true);
+  // 录音资源清理: 用户点了录音后不停 → 关 modal / 切页时若不清, 麦克风 stream + WebSocket + AudioContext + Timer 全部常驻.
+  // 两个 cleanup 内部都做了 null check, 幂等安全, 无需外层 isRecording 判断.
+  cleanupRecording();
+  cleanupVoiceRecord();
   vditor?.destroy();
   vditor = null;
 });
@@ -737,23 +750,71 @@ async function openAiPanel(feature: 'polish' | 'expand' | 'write') {
     aiPromptText.value = res.data[feature]?.prompt || '';
   } catch { aiPromptText.value = ''; }
   showAiPanel.value = true;
+  scrollAiPanelIntoView();
+}
+
+// AI process 走 SSE 流式: delta 到就追加 aiResult (Vue reactive 自动打字机效果),
+// 无 total timeout, 用 stall timeout (60s 无新 chunk 就 abort) 兜底 —— 只要 ollama 还在出字, 就一直等.
+// 首 chunk 前也计入 stall (ollama 冷启动可能 3-5s, 60s 足够宽裕)
+const STALL_TIMEOUT_MS = 60_000;
+const stopBtnHover = ref(false); // 处理中按钮 hover 时切换成红色 "停止", 点击 abort
+const aiPanelEl = ref<HTMLElement | null>(null);
+let currentAiAbort: AbortController | null = null;
+
+// 展开/触发 AI 面板后自动滚到底部, 让 aiPanel + 输出 textarea 立即可见, 不用手动滚
+async function scrollAiPanelIntoView() {
+  await nextTick();
+  aiPanelEl.value?.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
 async function runAi() {
   if (!vditor || aiProcessing.value) return;
   aiProcessing.value = true;
+  // 关键: 清 hover 状态防止鼠标已在按钮上时立即显示"停止". mouseenter 不会重复触发 (鼠标不动),
+  // 用户必须移开再进来才能触发 mouseenter → 显示"停止". 结果: 按钮先显示"处理中", 有意图 stop 才 hover 变红.
+  stopBtnHover.value = false;
   aiError.value = '';
   aiResult.value = '';
+  scrollAiPanelIntoView();
 
   const selection = vditor.getSelection();
   const content = selection || vditor.getValue();
 
+  const abortCtrl = new AbortController();
+  currentAiAbort = abortCtrl;
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+  let stallFired = false;
+  let firstDelta = true;
+  const resetStall = () => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => { stallFired = true; abortCtrl.abort(); }, STALL_TIMEOUT_MS);
+  };
+  resetStall();
+
   try {
-    const res = await api.aiProcess(aiFeature.value, content, aiPromptText.value);
-    aiResult.value = res.data.result;
+    await api.aiProcess(aiFeature.value, content, aiPromptText.value, undefined, (delta) => {
+      aiResult.value += delta;
+      resetStall();
+      // 首 delta 到时结果预览框 (v-if=aiResult) 首次渲染, 再滚一次让预览框出现在视口内
+      if (firstDelta) { firstDelta = false; scrollAiPanelIntoView(); }
+    }, abortCtrl.signal);
   } catch (err: any) {
-    aiError.value = err.message || 'AI 处理失败';
-  } finally { aiProcessing.value = false; }
+    // AbortError: 分 stall 触发 vs 用户主动停止. 用户停止不显示 error (保留 aiResult 让 UI 切"应用/重新生成")
+    if (err.name === 'AbortError' || (err.message || '').toLowerCase().includes('abort')) {
+      if (stallFired) aiError.value = `${STALL_TIMEOUT_MS / 1000} 秒无新输出, 已中断. 可点"重新生成"再试`;
+    } else {
+      aiError.value = err.message || 'AI 处理失败';
+    }
+  } finally {
+    if (stallTimer) clearTimeout(stallTimer);
+    aiProcessing.value = false;
+    currentAiAbort = null;
+    stopBtnHover.value = false;
+  }
+}
+
+function stopAi() {
+  currentAiAbort?.abort();
 }
 
 function applyAiResult() {
@@ -1026,7 +1087,12 @@ async function uploadPendingVoice(name: string) {
   }
 }
 
-defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
+// stopMedia: 供父组件在关闭动画开始时立刻停麦克风 (onBeforeUnmount 要等 Transition leave + vditor destroy 完才 fire, 麦克风红点延迟几秒消失)
+function stopMedia() {
+  if (isRecording.value) cleanupRecording();
+  if (isVoiceRecording.value) cleanupVoiceRecord();
+}
+defineExpose({ clearContent, isDirty: computed(() => dirty.value), stopMedia });
 </script>
 
 <template>
@@ -1151,8 +1217,8 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
     </div>
     </div>
 
-    <!-- AI Panel -->
-    <div v-if="showAi && showAiPanel" class="border-t border-gray-100 bg-gray-50/80">
+    <!-- AI Panel: 自然撑开, modal Body 承担 scroll. ref 供 openAiPanel/runAi 触发时自动 scrollIntoView -->
+    <div v-if="showAi && showAiPanel" ref="aiPanelEl" class="border-t border-gray-100 bg-gray-50/80">
       <div class="flex items-center px-3 pt-2">
         <span class="text-xs font-medium text-gray-500 inline-flex items-center gap-1">
           <component :is="currentAiFeatureIcon" size="0.875rem" weight="fill" />
@@ -1167,19 +1233,28 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
       </div>
       <div class="px-3 pb-3">
         <div v-if="aiError" class="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2 mb-2">{{ aiError }}</div>
-        <div v-if="aiResult" class="mb-2">
-          <div class="text-[10px] text-gray-400 mb-1">AI 结果预览：</div>
-          <pre class="max-h-40 overflow-y-auto bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-700 whitespace-pre-wrap font-mono">{{ aiResult }}</pre>
+        <!-- v-if 带 aiProcessing: 重新生成时 aiResult 清空但仍保留 textarea 挂载, 避免"消失→再出现"闪烁 -->
+        <div v-if="aiResult || aiProcessing" class="mb-2">
+          <div class="text-[10px] text-gray-400 mb-1">AI 结果预览 (可编辑)：</div>
+          <!-- pre 改 textarea: (1) 流式追加时用户可以手动改, apply 前修改; (2) 支持 v-model 让 aiResult 变化 → DOM 同步.
+               ref + watch(aiResult) 让 scrollTop = scrollHeight 实现流式打字机自动跟随末尾, 不用用户手滚 -->
+          <textarea ref="aiResultEl" v-model="aiResult" spellcheck="false"
+            class="w-full min-h-[100px] max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-700 whitespace-pre-wrap font-mono resize-none outline-none focus:border-primary" />
         </div>
         <div class="flex gap-2">
-          <button v-if="!aiResult" @click="runAi" :disabled="aiProcessing"
-            class="px-4 py-1.5 text-white text-xs font-medium rounded-lg disabled:opacity-50 transition-colors"
-            style="background: rgb(var(--c-accent))">
-            {{ aiProcessing ? '处理中' : '开始' }}
+          <!-- 处理中: 单按钮 (accent 色"处理中"), hover 时变红色"停止" 点击 abort;
+               非处理中: 单按钮 accent "开始". 应用按钮流式期间不显示 (未生成完不能 apply) -->
+          <button v-if="aiProcessing || !aiResult"
+            @click="aiProcessing ? stopAi() : runAi()"
+            @mouseenter="stopBtnHover = true" @mouseleave="stopBtnHover = false"
+            class="px-4 py-1.5 min-w-[4.5rem] text-center text-white text-xs font-medium rounded-lg transition-colors"
+            :class="aiProcessing && !stopBtnHover ? 'ai-btn-breathing' : ''"
+            :style="{ background: aiProcessing && stopBtnHover ? '#f87171' : 'rgb(var(--c-accent))' }">
+            {{ !aiProcessing ? '开始' : (stopBtnHover ? '停止' : '处理中') }}
           </button>
           <template v-else>
-            <button @click="applyAiResult" class="px-4 py-1.5 text-white text-xs font-medium rounded-lg transition-colors" style="background: rgb(var(--c-accent))">应用</button>
-            <button @click="runAi" :disabled="aiProcessing" class="px-4 py-1.5 text-xs text-gray-500 rounded-lg hover:bg-gray-100">{{ aiProcessing ? '处理中' : '重新生成' }}</button>
+            <button @click="applyAiResult" class="px-4 py-1.5 min-w-[4.5rem] text-center text-white text-xs font-medium rounded-lg transition-colors" style="background: rgb(var(--c-accent))">应用</button>
+            <button @click="runAi" class="px-4 py-1.5 min-w-[4.5rem] text-center text-xs text-gray-700 font-medium rounded-lg bg-gray-200 hover:bg-gray-300 transition-colors">重新生成</button>
           </template>
         </div>
       </div>
@@ -1255,6 +1330,9 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value) });
 <style>
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
+/* AI "处理中" 按钮呼吸: 只在非 hover 时应用, hover 时是红色停止不呼吸 */
+@keyframes ai-btn-breath { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+.ai-btn-breathing { animation: ai-btn-breath 1.6s ease-in-out infinite; }
 /* Vditor theme overrides —— Vditor 把 .vditor class 合并到 .vditor-wrapper 上 */
 .vditor-wrapper {
   border: none !important;

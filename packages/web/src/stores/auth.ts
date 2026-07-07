@@ -43,6 +43,12 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // 登录/注册后启 SSE, 跟 logout 停 SSE 对称. 否则同 tab 内登出再登录, SSE 已 es=null 但没人 restart,
+  // 提醒 / 通知 / 多设备同步全静默失效直到刷 app. startReminderSse 内部有 `if (es) return` 幂等保护.
+  function startSseAfterAuth() {
+    import('@/utils/sse').then(m => m.startReminderSse()).catch(() => {});
+  }
+
   async function register(username: string, password: string, nickname: string) {
     const res = await api.register({ username, password, nickname });
     setToken(res.data.token);
@@ -50,6 +56,7 @@ export const useAuthStore = defineStore('auth', () => {
     syncTokenToDesktop(res.data.token);
     clearUserData();
     user.value = res.data.user;
+    startSseAfterAuth();
     return res.data.user;
   }
 
@@ -60,6 +67,7 @@ export const useAuthStore = defineStore('auth', () => {
     syncTokenToDesktop(res.data.token);
     clearUserData();
     user.value = res.data.user;
+    startSseAfterAuth();
     return res.data.user;
   }
 
