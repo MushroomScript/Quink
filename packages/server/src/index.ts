@@ -62,8 +62,12 @@ app.use('/api/uploads/*', async (c, next) => {
   if ((payload.tv ?? 0) !== (tvRow.tokenVersion ?? 0)) return c.json({ error: '登录已失效' }, 401);
 
   // 2. 拿 url path 最后一段 (含 .thumb.jpg 后缀的也对应原 url 鉴权)
+  // 中文文件名浏览器 fetch 时会 URL-encode 成 `%E9...`, 后端 pathname 拿到的也是 encoded 状态,
+  // 但 DB files.url + 笔记 content 里存的都是原文中文, 不 decode 就永远匹配不到 → 404
+  // try/catch 防用户文件名含裸 `%` (如 `100%完成.txt` sanitizeName 允许 `%` 保留), decodeURIComponent 会抛 URIError
   const path = new URL(c.req.url).pathname;
   let filename = path.replace(/^\/api\/uploads\//, '');
+  try { filename = decodeURIComponent(filename); } catch { /* 保留原值 */ }
   // .thumb.jpg 缩略图对应原文件鉴权 (作者裸名 xxx.png, thumb 路径 xxx.png.thumb.jpg)
   const isThumb = filename.endsWith('.thumb.jpg');
   if (isThumb) filename = filename.slice(0, -('.thumb.jpg'.length));
@@ -163,8 +167,13 @@ app.use('/api/uploads/*', async (c, next) => {
     if (mime) c.res.headers.set('Content-Type', mime);
   } else {
     // 非白名单: 强制 attachment 让浏览器下载. 防 SVG/HTML/JS 等历史文件在浏览器内执行
-    const filename = decodeURIComponent(path.split('/').pop() || 'download');
-    c.res.headers.set('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`);
+    // Content-Disposition filename 里含中文时, HTTP header 只允许 ByteString (ASCII / Latin-1),
+    // 直接 set 会 TypeError "Cannot convert argument to a ByteString". 走 RFC 5987 `filename*=UTF-8''<enc>` 编码,
+    // 同时留一份 ASCII 兜底 filename 给老浏览器 (非 ASCII 字符替换成 _)
+    const rawFilename = decodeURIComponent(path.split('/').pop() || 'download');
+    const asciiSafe = rawFilename.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '');
+    const utf8Encoded = encodeURIComponent(rawFilename);
+    c.res.headers.set('Content-Disposition', `attachment; filename="${asciiSafe}"; filename*=UTF-8''${utf8Encoded}`);
   }
 });
 // root 用绝对路径 (DATA_DIR/uploads), rewrite 把 '/api/uploads/' 剥成 '/' 让 serveStatic join 出 UPLOAD_DIR/<filename>
