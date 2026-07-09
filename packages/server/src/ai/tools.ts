@@ -2,6 +2,7 @@ import { db, schema } from '../db/index.js';
 import { eq, and, or, like, desc, sql, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
+import { sanitizeUserMarkdown } from '../utils/markdownSanitizer.js';
 
 // ── OpenAI Function Calling 格式工具定义 ──
 
@@ -401,14 +402,15 @@ export async function executeTool(userId: string, name: string, args: any): Prom
     case 'create_note': {
       const id = nanoid(12);
       const now = dayjs().toISOString();
+      const safeContent = sanitizeUserMarkdown(args.content);
       await db.insert(schema.notes).values({
-        id, userId, content: args.content, type: args.type || 'note',
+        id, userId, content: safeContent, type: args.type || 'note',
         category: args.category || null, tags: args.tags || [],
         todoStatus: args.type === 'todo' ? 'pending' : null,
         aiProcessed: false, pinned: false, createdAt: now, updatedAt: now,
       });
       noteIds.push(id);
-      return { result: `已创建${args.type === 'todo' ? '待办' : '笔记'}：${args.content.slice(0, 50)}。直接告诉用户已完成，不要调用其他工具。`, noteIds };
+      return { result: `已创建${args.type === 'todo' ? '待办' : '笔记'}：${safeContent.slice(0, 50)}。直接告诉用户已完成，不要调用其他工具。`, noteIds };
     }
 
     case 'update_note': {
@@ -474,7 +476,7 @@ export async function executeTool(userId: string, name: string, args: any): Prom
       }
 
       const updates: Record<string, any> = { updatedAt: dayjs().toISOString() };
-      if (args.content !== undefined) updates.content = args.content;
+      if (args.content !== undefined) updates.content = sanitizeUserMarkdown(args.content);
       if (args.category !== undefined) updates.category = args.category;
       if (args.tags !== undefined) updates.tags = args.tags;
       if (args.todoStatus !== undefined) updates.todoStatus = args.todoStatus;

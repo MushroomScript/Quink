@@ -5,6 +5,7 @@ import { api } from '@/api';
 import Vditor from 'vditor';
 import { useRouter, useRoute } from 'vue-router';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { sanitizeHtml } from '@/utils/htmlSanitize';
 import { backendBaseUrl } from '@/utils/backendUrl';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { dragState } from '@/utils/cardDnd';
@@ -324,7 +325,7 @@ async function selectConversation(id: string) {
       if (msg.role === 'assistant') {
         const { answer } = parseThinking(msg.content);
         const renderContent = stripOuterCodeFence(answer || msg.content);
-        try { html = await Vditor.md2html(resolveMarkdownFileUrls(renderContent), { cdn: '/vditor' } as any); } catch {}
+        try { html = sanitizeHtml(await Vditor.md2html(resolveMarkdownFileUrls(renderContent), { cdn: '/vditor' } as any)); } catch {}
       }
       messages.value.push({ ...msg, role: msg.role as 'user' | 'assistant', sources: msg.sources || [], html, thinkingHtml });
     }
@@ -449,7 +450,7 @@ async function sendMessage() {
               const { answer } = parseThinking(snapshot);
               const content = stripOuterCodeFence(answer || snapshot);
               try {
-                const h = await Vditor.md2html(resolveMarkdownFileUrls(content), { cdn: '/vditor' } as any);
+                const h = sanitizeHtml(await Vditor.md2html(resolveMarkdownFileUrls(content), { cdn: '/vditor' } as any));
                 if (myVer > (streamingLastRenderVer.get(targetConvId) || 0) && streamingMap.value.has(targetConvId)) {
                   streamingLastRenderVer.set(targetConvId, myVer);
                   streamingHtmlMap.value.set(targetConvId, h);
@@ -472,7 +473,7 @@ async function sendMessage() {
     let html: string | undefined;
     const { answer: answerText } = parseThinking(fullContent);
     const renderText = stripOuterCodeFence(answerText || fullContent);
-    try { html = await Vditor.md2html(resolveMarkdownFileUrls(renderText), { cdn: '/vditor' } as any); } catch {}
+    try { html = sanitizeHtml(await Vditor.md2html(resolveMarkdownFileUrls(renderText), { cdn: '/vditor' } as any)); } catch {}
     if (currentConvId.value === targetConvId) {
       messages.value.push({ id: aiMsgId || 'ai-resp', role: 'assistant', content: fullContent, sources: aiSources, html });
     }

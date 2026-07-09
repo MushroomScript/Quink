@@ -26,14 +26,16 @@ onMounted(async () => {
   document.documentElement.setAttribute('data-theme', theme);
 });
 
-// 发起翻译 (窗口打开自动翻 / 二次选语言重翻共用). translate feature + targetLang 参数
+// 发起翻译 (窗口打开自动翻 / 二次选语言重翻共用). translate feature + targetLang 参数.
+// aiProcess 已切流式 (commit 33d77cf), 用 onDelta 增量拼到 translated 让用户看到打字机效果
 async function doTranslate(lang: string) {
   if (!original.value.trim() || retranslating.value) return;
   retranslating.value = true;
   translated.value = '';
   try {
-    const res = await api.aiProcess('translate', original.value, undefined, lang);
-    translated.value = res.data.result;
+    translated.value = await api.aiProcess('translate', original.value, undefined, lang, (chunk) => {
+      translated.value += chunk;
+    });
   } catch (err: any) {
     translated.value = '翻译失败：' + (err?.message || '未知错误');
   }

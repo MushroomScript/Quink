@@ -40,6 +40,7 @@ import {
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { sanitizeHtml } from '@/utils/htmlSanitize';
 import ReminderPicker from '@/components/ReminderPicker.vue';
 import ReactionBar from '@/components/ReactionBar.vue';
 import CommentThread from '@/components/CommentThread.vue';
@@ -337,7 +338,7 @@ async function renderContent(content: string): Promise<string> {
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
     tmp.querySelectorAll('input[type="checkbox"]').forEach((i) => i.removeAttribute('disabled'));
-    return tmp.innerHTML;
+    return sanitizeHtml(tmp.innerHTML);
   } catch (e) {
     console.error('[NoteDetail] Vditor render failed:', e);
     const esc = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

@@ -1,4 +1,5 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import type { Context, Next } from 'hono';
 import { db, schema } from './db/index.js';
@@ -13,15 +14,20 @@ if (process.env.NODE_ENV === 'production' && !process.env.QUINK_JWT_SECRET) {
 // 长效 token，不主动退出就一直有效 (体验优先)
 const TOKEN_EXPIRY = '999y';
 
-// ── Password hashing (HMAC-SHA256 + salt) ──
+// ── Password hashing (bcrypt cost 10, 兼容旧 HMAC-SHA256) ──
+//
+// S1 REVIEW-TODO 修复: 从单轮 HMAC-SHA256 升级到 bcrypt (cost 10 ≈ 100ms/次).
+// 老 hash (`salt:hash` hex 格式) 保留 verify, 用户下次成功登录自动 rehash 升级 (verifyAndMaybeRehash 返 needsRehash=true).
+// bcrypt 生成的 hash 形如 `$2a$10$...` / `$2b$10$...`, 靠 `$` 前缀区分.
 
-export function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString('hex');
-  const hash = createHmac('sha256', salt).update(password).digest('hex');
-  return `${salt}:${hash}`;
+const BCRYPT_COST = 10;
+
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, BCRYPT_COST);
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
+// 旧 hash 校验 (单轮 HMAC-SHA256 + salt): 仅用于兼容, 校验通过后 login 会自动 rehash 升级
+function verifyLegacyPassword(password: string, stored: string): boolean {
   const [salt, hash] = stored.split(':');
   if (!salt || !hash) return false;
   const candidate = createHmac('sha256', salt).update(password).digest('hex');
@@ -30,6 +36,24 @@ export function verifyPassword(password: string, stored: string): boolean {
   } catch {
     return false;
   }
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  // 新 hash (bcrypt): 以 `$2` 开头
+  if (stored.startsWith('$2')) {
+    try {
+      return await bcrypt.compare(password, stored);
+    } catch {
+      return false;
+    }
+  }
+  // 老 hash (HMAC-SHA256 + salt 十六进制): 兼容不阻断已存在用户登录
+  return verifyLegacyPassword(password, stored);
+}
+
+// 老 hash 需升级到 bcrypt: 供 login handler 判断
+export function needsRehash(stored: string): boolean {
+  return !stored.startsWith('$2');
 }
 
 // ── JWT ──

@@ -13,6 +13,7 @@ import 'dayjs/locale/zh-cn';
 import { PhTrash } from '@phosphor-icons/vue';
 import { fadeOutLeave, flyToNavLeave, snapshotCards } from '@/utils/cardLeave';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { sanitizeHtml } from '@/utils/htmlSanitize';
 import { useMasonry } from '@/composables/useMasonry';
 import { useEscToClose } from '@/composables/useEscToClose';
 import { useNotesStore } from '@/stores/notes';
@@ -163,7 +164,7 @@ async function load() {
     allNotes.value = res.data as TrashNote[];
     retentionDays.value = res.retentionDays ?? 7;
     for (const n of res.data) {
-      try { rendered.value[n.id] = await Vditor.md2html(resolveMarkdownFileUrls(n.content), { cdn: '/vditor' } as any); } catch { rendered.value[n.id] = n.content; }
+      try { rendered.value[n.id] = sanitizeHtml(await Vditor.md2html(resolveMarkdownFileUrls(n.content), { cdn: '/vditor' } as any)); } catch { rendered.value[n.id] = n.content; }
     }
     applyFilter();
   } catch (e: any) {

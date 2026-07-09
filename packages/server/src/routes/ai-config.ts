@@ -407,6 +407,12 @@ app.post('/transcribe-async', async (c) => {
       if (!filename || filename.startsWith('.')) {
         throw new Error('非法 audioUrl');
       }
+      // IDOR 校验: 文件必须属于当前用户. 否则拿别人裸文件名 → 服务端用自己 apiKey 转写 + 存到自己 voice_transcriptions
+      const fileRow = await db.select().from(schema.files)
+        .where(and(eq(schema.files.url, filename), eq(schema.files.userId, userId))).get();
+      if (!fileRow) {
+        throw new Error('文件不存在或无权访问');
+      }
       const uploadDir = UPLOAD_DIR;
       const filePath = pathResolve(uploadDir, filename);
       // relative 兜底: 若 filePath 不在 uploadDir 内, relative 会返回以 ".." 开头的路径

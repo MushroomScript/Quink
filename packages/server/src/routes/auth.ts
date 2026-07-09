@@ -4,17 +4,38 @@ import { db, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
-import { hashPassword, verifyPassword, signToken, authMiddleware, invalidateTokenVersionCache } from '../auth.js';
+import { hashPassword, verifyPassword, needsRehash, signToken, authMiddleware, invalidateTokenVersionCache } from '../auth.js';
 import { logAudit } from '../utils/auditLog.js';
 import { publish } from '../reminder/bus.js';
 import { cleanTrashForUser } from '../cleanup.js';
 import { DEFAULT_CATEGORIES } from '../ai/prompts.js';
+import { createTokenBucket, createAccountLock, getClientIp } from '../utils/rateLimit.js';
 
 const app = new Hono();
 
+// 登录/注册 rate limit + 账号锁 (S3 REVIEW-TODO 修复):
+// - 每 IP 10 分钟 5 次登录/注册尝试 (仅算失败, 成功后 reset)
+// - 每 username 10 分钟 5 次登录尝试, 超阈值锁账号 30 分钟
+// - 账号被锁期间返回 429, 密码正确也拒绝, 防暴力破解 + 撞库
+const AUTH_WINDOW_MS = 10 * 60 * 1000;
+const AUTH_MAX_ATTEMPTS = 5;
+const ACCOUNT_LOCK_MS = 30 * 60 * 1000;
+const ipLoginBucket = createTokenBucket({ windowMs: AUTH_WINDOW_MS, max: AUTH_MAX_ATTEMPTS });
+const ipRegisterBucket = createTokenBucket({ windowMs: AUTH_WINDOW_MS, max: AUTH_MAX_ATTEMPTS });
+const usernameLoginBucket = createTokenBucket({ windowMs: AUTH_WINDOW_MS, max: AUTH_MAX_ATTEMPTS });
+const accountLock = createAccountLock();
+
+function getIpFromContext(c: any): string {
+  return getClientIp({
+    'x-forwarded-for': c.req.header('x-forwarded-for'),
+    'x-real-ip': c.req.header('x-real-ip'),
+  });
+}
+
+// 密码最短 8 位 (S1 REVIEW-TODO 修复, 提升暴破成本; 从 6 位 → 8 位)
 const registerSchema = z.object({
   username: z.string().min(2).max(32),
-  password: z.string().min(6).max(128),
+  password: z.string().min(8).max(128),
   nickname: z.string().min(1).max(32),
 });
 
@@ -39,6 +60,11 @@ const updateProfileSchema = z.object({
 
 // POST /api/auth/register
 app.post('/register', async (c) => {
+  const ip = getIpFromContext(c);
+  if (!ipRegisterBucket.check(ip)) {
+    return c.json({ error: '注册请求过于频繁, 请 10 分钟后再试' }, 429);
+  }
+
   const body = await c.req.json();
   const parsed = registerSchema.safeParse(body);
   if (!parsed.success) {
@@ -57,7 +83,7 @@ app.post('/register', async (c) => {
   const user = {
     id: nanoid(12),
     username,
-    passwordHash: hashPassword(password),
+    passwordHash: await hashPassword(password),
     nickname,
     avatar: null,
     preferences: {},
@@ -90,6 +116,12 @@ app.post('/register', async (c) => {
 
 // POST /api/auth/login
 app.post('/login', async (c) => {
+  const ip = getIpFromContext(c);
+  // IP 限流 (5次/10min, 命中的失败/成功都算; 成功登录后 reset)
+  if (!ipLoginBucket.check(ip)) {
+    return c.json({ error: '登录请求过于频繁, 请 10 分钟后再试' }, 429);
+  }
+
   const body = await c.req.json();
   const parsed = loginSchema.safeParse(body);
   if (!parsed.success) {
@@ -98,13 +130,38 @@ app.post('/login', async (c) => {
 
   const username = parsed.data.username.toLowerCase();
   const password = parsed.data.password;
+
+  // 账号锁: 该 username 被暴力破解锁 30min. 无视密码是否正确, 都拒绝. 防同一账号被穷举
+  if (accountLock.isLocked(username)) {
+    const unlockAt = accountLock.peek(username);
+    const minutesLeft = unlockAt ? Math.max(1, Math.ceil((unlockAt - Date.now()) / 60000)) : 30;
+    return c.json({ error: `账号已临时锁定, 请 ${minutesLeft} 分钟后再试` }, 429);
+  }
+
   const user = await db.select().from(schema.users).where(eq(schema.users.username, username)).get();
 
-  if (!user || !verifyPassword(password, user.passwordHash)) {
-    // 登录失败 (含密码错误 / 用户不存在). 频繁失败可被监控为暴力破解
+  const passwordOk = user ? await verifyPassword(password, user.passwordHash) : false;
+  if (!user || !passwordOk) {
+    // 登录失败: 该 username 计数 +1, 超阈值锁 30min. 用 username 计数不用 IP 是为了防同 IP 撞多账号后 5 次就被卡死
+    const allowed = usernameLoginBucket.check(username);
+    if (!allowed) {
+      accountLock.lock(username, ACCOUNT_LOCK_MS);
+    }
     c.set('userId', user?.id || 'anonymous');
-    await logAudit(c, 'auth.login_failed', 'user', user?.id || null, { username });
+    await logAudit(c, 'auth.login_failed', 'user', user?.id || null, { username, locked: !allowed });
     return c.json({ error: '用户名或密码错误' }, 401);
+  }
+
+  // 登录成功: reset IP + username bucket + account lock, 避免正常用户被之前的失败挤压
+  ipLoginBucket.reset(ip);
+  usernameLoginBucket.reset(username);
+  accountLock.unlock(username);
+
+  // 老 HMAC hash 用户静默升级到 bcrypt (下次登录再验证不再走 legacy 分支). 失败不阻塞登录
+  if (needsRehash(user.passwordHash)) {
+    hashPassword(password)
+      .then(newHash => db.update(schema.users).set({ passwordHash: newHash }).where(eq(schema.users.id, user.id)))
+      .catch(err => console.error('[login] silent rehash failed:', err));
   }
 
   c.set('userId', user.id);
@@ -172,10 +229,12 @@ app.post('/password', authMiddleware, async (c) => {
   const { oldPassword, newPassword } = await c.req.json();
 
   if (!oldPassword || !newPassword) return c.json({ error: '请输入旧密码和新密码' }, 400);
-  if (newPassword.length < 6) return c.json({ error: '新密码至少6位' }, 400);
+  if (typeof newPassword !== 'string' || newPassword.length < 8 || newPassword.length > 128) {
+    return c.json({ error: '新密码 8-128 位' }, 400);
+  }
 
   const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
-  if (!user || !verifyPassword(oldPassword, user.passwordHash)) {
+  if (!user || !(await verifyPassword(oldPassword, user.passwordHash))) {
     return c.json({ error: '旧密码不正确' }, 401);
   }
 
@@ -183,7 +242,7 @@ app.post('/password', authMiddleware, async (c) => {
   // 约定: 长效 token 不变, 但改密码要"修改密码后立即退出登录"
   const newTv = (user.tokenVersion ?? 0) + 1;
   await db.update(schema.users)
-    .set({ passwordHash: hashPassword(newPassword), tokenVersion: newTv })
+    .set({ passwordHash: await hashPassword(newPassword), tokenVersion: newTv })
     .where(eq(schema.users.id, userId));
   invalidateTokenVersionCache(userId);
   // 改密码是高敏感操作, 必须记录 (含 tokenVersion 升级方便排查)

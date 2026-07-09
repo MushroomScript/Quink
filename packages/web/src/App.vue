@@ -14,6 +14,7 @@ import GlobalToast from '@/components/GlobalToast.vue';
 import { PhMinus, PhSquare, PhX, PhXCircle, PhCaretLeft } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { sanitizeHtml } from '@/utils/htmlSanitize';
 import { useTheme } from '@/composables/useTheme';
 import { useToast } from '@/composables/useToast';
 import { useImagePreview } from '@/composables/useImagePreview';
@@ -146,6 +147,7 @@ async function openRefPreview(noteId: string) {
     const withFiles = resolveMarkdownFileUrls(processed);  // 文件链接裸名拼前缀
     let html = await Vditor.md2html(withFiles, { cdn: '/vditor' } as any);
     html = injectRefLinkIcons(html);
+    html = sanitizeHtml(html);
     refPreviewStack.value.push({ note: res.data, html });
 
     if (!refPreviewEscHandler) {

@@ -5,6 +5,7 @@ import { api, isLoggedIn } from '@/api';
 import Vditor from 'vditor';
 import { PhSparkle, PhStop, PhPaperPlaneTilt, PhXCircle } from '@phosphor-icons/vue';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { sanitizeHtml } from '@/utils/htmlSanitize';
 import { backendBaseUrl } from '@/utils/backendUrl';
 
 // setup 顶层同步设主题（在 Vue 第一次 render 前），让窗口 show 时就是正确主题色
@@ -51,7 +52,7 @@ async function renderHistoryMessage(m: { id: string; role: string; content: stri
   if (role === 'user') return { id: m.id, role, content: m.content };
   let html: string | undefined;
   const renderText = stripOuterCodeFence(parseThinking(m.content).answer || m.content);
-  try { html = await Vditor.md2html(resolveMarkdownFileUrls(renderText), { cdn: '/vditor' } as any); } catch {}
+  try { html = sanitizeHtml(await Vditor.md2html(resolveMarkdownFileUrls(renderText), { cdn: '/vditor' } as any)); } catch {}
   return { id: m.id, role, content: m.content, html };
 }
 
@@ -129,7 +130,7 @@ async function sendMessage() {
 
     let html: string | undefined;
     const renderText = stripOuterCodeFence(parseThinking(fullContent).answer || fullContent);
-    try { html = await Vditor.md2html(resolveMarkdownFileUrls(renderText), { cdn: '/vditor' } as any); } catch {}
+    try { html = sanitizeHtml(await Vditor.md2html(resolveMarkdownFileUrls(renderText), { cdn: '/vditor' } as any)); } catch {}
     messages.value.push({ id: aiMsgId || 'ai', role: 'assistant', content: fullContent, html });
     streamingContent.value = '';
   } catch (err: any) {

@@ -31,6 +31,7 @@ import {
 } from '@phosphor-icons/vue';
 import { REF_LINK_REGEX, renderRefLink, injectRefLinkIcons } from '@/utils/refLink';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { sanitizeHtml } from '@/utils/htmlSanitize';
 import { previewMarkdown } from '@/utils/notePreview';
 import { highlightTextByPinyin } from '@/utils/pinyin';
 import { startCardDrag, dragState } from '@/utils/cardDnd';
@@ -486,6 +487,7 @@ watchEffect(async (onCleanup) => {
         tag ? tag : highlightTextByPinyin(text, q)
       );
     }
+    html = sanitizeHtml(html);
     if (cancelled) return;
     renderedContent.value = html;
   } catch {

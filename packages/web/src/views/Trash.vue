@@ -9,6 +9,7 @@ import 'dayjs/locale/zh-cn';
 import { PhTrash } from '@phosphor-icons/vue';
 import { fadeOutLeave, flyToNavLeave, snapshotCards } from '@/utils/cardLeave';
 import { resolveMarkdownFileUrls } from '@/utils/fileUrl';
+import { sanitizeHtml } from '@/utils/htmlSanitize';
 import { previewMarkdown } from '@/utils/notePreview';
 import { useMasonry } from '@/composables/useMasonry';
 import { useEscToClose } from '@/composables/useEscToClose';
@@ -155,7 +156,7 @@ async function load() {
     for (const n of res.data) {
       // 同 NoteCard / estimateHeight: 剥 base64 + 截断 (previewMarkdown), 防历史超大笔记全量 md2html 卡死回收站首屏
       const c = previewMarkdown(n.content);
-      try { rendered.value[n.id] = await Vditor.md2html(resolveMarkdownFileUrls(c), { cdn: '/vditor' } as any); } catch { rendered.value[n.id] = c; }
+      try { rendered.value[n.id] = sanitizeHtml(await Vditor.md2html(resolveMarkdownFileUrls(c), { cdn: '/vditor' } as any)); } catch { rendered.value[n.id] = c; }
     }
     applyFilter();
   } catch {}

@@ -12,6 +12,7 @@ import { logAudit } from '../utils/auditLog.js';
 import { createNotification, markRequestNotificationsRead } from '../utils/notifications.js';
 import { purgeNote } from '../cleanup.js';
 import { broadcastNoteShared } from '../utils/broadcast.js';
+import { sanitizeUserMarkdown } from '../utils/markdownSanitizer.js';
 
 // 笔记 markdown 内容截 30 字符作为通知 title 后缀, 去 markdown 标记+换行. 太长前端 truncate
 function noteSnippet(content: string, max = 30): string {
@@ -808,20 +809,7 @@ async function getNoteAuthorityRecipients(noteId: string): Promise<string[]> {
 // edit-request rejected 后冷却 24h, 防"循环 rejected 重申请" spam SSE 给作者
 const EDIT_REQUEST_REJECT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
-// 评论 + 申请 message 简单 markdown sanitize. 后端深度防御 (前端 Vditor 也会渲染时过滤).
-// 拦截 javascript: / data: / vbscript: 等危险 URI scheme, 含在 markdown link href 里
-function sanitizeUserMarkdown(text: string): string {
-  if (!text) return text;
-  // markdown link / image: [label](url) ![alt](url)
-  return text.replace(/(\!?\[[^\]]*\])\(([^)]+)\)/g, (full, label, url) => {
-    const trimmed = String(url).trim().toLowerCase();
-    if (trimmed.startsWith('javascript:') || trimmed.startsWith('vbscript:') ||
-        (trimmed.startsWith('data:') && !trimmed.startsWith('data:image/'))) {
-      return `${label}(#blocked)`;
-    }
-    return full;
-  });
-}
+// sanitizeUserMarkdown 已迁移到 utils/markdownSanitizer.ts (S2 REVIEW-TODO 修复覆盖 note.content).
 
 // POST /api/notes/:id/edit-request - 申请编辑权 (没 write 权的群成员调). 已 pending 返原 request (idempotent).
 app.post('/:id/edit-request', async (c) => {
@@ -1663,11 +1651,13 @@ app.post('/', async (c) => {
   }
 
   const now = dayjs().toISOString();
+  // sanitize markdown 危险 URI (javascript: / vbscript: / data:非 image), 深度防御 + 前端 DOMPurify 双层挡
+  const safeContent = sanitizeUserMarkdown(parsed.data.content);
   const note = {
     id: nanoid(12),
     userId,
-    content: parsed.data.content,
-    contentPinyin: toPinyinSearchable(parsed.data.content),
+    content: safeContent,
+    contentPinyin: toPinyinSearchable(safeContent),
     type: parsed.data.type,
     category: parsed.data.category ?? null,
     tags: parsed.data.tags ?? [],
@@ -1905,8 +1895,9 @@ app.patch('/:id', async (c) => {
     updates.version = existing.version + 1;
   }
   if (data.content !== undefined) {
-    updates.content = data.content;
-    updates.contentPinyin = toPinyinSearchable(data.content);
+    const safeContent = sanitizeUserMarkdown(data.content);
+    updates.content = safeContent;
+    updates.contentPinyin = toPinyinSearchable(safeContent);
   }
   if (data.summary !== undefined) updates.summary = data.summary;
   if (data.summaryLocked !== undefined) updates.summaryLocked = data.summaryLocked;
