@@ -579,4 +579,48 @@ try {
   }
 } catch (e) { console.error('[avatar migration v1] failed:', e); }
 
+// ──────────────────────────────────────────────────────────────
+//  热路径索引 (REVIEW-TODO Sprint 3 P1/P2/P3)
+// ──────────────────────────────────────────────────────────────
+// 加之前实测: 13 个热路径查询【全部】走全表扫 (EXPLAIN QUERY PLAN 全是 SCAN), 主列表连排序都要
+// 额外建临时 B 树. notes 只有一个群回收站的 partial index; group_members / files / categories /
+// folders / ai_configs / ai_conversations / voice_transcriptions 一个索引都没有.
+// 纯加索引, 业务代码零改动. CREATE INDEX IF NOT EXISTS 幂等, 每次启动跑一遍无害.
+const HOT_PATH_INDEXES = [
+  // ── notes: 主列表按 user + 未删除过滤, 再按 created/updated 排序 ──
+  // 默认排序是 created_at (sort=updated 才走 updated_at), 两条都要, 否则总有一种排序退回全表扫
+  `CREATE INDEX IF NOT EXISTS idx_notes_user_deleted_created ON notes(user_id, deleted_at, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_notes_user_deleted_updated ON notes(user_id, deleted_at, updated_at DESC)`,
+  // 3 个主 view 各自按 type 过滤 (灵感/笔记/待办)
+  `CREATE INDEX IF NOT EXISTS idx_notes_user_type_deleted ON notes(user_id, type, deleted_at)`,
+  // fork 子节点反查. partial —— 绝大多数笔记 parent_note_id 是 NULL, 不进索引省空间
+  `CREATE INDEX IF NOT EXISTS idx_notes_parent ON notes(parent_note_id) WHERE parent_note_id IS NOT NULL`,
+  // 编辑锁 cron 每 60s 扫一次过期锁
+  `CREATE INDEX IF NOT EXISTS idx_notes_lock_expires ON notes(edit_lock_expires_at) WHERE edit_lock_by IS NOT NULL`,
+
+  // ── files: /api/uploads/* 中间件每张图都按 url 查一次 ──
+  // UNIQUE 而非普通索引: url 是磁盘真实文件名, buildUniqueFilename 已保证唯一, 加 UNIQUE 顺带防重复入库
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_files_url ON files(url)`,
+  `CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id, created_at DESC)`,
+
+  // ── group_members: 主键是 (group_id, user_id), 所以按群查能走主键, 但【按 user 反查走不了】——
+  //    而"我在哪些群"是 30+ 处热路径的第一步 ──
+  `CREATE INDEX IF NOT EXISTS idx_group_members_user_status ON group_members(user_id, status)`,
+
+  // ── 其余 user_id 反查表 ──
+  `CREATE INDEX IF NOT EXISTS idx_folders_user ON folders(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_ai_configs_user ON ai_configs(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_ai_conversations_user ON ai_conversations(user_id, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_voice_transcriptions_user ON voice_transcriptions(user_id)`,
+  // 清单没点名但同类: 每次打开对话都按 conversation_id 拉消息
+  `CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages(conversation_id, created_at)`,
+];
+for (const stmt of HOT_PATH_INDEXES) {
+  // 逐条 try: 某条失败 (例如老库 files.url 有重复导致 UNIQUE 建不起来) 不能连累其余索引
+  try { sqlite.exec(stmt); } catch (e) {
+    console.error('[index] 创建失败, 跳过:', stmt.slice(0, 60), (e as Error).message);
+  }
+}
+
 export { schema };
