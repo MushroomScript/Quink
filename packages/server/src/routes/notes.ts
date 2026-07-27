@@ -129,10 +129,14 @@ app.get('/', async (c) => {
     sql`${schema.notes.deletedAt} IS NULL`, // 排除回收站
   ];
   if (scope === 'mine') {
-    // 个人列表 (GROUP-TODO-DESIGN.md): 我的笔记 (但排除我发的"群级待办" group — 群级只在群组界面显示)
+    // 个人列表: 我发的笔记全都算我的 (分享到群不改变归属 — 分享只是让群里也看得到, 别人改内容会 COW fork 成他们那份)
     // + 别人发的、我所在群的"每人完成待办" everyone (我需要各自完成, 混进我的列表; 靠下面 type filter 只在 Todos 露出)
+    //
+    // 蘑菇 2026-07-27 改: 原来这里还排除了我发的"群级待办"(todoGroupMode='group'), 结果同一条待办
+    // "直接发+勾分享"就从个人列表消失、"先发个人再改分享"却还在 (PATCH 不回填 todoGroupMode), 同终点两种结果.
+    // 且 'group' 除了这条排除之外没有任何其他行为差异 (canChangeTodoStatus / 卡片显示都只认 'everyone').
     conditions.push(sql`(
-      (${schema.notes.userId} = ${userId} AND (${schema.notes.todoGroupMode} IS NULL OR ${schema.notes.todoGroupMode} != 'group'))
+      ${schema.notes.userId} = ${userId}
       OR (${schema.notes.userId} != ${userId} AND ${schema.notes.type} = 'todo' AND ${schema.notes.todoGroupMode} = 'everyone'
           AND ${schema.notes.id} IN (
             SELECT ns.note_id FROM note_shares ns

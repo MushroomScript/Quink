@@ -393,7 +393,16 @@ try { sqlite.exec('ALTER TABLE notes ADD COLUMN todo_group_mode TEXT'); } catch 
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN roster_due_at TEXT'); } catch {}
 try { sqlite.exec('ALTER TABLE notes ADD COLUMN roster_visibility TEXT'); } catch {}
 // 迁移: 现有已分享到群的待办默认归"群级待办"(group), 行为跟以前一样 (admin 控单一状态). 私有 / 未分享的不动 (留 NULL)
-try { sqlite.exec("UPDATE notes SET todo_group_mode = 'group' WHERE type = 'todo' AND visibility = 'shared' AND todo_group_mode IS NULL"); } catch {}
+// 必须 config flag 守卫单次跑 —— 裸 exec 会每次启动重跑, 把用户"先发个人待办、之后才改成分享"的笔记
+// (PATCH 不回填 todoGroupMode 所以是 NULL) 一律刷成 'group'. 蘑菇 2026-07-27 踩到: 服务器重启后待办从个人列表消失
+try {
+  const row = sqlite.prepare("SELECT value FROM config WHERE key = 'todo_group_mode_migration_v1'").get() as { value: string } | undefined;
+  if (!row) {
+    const updated = sqlite.prepare("UPDATE notes SET todo_group_mode = 'group' WHERE type = 'todo' AND visibility = 'shared' AND todo_group_mode IS NULL").run();
+    sqlite.prepare("INSERT INTO config (key, value) VALUES (?, ?)").run('todo_group_mode_migration_v1', JSON.stringify(true));
+    console.log(`[todo group mode migration v1] marked ${updated.changes} shared todos as group`);
+  }
+} catch (e) { console.error('[todo group mode migration v1] failed:', e); }
 
 // 通知中心. payload 默认 '{}' 跟 drizzle .default({}) 对齐, 老行 readAt 默认 NULL (= 未读).
 // 两个 INDEX: 列通知按 (user, created_at DESC); 未读数走 partial index (sqlite 支持) 只索引未读行省空间
