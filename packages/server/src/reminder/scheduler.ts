@@ -26,10 +26,15 @@ function extractPreview(content: string, maxLen = 120): string {
   return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + '...' : cleaned;
 }
 
-// 算下次触发时刻: 用 rrule 在 (lastFire, now+far_future] 范围内找第一个 occurrence
+// 算下次触发时刻: 用 rrule 找 lastFire / now 之后 (取更晚的那个) 的第一个 occurrence
 // 前端只传简短 "FREQ=DAILY" 这种 (不含 DTSTART), 这里用 lastFire 作 dtstart 锚点
 // 用户高级模式可能传完整含 DTSTART 的 RRULE, 这种走原生解析
 // 若 RRULE 已无下次 (例如 UNTIL 已过) 返回 null
+//
+// 找的起点必须是 max(lastFire, now) 而不是 lastFire —— 否则 server 停机期间积压的周期会被逐个补发:
+// 每个 tick 只推进一个周期、推完仍在过去, 下个 tick 又被捞到, 用户表现为"每分钟收一条历史提醒"
+// 一直追到今天才停 (停机 7 天的工作日重复提醒 = 连续 6 分钟收 6 条). 提醒场景补发过期的没意义, 直接跳过.
+// dtstart 仍用 lastFire, 保持周期相位正确 (每周一 09:00 要基于原始时刻算, 不能拿 now 当锚点)
 function computeNextDue(rrule: string, lastFire: Date): string | null {
   try {
     const hasDtstart = /DTSTART/i.test(rrule);
@@ -40,7 +45,12 @@ function computeNextDue(rrule: string, lastFire: Date): string | null {
       const opts = RRule.parseString(rrule);
       rule = new RRule({ ...opts, dtstart: lastFire });
     }
-    const next = rule.after(lastFire, false);
+    const now = Date.now();
+    const skipped = now > lastFire.getTime();
+    const next = rule.after(new Date(Math.max(lastFire.getTime(), now)), false);
+    if (skipped && next) {
+      console.log(`[reminder/scheduler] 跳过已过期周期: ${rrule} 原定 ${lastFire.toISOString()} -> 下次 ${next.toISOString()}`);
+    }
     return next ? next.toISOString() : null;
   } catch (e) {
     console.error('[reminder/scheduler] RRULE 解析失败:', rrule, e);
