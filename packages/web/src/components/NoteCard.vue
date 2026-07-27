@@ -274,9 +274,12 @@ async function onTaskCheckboxClick(e: MouseEvent, input: HTMLInputElement) {
   try {
     await store.updateNote(props.note.id, { content: newContent, skipTimestamp: true });
     toast.show(toggledToDone ? '已完成' : '已取消完成', toggledToDone ? 'success' : 'default');
-  } catch (err) {
+  } catch (err: any) {
     props.note.content = oldContent;
     input.checked = !input.checked;
+    // 必须 toast: 只 console.error 的话失败表现就是"勾一下闪回去"没有任何解释 (多群共享笔记非作者勾选
+    // 会 400 editContext_ambiguous 要求去群组页操作, 不提示用户完全无从判断)
+    toast.show(err?.message || '操作失败', 'error');
     console.error('[NoteCard] toggle task failed:', err);
   }
 }

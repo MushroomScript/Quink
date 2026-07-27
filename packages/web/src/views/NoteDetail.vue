@@ -405,9 +405,11 @@ async function onContentClick(e: MouseEvent) {
     // version: 兜底 URL 直接打开 (note 不在 store viewState) 场景, store 自动注入路径走不到. res.version 回写避免连续 toggle 用旧 version
     const res = await store.updateNote(note.value.id, { content: newContent, version: note.value.version, skipTimestamp: true });
     if (res?.version != null && note.value) note.value.version = res.version;
-  } catch (err) {
+  } catch (err: any) {
     if (note.value) note.value.content = oldContent;
     input.checked = !input.checked;
+    // 同 NoteCard: 不 toast 的话失败只表现为"勾一下闪回去", 用户无从判断原因
+    toast.show(err?.message || '操作失败', 'error');
     console.error('[NoteDetail] toggle task failed:', err);
   }
 }

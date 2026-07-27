@@ -1857,6 +1857,20 @@ app.patch('/:id', async (c) => {
   const currentShareGroupIds = (await db.select({ groupId: schema.noteShares.groupId })
     .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all()).map(r => r.groupId);
 
+  // 正文任务清单的 checkbox 勾选 (- [ ] <-> - [x]) 是轻量 toggle, 要求它走"申锁 -> 改 -> 释放锁"三次请求太重:
+  // NoteCard / NoteDetail 的 checkbox 都不申锁, 撞上 needLock 就 400, 前端回滚 = 用户看到"闪一下又变回去".
+  // 后端自己 diff 判断"是否只有勾选状态变了": 两边所有 [x]/[X] 归一成 [ ] 后比对, 相等说明正文一个字没动.
+  // 不看客户端传的 skipTimestamp (客户端可伪造), 只信 DB 里 existing.content 跟请求 content 的实际差异.
+  // 只豁免锁: version 乐观锁照常校验 (多设备撞改仍会 409), fork 决策也一行不动 —— 非作者勾选照样 fork 出
+  // 他那份 (蘑菇 2026-07-27 拍板: "非作者勾选则 fork, 就和被修改是一样的").
+  const normalizeTaskMarks = (s: string) => s.replace(/^(\s*[-*+]\s+\[)[xX](\])/gm, '$1 $2');
+  const isTaskCheckboxOnly = (
+    data.content !== undefined &&
+    data.summary === undefined && data.tags === undefined &&
+    data.type === undefined && data.todoStatus === undefined &&
+    normalizeTaskMarks(data.content) === normalizeTaskMarks(existing.content)
+  );
+
   // shared 笔记必须持锁 + version 校验. private 笔记保持原行为 (作者直接改, 不需锁)
   // 唯一免锁场景 = 作者主视图改 root 多群内容. 其它所有 shared 编辑都要锁:
   //   - 非作者改任何 shared 笔记: 协作场景必锁
@@ -1865,7 +1879,7 @@ app.patch('/:id', async (c) => {
   //   - 作者改 root 多群 + 群组页: 该路径会触发 fork (创建该群专属版本), 跟非作者改 root 触发 fork 同款流程
   // 锁主要防"群成员协作时撞改". 作者主视图改多群 root 多设备同步靠 version 乐观锁兜底
   // 加 isCollabChange 前置 - 改管理字段 / 作者私域字段 (editPermission / pinned / visibility / sharedGroupIds / category) 时不走锁
-  const needLock = isCollabChange && existing.visibility === 'shared' && (
+  const needLock = isCollabChange && !isTaskCheckboxOnly && existing.visibility === 'shared' && (
     !isAuthor ||                                       // 非作者必锁
     existing.parentNoteId !== null ||                  // 作者改 fork 必锁
     currentShareGroupIds.length <= 1 ||                // 单群必锁 (单群 root 等价 fork)
