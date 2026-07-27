@@ -6,6 +6,18 @@ import { TOOLS_PROMPT, TOOL_DEFINITIONS } from './tools.js';
 // 裸 JSON 兜底识别时用来判断"这个 name 是不是真的工具", 防止把用户内容里的普通 JSON 当成调用
 const KNOWN_TOOL_NAMES = new Set(TOOL_DEFINITIONS.map(t => t.function.name));
 
+// AI 上游请求超时 (REVIEW-TODO Sprint 3 P10).
+// 原来所有 AI fetch 都没有超时: 上游卡住 (本地 ollama 显存不够挂起 / 云端网络黑洞) 就永远挂着,
+// 后台自动打标签那条链路还会一直占着并发名额, 表现是"笔记一直转圈不出标签"且没有任何报错.
+// 90s 给本地大模型留足余量 (14b 量化模型首 token 就可能十几秒), 又不至于真卡死时无限等.
+const AI_TIMEOUT_MS = 90_000;
+// 把"调用方传进来的取消信号"跟"超时信号"合并: 任一触发就中断.
+// AbortSignal.any 是 Node 20+ API, 项目要求 Node 20+ (README 部署章节), 可以直接用.
+function withTimeout(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(AI_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 interface AiCallOptions {
   userId: string;
   feature: AiFeature;
@@ -109,6 +121,7 @@ async function callAi(config: AiConfig, systemPrompt: string, userMessage: strin
         system: systemPrompt,
         messages: [{ role: 'user', content: userMessage }],
       }),
+      signal: withTimeout(),
     });
 
     if (!res.ok) throw new Error(`Anthropic API error: ${res.status}`);
@@ -130,6 +143,7 @@ async function callAi(config: AiConfig, systemPrompt: string, userMessage: strin
         max_tokens: maxTokens,
         temperature: 0.3,
       }),
+      signal: withTimeout(),
     });
 
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
@@ -172,7 +186,7 @@ export async function callAiStream(config: AiConfig, messages: ChatMessage[], ma
         system: typeof systemMsg?.content === 'string' ? systemMsg.content : '',
         messages: nonSystem.map(m => ({ role: m.role, content: m.content })),
       }),
-      signal,
+      signal: withTimeout(signal),
     });
     if (!res.ok) throw new Error(`Anthropic API error: ${res.status}`);
 
@@ -214,7 +228,7 @@ export async function callAiStream(config: AiConfig, messages: ChatMessage[], ma
         temperature: 0.3,
         stream: true,
       }),
-      signal,
+      signal: withTimeout(signal),
     });
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
 
@@ -268,7 +282,7 @@ async function callAiNonStream(config: AiConfig, messages: ChatMessage[], tools?
       messages: nonSystem.map(m => ({ role: m.role, content: m.content })),
     };
     if (tools?.length) body.tools = tools.map(t => ({ name: t.function.name, description: t.function.description, input_schema: t.function.parameters }));
-    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal });
+    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: withTimeout(signal) });
     if (!res.ok) throw new Error(`Anthropic API error: ${res.status} ${await res.text()}`);
     const data = await res.json() as any;
     const textBlock = data.content?.find((b: any) => b.type === 'text');
@@ -293,7 +307,7 @@ async function callAiNonStream(config: AiConfig, messages: ChatMessage[], tools?
       max_tokens: 2048, temperature: 0.3,
     };
     if (tools?.length) body.tools = tools;
-    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal });
+    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: withTimeout(signal) });
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status} ${await res.text()}`);
     const data = await res.json() as any;
     const choice = data.choices?.[0]?.message;
@@ -654,6 +668,8 @@ export async function transcribeAudio(userId: string, audioBuffer: Buffer, mimeT
     method: 'POST',
     headers: { 'Authorization': `Bearer ${config.apiKey}` },
     body: formData,
+    // 转写要先把整段音频传上去再等结果, 比纯文本请求慢得多, 给 3 倍时间 (REVIEW-TODO P10)
+    signal: AbortSignal.timeout(AI_TIMEOUT_MS * 3),
   });
 
   if (!res.ok) {

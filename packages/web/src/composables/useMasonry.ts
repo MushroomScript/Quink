@@ -274,20 +274,15 @@ export function useMasonry<T extends { id: string }>(
 
     if (shrunk) {
       const newIds = new Set(newItems.map((n) => n.id));
-      let hasNewIds = false;
-      for (const item of newItems) {
-        let found = false;
-        for (const col of columns.value) {
-          if ((col as T[]).some((c) => (c as any).id === (item as any).id)) {
-            found = true;
-            break;
-          }
-        }
-        if (!found) {
-          hasNewIds = true;
-          break;
-        }
+      // 判断"新数组里有没有当前列中不存在的 id" (有 = 不只是删除, 得整体 rebuild).
+      // 原来是三重嵌套 (每个 item × 每列 × 该列每个元素) = O(N×M×K), 1000 项 4 列能跑到几十万次
+      // 字符串比较, 每次列表刷新都要跑一遍. 改成先把列里所有 id 摊平成 Set 再 O(N) 查, 降到 O(总数+N).
+      // (REVIEW-TODO Sprint 3 P7)
+      const idsInColumns = new Set<string>();
+      for (const col of columns.value) {
+        for (const c of col as T[]) idsInColumns.add((c as any).id);
       }
+      const hasNewIds = newItems.some((item) => !idsInColumns.has((item as any).id));
       if (!hasNewIds) {
         // 真·删除: 走增量 splice
         for (let ci = 0; ci < columns.value.length; ci++) {

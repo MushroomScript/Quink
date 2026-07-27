@@ -2330,7 +2330,32 @@ app.delete('/:id', async (c) => {
  * 不阻塞笔记保存，后台静默执行
  * 巨型 content 跳过 AI 处理防大账单
  */
+// 后台 AI 处理的每用户并发闸 (REVIEW-TODO Sprint 3 P10).
+// processNoteWithAi 内部一次 Promise.all 四个 AI 调用 (标签/分类/摘要/精简). 批量场景 (一次 duplicate
+// 十几条 / 导入一批笔记) 会同时起 N 个 processNoteWithAi = 4N 个并发请求打向上游: 云端撞 rate limit,
+// 本地 ollama 直接显存爆掉. 限制同一用户同时只跑 2 篇, 每篇内部 4 个并发不动 → 上限 8 个在飞.
+// 只闸后台自动处理; 用户主动等待的 chat / 润色不走这里, 不会被排队拖慢.
+const MAX_AI_NOTES_PER_USER = 2;
+const aiSlots = new Map<string, { running: number; waiters: Array<() => void> }>();
+async function acquireAiSlot(userId: string): Promise<void> {
+  let s = aiSlots.get(userId);
+  if (!s) { s = { running: 0, waiters: [] }; aiSlots.set(userId, s); }
+  if (s.running < MAX_AI_NOTES_PER_USER) { s.running++; return; }
+  await new Promise<void>((resolve) => s!.waiters.push(resolve));
+  s.running++;
+}
+function releaseAiSlot(userId: string): void {
+  const s = aiSlots.get(userId);
+  if (!s) return;
+  s.running--;
+  const next = s.waiters.shift();
+  if (next) next();
+  // 没人在跑也没人排队 → 删掉条目, 防止 Map 随用户数无限增长
+  else if (s.running <= 0) aiSlots.delete(userId);
+}
+
 async function processNoteWithAi(userId: string, noteId: string, content: string, existingTags: string[], opts?: { simplifyContent?: boolean; originClientId?: string }) {
+  await acquireAiSlot(userId);
   try {
     if (content.length > NOTE_AI_SKIP_THRESHOLD) {
       await db.update(schema.notes).set({ aiProcessed: true }).where(eq(schema.notes.id, noteId));
@@ -2395,6 +2420,10 @@ async function processNoteWithAi(userId: string, noteId: string, content: string
     console.log(`[AI] Note ${noteId}: tags=${JSON.stringify(tags)}, category=${category}, summary=${summary}, simplified=${!!simplified}`);
   } catch (err) {
     console.error(`[AI] Failed to process note ${noteId}:`, err);
+  } finally {
+    // finally 而非 catch 末尾: 函数里有"内容过大直接 return" / "笔记已被删 return" 两条 early return,
+    // 只在 catch 里释放的话那两条路径会把名额永久漏掉, 攒够 2 次这个用户的 AI 就再也不工作了
+    releaseAiSlot(userId);
   }
 }
 
