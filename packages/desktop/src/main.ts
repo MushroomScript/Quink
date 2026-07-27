@@ -483,6 +483,38 @@ function applyShortcuts() {
 }
 
 // ──────────────────────────────────
+//  外部链接安全打开 (REVIEW-TODO D2)
+// ──────────────────────────────────
+// 笔记正文 / AI 回复 / 翻译结果里的链接最终都会走 shell.openExternal, 而它会把 URL 交给 OS 按 scheme
+// 分发. 裸调用等于把 OS 级协议处理器全部暴露给"任何能往笔记里写字的人": file:///C:/Windows/System32/calc.exe
+// 直接起进程, ms-msdt:// 是 Follina (CVE-2022-30190) 的入口, smb://evil/x 会把 NTLM 凭据发出去.
+// 共享笔记场景下攻击者只要往群里发一条笔记, 别人点一下就中招. 只放行这三种真正需要外跳的 scheme.
+const SAFE_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
+function openExternalSafe(rawUrl: string) {
+  try {
+    const u = new URL(rawUrl);
+    if (!SAFE_EXTERNAL_SCHEMES.has(u.protocol)) {
+      console.warn('[security] 拒绝打开非白名单 scheme:', u.protocol, rawUrl.slice(0, 120));
+      return;
+    }
+    shell.openExternal(rawUrl);
+  } catch {
+    // URL 解析失败 = 不是合法绝对 URL, 不开 (相对路径 / 畸形串都走这里)
+    console.warn('[security] 拒绝打开无法解析的 URL:', rawUrl.slice(0, 120));
+  }
+}
+
+// 快捷窗口统一的"窗口内不开新窗、外链交给系统浏览器"处理 (REVIEW-TODO D3).
+// Capture / AiChat / Translate / Float 都会渲染用户内容或 AI 输出, 里面的 target=_blank 链接
+// 不挂 handler 的话 Chromium 会开一个没有任何 webPreferences 限制的新 Electron 窗口.
+function applyExternalLinkGuard(win: BrowserWindow) {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalSafe(url);
+    return { action: 'deny' };
+  });
+}
+
+// ──────────────────────────────────
 //  主窗口（浏览/管理笔记）
 // ──────────────────────────────────
 function createMainWindow() {
@@ -610,13 +642,17 @@ function createMainWindow() {
       const u = new URL(url);
       const refId = u.searchParams.get('ref');
       if (refId) {
+        // refId 来自 URL query. 直接拼进选择器字符串等于给 renderer 上下文开了个 JS 注入口
+        // (构造 ref 值闭合引号后接任意代码). 两层 JSON.stringify: 内层把值变成合法的 CSS 属性选择器
+        // 带引号字面量, 外层把整个选择器变成合法的 JS 字符串字面量 (REVIEW-TODO D5)
+        const refSelector = `.note-ref-link[data-ref*=${JSON.stringify(`ref=${refId}`)}]`;
         mainWindow!.webContents.executeJavaScript(
-          `document.querySelector('.note-ref-link[data-ref*="ref=${refId}"]')?.click()`
+          `document.querySelector(${JSON.stringify(refSelector)})?.click()`
         ).catch(() => {});
         return { action: 'deny' };
       }
     } catch {}
-    shell.openExternal(url);
+    openExternalSafe(url);
     return { action: 'deny' };
   });
 
@@ -629,13 +665,14 @@ function createMainWindow() {
         // 同域:SPA 内部导航
         event.preventDefault();
         const navPath = u.pathname + u.search;
+        // navPath 含用户可控的 query, 裸拼进 pushState 参数能闭合引号注入 JS (REVIEW-TODO D5)
         mainWindow!.webContents.executeJavaScript(
-          `window.history.pushState(null,'','${navPath}');window.dispatchEvent(new PopStateEvent('popstate'))`
+          `window.history.pushState(null,'',${JSON.stringify(navPath)});window.dispatchEvent(new PopStateEvent('popstate'))`
         ).catch(() => {});
       } else {
         // 外域:用外部浏览器打开
         event.preventDefault();
-        shell.openExternal(url);
+        openExternalSafe(url);
       }
     } catch {
       event.preventDefault();
@@ -701,6 +738,7 @@ function createCaptureWindow() {
 
   // 加载 Web 端的快捷输入页面
   captureWindow.loadURL(`${WEB_URL}/capture`);
+  applyExternalLinkGuard(captureWindow);
   hookZoomChanged(captureWindow);
   // 新窗口 webContents zoom factor 默认 1.0, 物理 size 跟着 currentZoomLevel 算 (getCaptureSize),
   // 不显式 setZoomFactor 会导致物理跟 factor 不匹配 → 内容跟窗口边框不对齐.
@@ -876,8 +914,38 @@ const ATTACHMENT_STALL_MS = 15000;
 // 推送进度的最小间隔(throttle),避免每个 chunk 都 IPC + 触发 Vue reactive 造成 toast 闪烁
 const PROGRESS_THROTTLE_MS = 100;
 
+// 下载后直接交给 shell.openPath = 交给 OS 按扩展名找程序执行. 这些类型在 Windows 上双击即执行任意代码,
+// 攻击者往共享笔记里塞一个附件链接, 对方在桌面端点一下就等于运行了他的程序 (REVIEW-TODO D1).
+// 用户真要拿这类文件, 走"下载到本地"再自己决定, 不从应用里一键执行.
+const DANGEROUS_ATTACHMENT_EXT = new Set([
+  '.exe', '.msi', '.bat', '.cmd', '.com', '.scr', '.pif', '.cpl', '.hta', '.jar',
+  '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.ps1', '.psm1', '.reg', '.lnk', '.url',
+  '.sh', '.bash', '.command', '.app', '.pkg', '.dmg', '.deb', '.rpm', '.appimage',
+]);
+
 ipcMain.handle('open-attachment', async (event, url: string) => {
   const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
+
+  // origin 白名单: 附件只能来自当前连着的这台 Quink server. 不校验的话 renderer 传任意 URL 主进程就去
+  // 下载 (SSRF, 内网地址也能打), 下回来还直接 openPath. API_BASE 在远程模式下是用户自己配的地址, 可信.
+  try {
+    if (new URL(fullUrl).origin !== new URL(API_BASE).origin) {
+      console.warn('[security] 拒绝打开站外附件:', fullUrl.slice(0, 120));
+      return { success: false, error: '出于安全考虑, 只能打开本服务器上的附件' };
+    }
+  } catch {
+    return { success: false, error: '附件地址无效' };
+  }
+
+  // 扩展名黑名单. 用 URL path 判断而不是 Content-Type —— 决定 OS 拿什么程序打开的就是落盘后的扩展名
+  try {
+    const nameForCheck = decodeURIComponent(path.basename(new URL(fullUrl).pathname)).toLowerCase();
+    if (DANGEROUS_ATTACHMENT_EXT.has(path.extname(nameForCheck))) {
+      console.warn('[security] 拒绝打开可执行附件:', nameForCheck);
+      return { success: false, error: `出于安全考虑, 不能直接打开 ${path.extname(nameForCheck)} 文件` };
+    }
+  } catch { /* 解析不出文件名就走后面正常流程, 下面还会再 basename 一次 */ }
+
   if (attachmentInflight.has(fullUrl)) return attachmentInflight.get(fullUrl)!;
 
   const task = (async () => {
@@ -1419,6 +1487,29 @@ if (!gotLock) {
   });
 }
 
+// ──────────────────────────────────
+//  主进程崩溃兜底 (REVIEW-TODO D4)
+// ──────────────────────────────────
+// 主进程任何异步分支抛出未捕获异常, Electron 默认直接退进程: 用户看到整个 app 凭空消失, 没提示也没日志,
+// 下次启动什么线索都不剩. 落盘一份带堆栈的日志 + 弹 dialog 告诉用户日志在哪, 排查时至少有据可查.
+// 注意不要在这里 app.quit() —— 很多未捕获异常 (某个 IPC handler 出错) 并不影响其他窗口继续用.
+function logFatal(kind: string, err: any) {
+  const stamp = new Date().toISOString();
+  const detail = err?.stack || err?.message || String(err);
+  const line = `[${stamp}] ${kind}\n${detail}\n\n`;
+  console.error(`[fatal] ${kind}:`, err);
+  let logPath = '';
+  try {
+    logPath = path.join(app.getPath('userData'), 'crash.log');
+    fs.appendFileSync(logPath, line);
+  } catch { /* 日志都写不了就只能靠 console 了 */ }
+  try {
+    dialog.showErrorBox('Quink 遇到内部错误', `${kind}\n\n${String(detail).slice(0, 600)}\n\n日志: ${logPath || '(写入失败)'}`);
+  } catch { /* dialog 在 app ready 前不可用 */ }
+}
+process.on('uncaughtException', (err) => logFatal('uncaughtException', err));
+process.on('unhandledRejection', (reason) => logFatal('unhandledRejection', reason));
+
 app.whenReady().then(async () => {
   // 读"连哪个 server"配置. 首次启动 (无配置) → 弹引导页不走主流程; 用户选完写 config + relaunch 重新进这里.
   const cfg = readServerConfig();
@@ -1541,6 +1632,7 @@ function createAiChatWindow() {
   });
 
   aiChatWindow.loadURL(`${WEB_URL}/ai-chat`);
+  applyExternalLinkGuard(aiChatWindow);
   hookZoomChanged(aiChatWindow);
   // 同 createCaptureWindow: did-finish-load 后显式 setZoomFactor, 防新窗口 factor 默认 1.0 跟物理不匹配
   aiChatWindow.webContents.once('did-finish-load', () => {
@@ -1588,6 +1680,7 @@ function createTranslateWindow(original: string, translated: string, lang: strin
   const t = encodeURIComponent(translated.slice(0, 5000));
   const l = encodeURIComponent(lang || '');
   translateWindow.loadURL(`${WEB_URL}/translate-result?o=${o}&t=${t}&lang=${l}`);
+  applyExternalLinkGuard(translateWindow);
   hookZoomChanged(translateWindow);
   // did-finish-load 后显式 setZoomFactor, 防新窗口 factor 默认 1.0 跟物理不匹配 (同 AiChat/Capture)
   translateWindow.webContents.once('did-finish-load', () => {
@@ -1716,6 +1809,7 @@ async function showFloatWindow(text: string) {
 
   const encodedText = encodeURIComponent(text.slice(0, 2000));
   floatWindow.loadURL(`${WEB_URL}/float?text=${encodedText}`);
+  applyExternalLinkGuard(floatWindow);
 
   // 内容缩放对齐窗口物理尺寸: 清 origin 残留 zoom level + setZoomFactor(factor). did-finish-load 而非
   // dom-ready — 后者 setZoomFactor 可能被 navigation 完成时 reset (跟 Capture/AiChat 一致)
