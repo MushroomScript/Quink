@@ -664,13 +664,15 @@ const typeColor: Record<string, string> = {
 </script>
 
 <template>
-  <!-- 非 selectMode: 仅 type chip 是拖动 handle (其他地方鼠标按住选文字); selectMode: 整卡片可拖 (多选批量移动).
-       自定义拖动 (cardDnd.ts), 非 HTML5 DnD: selectMode 时整卡片 @pointerdown; 非 selectMode 时 type chip @pointerdown -->
   <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 group relative card-draggable"
     :data-note-id="note.id"
     :class="{ 'ring-2 ring-primary/50': displayPinned, 'ring-2 ring-primary': store.selectedIds.has(note.id), 'opacity-50': isDragging }"
     @pointerdown="store.selectMode ? onPointerDown($event) : undefined"
     @contextmenu="onContextMenu">
+    <!-- 拖动约定 (注释必须放在根元素【内部】: 放 <template> 下、根元素之前会让本组件变成多根 Fragment,
+         TransitionGroup 对多根组件无法应用过渡 → 列表删除的淡出动画整个失效, 且 Vue 不报任何警告):
+         非 selectMode 仅 type chip 是拖动 handle (其他地方鼠标按住选文字); selectMode 整卡片可拖 (多选批量移动).
+         自定义拖动走 cardDnd.ts 而非 HTML5 DnD -->
     <div class="px-3 py-2.5 md:px-4 md:py-3 cursor-pointer" @click="handleClick" @mousedown="onMouseDown">
       <div class="flex items-center gap-2 mb-2">
         <!-- 多选 checkbox: 跟 task list 视觉接近 — 空心圆 border (未选) / 实心主色 + 白勾 (已选);
