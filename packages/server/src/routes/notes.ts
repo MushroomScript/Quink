@@ -113,7 +113,6 @@ async function validateSharedGroups(userId: string, groupIds: string[]): Promise
 // GET /api/notes
 app.get('/', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { search, category, type, tag, tags, types, dateFrom, dateTo, sort, scope = 'mine', page = '1', limit = '50' } = c.req.query();
   const offset = (parseInt(page) - 1) * parseInt(limit);
   // 排序字段: created (默认, 兼容老行为) / updated. 未知值兜底 createdAt 不报错.
@@ -328,7 +327,6 @@ app.get('/', async (c) => {
 // GET /api/notes/trash
 app.get('/trash', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   // 个人回收站: 作者自己的所有软删 root 笔记 (fork 不进回收站, fork 是某群独占副本不属于作者主视图概念)
   // deletedInGroupId IS NULL 排除群回收站项 (admin 删别人共享笔记走群回收站, 不进作者个人 trash)
   // 之前加 "NOT EXISTS active fork" 排除了 root 孤儿场景 (root 最后一份 share 被 fork 走时 root
@@ -363,19 +361,18 @@ app.get('/trash', async (c) => {
 // POST /api/notes/trash/:id/restore
 app.post('/trash/:id/restore', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   const existing = await db.select().from(schema.notes)
     .where(and(eq(schema.notes.id, id), eq(schema.notes.userId, userId))).get();
   if (!existing || !existing.deletedAt) return c.json({ error: '笔记不存在' }, 404);
   await db.update(schema.notes).set({ deletedAt: null }).where(eq(schema.notes.id, id));
   // 多设备 / 群成员同步: restore 后笔记从 trash 回到主 view, 语义等价"新出现一条笔记" → 复用 note-created 让前端拉单条插入
-  publish(userId, 'note-created', { noteId: id }, _ocid);
+  publish(userId, 'note-created', { noteId: id }, c.get('ocid'));
   if (existing.visibility === 'shared') {
     const shares = await db.select({ groupId: schema.noteShares.groupId })
       .from(schema.noteShares).where(eq(schema.noteShares.noteId, id)).all();
     if (shares.length > 0) {
-      broadcastNoteShared(shares.map(s => s.groupId), userId, _ocid).catch(e => console.error('[notes] restore broadcast failed:', e));
+      broadcastNoteShared(shares.map(s => s.groupId), userId, c.get('ocid')).catch(e => console.error('[notes] restore broadcast failed:', e));
     }
   }
   await logAudit(c, 'note.restore', 'note', id, { visibility: existing.visibility });
@@ -385,7 +382,6 @@ app.post('/trash/:id/restore', async (c) => {
 // DELETE /api/notes/trash/:id
 app.delete('/trash/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   // 拿 sharedGroupIds 在删除前 (删完 note_shares 就没了)
   const existing = await db.select().from(schema.notes)
@@ -397,9 +393,9 @@ app.delete('/trash/:id', async (c) => {
   // purgeNote 走完整 cascade (清 9 张子表 + notes), 修原只清 noteShares/groupNotePins 漏 noteEditGrants / notePersonalReminders 等 FK
   if (existing) purgeNote(id);
   // 多设备 + 群成员同步: 作者其他设备的回收站列表移除该 id; 群成员 feed 也确认彻底清
-  publish(userId, 'note-deleted', { noteId: id }, _ocid);
+  publish(userId, 'note-deleted', { noteId: id }, c.get('ocid'));
   if (shareGroupIds.length > 0) {
-    broadcastNoteShared(shareGroupIds, userId, _ocid).catch(e => console.error('[notes] permanent delete broadcast failed:', e));
+    broadcastNoteShared(shareGroupIds, userId, c.get('ocid')).catch(e => console.error('[notes] permanent delete broadcast failed:', e));
   }
   await logAudit(c, 'note.permanent_delete', 'note', id, { sharedGroupIds: shareGroupIds });
   return c.json({ message: '已永久删除' });
@@ -408,7 +404,6 @@ app.delete('/trash/:id', async (c) => {
 // DELETE /api/notes/trash — 清空
 app.delete('/trash', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   // 先拿要删的 noteIds 清 note_shares, 再删 notes (单 DELETE 包 subquery 也能但事务更清晰)
   const trashed = await db.select({ id: schema.notes.id }).from(schema.notes)
     .where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NOT NULL`))
@@ -418,7 +413,7 @@ app.delete('/trash', async (c) => {
   // 走完整 cascade purgeNote (修原只清 noteShares/groupNotePins 漏其他 FK 子表)
   for (const tid of ids) purgeNote(tid);
   // 多设备同步: 作者本人所有设备清空回收站界面 + 主 view cache 标 dirty
-  publish(userId, 'trash-cleared', { count: ids.length }, _ocid);
+  publish(userId, 'trash-cleared', { count: ids.length }, c.get('ocid'));
   await logAudit(c, 'note.permanent_delete_all_trash', 'note', null, { count: ids.length });
   return c.json({ message: '已清空' });
 });
@@ -426,7 +421,6 @@ app.delete('/trash', async (c) => {
 // GET /api/notes/tags（必须在 /:id 之前注册）
 app.get('/tags', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const notes = await db.select({ tags: schema.notes.tags })
     .from(schema.notes).where(and(eq(schema.notes.userId, userId), sql`${schema.notes.deletedAt} IS NULL`)).all();
   const tagSet = new Set<string>();
@@ -669,7 +663,6 @@ const COMMENT_MAX_LEN = 1000;
 // POST /api/notes/:id/lock — 申请编辑锁. 别人持锁未过期 → 409 带 lockByNickname + expiresAt
 app.post('/:id/lock', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   // 用 read mode 校验 - 没编辑权连锁都拿不到, 避免编辑到一半提交才发现没权 (体验差)
   const note = await getNoteForAccess(userId, id, 'read');
@@ -711,7 +704,6 @@ app.post('/:id/lock', async (c) => {
 // POST /api/notes/:id/lock/heartbeat — 续约 (前端 setInterval 30s 调)
 app.post('/:id/lock/heartbeat', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   const body = await c.req.json().catch(() => ({}));
   const lockToken = body?.lockToken;
@@ -750,7 +742,6 @@ app.post('/:id/lock/heartbeat', async (c) => {
 // DELETE /api/notes/:id/lock — 释放 (前端 onBeforeUnmount + sendBeacon 调). sendBeacon 无 body 也兼容, 看 lock_by 是否我.
 app.delete('/:id/lock', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   const note = await getNoteForAccess(userId, id);
   if (!note) return c.json({ error: '笔记不存在' }, 404);
@@ -816,7 +807,6 @@ const EDIT_REQUEST_REJECT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 // POST /api/notes/:id/edit-request - 申请编辑权 (没 write 权的群成员调). 已 pending 返原 request (idempotent).
 app.post('/:id/edit-request', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   const body = await c.req.json().catch(() => ({} as any));
   const message: string | null = typeof body?.message === 'string' ? body.message.slice(0, 500) : null;
@@ -865,7 +855,7 @@ app.post('/:id/edit-request', async (c) => {
   };
   await db.insert(schema.noteEditRequests).values(newReq);
 
-  // SSE 推作者 + 群 admin (除申请人自己). 透传 _ocid 让同账号其他设备跳过
+  // SSE 推作者 + 群 admin (除申请人自己). 透传 c.get('ocid') 让同账号其他设备跳过
   const requester = await db.select({ nickname: schema.users.nickname })
     .from(schema.users).where(eq(schema.users.id, userId)).get();
   const recipients = await getNoteAuthorityRecipients(id);
@@ -875,7 +865,7 @@ app.post('/:id/edit-request', async (c) => {
     publish(rid, 'note-edit-request', {
       requestId: reqId, noteId: id, noteUserId: note.userId,
       requesterId: userId, requesterNickname: requester?.nickname || '群成员', message: sanitizedMessage,
-    }, _ocid);
+    }, c.get('ocid'));
     // 写入通知中心. body 跟 toast 文案对齐, payload 含 noteId 让 view 点击跳详情
     createNotification(rid, 'content', 'edit-request',
       `${requester?.nickname || '群成员'} 申请编辑你的笔记`,
@@ -890,7 +880,6 @@ app.post('/:id/edit-request', async (c) => {
 // POST /api/notes/:id/edit-requests/:reqId/approve - 同意 (作者+群 admin), 永久授权 (写 note_edit_grants)
 app.post('/:id/edit-requests/:reqId/approve', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id, reqId } = c.req.param();
 
   const note = await getNoteForAccess(userId, id, 'read');
@@ -917,13 +906,13 @@ app.post('/:id/edit-requests/:reqId/approve', async (c) => {
 
   publish(req.userId, 'note-edit-request-resolved', {
     requestId: reqId, noteId: id, status: 'approved', handledBy: userId,
-  }, _ocid);
+  }, c.get('ocid'));
   // 审批人(作者/群 admin)自己的其他设备也要刷 —— 待审面板里那条 pending 得消失, 授权列表要多一个人
   // (REVIEW-TODO B8). 前端 handler 里的 isMyEvent 会让"点了同意的那台设备"自动跳过, 不会重复处理
   if (userId !== req.userId) {
     publish(userId, 'note-edit-request-resolved', {
       requestId: reqId, noteId: id, status: 'approved', handledBy: userId,
-    }, _ocid);
+    }, c.get('ocid'));
   }
   // 写通知给申请人
   createNotification(req.userId, 'content', 'edit-request-approved',
@@ -939,7 +928,6 @@ app.post('/:id/edit-requests/:reqId/approve', async (c) => {
 // POST /api/notes/:id/edit-requests/:reqId/reject - 拒绝 (作者+群 admin)
 app.post('/:id/edit-requests/:reqId/reject', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id, reqId } = c.req.param();
 
   const note = await getNoteForAccess(userId, id, 'read');
@@ -960,12 +948,12 @@ app.post('/:id/edit-requests/:reqId/reject', async (c) => {
 
   publish(req.userId, 'note-edit-request-resolved', {
     requestId: reqId, noteId: id, status: 'rejected', handledBy: userId,
-  }, _ocid);
+  }, c.get('ocid'));
   // 同 approve: 审批人其他设备的待审面板要把这条 pending 去掉 (REVIEW-TODO B8)
   if (userId !== req.userId) {
     publish(userId, 'note-edit-request-resolved', {
       requestId: reqId, noteId: id, status: 'rejected', handledBy: userId,
-    }, _ocid);
+    }, c.get('ocid'));
   }
   // 写通知给申请人
   createNotification(req.userId, 'content', 'edit-request-rejected',
@@ -981,7 +969,6 @@ app.post('/:id/edit-requests/:reqId/reject', async (c) => {
 // GET /api/notes/:id/edit-requests - 列出该笔记所有申请 (按时间倒序, 含申请人 nickname/avatar)
 app.get('/:id/edit-requests', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
 
   const note = await getNoteForAccess(userId, id, 'read');
@@ -1012,7 +999,6 @@ app.get('/:id/edit-requests', async (c) => {
 // GET /api/notes/:id/edit-grants - 列已授权用户 (作者+群 admin 看)
 app.get('/:id/edit-grants', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
 
   const note = await getNoteForAccess(userId, id, 'read');
@@ -1038,7 +1024,6 @@ app.get('/:id/edit-grants', async (c) => {
 // DELETE /api/notes/:id/edit-grants/:userId - 撤销某用户的编辑权 (作者+群 admin)
 app.delete('/:id/edit-grants/:userId', async (c) => {
   const me = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const targetUserId = c.req.param('userId');
 
@@ -1054,9 +1039,9 @@ app.delete('/:id/edit-grants/:userId', async (c) => {
     eq(schema.noteEditGrants.userId, targetUserId),
   ));
   // 推 SSE 给被撤销人让他前端刷 canWrite (NoteCard 预判 / NoteEditModal 进 modal 前判断)
-  publish(targetUserId, 'note-edit-grant-revoked', { noteId: id }, _ocid);
+  publish(targetUserId, 'note-edit-grant-revoked', { noteId: id }, c.get('ocid'));
   // 操作者自己的其他设备: NoteDetail 的"额外授权 X 人" popover 里那个人得从列表里去掉 (REVIEW-TODO B8)
-  if (me !== targetUserId) publish(me, 'note-edit-grant-revoked', { noteId: id }, _ocid);
+  if (me !== targetUserId) publish(me, 'note-edit-grant-revoked', { noteId: id }, c.get('ocid'));
   await logAudit(c, 'note.edit_grant_revoke', 'note', id, { revokedUserId: targetUserId });
   return c.json({ data: { message: '已撤销编辑权' } });
 });
@@ -1067,7 +1052,6 @@ app.delete('/:id/edit-grants/:userId', async (c) => {
 // 修法: 编辑者只列"调用者也在的群里也是成员"的人, 跨群编辑者匿名化 (用 '群成员' 占位 nickname, avatar=null, userId 仍返用于幂等).
 app.get('/:id/edit-history', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
 
   const note = await getNoteForAccess(userId, id, 'read');
@@ -1197,7 +1181,6 @@ async function getReactionSummary(noteId: string, userId: string): Promise<Array
 // 已有 (note,user,emoji) → DELETE 取消; 否则 INSERT 添加. 返回新 summary + action.
 app.post('/:id/reactions', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   const body = await c.req.json().catch(() => ({} as any));
   const emoji = typeof body?.emoji === 'string' ? body.emoji : null;
@@ -1232,10 +1215,10 @@ app.post('/:id/reactions', async (c) => {
   }
 
   const summary = await getReactionSummary(id, userId);
-  broadcastNoteSocial(id, 'note-reaction-changed', { noteId: id, summary }, userId, _ocid)
+  broadcastNoteSocial(id, 'note-reaction-changed', { noteId: id, summary }, userId, c.get('ocid'))
     .catch(e => console.error('[reactions] broadcast failed:', e));
   // 多设备同步: 给操作者本人所有设备 publish (broadcastNoteSocial 排除发起人 userId 同账号其他设备也漏)
-  publish(userId, 'note-reaction-changed', { noteId: id, summary }, _ocid);
+  publish(userId, 'note-reaction-changed', { noteId: id, summary }, c.get('ocid'));
   await logAudit(c, 'note.reaction', 'note', id, { emoji, action });
   return c.json({ data: { action, summary } });
 });
@@ -1304,7 +1287,6 @@ async function loadTodoDoneMaps(noteIds: string[], userId: string): Promise<Map<
 // 任何能 read 该 shared everyone 待办的群成员都能切自己的 (不碰笔记内容, 不要编辑锁/admin).
 app.post('/:id/todo-done', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const note = await getNoteForAccess(userId, id, 'read');
   if (!note) return c.json({ error: '笔记不存在' }, 404);
@@ -1324,16 +1306,15 @@ app.post('/:id/todo-done', async (c) => {
   }
   const summary = await getTodoDoneSummary(id, userId, note.rosterDueAt);
   // SSE: 群其他成员 (聚合进度变) + 本人其他设备
-  broadcastNoteSocial(id, 'note-todo-done-changed', { noteId: id, summary }, userId, _ocid)
+  broadcastNoteSocial(id, 'note-todo-done-changed', { noteId: id, summary }, userId, c.get('ocid'))
     .catch(e => console.error('[todo-done] broadcast failed:', e));
-  publish(userId, 'note-todo-done-changed', { noteId: id, summary }, _ocid);
+  publish(userId, 'note-todo-done-changed', { noteId: id, summary }, c.get('ocid'));
   return c.json({ data: { action, summary } });
 });
 
 // GET /api/notes/:id/reactions — 列汇总, 含 mine 标记 (用户已加的 emoji)
 app.get('/:id/reactions', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   const note = await getNoteForAccess(userId, id, 'read');
   if (!note) return c.json({ error: '笔记不存在' }, 404);
@@ -1346,7 +1327,6 @@ app.get('/:id/reactions', async (c) => {
 // 不像 updateNote 那样涉及多字段协作冲突; 且 AI 生成期间用户手动改 summary 撞车属极小概率, 由前端 SSE 触发 refetch 兜底).
 app.post('/:id/summary/regenerate', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const note = await getNoteForAccess(userId, id, 'write');
   if (!note) return c.json({ error: '笔记不存在或无编辑权限' }, 404);
@@ -1359,7 +1339,7 @@ app.post('/:id/summary/regenerate', async (c) => {
     .set({ summary: newSummary, summaryLocked: false, version: newVersion, updatedAt: dayjs().toISOString() })
     .where(eq(schema.notes.id, id));
   // 多设备 / 共享群同步: 复用现有 note-updated 事件, 其他设备 refreshSingleNote 会拉最新 summary
-  publish(userId, 'note-updated', { noteId: id }, _ocid);
+  publish(userId, 'note-updated', { noteId: id }, c.get('ocid'));
   await logAudit(c, 'note.summary.regenerate', 'note', id, { length: newSummary.length });
   return c.json({ data: { summary: newSummary, version: newVersion } });
 });
@@ -1376,7 +1356,6 @@ const updateCommentSchema = z.object({
 // 顶层评论传 null/undefined; 一级回复传顶层 id; 二级及以下传任意已存在 id → 最终 parentId 落到根 (顶层) 上.
 app.post('/:id/comments', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   const body = await c.req.json().catch(() => ({}));
   const parsed = createCommentSchema.safeParse(body);
@@ -1414,10 +1393,10 @@ app.post('/:id/comments', async (c) => {
     .from(schema.users).where(eq(schema.users.id, userId)).get();
   const enriched = { ...newComment, userNickname: user?.nickname || '用户', userAvatar: user?.avatar || null };
 
-  broadcastNoteSocial(id, 'note-comment-added', { noteId: id, comment: enriched }, userId, _ocid)
+  broadcastNoteSocial(id, 'note-comment-added', { noteId: id, comment: enriched }, userId, c.get('ocid'))
     .catch(e => console.error('[comments] broadcast failed:', e));
   // 多设备同步: CommentThread.onCommentAdded 已有 id 去重防重 push
-  publish(userId, 'note-comment-added', { noteId: id, comment: enriched }, _ocid);
+  publish(userId, 'note-comment-added', { noteId: id, comment: enriched }, c.get('ocid'));
   // 写通知给笔记作者 (除非评论的是自己的笔记). reaction 不写通知 (频率太高)
   if (note.userId !== userId) {
     createNotification(note.userId, 'content', 'comment-added',
@@ -1433,7 +1412,6 @@ app.post('/:id/comments', async (c) => {
 // GET /api/notes/:id/comments — 列所有未删评论 (含 user nickname/avatar). 前端组 thread.
 app.get('/:id/comments', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   const note = await getNoteForAccess(userId, id, 'read');
   if (!note) return c.json({ error: '笔记不存在' }, 404);
@@ -1462,7 +1440,6 @@ app.get('/:id/comments', async (c) => {
 // PATCH /api/notes/:id/comments/:cid — 编辑评论 (仅本人, 无时限)
 app.patch('/:id/comments/:cid', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id, cid } = c.req.param();
   const body = await c.req.json().catch(() => ({}));
   const parsed = updateCommentSchema.safeParse(body);
@@ -1489,12 +1466,12 @@ app.patch('/:id/comments/:cid', async (c) => {
   broadcastNoteSocial(id, 'note-comment-updated', {
     noteId: id, commentId: cid, content: sanitizedContent, updatedAt: now,
     userNickname: u?.nickname || '用户', userAvatar: u?.avatar || null,
-  }, userId, _ocid).catch(e => console.error('[comments] broadcast failed:', e));
+  }, userId, c.get('ocid')).catch(e => console.error('[comments] broadcast failed:', e));
   // 多设备同步: CommentThread.onCommentUpdated 用 findIndex 已是幂等
   publish(userId, 'note-comment-updated', {
     noteId: id, commentId: cid, content: sanitizedContent, updatedAt: now,
     userNickname: u?.nickname || '用户', userAvatar: u?.avatar || null,
-  }, _ocid);
+  }, c.get('ocid'));
   await logAudit(c, 'note.comment_update', 'comment', cid, { noteId: id });
   return c.json({ data: { ...comment, content: sanitizedContent, updatedAt: now } });
 });
@@ -1502,7 +1479,6 @@ app.patch('/:id/comments/:cid', async (c) => {
 // DELETE /api/notes/:id/comments/:cid — 软删 (deletedAt). 本人 OR 笔记作者 OR 群 admin 都能删.
 app.delete('/:id/comments/:cid', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id, cid } = c.req.param();
 
   const note = await getNoteForAccess(userId, id, 'read');
@@ -1536,9 +1512,9 @@ app.delete('/:id/comments/:cid', async (c) => {
 
   // 广播每条删除事件给所有读者 (子评论数量通常 ≤10, 不需合并)
   for (const did of deletedCommentIds) {
-    broadcastNoteSocial(id, 'note-comment-deleted', { noteId: id, commentId: did }, userId, _ocid)
+    broadcastNoteSocial(id, 'note-comment-deleted', { noteId: id, commentId: did }, userId, c.get('ocid'))
       .catch(e => console.error('[comments] broadcast failed:', e));
-    publish(userId, 'note-comment-deleted', { noteId: id, commentId: did }, _ocid);
+    publish(userId, 'note-comment-deleted', { noteId: id, commentId: did }, c.get('ocid'));
   }
   await logAudit(c, 'note.comment_delete', 'comment', cid, {
     noteId: id, cascadedCount: deletedCommentIds.length - 1,
@@ -1551,7 +1527,6 @@ app.delete('/:id/comments/:cid', async (c) => {
 // 群成员拿别人共享笔记 → 校验 note_shares 跟我所在群有交集才放行
 app.get('/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   const note = await db.select().from(schema.notes).where(eq(schema.notes.id, id)).get();
   if (!note) return c.json({ error: '笔记不存在' }, 404);
@@ -1627,7 +1602,6 @@ app.get('/:id', async (c) => {
 // POST /api/notes
 app.post('/', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const body = await c.req.json();
   const parsed = createNoteSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
@@ -1701,11 +1675,11 @@ app.post('/', async (c) => {
   });
 
   // 异步 AI 处理（不阻塞响应）. simplifyContent=true (float「AI整理」) 时额外后台精简 content
-  processNoteWithAi(userId, note.id, note.content, note.tags as string[], { simplifyContent: parsed.data.simplifyContent, originClientId: _ocid }).catch(() => {});
+  processNoteWithAi(userId, note.id, note.content, note.tags as string[], { simplifyContent: parsed.data.simplifyContent, originClientId: c.get('ocid') }).catch(() => {});
   // 通知目标群成员有新笔记 (前端 sse handler 收到后在群详情页 reload feed)
-  broadcastNoteShared(sharedGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
+  broadcastNoteShared(sharedGroupIds, userId, c.get('ocid')).catch(e => console.error('[notes] broadcast failed:', e));
   // 多设备同步: 给作者本人所有设备 publish (broadcastNoteShared 排除发起人, 同账号其他设备一起被排除; 私有笔记不走 broadcast 也漏)
-  publish(userId, 'note-created', { noteId: note.id }, _ocid);
+  publish(userId, 'note-created', { noteId: note.id }, c.get('ocid'));
   await logAudit(c, 'note.create', 'note', note.id, {
     type: note.type, visibility, sharedGroupIds,
   });
@@ -1725,7 +1699,6 @@ const duplicateRateMap = new Map<string, { count: number; resetAt: number }>();
 // 通知原作者: SSE 推 'note-duplicated' (前端 toast / 通知中心)
 app.post('/:id/duplicate', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
 
   // rate-limit (per-user) 防批量复制
@@ -1775,7 +1748,7 @@ app.post('/:id/duplicate', async (c) => {
   processNoteWithAi(userId, newId, newContent, []).catch(() => {});
 
   // 多设备同步: 操作者本人所有设备主 view 拉新副本
-  publish(userId, 'note-created', { noteId: newId }, _ocid);
+  publish(userId, 'note-created', { noteId: newId }, c.get('ocid'));
   // 通知原作者 (不通知自己复制自己)
   if (original.userId !== userId) {
     const dup = await db.select({ nickname: schema.users.nickname }).from(schema.users)
@@ -1803,7 +1776,6 @@ app.post('/:id/duplicate', async (c) => {
 // PATCH /api/notes/:id
 app.patch('/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   const body = await c.req.json();
   const parsed = updateNoteSchema.safeParse(body);
@@ -2136,13 +2108,13 @@ app.patch('/:id', async (c) => {
     });
     // 广播: 该群成员看到新 fork, 其它仍连 original 的群成员需要刷新 (original 的 sharedGroupIds 里去掉了该群)
     const allGroupIds = [...new Set([effectiveGroupId!, ...currentShareGroupIds])];
-    broadcastNoteShared(allGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
+    broadcastNoteShared(allGroupIds, userId, c.get('ocid')).catch(e => console.error('[notes] broadcast failed:', e));
     // 多设备同步: 给作者本人所有设备 publish 让其他设备 store 拉 fork 新版本
-    publish(userId, 'note-updated', { noteId: newNoteId }, _ocid);
+    publish(userId, 'note-updated', { noteId: newNoteId }, c.get('ocid'));
     // 孤儿处理软删 root 时 publish 'note-deleted' for root id 给原作者, 让其他设备主 view splice 出 root
-    // (本设备 _ocid 跳过, 非作者触发时操作者 clientId 跟作者无关, 作者所有设备都收到)
+    // (本设备 c.get('ocid') 跳过, 非作者触发时操作者 clientId 跟作者无关, 作者所有设备都收到)
     if (orphanedRoot) {
-      publish(existing.userId, 'note-deleted', { noteId: id }, _ocid);
+      publish(existing.userId, 'note-deleted', { noteId: id }, c.get('ocid'));
     }
     await logAudit(c, 'note.update_fork', 'note', newNoteId, {
       originNoteId: id, groupId: effectiveGroupId, isAuthor,
@@ -2195,13 +2167,13 @@ app.patch('/:id', async (c) => {
   // 广播给 旧 ∪ 新 groupIds 的成员 (旧群刷掉这条笔记, 新群加上这条笔记 / 内容改了也要同步)
   if (willUpdateShares) {
     const allGroupIds = [...new Set([...currentShareGroupIds, ...(newSharedGroupIds || [])])];
-    broadcastNoteShared(allGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
+    broadcastNoteShared(allGroupIds, userId, c.get('ocid')).catch(e => console.error('[notes] broadcast failed:', e));
   } else if (existing.visibility === 'shared') {
     // 只改了内容/tag 没改群列表, 但已经是 shared → 通知所有群成员刷新看新内容
-    broadcastNoteShared(currentShareGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
+    broadcastNoteShared(currentShareGroupIds, userId, c.get('ocid')).catch(e => console.error('[notes] broadcast failed:', e));
   }
   // 多设备同步: 给作者本人所有设备 publish 让其他设备 store 拉单条 refreshSingleNote (复用 scheduler 那条线已有的 note-updated SSE 事件)
-  publish(userId, 'note-updated', { noteId: id }, _ocid);
+  publish(userId, 'note-updated', { noteId: id }, c.get('ocid'));
   // 内容变化时拍 before 快照存 audit (跟 delete 时的 snapshot 一致, 让审计可完整回溯任意时刻笔记状态).
   // 仅 isContentChange 存 (pinned/visibility/sharedGroupIds 等管理操作不影响内容, 无快照意义)
   await logAudit(c, 'note.update', 'note', id, {
@@ -2232,7 +2204,6 @@ app.patch('/:id', async (c) => {
 // ?groupId= 仍可选传 (audit 记录哪个群上下文发起), 不影响进哪个回收站
 app.delete('/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id'); // 多设备同步: 给 publish 让其他设备 SSE 跳过自己发的事件
   const { id } = c.req.param();
   const groupIdQuery = c.req.query('groupId');
 
@@ -2275,13 +2246,13 @@ app.delete('/:id', async (c) => {
 
   // 软删共享笔记 → 通知群成员 (note_shares 保留但 deletedAt 过滤让 feed 看不到)
   if (existing.visibility === 'shared' && sharedGroupIds.length > 0) {
-    broadcastNoteShared(sharedGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
+    broadcastNoteShared(sharedGroupIds, userId, c.get('ocid')).catch(e => console.error('[notes] broadcast failed:', e));
   }
   // 多设备同步: 操作者本人所有设备主 view 移除该 id
-  publish(userId, 'note-deleted', { noteId: id }, _ocid);
+  publish(userId, 'note-deleted', { noteId: id }, c.get('ocid'));
   // admin 删别人的笔记时, 上面那句只通知到操作者自己 → 原作者设备上那张卡片会一直挂着直到手动刷新
   // (下面 createNotification 只往通知中心塞一条提示, 不会让列表 splice 掉这条) (REVIEW-TODO B4)
-  if (!isAuthor) publish(existing.userId, 'note-deleted', { noteId: id }, _ocid);
+  if (!isAuthor) publish(existing.userId, 'note-deleted', { noteId: id }, c.get('ocid'));
 
   // 任何人删共享笔记都给所有相关群 owner+admin 发 group-trash-changed 让群回收站 view 刷
   if (existing.visibility === 'shared' && sharedGroupIds.length > 0) {
@@ -2297,7 +2268,7 @@ app.delete('/:id', async (c) => {
       const k = a.userId + '|' + a.groupId;
       if (seen.has(k)) continue;
       seen.add(k);
-      publish(a.userId, 'group-trash-changed', { groupId: a.groupId }, _ocid);
+      publish(a.userId, 'group-trash-changed', { groupId: a.groupId }, c.get('ocid'));
     }
   }
 
@@ -2442,7 +2413,6 @@ const groupReminderSchema = reminderSchema.extend({
 // POST /api/notes/:id/personal-reminder — 设/更新个人提醒
 app.post('/:id/personal-reminder', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const note = await getNoteForAccess(userId, id, 'read');
   if (!note) return c.json({ error: '笔记不存在' }, 404);
@@ -2461,7 +2431,7 @@ app.post('/:id/personal-reminder', async (c) => {
     target: [schema.notePersonalReminders.userId, schema.notePersonalReminders.noteId],
     set: { dueAt: parsed.data.dueAt, rrule: parsed.data.rrule ?? null, remindSentAt: null },
   });
-  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, _ocid);
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, c.get('ocid'));
   await logAudit(c, 'note.personal_reminder_set', 'note', id, { dueAt: parsed.data.dueAt, rrule: parsed.data.rrule });
   return c.json({ data: { noteId: id, dueAt: parsed.data.dueAt, rrule: parsed.data.rrule ?? null } });
 });
@@ -2469,13 +2439,12 @@ app.post('/:id/personal-reminder', async (c) => {
 // DELETE /api/notes/:id/personal-reminder — 删个人提醒 (idempotent)
 app.delete('/:id/personal-reminder', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   await db.delete(schema.notePersonalReminders).where(and(
     eq(schema.notePersonalReminders.userId, userId),
     eq(schema.notePersonalReminders.noteId, id),
   ));
-  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, _ocid);
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, c.get('ocid'));
   await logAudit(c, 'note.personal_reminder_delete', 'note', id);
   return c.json({ message: '已删除' });
 });
@@ -2484,7 +2453,6 @@ app.delete('/:id/personal-reminder', async (c) => {
 // 校验: 1) note 分享到 groupId 2) userId 在 groupId 是 owner/admin
 app.post('/:id/group-reminder', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const parsed = groupReminderSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
@@ -2518,10 +2486,10 @@ app.post('/:id/group-reminder', async (c) => {
     target: [schema.noteGroupReminders.noteId, schema.noteGroupReminders.groupId],
     set: { dueAt, rrule: rrule ?? null, remindSentAt: null, createdBy: userId },
   });
-  publish(userId, 'data-changed', { scope: 'reminders', noteId: id, groupId }, _ocid);
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id, groupId }, c.get('ocid'));
   // 群成员的 NoteCard 上有铃铛 + 提醒时间, 不广播他们卡片就一直是"没有提醒"的样子 (REVIEW-TODO B5).
   // 下面的 createNotification 只往通知中心塞一条, 不会刷新卡片本身
-  broadcastNoteShared([groupId], userId, _ocid).catch(e => console.error('[notes] group-reminder broadcast failed:', e));
+  broadcastNoteShared([groupId], userId, c.get('ocid')).catch(e => console.error('[notes] group-reminder broadcast failed:', e));
   // 设/更新群提醒时给该群 active 成员 (除发起人) 发通知, 跟 scheduler 到点同款规则:
   // group_reminder_subscriptions.enabled=false 的成员一律跳过 (用户已明示"不想被该群打扰", 设置事件也算"打扰")
   const members = await db.select({ userId: schema.groupMembers.userId })
@@ -2558,7 +2526,6 @@ app.post('/:id/group-reminder', async (c) => {
 // DELETE /api/notes/:id/group-reminder?groupId= — 删群提醒
 app.delete('/:id/group-reminder', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const groupId = c.req.query('groupId');
   if (!groupId) return c.json({ error: 'groupId 缺失' }, 400);
@@ -2575,9 +2542,9 @@ app.delete('/:id/group-reminder', async (c) => {
     eq(schema.noteGroupReminders.noteId, id),
     eq(schema.noteGroupReminders.groupId, groupId),
   ));
-  publish(userId, 'data-changed', { scope: 'reminders', noteId: id, groupId }, _ocid);
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id, groupId }, c.get('ocid'));
   // 同 POST: 不广播的话群成员卡片上那个铃铛删了也不消失 (REVIEW-TODO B5)
-  broadcastNoteShared([groupId], userId, _ocid).catch(e => console.error('[notes] group-reminder broadcast failed:', e));
+  broadcastNoteShared([groupId], userId, c.get('ocid')).catch(e => console.error('[notes] group-reminder broadcast failed:', e));
   await logAudit(c, 'note.group_reminder_delete', 'note', id, { groupId });
   return c.json({ message: '已删除' });
 });
@@ -2619,7 +2586,6 @@ app.get('/:id/reminders', async (c) => {
 // 比群级 group_reminder_subscriptions 更细粒度, 用户对单条待办说"不打扰我"
 app.post('/:id/group-reminder/mute', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   // 校验笔记可见 (防屏蔽不属于自己可访问的笔记)
   const note = await getNoteForAccess(userId, id, 'read');
@@ -2627,7 +2593,7 @@ app.post('/:id/group-reminder/mute', async (c) => {
   await db.insert(schema.noteGroupReminderMutes).values({
     userId, noteId: id, mutedAt: dayjs().toISOString(),
   }).onConflictDoNothing();
-  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, _ocid);
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, c.get('ocid'));
   await logAudit(c, 'note.group_reminder_mute', 'note', id, {});
   return c.json({ message: '已屏蔽' });
 });
@@ -2635,13 +2601,12 @@ app.post('/:id/group-reminder/mute', async (c) => {
 // DELETE /api/notes/:id/group-reminder/mute — 取消屏蔽
 app.delete('/:id/group-reminder/mute', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   await db.delete(schema.noteGroupReminderMutes).where(and(
     eq(schema.noteGroupReminderMutes.userId, userId),
     eq(schema.noteGroupReminderMutes.noteId, id),
   ));
-  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, _ocid);
+  publish(userId, 'data-changed', { scope: 'reminders', noteId: id }, c.get('ocid'));
   await logAudit(c, 'note.group_reminder_unmute', 'note', id, {});
   return c.json({ message: '已恢复接收' });
 });

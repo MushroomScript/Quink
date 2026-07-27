@@ -159,7 +159,6 @@ inviteApp.get('/:token', async (c) => {
 // 申请加入: 必须 auth (只有登录用户能加群)
 inviteApp.post('/:token/apply', authMiddleware, async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const token = c.req.param('token');
   if (!token) return c.json({ error: '邀请链接无效或已被重置' }, 404);
   const g = await db.select().from(schema.groups).where(eq(schema.groups.inviteToken, token)).get();
@@ -190,10 +189,10 @@ inviteApp.post('/:token/apply', authMiddleware, async (c) => {
       });
     }
     // 通知 owner 有新成员加入 (SSE) + 广播给其他成员 (排除新加入的人, 他不需要刷新)
-    publish(g.ownerId, 'group-member-joined', { groupId: g.id, userId }, _ocid);
-    await broadcastGroupChanged(g.id, [userId, g.ownerId], _ocid);
+    publish(g.ownerId, 'group-member-joined', { groupId: g.id, userId }, c.get('ocid'));
+    await broadcastGroupChanged(g.id, [userId, g.ownerId], c.get('ocid'));
     // 多设备同步: 加入群后, 申请人本人其他设备 sidebar 也要看到新群
-    publish(userId, 'group-changed', { groupId: g.id }, _ocid);
+    publish(userId, 'group-changed', { groupId: g.id }, c.get('ocid'));
     // 给新成员写通知 (你加入了新群); autoJoin 模式下 owner 已有 toast, 通知中心不再重复
     createNotification(userId, 'group', 'group-joined',
       `你已加入「${g.name}」`, null, { groupId: g.id },
@@ -237,7 +236,7 @@ inviteApp.post('/:token/apply', authMiddleware, async (c) => {
     groupId: g.id,
     groupName: g.name,
     applicant: { id: userId, ...applicant },
-  }, _ocid);
+  }, c.get('ocid'));
   return c.json({ data: { status: 'pending', requestId: reqRow.id, groupId: g.id } });
 });
 
@@ -264,7 +263,6 @@ const updateSchema = z.object({
 // 我的群列表: 我作为 active member 的群, 含成员数 + 我的角色
 app.get('/', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   // join 拿群基本信息 + 自己角色
   const rows = db.all(sql`
     SELECT g.*, gm.role as my_role,
@@ -289,7 +287,6 @@ app.get('/', async (c) => {
 
 app.post('/', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const parsed = createSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
   const now = dayjs().toISOString();
@@ -307,7 +304,7 @@ app.post('/', async (c) => {
     }).run();
   });
   // 多设备同步: 给作者本人所有设备 publish 'group-changed' 让其他设备 sidebar 群列表出现新群
-  publish(userId, 'group-changed', { groupId }, _ocid);
+  publish(userId, 'group-changed', { groupId }, c.get('ocid'));
   await logAudit(c, 'group.create', 'group', groupId, {
     name: parsed.data.name, autoJoin: parsed.data.autoJoin,
   });
@@ -318,7 +315,6 @@ app.post('/', async (c) => {
 // 群详情: 含成员列表 + 我的角色. 仅 active member 可访问
 app.get('/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me) return c.json({ error: '群组不存在或你不是成员' }, 404);
@@ -352,7 +348,6 @@ app.get('/:id', async (c) => {
 // 跟 GET /api/notes?scope=group:<id> 等价, 但路径更 RESTful + 自然返回作者头像/昵称给 NoteCard 用
 app.get('/:id/notes', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me) return c.json({ error: '群组不存在或你不是成员' }, 404);
@@ -496,7 +491,6 @@ async function assertCanGroupPin(groupId: string, noteId: string, userId: string
 
 app.post('/:id/notes/:noteId/pin', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const noteId = c.req.param('noteId');
   const err = await assertCanGroupPin(groupId, noteId, userId);
@@ -512,7 +506,7 @@ app.post('/:id/notes/:noteId/pin', async (c) => {
     .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.status, 'active')))
     .all();
   for (const m of members) {
-    if (m.userId !== userId) publish(m.userId, 'group-notes-changed', { groupId }, _ocid);
+    if (m.userId !== userId) publish(m.userId, 'group-notes-changed', { groupId }, c.get('ocid'));
   }
   await logAudit(c, 'group.note_pin', 'group', groupId, { noteId });
   return c.json({ message: '已置顶' });
@@ -520,7 +514,6 @@ app.post('/:id/notes/:noteId/pin', async (c) => {
 
 app.delete('/:id/notes/:noteId/pin', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const noteId = c.req.param('noteId');
   const err = await assertCanGroupPin(groupId, noteId, userId);
@@ -532,7 +525,7 @@ app.delete('/:id/notes/:noteId/pin', async (c) => {
     .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.status, 'active')))
     .all();
   for (const m of members) {
-    if (m.userId !== userId) publish(m.userId, 'group-notes-changed', { groupId }, _ocid);
+    if (m.userId !== userId) publish(m.userId, 'group-notes-changed', { groupId }, c.get('ocid'));
   }
   await logAudit(c, 'group.note_unpin', 'group', groupId, { noteId });
   return c.json({ message: '已取消置顶' });
@@ -542,7 +535,6 @@ app.delete('/:id/notes/:noteId/pin', async (c) => {
 // 给群组详情页"编辑申请管理"面板用. 不分页, 假设每群 pending 量不大.
 app.get('/:id/note-edit-requests', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
@@ -571,7 +563,6 @@ app.get('/:id/note-edit-requests', async (c) => {
 // 群级汇总: 该群所有 shared 笔记的已授权用户 (作者+admin 看, 可撤销)
 app.get('/:id/note-edit-grants', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me || (me.role !== 'owner' && me.role !== 'admin')) {
@@ -595,7 +586,6 @@ app.get('/:id/note-edit-grants', async (c) => {
 
 app.patch('/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me) return c.json({ error: '群组不存在或你不是成员' }, 403);
@@ -623,8 +613,8 @@ app.patch('/:id', async (c) => {
   if (Object.keys(updates).length === 0) return c.json({ error: '无变更字段' }, 400);
   await db.update(schema.groups).set(updates).where(eq(schema.groups.id, groupId));
   // 广播给所有成员 (排除操作者) 让群名/头像/autoJoin/公告 实时更新
-  await broadcastGroupChanged(groupId, [userId], _ocid);
-  publish(userId, 'group-changed', { groupId }, _ocid);
+  await broadcastGroupChanged(groupId, [userId], c.get('ocid'));
+  publish(userId, 'group-changed', { groupId }, c.get('ocid'));
   await logAudit(c, parsed.data.announcement !== undefined ? 'group.announcement' : 'group.update',
     'group', groupId, { fields: Object.keys(updates) });
   const enriched = await enrichGroup(groupId, userId);
@@ -634,7 +624,6 @@ app.patch('/:id', async (c) => {
 // 解散群: 仅 owner. 同时清 group_members + group_join_requests (后续 PR 加 note_shares 也要清)
 app.delete('/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me || me.role !== 'owner') return c.json({ error: '仅创建者可解散群组' }, 403);
@@ -656,7 +645,7 @@ app.delete('/:id', async (c) => {
     tx.delete(schema.groups).where(eq(schema.groups.id, groupId)).run();
   });
   for (const uid of memberIds) {
-    publish(uid, 'group-dissolved', { groupId }, _ocid);
+    publish(uid, 'group-dissolved', { groupId }, c.get('ocid'));
     // 给所有 active 成员写通知 (含解散者本人, 让多设备 sidebar 同步移除)
     if (uid !== userId) {
       createNotification(uid, 'group', 'group-dissolved',
@@ -671,7 +660,6 @@ app.delete('/:id', async (c) => {
 // 重置邀请 token: owner/admin. 旧 token 立即失效, 返回新 token + 过期时间
 app.post('/:id/invite/reset', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me || (me.role !== 'owner' && me.role !== 'admin')) return c.json({ error: '无权重置邀请' }, 403);
@@ -681,8 +669,8 @@ app.post('/:id/invite/reset', async (c) => {
     .set({ inviteToken: newToken, inviteExpiresAt: newExpires })
     .where(eq(schema.groups.id, groupId));
   // 广播给其他 active 成员 (排除操作者), 让其他 admin/owner 面板自动同步新 token
-  await broadcastGroupChanged(groupId, [userId], _ocid);
-  publish(userId, 'group-changed', { groupId }, _ocid);
+  await broadcastGroupChanged(groupId, [userId], c.get('ocid'));
+  publish(userId, 'group-changed', { groupId }, c.get('ocid'));
   await logAudit(c, 'group.invite_reset', 'group', groupId);
   return c.json({ data: { inviteToken: newToken, inviteExpiresAt: newExpires } });
 });
@@ -690,7 +678,6 @@ app.post('/:id/invite/reset', async (c) => {
 // 关闭邀请: owner/admin. token 设 null, 谁也加不进来 (除非 owner/admin 重新 reset)
 app.delete('/:id/invite', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me || (me.role !== 'owner' && me.role !== 'admin')) return c.json({ error: '无权关闭邀请' }, 403);
@@ -698,8 +685,8 @@ app.delete('/:id/invite', async (c) => {
     .set({ inviteToken: null, inviteExpiresAt: null })
     .where(eq(schema.groups.id, groupId));
   // 广播给其他 active 成员 (排除操作者), 让其他 admin/owner 立即看到邀请已关闭
-  await broadcastGroupChanged(groupId, [userId], _ocid);
-  publish(userId, 'group-changed', { groupId }, _ocid);
+  await broadcastGroupChanged(groupId, [userId], c.get('ocid'));
+  publish(userId, 'group-changed', { groupId }, c.get('ocid'));
   await logAudit(c, 'group.invite_revoke', 'group', groupId);
   return c.json({ message: '邀请已关闭' });
 });
@@ -711,7 +698,6 @@ app.delete('/:id/invite', async (c) => {
 // 看待审申请列表: 仅 owner/admin
 app.get('/:id/join-requests', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me || (me.role !== 'owner' && me.role !== 'admin')) return c.json({ error: '无权限' }, 403);
@@ -735,7 +721,6 @@ app.get('/:id/join-requests', async (c) => {
 // 同意申请: owner/admin. 把申请 status=approved + 创建 group_members + SSE 通知申请人
 app.post('/:id/join-requests/:reqId/approve', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const reqId = c.req.param('reqId');
   const me = await getActiveMember(groupId, userId);
@@ -765,10 +750,10 @@ app.post('/:id/join-requests/:reqId/approve', async (c) => {
       .where(eq(schema.groupJoinRequests.id, reqId))
       .run();
   });
-  publish(reqRow.userId, 'group-join-approved', { groupId, requestId: reqId }, _ocid);
+  publish(reqRow.userId, 'group-join-approved', { groupId, requestId: reqId }, c.get('ocid'));
   // 广播给其他成员 (排除操作者 + 申请人, 申请人通过 group-join-approved 触发 loadGroups)
-  await broadcastGroupChanged(groupId, [userId, reqRow.userId], _ocid);
-  publish(userId, 'group-changed', { groupId }, _ocid);
+  await broadcastGroupChanged(groupId, [userId, reqRow.userId], c.get('ocid'));
+  publish(userId, 'group-changed', { groupId }, c.get('ocid'));
   // 给申请人写通知 (你的申请已通过)
   const approvedGroup = await db.select({ name: schema.groups.name }).from(schema.groups)
     .where(eq(schema.groups.id, groupId)).get();
@@ -786,7 +771,6 @@ app.post('/:id/join-requests/:reqId/approve', async (c) => {
 
 app.post('/:id/join-requests/:reqId/reject', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const reqId = c.req.param('reqId');
   const me = await getActiveMember(groupId, userId);
@@ -799,7 +783,7 @@ app.post('/:id/join-requests/:reqId/reject', async (c) => {
   await db.update(schema.groupJoinRequests)
     .set({ status: 'rejected', handledAt: now, handledBy: userId })
     .where(eq(schema.groupJoinRequests.id, reqId));
-  publish(reqRow.userId, 'group-join-rejected', { groupId, requestId: reqId }, _ocid);
+  publish(reqRow.userId, 'group-join-rejected', { groupId, requestId: reqId }, c.get('ocid'));
   // 给申请人写通知 (你的申请被拒)
   const rejGroup = await db.select({ name: schema.groups.name }).from(schema.groups)
     .where(eq(schema.groups.id, groupId)).get();
@@ -822,7 +806,6 @@ app.post('/:id/join-requests/:reqId/reject', async (c) => {
 // 踢人 (owner/admin) 或 自己退群 (任何 member). owner 不能踢自己 (用解散群代替)
 app.delete('/:id/members/:userId', async (c) => {
   const meId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const targetId = c.req.param('userId');
   const me = await getActiveMember(groupId, meId);
@@ -872,10 +855,10 @@ app.delete('/:id/members/:userId', async (c) => {
     )).run();
   });
   // 主动退群不需要推 SSE 给自己 (前端已知道 + 已 toast), 只在被别人踢时推
-  if (!isSelf) publish(targetId, 'group-member-removed', { groupId, by: meId, self: false }, _ocid);
+  if (!isSelf) publish(targetId, 'group-member-removed', { groupId, by: meId, self: false }, c.get('ocid'));
   // 广播给剩余成员 (status='removed' 的人不在 active 列表自动排除, 不会通知到自己)
-  await broadcastGroupChanged(groupId, [meId], _ocid);
-  publish(meId, 'group-changed', { groupId }, _ocid);
+  await broadcastGroupChanged(groupId, [meId], c.get('ocid'));
+  publish(meId, 'group-changed', { groupId }, c.get('ocid'));
   // 被踢时给被踢者写通知 (主动退群不写, 自己知道)
   if (!isSelf) {
     const kickGroup = await db.select({ name: schema.groups.name }).from(schema.groups)
@@ -897,7 +880,6 @@ const roleSchema = z.object({ role: z.enum(['admin', 'member']) });
 // PATCH /api/groups/:id/members/me/presence-mode  body: { hidePresence: boolean }
 app.patch('/:id/members/me/presence-mode', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me) return c.json({ error: '群组不存在或你不是成员' }, 404);
@@ -919,7 +901,7 @@ app.patch('/:id/members/me/presence-mode', async (c) => {
     if (m.userId === userId) continue;
     publish(m.userId, 'presence-changed', { userId, online: fakeOnline });
   }
-  publish(userId, 'group-changed', { groupId }, _ocid);
+  publish(userId, 'group-changed', { groupId }, c.get('ocid'));
   await logAudit(c, 'group.presence_mode', 'group', groupId, { hidePresence: hide });
   return c.json({ data: { hidePresence: hide } });
 });
@@ -927,7 +909,6 @@ app.patch('/:id/members/me/presence-mode', async (c) => {
 // 改成员角色 (owner only, admin/member 互转, 不能转 owner)
 app.patch('/:id/members/:userId', async (c) => {
   const meId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const targetId = c.req.param('userId');
   const me = await getActiveMember(groupId, meId);
@@ -942,8 +923,8 @@ app.patch('/:id/members/:userId', async (c) => {
     .set({ role: parsed.data.role })
     .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.userId, targetId)));
   // 广播给所有成员让 chip 颜色实时更新 (排除操作者)
-  await broadcastGroupChanged(groupId, [meId], _ocid);
-  publish(meId, 'group-changed', { groupId }, _ocid);
+  await broadcastGroupChanged(groupId, [meId], c.get('ocid'));
+  publish(meId, 'group-changed', { groupId }, c.get('ocid'));
   // 给 targetId 写通知 (被任命/取消管理员). member→admin = promoted; admin→member = demoted
   const isPromote = target.role === 'member' && parsed.data.role === 'admin';
   const isDemote = target.role === 'admin' && parsed.data.role === 'member';
@@ -1022,7 +1003,6 @@ app.get('/:id/trash', async (c) => {
 // 约定: 校验"笔记 deletedAt + 在该群 note_shares 关联", 不再用 deletedInGroupId 单字段
 app.post('/:id/trash/:noteId/restore', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const noteId = c.req.param('noteId');
   const me = await getActiveMember(groupId, userId);
@@ -1042,15 +1022,15 @@ app.post('/:id/trash/:noteId/restore', async (c) => {
     .where(eq(schema.notes.id, noteId));
 
   // 通知群 admin 让群回收站 view 移除该条; 通知原作者 + 群成员让 feed/主 view 重新看到该笔记
-  await broadcastGroupTrashChanged(groupId, _ocid);
+  await broadcastGroupTrashChanged(groupId, c.get('ocid'));
   // 用 note-created 而不是 note-updated (REVIEW-TODO B4): 恢复的语义是"这条重新出现在主 view",
   // 跟个人回收站 restore 对齐. note-updated 在前端走 refreshSingleNote —— 而这条笔记此刻还不在
   // 作者主 view 的列表里, 刷不出来, 结果就是 admin 恢复完原作者那边主 view 依然没有它
-  publish(note.userId, 'note-created', { noteId }, _ocid);
+  publish(note.userId, 'note-created', { noteId }, c.get('ocid'));
   const sharedGroupIds = (await db.select({ groupId: schema.noteShares.groupId })
     .from(schema.noteShares).where(eq(schema.noteShares.noteId, noteId)).all()).map(s => s.groupId);
   if (sharedGroupIds.length > 0) {
-    broadcastNoteShared(sharedGroupIds, userId, _ocid).catch(e => console.error('[restore] broadcast failed:', e));
+    broadcastNoteShared(sharedGroupIds, userId, c.get('ocid')).catch(e => console.error('[restore] broadcast failed:', e));
   }
   // 通知原作者 (跟 note-deleted-by-admin 一对): 笔记已恢复
   const [group, actor] = await Promise.all([
@@ -1070,7 +1050,6 @@ app.post('/:id/trash/:noteId/restore', async (c) => {
 // DELETE /:id/trash/:noteId — 永久删 (仅 owner)
 app.delete('/:id/trash/:noteId', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const noteId = c.req.param('noteId');
   const me = await getActiveMember(groupId, userId);
@@ -1091,7 +1070,7 @@ app.delete('/:id/trash/:noteId', async (c) => {
     visibility: note.visibility, userId: note.userId,
   };
   purgeNote(noteId);
-  await broadcastGroupTrashChanged(groupId, _ocid);
+  await broadcastGroupTrashChanged(groupId, c.get('ocid'));
   await logAudit(c, 'group.note_permanent_delete', 'group', groupId, { noteId, snapshot });
   return c.json({ message: '已永久删除' });
 });
@@ -1099,7 +1078,6 @@ app.delete('/:id/trash/:noteId', async (c) => {
 // DELETE /:id/trash — 清空群回收站 (仅 owner)
 app.delete('/:id/trash', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const groupId = c.req.param('id');
   const me = await getActiveMember(groupId, userId);
   if (!me || me.role !== 'owner') {
@@ -1114,7 +1092,7 @@ app.delete('/:id/trash', async (c) => {
   `) as Array<{ id: string; userId: string; content: string }>;
   if (trashed.length === 0) return c.json({ message: '已清空', count: 0 });
   for (const t of trashed) purgeNote(t.id);
-  await broadcastGroupTrashChanged(groupId, _ocid);
+  await broadcastGroupTrashChanged(groupId, c.get('ocid'));
   await logAudit(c, 'group.note_permanent_delete_all', 'group', groupId, {
     count: trashed.length, noteIds: trashed.map(t => t.id),
   });

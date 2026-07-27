@@ -122,7 +122,6 @@ function nameFromOriginal(originalName: string): string {
 // POST /api/upload/avatar — upload avatar image
 app.post('/avatar', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const body = await c.req.parseBody();
   const file = body['file'];
 
@@ -152,7 +151,7 @@ app.post('/avatar', async (c) => {
     }
   }
 
-  publish(userId, 'data-changed', { scope: 'user-profile' }, _ocid);
+  publish(userId, 'data-changed', { scope: 'user-profile' }, c.get('ocid'));
   // url 含 avatars/ 前缀, 让中间件按路径分支放行 (头像可被任意登录用户读)
   return c.json({ data: { url: `/api/uploads/avatars/${filename}` } }, 201);
 });
@@ -213,7 +212,6 @@ app.post('/file', async (c) => {
   const url = filename;
   const category = getFileCategory(file.type);
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const id = nanoid(12);
 
   const folderId = typeof folderIdField === 'string' && folderIdField ? folderIdField : null;
@@ -229,7 +227,7 @@ app.post('/file', async (c) => {
     createdAt: dayjs().toISOString(),
   });
 
-  publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  publish(userId, 'data-changed', { scope: 'resources' }, c.get('ocid'));
   await logAudit(c, 'file.upload', 'file', id, {
     filename: displayFilename, mime: file.type, size: file.size, category,
   });
@@ -248,7 +246,6 @@ app.post('/file', async (c) => {
 // GET /api/upload/files — list all uploaded files for current user
 app.get('/files', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const results = await db.select().from(schema.files)
     .where(eq(schema.files.userId, userId))
     .orderBy(desc(schema.files.createdAt))
@@ -260,7 +257,6 @@ app.get('/files', async (c) => {
 // 同时扫描该用户所有笔记,把 markdown link `[oldName](url)` 同步改成 `[newName](url)`
 app.patch('/files/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const body = await c.req.json().catch(() => ({}));
   const newName = typeof body.filename === 'string' ? body.filename.trim() : '';
@@ -323,14 +319,14 @@ app.patch('/files/:id', async (c) => {
     });
   }
 
-  publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  publish(userId, 'data-changed', { scope: 'resources' }, c.get('ocid'));
   // 改到的笔记里有共享出去的 → 群成员看到的 markdown label 还是旧文件名, 得广播一次 (REVIEW-TODO B7)
   const sharedTouchedIds = touched.filter(t => t.visibility === 'shared').map(t => t.id);
   if (sharedTouchedIds.length > 0) {
     const gids = [...new Set((await db.select({ groupId: schema.noteShares.groupId })
       .from(schema.noteShares).where(inArray(schema.noteShares.noteId, sharedTouchedIds)).all())
       .map(r => r.groupId))];
-    broadcastNoteShared(gids, userId, _ocid).catch(e => console.error('[upload] rename broadcast failed:', e));
+    broadcastNoteShared(gids, userId, c.get('ocid')).catch(e => console.error('[upload] rename broadcast failed:', e));
   }
   await logAudit(c, 'file.rename', 'file', id, { old: oldName, new: newName });
   return c.json({ data: { ...file, filename: newName } });
@@ -339,7 +335,6 @@ app.patch('/files/:id', async (c) => {
 // DELETE /api/upload/files/:id
 app.delete('/files/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const file = await db.select().from(schema.files)
     .where(eq(schema.files.id, id)).get();
@@ -352,7 +347,7 @@ app.delete('/files/:id', async (c) => {
     const diskPath = resolve(UPLOAD_DIR, file.url.replace('/api/uploads/', ''));
     if (existsSync(diskPath)) unlinkSync(diskPath);
   } catch {}
-  publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  publish(userId, 'data-changed', { scope: 'resources' }, c.get('ocid'));
   await logAudit(c, 'file.delete', 'file', id, { filename: file.filename });
   return c.json({ message: '已删除' });
 });
@@ -362,7 +357,6 @@ app.delete('/files/:id', async (c) => {
 // GET /api/upload/folders — 列出当前用户所有文件夹 (嵌套树由前端按 parentId 组装)
 app.get('/folders', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const results = await db.select().from(schema.folders)
     .where(eq(schema.folders.userId, userId))
     .orderBy(schema.folders.name)
@@ -373,7 +367,6 @@ app.get('/folders', async (c) => {
 // POST /api/upload/folders — 创建文件夹. body: { name, parentId?: string | null }
 app.post('/folders', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const body = await c.req.json().catch(() => ({}));
   const name = typeof body.name === 'string' ? body.name.trim() : '';
   const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId : null;
@@ -387,14 +380,13 @@ app.post('/folders', async (c) => {
   const id = nanoid(12);
   const row = { id, userId, name, parentId, createdAt: dayjs().toISOString() };
   await db.insert(schema.folders).values(row);
-  publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  publish(userId, 'data-changed', { scope: 'resources' }, c.get('ocid'));
   return c.json({ data: row }, 201);
 });
 
 // PATCH /api/upload/folders/:id — 重命名文件夹. body: { name }
 app.patch('/folders/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const body = await c.req.json().catch(() => ({}));
   const newName = typeof body.name === 'string' ? body.name.trim() : '';
@@ -402,7 +394,7 @@ app.patch('/folders/:id', async (c) => {
   const folder = await db.select().from(schema.folders).where(eq(schema.folders.id, id)).get();
   if (!folder || folder.userId !== userId) return c.json({ error: '文件夹不存在' }, 404);
   await db.update(schema.folders).set({ name: newName }).where(eq(schema.folders.id, id));
-  publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  publish(userId, 'data-changed', { scope: 'resources' }, c.get('ocid'));
   return c.json({ data: { ...folder, name: newName } });
 });
 
@@ -439,7 +431,6 @@ async function collectFolderTree(userId: string, rootFolderId: string): Promise<
 // GET /api/upload/folders/:id/download — 把文件夹内容(含子文件夹递归) 打包 zip 流式响应
 app.get('/folders/:id/download', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const folder = await db.select().from(schema.folders).where(eq(schema.folders.id, id)).get();
   if (!folder || folder.userId !== userId) return c.json({ error: '文件夹不存在' }, 404);
@@ -463,7 +454,6 @@ app.get('/folders/:id/download', async (c) => {
 //   - true: 递归删除文件夹内所有文件 (含子文件夹) + 删除子文件夹本身
 app.delete('/folders/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { id } = c.req.param();
   const body = await c.req.json().catch(() => ({}));
   const deleteFiles = body.deleteFiles === true;
@@ -495,7 +485,7 @@ app.delete('/folders/:id', async (c) => {
     await db.update(schema.folders).set({ parentId: folder.parentId }).where(and(eq(schema.folders.userId, userId), eq(schema.folders.parentId, id)));
     await db.delete(schema.folders).where(eq(schema.folders.id, id));
   }
-  publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  publish(userId, 'data-changed', { scope: 'resources' }, c.get('ocid'));
   return c.json({ message: '已删除' });
 });
 
@@ -504,7 +494,6 @@ app.delete('/folders/:id', async (c) => {
 // 校验循环: 文件夹不能移动到自己 / 自己子孙内 (否则形成 cycle)
 app.post('/items/move', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const body = await c.req.json().catch(() => ({}));
   const fileIds = Array.isArray(body.fileIds) ? body.fileIds.filter((x: any) => typeof x === 'string') : [];
   const folderIds = Array.isArray(body.folderIds) ? body.folderIds.filter((x: any) => typeof x === 'string') : [];
@@ -549,7 +538,7 @@ app.post('/items/move', async (c) => {
     if (fileIds.length) tx.update(schema.files).set({ folderId: targetFolderId }).where(and(eq(schema.files.userId, userId), inArray(schema.files.id, fileIds))).run();
     if (folderIds.length) tx.update(schema.folders).set({ parentId: targetFolderId }).where(and(eq(schema.folders.userId, userId), inArray(schema.folders.id, folderIds))).run();
   });
-  publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  publish(userId, 'data-changed', { scope: 'resources' }, c.get('ocid'));
   return c.json({ message: '已移动', count: fileIds.length + folderIds.length });
 });
 
@@ -557,7 +546,6 @@ app.post('/items/move', async (c) => {
 // body: { ids: string[], folderId: string | null }
 app.post('/files/move', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const body = await c.req.json().catch(() => ({}));
   const ids = Array.isArray(body.ids) ? body.ids.filter((x: any) => typeof x === 'string') : [];
   const folderId = typeof body.folderId === 'string' && body.folderId ? body.folderId : null;
@@ -568,7 +556,7 @@ app.post('/files/move', async (c) => {
     if (!folder || folder.userId !== userId) return c.json({ error: '目标文件夹不存在' }, 400);
   }
   await db.update(schema.files).set({ folderId }).where(and(eq(schema.files.userId, userId), inArray(schema.files.id, ids)));
-  publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  publish(userId, 'data-changed', { scope: 'resources' }, c.get('ocid'));
   return c.json({ message: '已移动', count: ids.length });
 });
 

@@ -41,6 +41,16 @@ app.use('*', cors({
 }));
 app.use('*', logger());
 
+// 发起方 clientId (REVIEW-TODO Sprint 4 Q4): 前端 api/index.ts 每个请求都带 X-Quink-Client-Id,
+// 每 tab 一个唯一 id. 写 endpoint 把它透传给 publish, 让发起方那台设备的 SSE handler 跳过自己发的事件
+// (本地已经 mutate 过 UI, 不需要再被 SSE 二次触发).
+// 原来 106 个 write endpoint 每个顶部都手写一遍 `const _ocid = c.req.header(...)`, 统一挪到这里,
+// handler 里直接 c.get('ocid'). 没走到这个中间件的路径拿到 undefined —— 跟"header 不存在"同义, 行为不变.
+app.use('*', async (c, next) => {
+  c.set('ocid', c.req.header('X-Quink-Client-Id'));
+  await next();
+});
+
 // Static files (uploaded avatars etc.)
 // 群组文件授权: query token 鉴权 + files 表查作者 + note_shares 查群可见性.
 // avatar 不入 files 表 → 默认公开放行 (跨用户能看头像). file 入 files 表 → 走鉴权

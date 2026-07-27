@@ -74,7 +74,6 @@ app.get('/unread-count', async (c) => {
 // POST /api/notifications/:id/read  标已读. idempotent (已读再标无副作用)
 app.post('/:id/read', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const id = c.req.param('id');
   const row = await db.select().from(schema.notifications)
     .where(and(eq(schema.notifications.id, id), eq(schema.notifications.userId, userId)))
@@ -84,7 +83,7 @@ app.post('/:id/read', async (c) => {
     await db.update(schema.notifications).set({ readAt: dayjs().toISOString() })
       .where(eq(schema.notifications.id, id));
   }
-  publish(userId, 'notification-changed', { scope: 'read', id }, _ocid);
+  publish(userId, 'notification-changed', { scope: 'read', id }, c.get('ocid'));
   // read 是高频操作 (用户点几十次/天) 无掩盖嫌疑, 砍 audit 防 spam audit_logs 表
   return c.json({ data: { id, readAt: row.readAt ?? dayjs().toISOString() } });
 });
@@ -92,7 +91,6 @@ app.post('/:id/read', async (c) => {
 // POST /api/notifications/read-all?category=  全部标已读. category 不传 = 全部 tab
 app.post('/read-all', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const rawCat = c.req.query('category');
   const category = parseCategory(rawCat);
   if (rawCat && !category) return c.json({ error: 'invalid category' }, 400);
@@ -107,7 +105,7 @@ app.post('/read-all', async (c) => {
 
   const now = dayjs().toISOString();
   const result = await db.update(schema.notifications).set({ readAt: now }).where(whereClause);
-  publish(userId, 'notification-changed', { scope: 'read-all', category: category ?? null }, _ocid);
+  publish(userId, 'notification-changed', { scope: 'read-all', category: category ?? null }, c.get('ocid'));
   // read-all 是高频 + 无掩盖嫌疑, 砍 audit 防 spam (delete/clear 仍留, 才是掩盖证据的核心场景)
   return c.json({ data: { updated: result.changes ?? 0 } });
 });
@@ -115,14 +113,13 @@ app.post('/read-all', async (c) => {
 // DELETE /api/notifications/:id  删一条
 app.delete('/:id', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const id = c.req.param('id');
   const row = await db.select({ id: schema.notifications.id }).from(schema.notifications)
     .where(and(eq(schema.notifications.id, id), eq(schema.notifications.userId, userId)))
     .get();
   if (!row) return c.json({ error: '通知不存在' }, 404);
   await db.delete(schema.notifications).where(eq(schema.notifications.id, id));
-  publish(userId, 'notification-changed', { scope: 'delete', id }, _ocid);
+  publish(userId, 'notification-changed', { scope: 'delete', id }, c.get('ocid'));
   await logAudit(c, 'notification.delete', 'notification', id);
   return c.json({ message: '已删除' });
 });
@@ -130,7 +127,6 @@ app.delete('/:id', async (c) => {
 // DELETE /api/notifications?category=  清空当前 tab (不传 = 全部清)
 app.delete('/', async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const rawCat = c.req.query('category');
   const category = parseCategory(rawCat);
   if (rawCat && !category) return c.json({ error: 'invalid category' }, 400);
@@ -140,7 +136,7 @@ app.delete('/', async (c) => {
     : eq(schema.notifications.userId, userId);
 
   const result = await db.delete(schema.notifications).where(whereClause);
-  publish(userId, 'notification-changed', { scope: 'clear', category: category ?? null }, _ocid);
+  publish(userId, 'notification-changed', { scope: 'clear', category: category ?? null }, c.get('ocid'));
   await logAudit(c, 'notification.clear', 'notification', null, { category: category ?? null, deleted: result.changes ?? 0 });
   return c.json({ data: { deleted: result.changes ?? 0 } });
 });

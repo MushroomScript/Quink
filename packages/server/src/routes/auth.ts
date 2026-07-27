@@ -178,7 +178,6 @@ app.post('/login', async (c) => {
 // GET /api/auth/me — 获取当前用户信息（需登录）
 app.get('/me', authMiddleware, async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
 
   if (!user) {
@@ -193,7 +192,6 @@ app.get('/me', authMiddleware, async (c) => {
 // PATCH /api/auth/me — 更新个人信息（需登录）
 app.patch('/me', authMiddleware, async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const body = await c.req.json();
   const parsed = updateProfileSchema.safeParse(body);
   if (!parsed.success) {
@@ -210,7 +208,7 @@ app.patch('/me', authMiddleware, async (c) => {
     // 多设备同步 (REVIEW-TODO B1): 同文件 password / logout-all-devices 都 publish 了, 唯独最常用的
     // 改昵称/头像/偏好漏了 → 其他设备的头像、主题外的偏好一直是旧值, 必须重启 app 才刷新.
     // sse.ts 收到 user-profile scope 会直接调 auth.fetchMe(), 不依赖某个 view 挂监听
-    publish(userId, 'data-changed', { scope: 'user-profile' }, _ocid);
+    publish(userId, 'data-changed', { scope: 'user-profile' }, c.get('ocid'));
   }
 
   // 用户保存了新的 retention 设置 → 立即按新天数清理该用户回收站, 不用等下个 6h 定时 tick
@@ -229,7 +227,6 @@ app.patch('/me', authMiddleware, async (c) => {
 // POST /api/auth/password — 修改密码
 app.post('/password', authMiddleware, async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const { oldPassword, newPassword } = await c.req.json();
 
   if (!oldPassword || !newPassword) return c.json({ error: '请输入旧密码和新密码' }, 400);
@@ -251,7 +248,7 @@ app.post('/password', authMiddleware, async (c) => {
   invalidateTokenVersionCache(userId);
   // 改密码是高敏感操作, 必须记录 (含 tokenVersion 升级方便排查)
   await logAudit(c, 'auth.password_change', 'user', userId, { newTokenVersion: newTv });
-  publish(userId, 'data-changed', { scope: 'user-profile' }, _ocid);
+  publish(userId, 'data-changed', { scope: 'user-profile' }, c.get('ocid'));
   return c.json({ message: '密码已修改, 所有设备需重新登录' });
 });
 
@@ -259,14 +256,13 @@ app.post('/password', authMiddleware, async (c) => {
 // 用户场景: 怀疑某设备 token 泄漏 / 卖二手手机前清干净 / 共用电脑忘了登出. 实际效果跟改密码一致.
 app.post('/logout-all-devices', authMiddleware, async (c) => {
   const userId = c.get('userId');
-  const _ocid = c.req.header('X-Quink-Client-Id');
   const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
   if (!user) return c.json({ error: '用户不存在' }, 404);
   const newTv = (user.tokenVersion ?? 0) + 1;
   await db.update(schema.users).set({ tokenVersion: newTv }).where(eq(schema.users.id, userId));
   invalidateTokenVersionCache(userId);
   await logAudit(c, 'auth.logout_all_devices', 'user', userId, { newTokenVersion: newTv });
-  publish(userId, 'data-changed', { scope: 'user-profile' }, _ocid);
+  publish(userId, 'data-changed', { scope: 'user-profile' }, c.get('ocid'));
   return c.json({ message: '所有设备已退出登录' });
 });
 
