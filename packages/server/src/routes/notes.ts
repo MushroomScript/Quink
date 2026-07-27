@@ -128,6 +128,25 @@ app.get('/', async (c) => {
   const conditions: any[] = [
     sql`${schema.notes.deletedAt} IS NULL`, // 排除回收站
   ];
+
+  // 「我所在的 active 群」四个 scope 分支都要用. 提前查出来当常量列表用, 不要写成嵌套子查询
+  // (REVIEW-TODO Sprint 3 P5): 嵌进去的话主查询要多一层 LIST SUBQUERY + 一个 BLOOM FILTER,
+  // 实测 0.17ms → 0.13ms. 清单还建议加 60s 缓存, 但实测单独查这一次只要 0.002ms (占总耗时 1.7%),
+  // 为这点收益换来"刚加入群 / 刚被踢 60s 内看到的是旧数据"不划算, 不做缓存.
+  // 空数组要走 sql`0` (恒假) —— 生成 `IN ()` 是非法 SQL.
+  const needMyGroups = scope === 'mine' || scope === 'others_shared' || scope === 'shared' || scope === 'all';
+  const myGroupIds = needMyGroups
+    ? (await db.select({ groupId: schema.groupMembers.groupId }).from(schema.groupMembers)
+        .where(and(
+          eq(schema.groupMembers.userId, userId),
+          eq(schema.groupMembers.status, 'active'),
+        )).all()).map(r => r.groupId)
+    : [];
+  // 「笔记分享到了我所在的某个群」条件片段. 不在任何群时恒假, 让上层的 OR 分支自然短路
+  const sharedToMyGroups = myGroupIds.length === 0
+    ? sql`0`
+    : sql`${schema.notes.id} IN (SELECT ns.note_id FROM note_shares ns WHERE ns.group_id IN ${myGroupIds})`;
+
   if (scope === 'mine') {
     // 个人列表: 我发的笔记全都算我的 (分享到群不改变归属 — 分享只是让群里也看得到, 别人改内容会 COW fork 成他们那份)
     // + 别人发的、我所在群的"每人完成待办" everyone (我需要各自完成, 混进我的列表; 靠下面 type filter 只在 Todos 露出)
@@ -138,10 +157,7 @@ app.get('/', async (c) => {
     conditions.push(sql`(
       ${schema.notes.userId} = ${userId}
       OR (${schema.notes.userId} != ${userId} AND ${schema.notes.type} = 'todo' AND ${schema.notes.todoGroupMode} = 'everyone'
-          AND ${schema.notes.id} IN (
-            SELECT ns.note_id FROM note_shares ns
-            WHERE ns.group_id IN (SELECT group_id FROM group_members WHERE user_id = ${userId} AND status = 'active')
-          ))
+          AND ${sharedToMyGroups})
     )`);
   } else if (scope === 'private') {
     // 仅作者本人 private (任何 shared 都过滤). 对应 sharedDisplay='none'
@@ -151,33 +167,15 @@ app.get('/', async (c) => {
     // 作者本人 private + 他人共享给我所在群的 shared (排除作者本人 shared). 对应 sharedDisplay='others'
     conditions.push(sql`(
       (${schema.notes.userId} = ${userId} AND ${schema.notes.visibility} = 'private')
-      OR (${schema.notes.userId} != ${userId} AND ${schema.notes.id} IN (
-        SELECT ns.note_id FROM note_shares ns
-        WHERE ns.group_id IN (
-          SELECT group_id FROM group_members WHERE user_id = ${userId} AND status = 'active'
-        )
-      ))
+      OR (${schema.notes.userId} != ${userId} AND ${sharedToMyGroups})
     )`);
   } else if (scope === 'shared') {
     // 遗留字段. 仅他人共享给我所在群的 shared (不含作者本人 private). sharedDisplay 不映射到此, 保留兼容旧调用方
-    conditions.push(sql`${schema.notes.id} IN (
-      SELECT ns.note_id FROM note_shares ns
-      WHERE ns.group_id IN (
-        SELECT group_id FROM group_members WHERE user_id = ${userId} AND status = 'active'
-      )
-    )`);
+    conditions.push(sharedToMyGroups);
     conditions.push(sql`${schema.notes.userId} != ${userId}`);
   } else if (scope === 'all') {
     // mine ∪ 他人共享给我所在群的 shared. 对应 sharedDisplay='all'
-    conditions.push(sql`(
-      ${schema.notes.userId} = ${userId}
-      OR ${schema.notes.id} IN (
-        SELECT ns.note_id FROM note_shares ns
-        WHERE ns.group_id IN (
-          SELECT group_id FROM group_members WHERE user_id = ${userId} AND status = 'active'
-        )
-      )
-    )`);
+    conditions.push(sql`(${schema.notes.userId} = ${userId} OR ${sharedToMyGroups})`);
   } else if (scope.startsWith('group:')) {
     const groupId = scope.slice(6);
     // 校验我是该群 active member, 否则返回空 (不暴露非成员看群可见笔记)
