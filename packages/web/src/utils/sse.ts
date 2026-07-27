@@ -46,6 +46,31 @@ function showNotification(p: NotifyPayload) {
   }
 }
 
+// SSE 事件注册 helper (REVIEW-TODO Sprint 4 Q5).
+// 26 个 handler 原来逐字重复同一套骨架: JSON.parse → isMyEvent 守卫 → 业务 → try/catch 打日志.
+// 抽出来后单个 handler 只剩业务那两三行, 也不会再出现"某个 handler 忘了写 isMyEvent 守卫"
+// 或"catch 里的事件名跟实际注册的对不上"这类抄漏.
+//
+// skipMine=false 用于"本来就该在发起设备上也生效"的事件: 例如 reminder (提醒到点是 server 定时器
+// 主动推的, 没有"发起设备"概念) / notification-new (收件人多设备都该收到).
+function onSse<T = any>(
+  source: EventSource,
+  name: string,
+  handler: (data: T) => void,
+  opts: { skipMine?: boolean } = {},
+) {
+  const { skipMine = true } = opts;
+  source.addEventListener(name, (ev) => {
+    try {
+      const data = JSON.parse((ev as MessageEvent).data) as T;
+      if (skipMine && isMyEvent(data)) return;
+      handler(data);
+    } catch (e) {
+      console.error(`[sse] ${name} handle failed:`, e);
+    }
+  });
+}
+
 export function startReminderSse() {
   if (es) return; // 已连
   const token = getAuthToken();
@@ -104,18 +129,12 @@ export function startReminderSse() {
   // note-deleted: DELETE /:id (软删) 或 DELETE /trash/:id (彻底删除) 后 server publish 给作者本人所有设备
   // → 其他设备本地 store 从 viewState 移除该 id (不调 API 避免重复 DELETE)
   // Trash.vue 用本地 ref 自管 trashedNotes, 单独监听 quink-note-deleted CustomEvent
-  es.addEventListener('note-deleted', (ev) => {
-    try {
-      const data = JSON.parse((ev as MessageEvent).data) as { noteId: string };
-      if (isMyEvent(data)) return;
-      import('@/stores/notes').then(({ useNotesStore }) => {
-        useNotesStore().syncNoteDeleted(data.noteId);
-      });
-      // 派 CustomEvent 给 Trash / NoteDetail 等局部组件监听 (如果当前在 Trash 看回收站列表, 这条要从列表里清掉)
-      window.dispatchEvent(new CustomEvent('quink-note-deleted', { detail: { noteId: data.noteId } }));
-    } catch (e) {
-      console.error('[sse] note-deleted parse failed:', e);
-    }
+  onSse<{ noteId: string }>(es, 'note-deleted', (data) => {
+    import('@/stores/notes').then(({ useNotesStore }) => {
+      useNotesStore().syncNoteDeleted(data.noteId);
+    });
+    // 派 CustomEvent 给 Trash / NoteDetail 等局部组件监听 (如果当前在 Trash 看回收站列表, 这条要从列表里清掉)
+    window.dispatchEvent(new CustomEvent('quink-note-deleted', { detail: { noteId: data.noteId } }));
   });
 
   // 通用 data-changed: 给非笔记/群组的其他界面 (categories / ai-configs / ai-prompts / ai-conversations / ai-messages / reminder-channels / resources / user-profile) 用.
@@ -214,7 +233,6 @@ export function startReminderSse() {
       import('@/stores/groups').then(({ useGroupsStore }) => {
         useGroupsStore().onMemberJoined(data.groupId);
       });
-      void data;
     } catch (e) { console.error('[sse] group-member-joined parse failed:', e); }
   });
 
@@ -277,15 +295,9 @@ export function startReminderSse() {
   });
 
   // note-duplicated - 别人复制了你的笔记, 给原作者 toast + 桌面通知
-  es.addEventListener('note-duplicated', (ev) => {
-    try {
-      const data = JSON.parse((ev as MessageEvent).data) as {
-        originNoteId: string; newNoteId: string; duplicatorNickname: string;
-      };
-      if (isMyEvent(data)) return;
-      // toast + OS 通知都砍, 通知中心 + browser channel 统一接管
-      void data;
-    } catch (e) { console.error('[sse] note-duplicated parse failed:', e); }
+  es.addEventListener('note-duplicated', () => {
+    // 空实现: toast + OS 通知都砍了, 通知中心 + browser channel 统一接管.
+    // 保留注册是为了留个"这个事件确实存在、只是前端不处理"的落点, 别让人以为漏接了
   });
 
   // note-edit-request-resolved - 申请人收到处理结果 (approved/rejected)
