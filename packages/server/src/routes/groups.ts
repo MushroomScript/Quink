@@ -1043,7 +1043,10 @@ app.post('/:id/trash/:noteId/restore', async (c) => {
 
   // 通知群 admin 让群回收站 view 移除该条; 通知原作者 + 群成员让 feed/主 view 重新看到该笔记
   await broadcastGroupTrashChanged(groupId, _ocid);
-  publish(note.userId, 'note-updated', { noteId }, _ocid);
+  // 用 note-created 而不是 note-updated (REVIEW-TODO B4): 恢复的语义是"这条重新出现在主 view",
+  // 跟个人回收站 restore 对齐. note-updated 在前端走 refreshSingleNote —— 而这条笔记此刻还不在
+  // 作者主 view 的列表里, 刷不出来, 结果就是 admin 恢复完原作者那边主 view 依然没有它
+  publish(note.userId, 'note-created', { noteId }, _ocid);
   const sharedGroupIds = (await db.select({ groupId: schema.noteShares.groupId })
     .from(schema.noteShares).where(eq(schema.noteShares.noteId, noteId)).all()).map(s => s.groupId);
   if (sharedGroupIds.length > 0) {

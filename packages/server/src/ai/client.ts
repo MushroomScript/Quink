@@ -139,8 +139,13 @@ async function callAi(config: AiConfig, systemPrompt: string, userMessage: strin
 const LONG_OUTPUT_MAX_TOKENS = 8192;
 
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | Array<{ type: string; text?: string; image_url?: { url: string }; source?: { type: string; media_type: string; data: string } }>;
+  // OpenAI function calling 协议要求成对出现: assistant 发起调用时带 tool_calls,
+  // role:'tool' 的结果消息必须带 tool_call_id 指回去. 缺任一边 OpenAI 直接 400.
+  // (原来这两个字段没进类型, 工具循环里靠 `as any` 硬塞, 结果发请求时被 map 掉了 —— REVIEW-TODO B9)
+  tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+  tool_call_id?: string;
 }
 
 export async function callAiStream(config: AiConfig, messages: ChatMessage[], maxTokens = 2048, signal?: AbortSignal): Promise<ReadableStream<string>> {
@@ -273,7 +278,15 @@ async function callAiNonStream(config: AiConfig, messages: ChatMessage[], tools?
     if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
     const body: any = {
       model: config.model,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      // 必须透传 tool_calls / tool_call_id (REVIEW-TODO B9): 工具循环第二轮发的消息里带着
+      // role:'tool' 的执行结果, 只挑 role+content 的话这两个字段就丢了, OpenAI 会以
+      // "messages with role 'tool' must be a response to a preceding message with 'tool_calls'" 400
+      messages: messages.map(m => ({
+        role: m.role,
+        content: m.content,
+        ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
+        ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+      })),
       max_tokens: 2048, temperature: 0.3,
     };
     if (tools?.length) body.tools = tools;
@@ -297,6 +310,16 @@ export interface ToolCallEvent {
   args: any;
 }
 
+// 降级到提示词模式前, 把 FC 协议残留从消息历史里摘掉 (REVIEW-TODO B9).
+// 降级后不再传 tools, 但 msgsCopy 里可能已经攒了前几轮的 role:'tool' 结果 + 带 tool_calls 的 assistant,
+// 这些在"没有 tools 的请求"里是非法的, 会让降级重试本身又 400 —— 等于降级白做.
+// 代价: 已执行的工具结果从上下文里丢了, 模型可能重新调一次. 降级路径优先保证"能跑通".
+function stripFcArtifacts(msgs: ChatMessage[]): ChatMessage[] {
+  return msgs
+    .filter(m => m.role !== 'tool')
+    .map(m => (m.tool_calls ? { ...m, tool_calls: undefined } : m));
+}
+
 export async function callAiWithToolLoop(
   config: AiConfig,
   messages: ChatMessage[],
@@ -307,7 +330,8 @@ export async function callAiWithToolLoop(
   signal?: AbortSignal,
 ): Promise<{ stream: ReadableStream<string>; noteIds: string[] }> {
   const allNoteIds: string[] = [];
-  const msgsCopy = [...messages];
+  // let 而非 const: 降级到提示词模式时要整体换成 stripFcArtifacts 过滤后的副本
+  let msgsCopy = [...messages];
   let supportsTools = true;
 
   for (let round = 0; round < maxRounds; round++) {
@@ -325,6 +349,8 @@ export async function callAiWithToolLoop(
         if (sysIdx >= 0 && typeof msgsCopy[sysIdx].content === 'string' && !(msgsCopy[sysIdx].content as string).includes('可用工具')) {
           msgsCopy[sysIdx] = { ...msgsCopy[sysIdx], content: msgsCopy[sysIdx].content + '\n\n' + TOOLS_PROMPT };
         }
+        // 这里可能已经跑过几轮工具, msgsCopy 里带着 FC 协议消息, 不清掉降级重试自己会 400 (REVIEW-TODO B9)
+        msgsCopy = stripFcArtifacts(msgsCopy);
         response = await callAiNonStream(config, msgsCopy, undefined, signal);
       } else {
         throw err;
@@ -348,7 +374,17 @@ export async function callAiWithToolLoop(
 
     // 原生工具调用
     if (response.toolCalls.length > 0) {
-      msgsCopy.push({ role: 'assistant', content: response.content || '' });
+      // assistant 必须带 tool_calls, 否则下面 push 的 role:'tool' 消息在 OpenAI 眼里是"没有对应
+      // 调用的孤儿结果", 同样 400 (REVIEW-TODO B9). Anthropic 分支不读这个字段, 带着无害
+      msgsCopy.push({
+        role: 'assistant',
+        content: response.content || '',
+        tool_calls: response.toolCalls.map(tc => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+        })),
+      });
       for (const tc of response.toolCalls) {
         const t1 = Date.now();
         onToolCall?.({ name: tc.name, args: tc.args });

@@ -920,6 +920,13 @@ app.post('/:id/edit-requests/:reqId/approve', async (c) => {
   publish(req.userId, 'note-edit-request-resolved', {
     requestId: reqId, noteId: id, status: 'approved', handledBy: userId,
   }, _ocid);
+  // 审批人(作者/群 admin)自己的其他设备也要刷 —— 待审面板里那条 pending 得消失, 授权列表要多一个人
+  // (REVIEW-TODO B8). 前端 handler 里的 isMyEvent 会让"点了同意的那台设备"自动跳过, 不会重复处理
+  if (userId !== req.userId) {
+    publish(userId, 'note-edit-request-resolved', {
+      requestId: reqId, noteId: id, status: 'approved', handledBy: userId,
+    }, _ocid);
+  }
   // 写通知给申请人
   createNotification(req.userId, 'content', 'edit-request-approved',
     '编辑权限申请已通过', noteSnippet(note.content),
@@ -956,6 +963,12 @@ app.post('/:id/edit-requests/:reqId/reject', async (c) => {
   publish(req.userId, 'note-edit-request-resolved', {
     requestId: reqId, noteId: id, status: 'rejected', handledBy: userId,
   }, _ocid);
+  // 同 approve: 审批人其他设备的待审面板要把这条 pending 去掉 (REVIEW-TODO B8)
+  if (userId !== req.userId) {
+    publish(userId, 'note-edit-request-resolved', {
+      requestId: reqId, noteId: id, status: 'rejected', handledBy: userId,
+    }, _ocid);
+  }
   // 写通知给申请人
   createNotification(req.userId, 'content', 'edit-request-rejected',
     '编辑权限申请被拒绝', noteSnippet(note.content),
@@ -1044,6 +1057,8 @@ app.delete('/:id/edit-grants/:userId', async (c) => {
   ));
   // 推 SSE 给被撤销人让他前端刷 canWrite (NoteCard 预判 / NoteEditModal 进 modal 前判断)
   publish(targetUserId, 'note-edit-grant-revoked', { noteId: id }, _ocid);
+  // 操作者自己的其他设备: NoteDetail 的"额外授权 X 人" popover 里那个人得从列表里去掉 (REVIEW-TODO B8)
+  if (me !== targetUserId) publish(me, 'note-edit-grant-revoked', { noteId: id }, _ocid);
   await logAudit(c, 'note.edit_grant_revoke', 'note', id, { revokedUserId: targetUserId });
   return c.json({ data: { message: '已撤销编辑权' } });
 });
@@ -2264,8 +2279,11 @@ app.delete('/:id', async (c) => {
   if (existing.visibility === 'shared' && sharedGroupIds.length > 0) {
     broadcastNoteShared(sharedGroupIds, userId, _ocid).catch(e => console.error('[notes] broadcast failed:', e));
   }
-  // 多设备同步: 作者本人所有设备主 view 移除该 id
+  // 多设备同步: 操作者本人所有设备主 view 移除该 id
   publish(userId, 'note-deleted', { noteId: id }, _ocid);
+  // admin 删别人的笔记时, 上面那句只通知到操作者自己 → 原作者设备上那张卡片会一直挂着直到手动刷新
+  // (下面 createNotification 只往通知中心塞一条提示, 不会让列表 splice 掉这条) (REVIEW-TODO B4)
+  if (!isAuthor) publish(existing.userId, 'note-deleted', { noteId: id }, _ocid);
 
   // 任何人删共享笔记都给所有相关群 owner+admin 发 group-trash-changed 让群回收站 view 刷
   if (existing.visibility === 'shared' && sharedGroupIds.length > 0) {
@@ -2474,6 +2492,9 @@ app.post('/:id/group-reminder', async (c) => {
     set: { dueAt, rrule: rrule ?? null, remindSentAt: null, createdBy: userId },
   });
   publish(userId, 'data-changed', { scope: 'reminders', noteId: id, groupId }, _ocid);
+  // 群成员的 NoteCard 上有铃铛 + 提醒时间, 不广播他们卡片就一直是"没有提醒"的样子 (REVIEW-TODO B5).
+  // 下面的 createNotification 只往通知中心塞一条, 不会刷新卡片本身
+  broadcastNoteShared([groupId], userId, _ocid).catch(e => console.error('[notes] group-reminder broadcast failed:', e));
   // 设/更新群提醒时给该群 active 成员 (除发起人) 发通知, 跟 scheduler 到点同款规则:
   // group_reminder_subscriptions.enabled=false 的成员一律跳过 (用户已明示"不想被该群打扰", 设置事件也算"打扰")
   const members = await db.select({ userId: schema.groupMembers.userId })
@@ -2528,6 +2549,8 @@ app.delete('/:id/group-reminder', async (c) => {
     eq(schema.noteGroupReminders.groupId, groupId),
   ));
   publish(userId, 'data-changed', { scope: 'reminders', noteId: id, groupId }, _ocid);
+  // 同 POST: 不广播的话群成员卡片上那个铃铛删了也不消失 (REVIEW-TODO B5)
+  broadcastNoteShared([groupId], userId, _ocid).catch(e => console.error('[notes] group-reminder broadcast failed:', e));
   await logAudit(c, 'note.group_reminder_delete', 'note', id, { groupId });
   return c.json({ message: '已删除' });
 });

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth.js';
 import { publish } from '../reminder/bus.js';
+import { broadcastNoteShared } from '../utils/broadcast.js';
 import { logAudit } from '../utils/auditLog.js';
 import { db, schema } from '../db/index.js';
 import { eq, desc, and, isNull, inArray } from 'drizzle-orm';
@@ -295,9 +296,13 @@ app.patch('/files/:id', async (c) => {
   //   - url 用 escapeRegex 100% 完整匹配,不会误伤
   const linkPattern = new RegExp(`\\[((?:[^\\]\\\\]|\\\\.)*)\\]\\(${escapeRegex(file.url)}\\)`, 'g');
   const validLabels = new Set([...prevHistory, oldName]);
+  // 只扫未删除的笔记 (REVIEW-TODO B7): 回收站里的笔记改 label 没意义, 白白多写一堆行
   const notes = await db.select().from(schema.notes)
-    .where(eq(schema.notes.userId, userId)).all();
+    .where(and(eq(schema.notes.userId, userId), isNull(schema.notes.deletedAt))).all();
   const now = dayjs().toISOString();
+  // 先算出要改哪些, 再一个事务批量写 —— 原来是逐条 await update, 中途抛错会留下"一半笔记新名字
+  // 一半旧名字"的脏状态 (REVIEW-TODO B7)
+  const touched: Array<{ id: string; content: string; visibility: string }> = [];
   for (const note of notes) {
     if (!note.content.includes(file.url)) continue;
     const newContent = note.content.replace(linkPattern, (match, label) => {
@@ -305,13 +310,28 @@ app.patch('/files/:id', async (c) => {
       return match;
     });
     if (newContent !== note.content) {
-      await db.update(schema.notes)
-        .set({ content: newContent, contentPinyin: toPinyinSearchable(newContent), updatedAt: now })
-        .where(eq(schema.notes.id, note.id));
+      touched.push({ id: note.id, content: newContent, visibility: note.visibility });
     }
+  }
+  if (touched.length > 0) {
+    db.transaction((tx) => {
+      for (const t of touched) {
+        tx.update(schema.notes)
+          .set({ content: t.content, contentPinyin: toPinyinSearchable(t.content), updatedAt: now })
+          .where(eq(schema.notes.id, t.id)).run();
+      }
+    });
   }
 
   publish(userId, 'data-changed', { scope: 'resources' }, _ocid);
+  // 改到的笔记里有共享出去的 → 群成员看到的 markdown label 还是旧文件名, 得广播一次 (REVIEW-TODO B7)
+  const sharedTouchedIds = touched.filter(t => t.visibility === 'shared').map(t => t.id);
+  if (sharedTouchedIds.length > 0) {
+    const gids = [...new Set((await db.select({ groupId: schema.noteShares.groupId })
+      .from(schema.noteShares).where(inArray(schema.noteShares.noteId, sharedTouchedIds)).all())
+      .map(r => r.groupId))];
+    broadcastNoteShared(gids, userId, _ocid).catch(e => console.error('[upload] rename broadcast failed:', e));
+  }
   await logAudit(c, 'file.rename', 'file', id, { old: oldName, new: newName });
   return c.json({ data: { ...file, filename: newName } });
 });

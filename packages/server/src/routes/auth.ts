@@ -207,6 +207,10 @@ app.patch('/me', authMiddleware, async (c) => {
 
   if (Object.keys(updates).length > 0) {
     await db.update(schema.users).set(updates).where(eq(schema.users.id, userId));
+    // 多设备同步 (REVIEW-TODO B1): 同文件 password / logout-all-devices 都 publish 了, 唯独最常用的
+    // 改昵称/头像/偏好漏了 → 其他设备的头像、主题外的偏好一直是旧值, 必须重启 app 才刷新.
+    // sse.ts 收到 user-profile scope 会直接调 auth.fetchMe(), 不依赖某个 view 挂监听
+    publish(userId, 'data-changed', { scope: 'user-profile' }, _ocid);
   }
 
   // 用户保存了新的 retention 设置 → 立即按新天数清理该用户回收站, 不用等下个 6h 定时 tick

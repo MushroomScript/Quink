@@ -3,6 +3,8 @@ import { eq, and, or, like, desc, sql, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import dayjs from 'dayjs';
 import { sanitizeUserMarkdown } from '../utils/markdownSanitizer.js';
+import { publish } from '../reminder/bus.js';
+import { broadcastNoteShared } from '../utils/broadcast.js';
 
 // ── OpenAI Function Calling 格式工具定义 ──
 
@@ -410,6 +412,10 @@ export async function executeTool(userId: string, name: string, args: any): Prom
         aiProcessed: false, pinned: false, createdAt: now, updatedAt: now,
       });
       noteIds.push(id);
+      // 多设备同步 (REVIEW-TODO B2): 不通知的话作者其他设备的主 view 拿不到这条新笔记.
+      // 故意不传 originClientId —— AI 建笔记时发起方前端只渲染对话回复, 并没有本地往列表里插卡片,
+      // 所以发起设备自己也要靠这条 SSE 才看得到 (传了 ocid 反而把发起设备排除掉)
+      publish(userId, 'note-created', { noteId: id });
       return { result: `已创建${args.type === 'todo' ? '待办' : '笔记'}：${safeContent.slice(0, 50)}。直接告诉用户已完成，不要调用其他工具。`, noteIds };
     }
 
@@ -486,6 +492,16 @@ export async function executeTool(userId: string, name: string, args: any): Prom
 
       await db.update(schema.notes).set(updates).where(eq(schema.notes.id, args.id));
       noteIds.push(args.id);
+      // 多设备 / 群成员同步 (REVIEW-TODO B3). 同样不传 originClientId, 理由同 create_note.
+      // 给作者本人 publish (note.userId 而非 userId —— AI 也可能在改别人分享给我的笔记);
+      // 操作者不是作者时再给操作者自己补一份, 否则他其他设备刷不到
+      publish(note.userId, 'note-updated', { noteId: args.id });
+      if (note.userId !== userId) publish(userId, 'note-updated', { noteId: args.id });
+      if (note.visibility === 'shared') {
+        const shareGroupIds = (await db.select({ groupId: schema.noteShares.groupId })
+          .from(schema.noteShares).where(eq(schema.noteShares.noteId, args.id)).all()).map(r => r.groupId);
+        broadcastNoteShared(shareGroupIds, userId).catch(e => console.error('[ai/tools] broadcast failed:', e));
+      }
       const actions = [];
       if (args.todoStatus === 'done') actions.push('标记为完成');
       if (args.todoStatus === 'pending') actions.push('标记为未完成');

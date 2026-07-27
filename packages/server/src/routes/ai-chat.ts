@@ -221,6 +221,9 @@ app.post('/conversations/:id/messages', async (c) => {
         id: aiMsgId, conversationId: id, role: 'assistant', content: fullResponse,
         sources: noteIds, createdAt: dayjs().toISOString(),
       });
+      // 多设备同步 (REVIEW-TODO B6): 上面发 user message 时那句 publish 的注释写着"等 endpoint 结束后
+      // 会再 publish 一次", 但这一次一直没写 → 其他设备只看得到自己的提问, 永远等不到 AI 回复出现
+      publish(userId, 'data-changed', { scope: 'ai-messages', convId: id }, _ocid);
       await write({ type: 'done', sources: noteIds, messageId: aiMsgId });
 
       // 首轮自动生成标题
