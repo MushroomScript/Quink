@@ -1,7 +1,10 @@
 import { db, schema } from '../db/index.js';
 import { eq, and } from 'drizzle-orm';
 import { DEFAULT_PROMPTS, type AiFeature } from './prompts.js';
-import { TOOLS_PROMPT } from './tools.js';
+import { TOOLS_PROMPT, TOOL_DEFINITIONS } from './tools.js';
+
+// 裸 JSON 兜底识别时用来判断"这个 name 是不是真的工具", 防止把用户内容里的普通 JSON 当成调用
+const KNOWN_TOOL_NAMES = new Set(TOOL_DEFINITIONS.map(t => t.function.name));
 
 interface AiCallOptions {
   userId: string;
@@ -310,6 +313,44 @@ export interface ToolCallEvent {
   args: any;
 }
 
+// 从模型回复里抠出"裸 JSON 形式"的工具调用.
+// 背景 (蘑菇 2026-07-27 报): 提示词降级模式要求模型输出 `<tool>{...}</tool>`, 但 qwen2.5-coder
+// 这类代码模型习惯直接吐 `{"name":"create_note","args":{...}}` 不套标签 —— 工具名跟参数其实全对,
+// 只是标签没加, 结果被当成普通聊天文本原样打给用户看. 只认标签太苛刻, 这里做兜底.
+//
+// 防误伤: 必须同时满足 name 在已知工具名单内 + args 是对象, 才认作工具调用. 用户笔记正文里
+// 恰好出现一段"name 正好等于某工具名且带 args 对象"的 JSON 才会误判, 概率可忽略.
+// 括号配对手写而不用正则: 参数值里可能带 { } (如 content 是一段 JSON 文本), 正则配不平.
+function extractBareToolCalls(content: string, knownNames: Set<string>): { name: string; args: any }[] {
+  const calls: { name: string; args: any }[] = [];
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] !== '{') continue;
+    let depth = 0, inStr = false, esc = false, end = -1;
+    for (let j = i; j < content.length; j++) {
+      const ch = content[j];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === '{') depth++;
+      else if (ch === '}' && --depth === 0) { end = j; break; }
+    }
+    if (end < 0) break;              // 后面没有配平的 }, 不用再找了
+    try {
+      const obj = JSON.parse(content.slice(i, end + 1));
+      // 参数字段两种写法都认: TOOLS_PROMPT 教的是 args, 但模型 (实测 qwen2.5-coder) 更倾向输出
+      // OpenAI 原生的 arguments. 只认一种的话另一种就漏了
+      const rawArgs = obj?.args ?? obj?.arguments;
+      if (obj && typeof obj.name === 'string' && knownNames.has(obj.name)
+          && rawArgs && typeof rawArgs === 'object') {
+        calls.push({ name: obj.name, args: rawArgs });
+        i = end;                     // 跳过整个已识别的对象, 避免嵌套重复命中
+      }
+    } catch { /* 不是合法 JSON, 继续往后找 */ }
+  }
+  return calls;
+}
+
 // 降级到提示词模式前, 把 FC 协议残留从消息历史里摘掉 (REVIEW-TODO B9).
 // 降级后不再传 tools, 但 msgsCopy 里可能已经攒了前几轮的 role:'tool' 结果 + 带 tool_calls 的 assistant,
 // 这些在"没有 tools 的请求"里是非法的, 会让降级重试本身又 400 —— 等于降级白做.
@@ -318,6 +359,24 @@ function stripFcArtifacts(msgs: ChatMessage[]): ChatMessage[] {
   return msgs
     .filter(m => m.role !== 'tool')
     .map(m => (m.tool_calls ? { ...m, tool_calls: undefined } : m));
+}
+
+// 从模型回复文本里解析工具调用: 先认 <tool> 标签 (TOOLS_PROMPT 教的格式), 再兜底认裸 JSON.
+// 不支持 OpenAI FC 协议的模型 (实测 ollama 的 qwen2.5-coder / qwen2.5) 即使传了 tools 参数,
+// 也不会返回 tool_calls 字段, 而是把调用意图写在 content 里 —— 所以原生调用的 content 也要过一遍.
+function parseToolCallsFromText(content: string): { name: string; args: any }[] {
+  const calls: { name: string; args: any }[] = [];
+  const toolRegex = /<tool>([\s\S]*?)<\/tool>/g;
+  let match;
+  while ((match = toolRegex.exec(content)) !== null) {
+    try {
+      const o = JSON.parse(match[1]);
+      const a = o?.args ?? o?.arguments;
+      if (o && typeof o.name === 'string') calls.push({ name: o.name, args: a ?? {} });
+    } catch { /* 标签里不是合法 JSON, 跳过 */ }
+  }
+  if (calls.length === 0) calls.push(...extractBareToolCalls(content, KNOWN_TOOL_NAMES));
+  return calls;
 }
 
 export async function callAiWithToolLoop(
@@ -358,6 +417,25 @@ export async function callAiWithToolLoop(
     }
     console.log(`[AI] round ${round}: model responded in ${Date.now() - t0}ms, toolCalls=${response.toolCalls.length}`);
 
+    // 模型没走 FC 协议, 但可能已经把调用意图写在 content 里了 (裸 JSON / <tool> 标签).
+    // 必须在下面"强制降级重试"之前先抠一次 —— 降级会把 response 整个覆盖掉, 而实测 ollama qwen 的
+    // 行为是: 原生这轮的 content 里有正确的 {"name":...,"arguments":{...}}, 降级重试反而改口说
+    // "已添加灵感xxx" 什么都不调. 先抠到就直接执行, 省一次重试也避免模型编造成功消息 (蘑菇 2026-07-27)
+    if (response.toolCalls.length === 0 && response.content) {
+      const earlyCalls = parseToolCallsFromText(response.content);
+      if (earlyCalls.length > 0) {
+        console.log(`[AI] round ${round}: 无 tool_calls 字段, 从回复文本识别到 ${earlyCalls.length} 个调用: ${earlyCalls.map(c => c.name).join(',')}`);
+        msgsCopy.push({ role: 'assistant', content: response.content });
+        for (const tc of earlyCalls) {
+          onToolCall?.({ name: tc.name, args: tc.args });
+          const { result, noteIds } = await executeToolFn(tc.name, tc.args);
+          allNoteIds.push(...noteIds);
+          msgsCopy.push({ role: 'user', content: `[工具 ${tc.name} 执行结果]:\n${result}` });
+        }
+        continue;
+      }
+    }
+
     // 第一轮：原生 FC 模式下模型既没生成 tool_calls、也没用 <tool> 标签，
     // 大概率是弱模型（如 qwen2.5-coder 量化版）不会用 OpenAI FC 协议。强制降级 prompt 模式重试一次，
     // 引导模型读 TOOLS_PROMPT 后输出 <tool>...</tool>，避免它凭训练数据编造笔记内容。
@@ -396,14 +474,9 @@ export async function callAiWithToolLoop(
       continue;
     }
 
-    // 提示词降级模式：检测 <tool> 标签
-    if (response.content && response.content.includes('<tool>')) {
-      const toolRegex = /<tool>([\s\S]*?)<\/tool>/g;
-      let match;
-      const calls: { name: string; args: any }[] = [];
-      while ((match = toolRegex.exec(response.content)) !== null) {
-        try { calls.push(JSON.parse(match[1])); } catch {}
-      }
+    // 降级重试后再解析一次 (上面那次是降级前的 response, 这次是降级后的)
+    if (response.content) {
+      const calls = parseToolCallsFromText(response.content);
       if (calls.length > 0) {
         msgsCopy.push({ role: 'assistant', content: response.content });
         for (const tc of calls) {
