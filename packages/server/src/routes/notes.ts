@@ -1951,7 +1951,19 @@ app.patch('/:id', async (c) => {
   let shouldFork = false;
   let effectiveGroupId: string | undefined = ctxGroupId; // 可能被下面自动推断覆盖 (非作者主视图改时)
   if (existing.visibility === 'shared' && isContentChange) {
-    if (!isAuthor && existing.parentNoteId === null) {
+    // 「最后一个共享群」被非作者改时还要不要 fork —— 看【作者】的偏好 forkOnOthersEdit, 默认 false = 不 fork.
+    // 因为 fork 会把原件的最后一个群关系摘走 → 原件变孤儿 → 下面 orphanedRoot 分支把它 private + deletedAt
+    // 丢进回收站. 单群共享 (最常见) 时用户看到的就是"别人改一下我的笔记, 我列表里那条没了, 群里冒出一条新 id".
+    // 关掉后走 in-place: id 不变、不进回收站、群里还是那条, 就是内容被改了 (广播 / history / audit 都照走).
+    // 多群时不看偏好, 无条件 fork —— 群组之间必须互相隔离 (蘑菇 2026-07-27 拍板).
+    let skipLastGroupFork = false;
+    if (!isAuthor && existing.parentNoteId === null && currentShareGroupIds.length <= 1) {
+      const author = await db.select({ preferences: schema.users.preferences })
+        .from(schema.users).where(eq(schema.users.id, existing.userId)).get();
+      // !== true: 老用户 preferences 里没这字段 (undefined) 也算关闭, 不用写迁移
+      skipLastGroupFork = (author?.preferences as any)?.forkOnOthersEdit !== true;
+    }
+    if (!isAuthor && existing.parentNoteId === null && !skipLastGroupFork) {
       // 非作者改 root → fork (创建该群专属版本). 非作者改已是 fork 的笔记 → in-place 改 fork (fork 本身就是该群专属版本, 二次 fork 无意义且把原 fork 变孤儿).
       // 非作者改 shared 必 fork. 但前端不一定能传 editContext (主视图也可能编辑别人共享笔记).
       // 90% case 无歧义: B 在主视图看到 A 共享的笔记 → B 必定是某个共享群的成员 → 算 B 的 active 群 ∩ 笔记共享群

@@ -76,6 +76,9 @@ const prefs = reactive({
   //   none    = 群组共享笔记全部隐藏 (= private scope, 仅 private)
   //   all     = 群组共享笔记全部显示 (= all scope, private + 我分享的 + 他人分享的)
   sharedDisplay: 'own' as 'own' | 'others' | 'none' | 'all',
+  // 他人修改我分享的笔记时, 最后一个共享群要不要 fork 出副本. 默认 false = 直接改同一条
+  // (fork 会让原件变孤儿丢进回收站, 单群共享时表现为"笔记从我列表里消失"). 多群时始终 fork 不受此开关影响
+  forkOnOthersEdit: false,
   aiChatMaxTokens: 8192,
   aiPersona: 'concise',
   aiPersonaCustom: '',
@@ -1042,6 +1045,14 @@ function goBack() {
               { value: 'all', label: '全部显示' },
             ]" />
           </div>
+        </div>
+        <!-- 他人修改共享笔记时是否生成副本. 仅影响"最后一个共享群"被改的情况; 分享到多个群时各群始终各自 fork -->
+        <div class="flex items-center justify-between py-3 border-t border-gray-100">
+          <div>
+            <div class="text-sm text-gray-700 font-medium">他人修改时生成群副本</div>
+            <div class="text-xs text-gray-400 mt-0.5">关闭时群成员直接编辑同一条, 大家看到相同内容; 开启则生成该群专属副本, 你的原件移入回收站存档。分享到多个群时各群之间始终互相隔离, 不受此开关影响</div>
+          </div>
+          <ToggleSwitch v-model="prefs.forkOnOthersEdit" class="ml-4" />
         </div>
         <!-- 待办未完成数字提示 -->
         <div class="flex items-center justify-between py-3 border-t border-gray-100">
