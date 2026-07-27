@@ -10,6 +10,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useTheme } from '@/composables/useTheme';
+import { api } from '@/api';
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -32,7 +33,14 @@ const frames = [
 const currentFrame = ref(0);
 let timer: number | null = null;
 
+// 备案信息 (ICP / 公安) 来自后端 env, 源码里没有值 —— 备案号绑定域名+主体, 不能进公开镜像被别人冒用.
+// 部署方没配 env 时字段全空, 下面 v-if 整块不渲染
+const beian = ref<{ icpBeian: string; policeBeian: string; policeBeianCode: string } | null>(null);
+
 onMounted(() => {
+  // 拿不到备案号不能挡住登录, 失败静默
+  api.getSiteInfo().then((r) => { beian.value = r; }).catch(() => {});
+
   // 低性能 / 移动 / 用户偏好减少动画时停止自动轮播 — 仅保留手动点击切换
   const skipAutoplay = matchMedia('(max-width: 1024px), (prefers-reduced-motion: reduce)').matches;
   if (skipAutoplay) return;
@@ -273,6 +281,20 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
               {{ isRegister ? '已有账号？去登录' : '没有账号？去注册' }}
             </button>
           </div>
+
+          <!-- 备案信息: 工信部要求 ICP 备案号展示在首页并链到 beian.miit.gov.cn, 公安要求网安备案号链到查询页.
+               未登录打开站点看到的就是本页 = 首页. 两个号各自独立, 谁配了显示谁.
+               放表单卡片内 (不是贴 .right 底部) 是因为显示比例 150% 时左侧 hero 把 .split 撑到 1134px 而视口逻辑高
+               只有 600px, 贴底的话会被 .login-page 的 overflow:hidden 裁掉 —— 备案号是合规要求不能某些缩放下消失 -->
+          <footer v-if="beian && (beian.icpBeian || beian.policeBeian)" class="beian">
+            <a v-if="beian.icpBeian" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">
+              {{ beian.icpBeian }}
+            </a>
+            <a v-if="beian.policeBeian" :href="`https://beian.mps.gov.cn/#/query/webSearch?code=${beian.policeBeianCode}`"
+              target="_blank" rel="noopener noreferrer">
+              {{ beian.policeBeian }}
+            </a>
+          </footer>
         </div>
       </main>
     </div>
@@ -943,6 +965,26 @@ function toggleMode() { isRegister.value = !isRegister.value; error.value = ''; 
 }
 .switch-btn:hover {
   color: rgb(var(--c-accent-dark));
+}
+
+/* 备案信息: 跟表单同一文档流 (卡片内最底), 表单可见它就可见 —— 各显示比例下都不会被裁掉 */
+.beian {
+  margin-top: 30px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 16px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.beian a {
+  color: #94a3b8;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.beian a:hover {
+  color: #64748b;
+  text-decoration: underline;
 }
 
 /* 表单切换登录 / 注册时 昵称字段展开收起动画 */

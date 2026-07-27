@@ -357,6 +357,11 @@ export interface AiPromptItem {
 // ── API ──
 
 export const api = {
+  // 站点备案信息 (无需登录, 登录页底部用). 值来自部署方 env, 没配时各字段是空串
+  getSiteInfo() {
+    return request<{ icpBeian: string; policeBeian: string; policeBeianCode: string }>('/site-info');
+  },
+
   // Auth
   register(data: { username: string; password: string; nickname: string }) {
     return request<{ data: { token: string; user: User } }>('/auth/register', {

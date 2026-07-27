@@ -58,6 +58,7 @@ docker compose up -d          # 自动拉镜像 + 起容器
 - **升级**：`git pull && docker compose pull && docker compose up -d`
 - **备份 / 迁移**：把 `quink-data/` 整个目录拷走即可（SQLite + uploads + 缩略图都在内）
 - **公网部署**：建议 nginx / caddy 反代加 HTTPS。SSE 长连接的 nginx 要 `proxy_buffering off` + `proxy_read_timeout 24h`
+- **备案号**（中国大陆公网部署）：`.env` 里填 `QUINK_ICP_BEIAN` / `QUINK_POLICE_BEIAN`，登录页底部自动展示并链到官方查询页；不填则不显示。**只能填你自己申请下来的号**
 - **完整配置**：`.env` 里 `JWT_SECRET`（必填）+ `QUINK_ALLOWED_ORIGINS`（CORS 白名单，默认 `*`）。其余 env 见 `packages/server/CLAUDE.md`
 
 > 不想用 Docker 也可从源码跑：`pnpm install` → `pnpm --filter @quink/web build` → 设 `QUINK_WEB_DIST` 起 server。需要 Node 20+。

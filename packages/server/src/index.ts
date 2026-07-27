@@ -20,6 +20,7 @@ import notificationsRoutes from './routes/notifications.js';
 import { startReminderScheduler } from './reminder/scheduler.js';
 import { startEditLockCleanup } from './routes/notes.js';
 import { UPLOAD_DIR, VERSION, WEB_DIST } from './config/paths.js';
+import { ICP_BEIAN, POLICE_BEIAN, POLICE_BEIAN_CODE } from './config/site.js';
 import { readFileSync, existsSync } from 'fs';
 import { join as pathJoin } from 'path';
 
@@ -200,6 +201,13 @@ app.route('/api/invite', inviteApp);
 const healthHandler = (c: any) => c.json({ status: 'ok', name: 'Quink Server', version: VERSION });
 app.get('/api/health', healthHandler);
 app.get('/api/version', healthHandler);
+
+// 站点备案信息 (无需登录, 登录页底部要展示). 值全来自部署方 env, 没配就是空串 → 前端不渲染备案区
+app.get('/api/site-info', (c) => c.json({
+  icpBeian: ICP_BEIAN,
+  policeBeian: POLICE_BEIAN,
+  policeBeianCode: POLICE_BEIAN_CODE,
+}));
 
 // Stats（需要登录）
 app.get('/api/stats', authMiddleware, async (c) => {

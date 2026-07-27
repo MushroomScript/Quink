@@ -44,6 +44,10 @@ services:
       # CORS 白名单. 不设 = 允许所有 origin (内网 / 单用户 OK).
       # 公网部署改成你的域名 "https://quink.yourdomain.com" 收紧
       QUINK_ALLOWED_ORIGINS: ${QUINK_ALLOWED_ORIGINS:-*}
+      # 备案号 (中国大陆公网部署才需要). 不设 = 登录页不显示备案区.
+      # 备案号绑定你自己的域名 + 主体, 所以只走 env 不进镜像, 各部署方填各自的号
+      QUINK_ICP_BEIAN: ${QUINK_ICP_BEIAN:-}
+      QUINK_POLICE_BEIAN: ${QUINK_POLICE_BEIAN:-}
       # 其他覆盖 (一般不动). 完整列表见 packages/server/CLAUDE.md
       # QUINK_DATA_DIR: /data
       # QUINK_WEB_DIST: /app/web-dist
