@@ -166,6 +166,7 @@ function createSetupWindow(isFirstRun: boolean) {
     },
   });
   setupWindow.loadFile(path.join(__dirname, '..', 'ui', 'setup.html'));
+  applyExternalLinkGuard(setupWindow);
   setupWindow.once('ready-to-show', () => setupWindow?.show());
   setupWindow.on('closed', () => {
     setupWindow = null;
@@ -461,6 +462,7 @@ function _showToast(msg: string, x: number, y: number) {
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   });
   toastWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  applyExternalLinkGuard(toastWin);
   toastWin.once('ready-to-show', () => toastWin?.showInactive());
   toastWin.on('closed', () => { toastWin = null; });
 
@@ -511,6 +513,17 @@ function applyExternalLinkGuard(win: BrowserWindow) {
   win.webContents.setWindowOpenHandler(({ url }) => {
     openExternalSafe(url);
     return { action: 'deny' };
+  });
+  // 另一条路径: 窗口内直接导航走 (location.href / 不带 target 的 <a>). 这些小窗都是固定用途,
+  // 被导航到外部页面等于凭空多出一个没人管的浏览器窗口. 同源放行 (SPA 路由 / dev 热更新要用),
+  // 外域拦下改交系统浏览器. setup / toast 加载的是本地 file: 跟 data: URL, origin 跟 WEB_URL 天然不同,
+  // 它们本来也不该发生任何导航, 一律拦掉正合适.
+  win.webContents.on('will-navigate', (event, url) => {
+    try {
+      if (new URL(url).origin === new URL(WEB_URL).origin) return; // 同源内部跳转放行
+    } catch { /* 解析不了的一律拦 */ }
+    event.preventDefault();
+    openExternalSafe(url);
   });
 }
 
