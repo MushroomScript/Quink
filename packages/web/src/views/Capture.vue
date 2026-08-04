@@ -70,7 +70,7 @@ onMounted(async () => {
       const t = localStorage.getItem('quink_theme') || 'blueberry';
       document.documentElement.setAttribute('data-theme', t);
       setTimeout(() => {
-        document.querySelector<HTMLElement>('.vditor-ir [contenteditable]')?.focus();
+        document.querySelector<HTMLElement>('.vditor-ir [contenteditable], .vditor-wysiwyg [contenteditable]')?.focus();
       }, 50);
     });
   } catch {}

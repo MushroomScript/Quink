@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, markRaw } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, markRaw } from 'vue';
 import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import { api } from '@/api';
@@ -17,6 +17,10 @@ import RenameModal from './RenameModal.vue';
 import VisibilityChip from './VisibilityChip.vue';
 import CategoryPicker from './CategoryPicker.vue';
 import TodoModeChip from './TodoModeChip.vue';
+import EditorBlockTools from './EditorBlockTools.vue';
+import EditorTextStylePicker from './EditorTextStylePicker.vue';
+import { findBlock, commit as commitEditor, focusCell, moveBlockUp, moveBlockDown } from '@/utils/editorBlockOps';
+import { createInlineStyleDecor, wrapWithStyle, type DecorHandle } from '@/utils/inlineStyleDecor';
 import {
   PhLightbulb,
   PhNotePencil,
@@ -236,7 +240,12 @@ const currentAiFeatureIcon = computed(() =>
 );
 
 const editorRef = ref<HTMLDivElement>();
+// Vditor 内容区 (.vditor-ir .vditor-reset), 表格/块悬浮工具挂在它上面。
+// Vditor 是异步建 DOM 的, 所以在 after 回调里才拿得到
+const contentEl = ref<HTMLElement | null>(null);
 let vditor: Vditor | null = null;
+// 内联样式(颜色/字号)装饰层, after 回调里创建, 卸载时 destroy
+let decor: DecorHandle | null = null;
 const dirty = ref(false);
 const toast = useToast();
 
@@ -474,6 +483,30 @@ function onListPaste(e: ClipboardEvent) {
   vditor?.insertMD(lines.slice(1).map((l) => prefix + l).join('\n')); // 其余行各建独立新项
 }
 
+// ── 粘贴多行纯文本时, 把单换行规范成段落分隔 ──
+//
+// 编辑器里按回车得到的是两个 <p>; 而从外部粘贴 `A\nB`, Vditor 给的是 `<p>A\nB</p>`
+// —— 一个段落里夹着软换行。两者行间距不一样, markdown 源码也不一样(`A\n\nB` vs `A\nB`)。
+// 更麻烦的是内联样式标签**不能包含换行**, 跨这种软换行上色会让标签跨段、配对失效。
+//
+// 所以粘贴时统一成段落分隔, 让"粘进来的"和"自己敲回车的"结构完全一致(蘑菇 2026-08-03 提)。
+// markdown 里连续多个空行本来就等价于一个段落分隔, 规范化不丢语义。
+function onMultilinePaste(e: ClipboardEvent) {
+  const text = e.clipboardData?.getData('text/plain') || '';
+  if (!/\n/.test(text)) return;                                        // 单行不用管
+  if (!pasteIsPlainish(e.clipboardData?.getData('text/html') || '')) return;  // 富文本自带结构, 放行
+  // 列表项里粘贴多行有专门的处理(拆成多个列表项), 那条路先走
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount && pasteFindListItem(sel.getRangeAt(0).startContainer)) return;
+
+  const normalized = text.replace(/\r\n?/g, '\n').replace(/\n+/g, '\n\n').trim();
+  if (!normalized) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  vditor?.insertValue(normalized);
+}
+
 // 自定义 vditor toolbar tooltip: 默认 vditor tooltip 是按钮的 ::before/::after 伪元素
 // 被 App.vue main 的 overflow-y-auto 裁切(尤其飞向上方时)。改用 Teleport 到 body 的
 // 自定义 tooltip,固定定位 + z-index 最顶,脱离任何 overflow 控制,永远朝上显示完整
@@ -517,6 +550,618 @@ function onToolbarMouseOut(e: MouseEvent) {
   customTooltip.value.visible = false;
 }
 
+// ── 工具栏「本段上移 / 下移」──
+// 蘑菇 2026-08-03 定: 段落整块上下移放工具栏, 不做悬浮箭头。
+// 工具栏是字符串配置, 塞不进 Vue 组件, 图标只能写 inline SVG (根 ICONS.md 的例外条款)。
+//
+// 这里**特意用 Vditor 自带的图标**而不是 phosphor (蘑菇 2026-08-03: "你这个图标没人家的好看"):
+// `#vditor-icon-up` / `#vditor-icon-down` 是 Vditor 启动时注入页面的 SVG symbol,
+// 用 <use> 引用就跟工具栏上加粗/斜体那些按钮彻底同源同风格, 不会一眼看出是外挂的。
+// 这是 ICONS.md "统一 phosphor" 的有意例外 —— 因为这两个按钮长在 Vditor 自己的工具栏里,
+// 跟邻居保持一致比跟全局图标库一致更重要。
+//
+// 不写 width/height: Vditor 自带 `.vditor-toolbar__item svg { width:15px; height:15px }`
+// 会强制覆盖, 写了也不生效。svg 加 pointer-events:none 防它拦掉按钮 click (ICONS.md 记过)。
+const SVG_ARROW_UP = '<svg style="pointer-events:none"><use xlink:href="#vditor-icon-up"></use></svg>';
+const SVG_ARROW_DOWN = '<svg style="pointer-events:none"><use xlink:href="#vditor-icon-down"></use></svg>';
+
+// 颜色/字号按钮的图标: 左边是内容(A / 字), 下面一条当前色的色条, 右边一个小箭头。
+// 箭头单独一个 span 是为了 click 时能判断"点的是箭头还是主体"(Word 那种两段式交互)。
+// 这些 span 不能 pointer-events:none —— 要靠它们做命中判断。
+// 色条必须放在 .qk-glyph **里面** —— 它是 absolute 定位, 要相对 A 那个字来算宽度。
+// 放外面当兄弟节点的话, 会相对整个按钮定位, 变得比 A 宽三倍(实测 A 只有 9px, 色条却 28px)。
+const ICON_TEXT_COLOR =
+  '<span class="qk-styled-btn">' +
+  '<span class="qk-glyph">A<span class="qk-swatch" style="background:#e11d48"></span></span>' +
+  '<span class="qk-caret">▾</span></span>';
+// 字号按钮上直接显示当前数字 (仿 Word 的字号框), 没设过时显示「字」
+const ICON_FONT_SIZE =
+  '<span class="qk-styled-btn"><span class="qk-glyph qk-glyph-size">字</span>' +
+  '<span class="qk-caret">▾</span></span>';
+
+/**
+ * 表格/块操作改完 DOM 后调这个, 让编辑器感知变更。
+ *
+ * 【为什么不派 DOM 的 input 事件】Vditor 在编辑区上绑了 input 监听, 收到就把当前 block
+ * 整个重新解析。整行移动这类结构性改动不符合它的假设 —— WYSIWYG 下实测直接把表格
+ * 解析成了纯文本段落("| 水果 | 数量 |" 字面量), 整张表就没了。
+ *
+ * Vditor 自己改表格 DOM 后走的是 execAfterRender, 它**不重新解析 DOM**, 只干两件事:
+ * 记撤销栈 + 触发 options.input 回调。这里做等价的事。
+ * undo 是内部对象, 加 try 兜底防它以后改结构。
+ */
+function afterBlockOp() {
+  dirty.value = true;
+  try {
+    const inner = (vditor as unknown as { vditor?: { undo?: { addToUndoStack?: (v: unknown) => void } } })?.vditor;
+    inner?.undo?.addToUndoStack?.(inner);
+  } catch {}
+}
+
+// ── 文字颜色 / 字号 ──
+// 仿 Word: 工具栏按钮上有条当前色的色条, 直接点 = 套用当前色; 点右侧小箭头 = 展开面板换色。
+// 按钮 icon 是 HTML 字符串, 所以色条用 inline style 画, 换色时直接改那个 DOM 节点。
+const stylePicker = reactive({
+  open: false,
+  kind: 'color' as 'color' | 'size',
+  anchor: null as HTMLElement | null,
+});
+const currentColor = ref('#e11d48');
+const currentSize = ref('');
+
+function toolbarBtn(name: string): HTMLElement | null {
+  return editorRef.value?.querySelector(`.vditor-toolbar [data-type="${name}"]`) as HTMLElement ?? null;
+}
+
+/** 把工具栏颜色按钮上的色条刷成当前色 */
+function syncColorSwatch() {
+  const bar = toolbarBtn('text-color')?.querySelector('.qk-swatch') as HTMLElement | null;
+  if (bar) bar.style.background = currentColor.value;
+}
+
+/** 字号按钮上显示当前数字, 没设过就显示「字」 */
+function syncSizeGlyph() {
+  const g = toolbarBtn('font-size')?.querySelector('.qk-glyph') as HTMLElement | null;
+  if (!g) return;
+  const n = parseInt(currentSize.value, 10);
+  g.textContent = Number.isFinite(n) ? String(n) : '字';
+}
+
+// ── 选区跟踪 ──
+// 点工具栏按钮 / 面板里的输入框都会让编辑区失焦, 选区当场清空。
+// 所以不能等"点了才去取选区", 必须一直记着最后一次有效的选中范围。
+// (之前就是等点击时才取, 结果直接点颜色/字号按钮永远提示"先选中文字")
+let lastRange: Range | null = null;
+function trackEditorSelection() {
+  const el = contentEl.value;
+  if (!el) return;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const r = sel.getRangeAt(0);
+  if (r.collapsed || !el.contains(r.startContainer)) return;   // 只记"真的选中了内容"的
+  lastRange = r.cloneRange();
+}
+function restoreEditorSelection(): boolean {
+  const el = contentEl.value;
+  if (!lastRange || !el || !lastRange.startContainer.isConnected) return false;
+  try {
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(lastRange);
+    return true;
+  } catch { return false; }
+}
+
+/** 去掉 Vditor 到处塞的零宽空格再比对, 否则肉眼一样的文字永远相等不了 */
+function plainOf(s: string | null): string {
+  return (s || '').replace(/[​﻿]/g, '');
+}
+
+function applyRange(r: Range): boolean {
+  try {
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(r);
+    lastRange = r.cloneRange();
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * 在 scope 里找这段文字对应的 Range。`exact` 表示命中的是装饰段(样式已渲染, 边界最准)。
+ *
+ * 按**文本内容**找, 不能按光标位置找 —— execCommand 插完光标停在插入内容的末尾,
+ * 也就是闭标签外面, `closest('[data-mk-deco]')` 根本够不着 (实测: 应用后选中状态直接没了)。
+ * 同样的文字可能出现多次, `pick` 决定取第一个还是最后一个 (跨段落重选要一头一尾各取一个)。
+ *
+ * 找不到装饰段时退回裸文本: 装饰还没补上的那几帧靠它先把选中态顶上, 别留空档。
+ */
+function rangeForText(
+  scope: HTMLElement,
+  text: string,
+  pick: 'first' | 'last' = 'last',
+): { range: Range; exact: boolean } | null {
+  const want = plainOf(text);
+  if (!want) return null;
+
+  const decos = Array.from(scope.querySelectorAll<HTMLElement>('span[data-mk-deco]'))
+    .filter((d) => plainOf(d.textContent) === want);
+  const deco = pick === 'first' ? decos[0] : decos[decos.length - 1];
+  if (deco) {
+    const r = document.createRange();
+    r.selectNodeContents(deco);
+    return { range: r, exact: true };
+  }
+
+  const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+  const texts: Text[] = [];
+  let n: Node | null;
+  while ((n = walker.nextNode())) texts.push(n as Text);
+  if (pick === 'last') texts.reverse();
+
+  for (const t of texts) {
+    if (t.parentElement?.closest('.mk-color')) continue;    // 标签源码本身不算内容
+    const idx = plainOf(t.data).indexOf(want);
+    if (idx < 0) continue;
+    // plainOf 剥过零宽空格, 下标要换算回原始 data 上
+    const zw = (c: string) => c === '​' || c === '﻿';
+    let start = 0;
+    for (let seen = 0; start < t.data.length && seen < idx; start++) if (!zw(t.data[start])) seen++;
+    while (start < t.data.length && zw(t.data[start])) start++;
+    let end = start;
+    for (let got = 0; end < t.data.length && got < want.length; end++) if (!zw(t.data[end])) got++;
+    const r = document.createRange();
+    r.setStart(t, start);
+    r.setEnd(t, end);
+    return { range: r, exact: false };
+  }
+  return null;
+}
+
+/**
+ * 套完样式后把那段文字重新选上 (Word 就是这个行为: 改完还选着, 方便接着调)。
+ *
+ * 逐帧重试而不是定时等: 装饰就绪的时机很不稳定 —— 实测有时 24ms, 有时 450ms
+ * (取决于 Vditor 什么时候把插入的文本解析成标签)。固定 setTimeout 猜时间的话,
+ * 猜早了选不中, 猜晚了选中状态白白断档(60ms 的等待实测让人眼看到明显一闪)。
+ * 每帧试一次, 一成功立刻停, 断档压到最小。tries 给 40 帧(~650ms), 照上面 450ms 的最坏值留余量。
+ *
+ * 裸文本那条只做一次(fellBack 记着), 之后每帧只认装饰段 ——
+ * 每帧都 removeAllRanges 重设选区的话, 选中态自己会闪。
+ */
+function reselectStyled(text: string, tries = 40, fellBack = false) {
+  decor?.refresh();
+  const root = contentEl.value;
+  if (!root) return;
+  const hit = rangeForText(root, text);
+  if (hit?.exact) { applyRange(hit.range); return; }
+  const done = fellBack || (!!hit && applyRange(hit.range));
+  if (tries <= 0) return;
+  requestAnimationFrame(() => reselectStyled(text, tries - 1, done));
+}
+
+/**
+ * 跨段落套完样式后重选。
+ *
+ * 不能拿整串文字去找 —— 跨段落的内容分散在不同 `<p>` 的不同文本节点里,
+ * 没有任何一个节点装得下, 一路找不到就会重试到预算耗尽然后什么都不做,
+ * 用户看到的就是"选中状态直接没了"(蘑菇实测, 跨行选中最容易撞上)。
+ * 改成每段各自找, 再拿第一段的头 + 最后一段的尾拼成一个大范围。
+ */
+function reselectAcross(texts: string[], tries = 40, fellBack = false) {
+  decor?.refresh();
+  const root = contentEl.value;
+  const list = texts.filter((t) => plainOf(t));
+  if (!root || !list.length) return;
+
+  const head = rangeForText(root, list[0], 'first');
+  const tail = list.length === 1 ? head : rangeForText(root, list[list.length - 1], 'last');
+  let done = fellBack;
+  if (head && tail) {
+    const r = document.createRange();
+    r.setStart(head.range.startContainer, head.range.startOffset);
+    r.setEnd(tail.range.endContainer, tail.range.endOffset);
+    if (head.exact && tail.exact) { applyRange(r); return; }
+    if (!done) done = applyRange(r);
+  }
+  if (tries <= 0) return;
+  requestAnimationFrame(() => reselectAcross(texts, tries - 1, done));
+}
+
+/** 合并两串 css 声明, 同名属性以新的为准 */
+function mergeCss(oldCss: string, newCss: string): string {
+  const map = new Map<string, string>();
+  for (const part of [...oldCss.split(';'), ...newCss.split(';')]) {
+    const i = part.indexOf(':');
+    if (i < 0) continue;
+    const k = part.slice(0, i).trim();
+    const v = part.slice(i + 1).trim();
+    if (k && v) map.set(k, v);
+  }
+  return [...map].map(([k, v]) => `${k}:${v}`).join(';');
+}
+
+/** 选中范围是否正好是某一段已有样式(整段, 不是一部分) */
+function wrappingDeco(): HTMLElement | null {
+  const root = contentEl.value;
+  const sel = window.getSelection();
+  if (!root || !sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  const picked = plainOf(r.toString());
+  if (!picked) return null;
+  // 两边都剥零宽空格再比 —— Vditor 到处塞零宽空格, 直接比字符串会漏判,
+  // 漏判就会落到别的分支去(该合并样式的变成套一层新标签)
+  return Array.from(root.querySelectorAll<HTMLElement>('span[data-mk-deco]'))
+    .find((d) => plainOf(d.textContent) === picked && d.contains(r.startContainer)) ?? null;
+}
+
+/** 选中范围整个落在某一段已有样式**内部**(只选了其中一部分) */
+function decoContaining(r: Range): HTMLElement | null {
+  const el = r.startContainer.nodeType === 3 ? r.startContainer.parentElement : (r.startContainer as HTMLElement);
+  const deco = el?.closest?.('span[data-mk-deco]') as HTMLElement | null;
+  return deco && deco.contains(r.endContainer) ? deco : null;
+}
+
+/** 选区碰到的所有样式段 */
+function decosIntersecting(r: Range): HTMLElement[] {
+  const root = contentEl.value;
+  if (!root) return [];
+  return Array.from(root.querySelectorAll<HTMLElement>('span[data-mk-deco]'))
+    .filter((d) => { try { return r.intersectsNode(d); } catch { return false; } });
+}
+
+/** 把范围撑到覆盖它碰到的每一对完整标签, 免得只替换掉半个标签留下孤儿 */
+function expandOverTags(r: Range): Range {
+  const ext = r.cloneRange();
+  for (const d of decosIntersecting(r)) {
+    const open = d.previousElementSibling?.classList.contains('mk-color') ? d.previousElementSibling : d;
+    const close = d.nextElementSibling?.classList.contains('mk-color') ? d.nextElementSibling : d;
+    const a = document.createRange();
+    a.selectNode(open);
+    if (ext.compareBoundaryPoints(Range.START_TO_START, a) > 0) ext.setStartBefore(open);
+    const b = document.createRange();
+    b.selectNode(close);
+    if (ext.compareBoundaryPoints(Range.END_TO_END, b) < 0) ext.setEndAfter(close);
+  }
+  return ext;
+}
+
+/** 选区碰到的所有顶层块 */
+function blocksIn(r: Range): HTMLElement[] {
+  const root = contentEl.value;
+  if (!root) return [];
+  return Array.from(root.children).filter((b) => {
+    try { return r.intersectsNode(b); } catch { return false; }
+  }) as HTMLElement[];
+}
+
+/**
+ * 选区跨了好几个段落 -> **逐段各套一个标签**。
+ *
+ * 内联 HTML 标签不能跨段落: 直接套一个大标签的话, 开标签留在第一段、闭标签跑到最后一段,
+ * markdown 就成了 `<span ...>段一\n\n\n段二</span>` 这种东西, 配对失效、颜色不显示,
+ * 用户以为上色了其实没有 (蘑菇实测撞到)。
+ *
+ * 所以按段切开, 每段单独处理。从后往前做 —— 改前面的段会让后面段的 Range 失效。
+ */
+function applyPerBlock(range: Range, blocks: HTMLElement[], style: string) {
+  // 先把每段要替换的范围和内容都算出来, 再动手 (边算边改会让后面的范围失效)。
+  // 每段内部同样按原有样式分片合并, 保证改字号不冲掉颜色。
+  const jobs = blocks.map((b) => {
+    const sub = document.createRange();
+    sub.selectNodeContents(b);
+    if (b.contains(range.startContainer)) sub.setStart(range.startContainer, range.startOffset);
+    if (b.contains(range.endContainer)) sub.setEnd(range.endContainer, range.endOffset);
+    const ext = expandOverTags(sub);
+    const parts = sliceByStyle(ext, sub);
+    return {
+      ext,
+      text: parts.filter((p) => p.selected).map((p) => p.text).join(''),
+      out: buildStyled(parts, style),
+    };
+  }).filter((j) => j.text.trim());
+
+  if (!jobs.length) return;
+
+  // marker 是 contenteditable=false, 不解锁 execCommand 删不动
+  for (const d of decosIntersecting(range)) {
+    d.previousElementSibling?.removeAttribute('contenteditable');
+    d.nextElementSibling?.removeAttribute('contenteditable');
+  }
+
+  for (let i = jobs.length - 1; i >= 0; i--) {
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(jobs[i].ext);
+    document.execCommand('insertText', false, jobs[i].out);
+  }
+  reselectAcross(jobs.map((j) => j.text));   // 内部每帧都会 decor.refresh, 不用再另外排一次
+}
+
+interface StylePart { text: string; style: string; selected: boolean }
+
+/** 一个 Range 在某个文本节点上覆盖的区间, 不相交返回 null */
+function clipRange(r: Range, node: Text): [number, number] | null {
+  let hit = false;
+  try { hit = r.intersectsNode(node); } catch { return null; }
+  if (!hit) return null;
+  const s = node === r.startContainer ? r.startOffset : 0;
+  const e = node === r.endContainer ? r.endOffset : node.length;
+  return s < e ? [s, e] : null;
+}
+
+/**
+ * 把范围切成若干片, 每片记住:「原本是什么样式」+「是不是用户真的选中了」。
+ *
+ * 为什么要区分选中与否: 为了不切坏标签, 处理范围会被撑到覆盖整对标签(expandOverTags),
+ * 这就会把**用户没选的部分**也卷进来。如果一视同仁地套新样式, 就会出现
+ * "123 里 12 是红的, 只选了 23 改字号, 结果 1 也跟着变大"(蘑菇 2026-08-03 实测)。
+ * 撑进来的部分必须原样写回去。
+ */
+function sliceByStyle(ext: Range, picked: Range): StylePart[] {
+  const parts: StylePart[] = [];
+  const root = contentEl.value;
+  if (!root) return parts;
+
+  const push = (text: string, style: string, selected: boolean) => {
+    if (!text) return;
+    const last = parts[parts.length - 1];
+    if (last && last.style === style && last.selected === selected) last.text += text;
+    else parts.push({ text, style, selected });
+  };
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let n: Node | null;
+  while ((n = walker.nextNode())) {
+    const t = n as Text;
+    const clip = clipRange(ext, t);
+    if (!clip) continue;
+    if (t.parentElement?.closest('.mk-color')) continue;          // 标签源码本身不算内容
+    const deco = t.parentElement?.closest('span[data-mk-deco]');
+    const base = deco?.getAttribute('data-mk-deco') || '';
+    const sel = clipRange(picked, t);
+    const raw = t.textContent || '';
+
+    // 按"选中区间"把这个节点在 ext 内的部分切成最多三段
+    let i = clip[0];
+    while (i < clip[1]) {
+      const inSel = !!sel && i >= sel[0] && i < sel[1];
+      let end: number;
+      if (inSel) end = Math.min(clip[1], sel![1]);
+      else if (sel && i < sel[0]) end = Math.min(clip[1], sel[0]);
+      else end = clip[1];
+      push(raw.slice(i, end).replace(/[​﻿]/g, ''), base, inSel);
+      i = end;
+    }
+  }
+  return parts;
+}
+
+/** 按分片结果拼出替换用的 markdown: 选中的片合并新样式, 撑进来的片保持原样 */
+function buildStyled(parts: StylePart[], style: string): string {
+  return parts.map((p) => {
+    const s = p.selected ? mergeCss(p.style, style) : p.style;
+    return p.text.trim() && s ? wrapWithStyle(p.text, s) : p.text;
+  }).join('');
+}
+
+/**
+ * 选区横跨好几段样式 -> 连标签一起整片重建。
+ *
+ * 不能简单地套一个大标签: execCommand 会把新标签插在两段标签中间, 配对立刻崩
+ * (蘑菇实测到的 `<span 蓝>蓝<span 红><span 红><span 蓝>色大字</span>。` 就是这么来的)。
+ *
+ * 也不能整片统一成一个新样式 —— 那样"一半红一半没颜色的文字改字号"会把红色冲掉(蘑菇 2026-08-03 指出)。
+ * 所以按原有样式分片, **每片各自合并新样式**: 红的那截变成 `color:红;font-size:新`,
+ * 没颜色那截只有 `font-size:新`。改字号不动颜色, 改颜色不动字号。
+ */
+function rebuildAcross(range: Range, decos: HTMLElement[], style: string) {
+  const ext = expandOverTags(range);
+  const parts = sliceByStyle(ext, range);
+  if (!parts.length) return;
+
+  const out = buildStyled(parts, style);
+  const plain = parts.filter((p) => p.selected).map((p) => p.text).join('');
+
+  // marker 是 contenteditable=false, 不解锁 execCommand 删不动
+  for (const d of decos) {
+    d.previousElementSibling?.removeAttribute('contenteditable');
+    d.nextElementSibling?.removeAttribute('contenteditable');
+  }
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(ext);
+  document.execCommand('insertText', false, out);
+  reselectStyled(plain);
+}
+
+/**
+ * 选中了某段样式里的一部分 -> 把原标签**拆开重建**, 而不是往里面套新标签。
+ *
+ * 往里套是绝对不行的: 内联 HTML 嵌套后 markdown 的标签配对会崩 ——
+ * 蘑菇实测过一次"给蓝色大字的后几个字改红、再整段改蓝", 结果套出
+ * `<span 蓝>蓝<span 红><span 红><span 红><span 蓝>色大字</span>。` 这种闭合标签都对不上的残骸。
+ *
+ * 正确结果是拆成最多三段: 选中之前的保持原样式 / 选中的用合并后的样式 / 选中之后的保持原样式。
+ */
+function splitAndApply(deco: HTMLElement, range: Range, style: string) {
+  const full = deco.textContent || '';
+  const picked = range.toString();
+  const probe = document.createRange();
+  probe.selectNodeContents(deco);
+  probe.setEnd(range.startContainer, range.startOffset);
+  const start = probe.toString().length;
+
+  const oldStyle = deco.getAttribute('data-mk-deco') || '';
+  const before = full.slice(0, start);
+  const after = full.slice(start + picked.length);
+
+  let out = '';
+  if (before) out += wrapWithStyle(before, oldStyle);
+  out += wrapWithStyle(picked, mergeCss(oldStyle, style));
+  if (after) out += wrapWithStyle(after, oldStyle);
+
+  // 连开闭标签一起选中替换掉。marker 是 contenteditable=false, 不解锁的话 execCommand 删不动它
+  const open = deco.previousElementSibling as HTMLElement | null;
+  const close = deco.nextElementSibling as HTMLElement | null;
+  const hasOpen = !!open?.classList.contains('mk-color');
+  const hasClose = !!close?.classList.contains('mk-color');
+  if (hasOpen) open!.removeAttribute('contenteditable');
+  if (hasClose) close!.removeAttribute('contenteditable');
+
+  try {
+    const r = document.createRange();
+    r.setStartBefore(hasOpen ? open! : deco);
+    r.setEndAfter(hasClose ? close! : deco);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(r);
+    document.execCommand('insertText', false, out);
+  } catch {
+    if (hasOpen) open!.setAttribute('contenteditable', 'false');
+    if (hasClose) close!.setAttribute('contenteditable', 'false');
+    return;
+  }
+  reselectStyled(picked);
+}
+
+/**
+ * 给选中文字套样式。
+ *
+ * 分两种情况:
+ *  - 选中的正好是一段**已经有样式**的文字 -> 把新样式合并进那个标签
+ *    (先设红色再设 28px 应该得到 `color:red;font-size:28px` 一个标签)。
+ *    不能再套一层 —— 实测会让内层标签文本被当成普通内容, 显示成一串字面的 `<span style=...>`
+ *  - 普通文字 -> execCommand 插入带标签的纯文本, Vditor 自己解析成内联 HTML 并进撤销栈
+ */
+function applyTextStyle(style: string) {
+  if (!vditor) return;
+  if (!restoreEditorSelection()) { toast.show('先选中一段文字', 'default'); return; }
+  contentEl.value?.focus();
+
+  // 情况零: 选区跨了多个段落 -> 逐段各套一个标签 (内联标签不能跨段)
+  const sel0 = window.getSelection();
+  const r0 = sel0 && sel0.rangeCount ? sel0.getRangeAt(0) : null;
+  if (r0) {
+    const blocks = blocksIn(r0);
+    if (blocks.length > 1) { applyPerBlock(r0, blocks, style); return; }
+  }
+
+  // 情况一: 选中的正好是一整段已有样式 -> 直接改那个标签的 style
+  const deco = wrappingDeco();
+  if (deco) {
+    const open = deco.previousElementSibling as HTMLElement | null;
+    const txt = (open?.textContent || '').replace(/[​﻿]/g, '').trim();
+    const m = /^<span\s+style="([^"]*)"\s*>$/i.exec(txt);
+    if (open?.classList.contains('mk-color') && m) {
+      const kept = deco.textContent || '';
+      open.textContent = `<span style="${mergeCss(m[1], style)}">`;
+      afterBlockOp();
+      reselectStyled(kept);
+      return;
+    }
+  }
+
+  const sel = window.getSelection();
+  const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+
+  // 情况二: 选中的是某段样式里的一部分 -> 拆开重建, 绝不能往里套新标签
+  const inner = range ? decoContaining(range) : null;
+  if (inner && range) { splitAndApply(inner, range, style); return; }
+
+  // 情况三: 选区跨了好几段样式 -> 连标签一起整片重建成一个新标签
+  const touched = range ? decosIntersecting(range) : [];
+  if (range && touched.length) { rebuildAcross(range, touched, style); return; }
+
+  // 情况四: 普通文字 -> 插入带标签的纯文本, Vditor 自己解析成内联 HTML
+  const text = vditor.getSelection();
+  if (!text) { toast.show('先选中一段文字', 'default'); return; }
+  document.execCommand('insertText', false, wrapWithStyle(text, style));
+  reselectStyled(text);
+}
+
+function onStyleBtnClick(kind: 'color' | 'size', e: Event) {
+  const btn = (e.target as HTMLElement)?.closest('button') as HTMLElement | null;
+  const hitCaret = !!(e.target as HTMLElement)?.closest?.('.qk-caret');
+  // 点箭头 -> 展开面板; 点主体 -> 直接套当前值 (字号没设过时也展开, 免得点了没反应)
+  if (hitCaret || (kind === 'size' && !currentSize.value)) {
+    stylePicker.kind = kind;
+    stylePicker.anchor = btn;
+    stylePicker.open = true;
+    return;
+  }
+  applyTextStyle(kind === 'color' ? `color:${currentColor.value}` : `font-size:${currentSize.value}`);
+}
+
+function onStylePick(value: string) {
+  if (stylePicker.kind === 'color') {
+    currentColor.value = value;
+    syncColorSwatch();
+    applyTextStyle(`color:${value}`);
+  } else {
+    currentSize.value = value;
+    syncSizeGlyph();
+    applyTextStyle(`font-size:${value}`);
+  }
+  stylePicker.open = false;
+}
+
+/**
+ * 清除选中范围内的内联样式。
+ *
+ * 不能走 "getSelection() 拿文本 -> 剥标签 -> 插回去" —— getSelection() 返回的是**纯文本**,
+ * 本来就不含标签, 剥了等于没剥; 而且插入位置还在标签内部, 样式照旧(实测踩过)。
+ * 只能直接删 DOM: 把装饰 span 拆掉 + 删掉它前后那对标签节点。
+ */
+function onStyleClear() {
+  stylePicker.open = false;
+  const root = contentEl.value;
+  if (!root || !restoreEditorSelection()) { toast.show('先选中一段文字', 'default'); return; }
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) { toast.show('先选中一段文字', 'default'); return; }
+  const range = sel.getRangeAt(0);
+
+  const decos = Array.from(root.querySelectorAll<HTMLElement>('span[data-mk-deco]'))
+    .filter((d) => range.intersectsNode(d));
+  if (!decos.length) { toast.show('选中的文字没有设置样式', 'default'); return; }
+
+  for (const d of decos) {
+    // 前后紧挨着的就是那对标签(已被装饰层标成 .mk-color)
+    const prev = d.previousElementSibling;
+    const next = d.nextElementSibling;
+    if (prev?.classList.contains('mk-color')) prev.remove();
+    if (next?.classList.contains('mk-color')) next.remove();
+    const par = d.parentNode!;
+    while (d.firstChild) par.insertBefore(d.firstChild, d);
+    par.removeChild(d);
+    par.normalize();
+  }
+  afterBlockOp();
+  setTimeout(() => decor?.refresh(), 60);
+}
+
+// 移动光标所在的整块 (段落 / 表格 / 列表 / 引用) 跟相邻块换位置
+function moveCurrentBlock(dir: 'up' | 'down') {
+  const root = contentEl.value;
+  if (!root) return;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const node = sel.getRangeAt(0).startContainer;
+  if (!root.contains(node)) return;
+  const block = findBlock(node, root);
+  if (!block) return;
+  const moved = dir === 'up' ? moveBlockUp(block) : moveBlockDown(block);
+  if (!moved) return;
+  // 光标跟着块走, 这样能连着点第二次继续移动同一块
+  const idx = Array.prototype.indexOf.call(root.children, block);
+  commitEditor(root);
+  afterBlockOp();
+  nextTick(() => {
+    const target = (idx >= 0 ? root.children[idx] : null) as HTMLElement | null;
+    if (target) focusCell(target, true);
+  });
+}
+
 onMounted(() => {
   if (!editorRef.value) return;
 
@@ -526,12 +1171,26 @@ onMounted(() => {
     placeholder: props.placeholder,
     minHeight: props.minHeight,
     width: '100%',
-    mode: 'ir',
+    // 编辑模式: WYSIWYG (蘑菇 2026-08-03 拍板, 从 IR 换过来 —— "适合萌新用")。
+    // 跟 IR 的唯一区别: 光标进到加粗/标题/引用里时**不会露出 markdown 语法符号**,
+    // 始终是渲染后的样子。IR 是光标靠近就显示 ** / # 让你能手改。
+    // 代码里凡是选 .vditor-ir 的地方都同时写了 .vditor-wysiwyg, 想换回来把这行改成 'ir' 即可。
+    mode: 'wysiwyg',
+    // Vditor 3.11.2 bug: highlightToolbarWYSIWYG.ts:1152 无条件调 options.customWysiwygToolbar,
+    // 但 Options.ts 没给默认值 -> undefined is not a function -> WYSIWYG 的整个 popover 系统全瘫
+    // (表格面板/链接/图片/标题/引用全弹不出来)。必须自己传个空函数兜底。
+    customWysiwygToolbar: () => {},
     cdn: '/vditor',
     toolbar: [
       'emoji', 'headings', 'bold', 'italic', 'strike', 'link', '|',
       'list', 'ordered-list', 'check', 'quote', '|',
       'code', 'inline-code', 'table', 'line', '|',
+      { name: 'text-color', tip: '文字颜色 (点箭头换色)', icon: ICON_TEXT_COLOR, click: (e: Event) => onStyleBtnClick('color', e) },
+      { name: 'font-size', tip: '字号 (点箭头选)', icon: ICON_FONT_SIZE, click: (e: Event) => onStyleBtnClick('size', e) },
+      '|',
+      { name: 'move-block-up', tip: '本段上移', icon: SVG_ARROW_UP, click: () => moveCurrentBlock('up') },
+      { name: 'move-block-down', tip: '本段下移', icon: SVG_ARROW_DOWN, click: () => moveCurrentBlock('down') },
+      '|',
       'upload', 'undo', 'redo',
     ],
     toolbarConfig: { pin: false },
@@ -578,7 +1237,7 @@ onMounted(() => {
       // 注: focusEnd 时不调 vditor.focus(), 因为 vditor.focus() 内部把光标重置到默认位置, 会跟我们设的末尾冲突.
       if (props.focusEnd) {
         const setCursorToEnd = () => {
-          const contentEl = editorRef.value?.querySelector('.vditor-ir .vditor-reset') as HTMLElement | null;
+          const contentEl = editorRef.value?.querySelector('.vditor-ir .vditor-reset, .vditor-wysiwyg .vditor-reset') as HTMLElement | null;
           if (!contentEl) return;
           contentEl.focus();
           // CDP 实测 ("光标在末尾位置一个字后面" bug): Vditor IR 渲染后 PRE 末尾有一个空 text node
@@ -611,6 +1270,12 @@ onMounted(() => {
         vditor?.focus();
       }
       emit('ready');
+      // Vditor 建完 DOM 才能拿到内容区, 交给 EditorBlockTools 做表格/段落悬浮操作
+      contentEl.value = editorRef.value?.querySelector('.vditor-ir .vditor-reset, .vditor-wysiwyg .vditor-reset') as HTMLElement ?? null;
+      // 内联样式装饰层: 把 <span style="color:x"> 这种标签在编辑器里渲染成真的颜色/字号
+      if (contentEl.value) decor = createInlineStyleDecor(contentEl.value);
+      // 一直记着编辑区里最后一次选中范围, 供颜色/字号按钮用 (点按钮时选区已经没了)
+      document.addEventListener('selectionchange', trackEditorSelection);
       // Vditor 加载完后才有 toolbar DOM,这时给 wrapper 绑事件委托
       // (mouseover bubble 上来,closest 找 .vditor-tooltipped 按钮)
       editorRef.value?.addEventListener('mouseover', onToolbarMouseOver);
@@ -627,6 +1292,9 @@ onMounted(() => {
       editorRef.value?.addEventListener('paste', onListPaste, true);
       // capture 拦截 base64 富文本粘贴, 上传换 url 不让 base64 进编辑器 (微信油猴转图等多图场景会卡死)
       editorRef.value?.addEventListener('paste', onEditorPaste, true);
+      // capture 拦截: 粘贴多行纯文本时把单换行规范成段落分隔, 跟按回车的结构对齐。
+      // 注册在最后 —— 前面两个(列表拆项 / base64 图)命中时会 stopImmediatePropagation, 轮不到这里
+      editorRef.value?.addEventListener('paste', onMultilinePaste, true);
     },
     input: () => {
       dirty.value = true;
@@ -641,12 +1309,17 @@ onBeforeUnmount(() => {
   editorRef.value?.removeEventListener('dragover', onEditorDragOver, true);
   editorRef.value?.removeEventListener('dragleave', onEditorDragLeave, true);
   editorRef.value?.removeEventListener('drop', onEditorDrop, true);
+  editorRef.value?.removeEventListener('copy', onEditorCopy, true);
   editorRef.value?.removeEventListener('paste', onListPaste, true);
   editorRef.value?.removeEventListener('paste', onEditorPaste, true);
+  editorRef.value?.removeEventListener('paste', onMultilinePaste, true);
   // 录音资源清理: 用户点了录音后不停 → 关 modal / 切页时若不清, 麦克风 stream + WebSocket + AudioContext + Timer 全部常驻.
   // 两个 cleanup 内部都做了 null check, 幂等安全, 无需外层 isRecording 判断.
   cleanupRecording();
   cleanupVoiceRecord();
+  document.removeEventListener('selectionchange', trackEditorSelection);
+  decor?.destroy();
+  decor = null;
   vditor?.destroy();
   vditor = null;
 });
@@ -1112,6 +1785,14 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value), stopMedia });
       :data-drag-over="isDragOver ? '' : undefined"
       :style="isFullscreen ? { flex: '1 1 auto', minHeight: 0 } : { '--editor-max': maxHeight + 'px', minHeight: minHeight + 'px' }"></div>
 
+    <!-- 表格浮动面板 + 右键菜单。等 contentEl 就绪才挂 -->
+    <EditorBlockTools v-if="contentEl" :editor-el="contentEl" :after-op="afterBlockOp" />
+
+    <!-- 文字颜色 / 字号面板, 由工具栏按钮的小箭头唤起 -->
+    <EditorTextStylePicker :open="stylePicker.open" :anchor="stylePicker.anchor" :kind="stylePicker.kind"
+      :current="stylePicker.kind === 'color' ? currentColor : currentSize"
+      @pick="onStylePick" @clear="onStyleClear" @close="stylePicker.open = false" />
+
     <!-- AI buttons + bottom bar (录音时 absolute overlay 浮层覆盖此行,不占额外高度) -->
     <div class="relative">
     <div class="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border-t border-gray-100 select-none">
@@ -1448,19 +2129,20 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value), stopMedia });
 /* Vditor IR 模式给 heading 加 :before 伪元素显示 H1/H2/H3 标记,用 margin-left: -29px
    定位到左侧编辑区外。我们的 padding-left 16px 不够容纳 → 标记左半被裁(显示半个数字)。
    IR 模式 heading 已经渲染成大字粗体,语义已经够明显,直接隐藏标记保持视觉干净 */
-.vditor-ir .vditor-reset > h1:before,
-.vditor-ir .vditor-reset > h2:before,
-.vditor-ir .vditor-reset > h3:before,
-.vditor-ir .vditor-reset > h4:before,
-.vditor-ir .vditor-reset > h5:before,
-.vditor-ir .vditor-reset > h6:before {
+.vditor-ir .vditor-reset > h1:before, .vditor-wysiwyg .vditor-reset > h1:before,
+.vditor-ir .vditor-reset > h2:before, .vditor-wysiwyg .vditor-reset > h2:before,
+.vditor-ir .vditor-reset > h3:before, .vditor-wysiwyg .vditor-reset > h3:before,
+.vditor-ir .vditor-reset > h4:before, .vditor-wysiwyg .vditor-reset > h4:before,
+.vditor-ir .vditor-reset > h5:before, .vditor-wysiwyg .vditor-reset > h5:before,
+.vditor-ir .vditor-reset > h6:before, .vditor-wysiwyg .vditor-reset > h6:before {
   display: none !important;
 }
 /* 去掉 Vditor 内置的居中和多余间距，让内容区撑满 */
 .vditor-wrapper .vditor-reset,
 .vditor .vditor-reset,
 .vditor-ir .vditor-reset,
-.vditor-ir pre.vditor-reset {
+.vditor-ir pre.vditor-reset,
+.vditor-wysiwyg .vditor-reset {
   max-width: none !important;
   margin: 0 !important;
   padding: 8px 16px !important;
@@ -1469,6 +2151,7 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value), stopMedia });
 }
 /* placeholder 也从头开始 */
 .vditor-ir pre.vditor-reset:empty::before,
+.vditor-wysiwyg .vditor-reset:empty::before,
 .vditor-ir .vditor-reset .vditor-ir__marker--bi::before {
   margin-left: 0 !important;
 }
@@ -1532,6 +2215,94 @@ defineExpose({ clearContent, isDirty: computed(() => dirty.value), stopMedia });
   padding: 4px !important;
 }
 /* Dark mode */
+/* 工具栏上的「文字颜色」「字号」按钮: 内容 + 当前色条 + 展开箭头。
+   Vditor 会强制 .vditor-toolbar__item svg{width:15px}, 但我们这两个不是 svg 是 span, 不受影响。
+   注意别给这些 span 加 pointer-events:none —— click 时要靠 e.target 判断点的是箭头还是主体。 */
+.vditor-wrapper .qk-styled-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  line-height: 1;
+}
+/* 「A」和「字/数字」用同一套字号行高, 两个按钮看起来才是一对
+   (蘑菇 2026-08-03: A 的高度和字一样, 大小也一样)。
+   padding-bottom 是给色条留的位置, 两个都留同样多, 否则基线会错开一两像素。 */
+.vditor-wrapper .qk-glyph {
+  position: relative;
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding-bottom: 4px;
+}
+/* 字号按钮显示当前数字(两位数), 给个最小宽度免得数字一变按钮就跳 */
+.vditor-wrapper .qk-glyph-size {
+  min-width: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* 色条紧贴 A 下沿。左右各外扩 2px 比"正好等于 A 的宽度"看着舒服些
+   (蘑菇 2026-08-03: 稍微宽一点点) */
+.vditor-wrapper .qk-swatch {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  bottom: 0;
+  height: 3px;
+  border-radius: 1px;
+  pointer-events: none;   /* 色条只是装饰, 命中判断交给 .qk-glyph */
+}
+.vditor-wrapper .qk-caret {
+  font-size: 8px;
+  opacity: .6;
+  padding: 0 1px;
+}
+.vditor-wrapper .qk-caret:hover { opacity: 1; }
+
+/* ── 内联样式(颜色/字号)的标签完全隐藏 ──
+   markdown 里存的是 <span style="color:红">文字</span>, 那两个标签在编辑器里必须占个 DOM 节点,
+   这里把它们彻底藏掉, 看起来就跟 Word 一样只有彩色文字本身 (蘑菇 2026-08-03 定)。
+   配套的装饰逻辑在 utils/inlineStyleDecor.ts。
+
+   注意别用 display:none —— 那样光标跨过这段时浏览器的定位会出问题(节点没有几何盒子)。
+   用「宽度 0 + overflow:hidden + inline-block」既不占视觉空间, 又保留一个可定位的盒子。
+
+   **高度不能一起压成 0**(以前写的 height:0 / font-size:0 / line-height:0 已删):
+   光标停在这个盒子旁边时, 浏览器按这个盒子的行高画光标。压成 0 的话, 大字号那行的光标
+   会又短又贴着行顶 (蘑菇实测: "有大号字, 点到字前面时光标出现在字左上角")。
+   现在高度跟着字号走, 字号由 inlineStyleDecor 的 syncMarkerSize 同步成跟彩色文字一样大。
+
+   user-select:none + contenteditable=false(JS 那边加) 让光标进不去这串隐藏文字, 否则按左右
+   方向键会一路走进去 —— 用户完全看不出来(看着光标就在彩色字前面, 实际在标签中间几十个字符里)。
+
+   去掉边界标记的代价: 在彩色字最边上打字时, 看不出新字会不会继承颜色。
+   所有富文本编辑器都有这个问题, 蘑菇已知晓。要去掉颜色就选中文字点「清除样式」。 */
+.vditor-wrapper .mk-color {
+  display: inline-block;
+  width: 0;
+  overflow: hidden;
+  /* 这三行缺一不可, 而且必须 !important 压过 Vditor 给 code 设的 pre-wrap / break-all:
+     宽度被压成 0 后, 标签源码会**逐字竖着堆**, 一个 <span style="font-size:32px">
+     能堆出 1392px 高把整个编辑区顶下去 (实测)。强制一行才不撑高。 */
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  vertical-align: baseline;
+  letter-spacing: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* WYSIWYG 模式下 Vditor 自带一个 popover(点块时浮现, 带插行插列/对齐/表格尺寸输入框),
+   跟我们自己的 EditorBlockTools 面板会重叠打架, 所以藏掉, 只留我们那套
+   (我们那套多了行上下移, 而且图标跟项目统一)。
+   注意真实 class 是 .vditor-panel--none, 不是看名字猜的 .vditor-wysiwyg__popover。 */
+.vditor-wrapper .vditor-panel--none { display: none !important; }
+
 [data-theme="dark"] .vditor-wrapper .vditor-toolbar { border-bottom-color: rgba(255,255,255,0.06) !important; }
 [data-theme="dark"] .vditor-wrapper .vditor-toolbar__item > button,
 [data-theme="dark"] .vditor-wrapper .vditor-toolbar__item > span { color: #94a3b8; }

@@ -571,6 +571,7 @@ export function startQuinkCaret() {
    Vditor 用 ::before padding-left (caret 在 ce 内容区起点, 不在 ::before 内, 不受影响) */
 input:placeholder-shown, textarea:placeholder-shown { text-indent: 5px; }
 .vditor-ir pre.vditor-reset:empty::before,
+.vditor-wysiwyg .vditor-reset:empty::before,
 .vditor-reset:empty::before,
 [contenteditable="true"]:empty::before {
   padding-left: 4px !important;
