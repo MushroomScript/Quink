@@ -93,6 +93,9 @@ const props = withDefaults(defineProps<{
   // 权限分级: 非作者编辑共享笔记时锁定 type 不可改 + 隐藏 tag 入口 (只让改正文)
   lockType?: boolean;
   hideTags?: boolean;
+  // 工具栏精简: Capture 快捷记录窗只写两行字就存, 排版功能用不上还占地方 (蘑菇 2026-08-04)
+  showTextStyle?: boolean;   // 文字颜色 / 字号
+  showBlockMove?: boolean;   // 段落上移 / 下移
 }>(), {
   initialContent: '',
   initialType: 'quink',
@@ -114,6 +117,8 @@ const props = withDefaults(defineProps<{
   showCategoryPicker: true,
   lockType: false,
   hideTags: false,
+  showTextStyle: true,
+  showBlockMove: true,
 });
 
 const isFullscreen = ref(props.initialFullscreen);
@@ -1181,16 +1186,21 @@ onMounted(() => {
     // (表格面板/链接/图片/标题/引用全弹不出来)。必须自己传个空函数兜底。
     customWysiwygToolbar: () => {},
     cdn: '/vditor',
+    // 分隔符跟着按钮一起去留 —— 关掉一组却留下 '|', 工具栏上会多出一根挨着的竖线
     toolbar: [
       'emoji', 'headings', 'bold', 'italic', 'strike', 'link', '|',
       'list', 'ordered-list', 'check', 'quote', '|',
       'code', 'inline-code', 'table', 'line', '|',
-      { name: 'text-color', tip: '文字颜色 (点箭头换色)', icon: ICON_TEXT_COLOR, click: (e: Event) => onStyleBtnClick('color', e) },
-      { name: 'font-size', tip: '字号 (点箭头选)', icon: ICON_FONT_SIZE, click: (e: Event) => onStyleBtnClick('size', e) },
-      '|',
-      { name: 'move-block-up', tip: '本段上移', icon: SVG_ARROW_UP, click: () => moveCurrentBlock('up') },
-      { name: 'move-block-down', tip: '本段下移', icon: SVG_ARROW_DOWN, click: () => moveCurrentBlock('down') },
-      '|',
+      ...(props.showTextStyle ? [
+        { name: 'text-color', tip: '文字颜色 (点箭头换色)', icon: ICON_TEXT_COLOR, click: (e: Event) => onStyleBtnClick('color', e) },
+        { name: 'font-size', tip: '字号 (点箭头选)', icon: ICON_FONT_SIZE, click: (e: Event) => onStyleBtnClick('size', e) },
+        '|',
+      ] : []),
+      ...(props.showBlockMove ? [
+        { name: 'move-block-up', tip: '本段上移', icon: SVG_ARROW_UP, click: () => moveCurrentBlock('up') },
+        { name: 'move-block-down', tip: '本段下移', icon: SVG_ARROW_DOWN, click: () => moveCurrentBlock('down') },
+        '|',
+      ] : []),
       'upload', 'undo', 'redo',
     ],
     toolbarConfig: { pin: false },

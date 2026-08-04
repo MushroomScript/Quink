@@ -94,7 +94,8 @@ onUnmounted(() => {
 
     <!-- Editor: rounded-lg=8px 匹配 Win11 BrowserWindow frameless OS 圆角, 避免角落露 BrowserWindow bg -->
     <div v-else class="capture-editor-host relative flex-1 overflow-hidden bg-white rounded-lg shadow-2xl">
-      <RichEditor ref="editorRef" @submit="onSubmit" @ready="onEditorReady" :show-ai="false" :show-fullscreen-btn="false" :show-visibility-chip="false" :max-height="80" :min-height="60" placeholder="快速记录你的想法..." />
+      <!-- 快捷记录只写两行字就存, 颜色/字号/段落上下移这些排版功能用不上还占工具栏 (蘑菇 2026-08-04) -->
+      <RichEditor ref="editorRef" @submit="onSubmit" @ready="onEditorReady" :show-ai="false" :show-fullscreen-btn="false" :show-visibility-chip="false" :show-text-style="false" :show-block-move="false" :max-height="80" :min-height="60" placeholder="快速记录你的想法..." />
       <button @click="closeWindow" class="capture-close-btn" style="-webkit-app-region: no-drag" title="关闭">
         <PhXCircle size="1.125rem" weight="fill" />
       </button>
