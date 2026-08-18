@@ -349,7 +349,18 @@ html[data-electron] { --empty-state-offset: 84px; }  /* Electron 移动 (罕见)
 .note-content pre code { background: none; color: inherit; padding: 0; }
 .note-content table { border-collapse: collapse; width: 100%; }
 .note-content th, .note-content td { border: 1px solid #e2e8f0; padding: 0.4em 0.6em; font-size: 13px; }
-.note-content th { background: #f8fafc; font-weight: 600; }
+.note-content th { background: #f8fafc; }
+
+/* 表头粗细交给内容决定, 不由 CSS 写死 (蘑菇 2026-08-18)。
+   原来 Vditor 自带的 .vditor-reset table th 跟这里的 .note-content th 都无条件设 font-weight:600,
+   而 markdown 的表格语法**没有任何地方能表达"这个表头不要粗"** —— 用户在编辑器里按取消加粗,
+   浏览器只是插了个 <span style="font-weight:normal"> 临时 DOM, 序列化回 markdown 时丢掉,
+   一保存就又变粗。改成 normal 后: 想粗就选中按加粗 → 存成 `**表头**` → 存得住; 不想粗就别加粗。
+   表头仍保留浅灰底 + 居中对齐做视觉区分, 不会认不出是表头。
+   用 !important 是因为 Vditor 的 CSS 是运行时注入 <link>, 加载顺序可能在本文件之后;
+   它只作用在 th 自己身上, `**` 产生的 <strong> 是子元素, 照常显示粗体不受影响。 */
+.vditor-reset table th,
+.note-content th { font-weight: normal !important; }
 .note-content blockquote { border-left: 3px solid #e2e8f0; padding-left: 1em; color: #64748b; margin: 0.5em 0; }
 [data-theme="dark"] .note-content blockquote { border-left-color: rgba(255,255,255,0.15); color: #94a3b8; }
 .note-content ul, .note-content ol { padding-left: 1.5em; }
