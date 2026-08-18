@@ -807,16 +807,22 @@ async function saveAnnouncement() {
                   }">
                     {{ m.role === 'owner' ? '创建者' : m.role === 'admin' ? '管理员' : '成员' }}
                   </span>
-                  <!-- 移动端/触屏: "更多"按钮弹操作菜单 (桌面仍可右键)。
-                       没有可用操作的成员(创建者看自己)也要**占住这块宽度** —— 用 invisible
-                       (visibility:hidden, 占位但不可见) 而不是 v-if 不渲染, 否则那一行少一个按钮的宽度,
-                       角色 chip 就比别的行往右串, 看着没对齐 (蘑菇 2026-08-18 反馈)。 -->
-                  <button @click.stop="openCtxMenu($event, m)"
-                    class="shrink-0 -mr-1 p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover/member:opacity-100 touch-actions transition-opacity"
-                    :class="{ 'invisible pointer-events-none': !buildMemberActions(m).length }"
-                    title="成员操作">
-                    <PhDotsThreeVertical size="1rem" weight="bold" />
-                  </button>
+                  <!-- "更多"按钮弹成员操作菜单 (桌面仍可右键)。
+                       外层容器平时 w-0 **完全不占地**, 所以右边不留空白、各行角色 chip 天然贴边对齐;
+                       鼠标移到"有可操作项"的行时容器展开, flex 把 chip 平滑挤左, 按钮滑入。
+                       (蘑菇 2026-08-18: 一开始用 invisible 占位, 虽然对齐了但"右边空一溜很怪",
+                        改成悬停才腾位置。别用 v-if —— 那样 hover 时宽度突变没有过渡。)
+                       触屏没有 hover, 所有行一律展开: 有操作的显示按钮, 没操作的按钮 invisible 占位,
+                       这样触屏下各行同样是对齐的。 -->
+                  <div class="shrink-0 w-0 overflow-hidden transition-[width] duration-150 [@media(hover:none)]:w-6"
+                    :class="{ 'group-hover/member:w-6': buildMemberActions(m).length }">
+                    <button @click.stop="openCtxMenu($event, m)"
+                      class="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                      :class="{ 'invisible pointer-events-none': !buildMemberActions(m).length }"
+                      title="成员操作">
+                      <PhDotsThreeVertical size="1rem" weight="bold" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -850,16 +856,22 @@ async function saveAnnouncement() {
                   }">
                     {{ m.role === 'owner' ? '创建者' : m.role === 'admin' ? '管理员' : '成员' }}
                   </span>
-                  <!-- 移动端/触屏: "更多"按钮弹操作菜单 (桌面仍可右键)。
-                       没有可用操作的成员(创建者看自己)也要**占住这块宽度** —— 用 invisible
-                       (visibility:hidden, 占位但不可见) 而不是 v-if 不渲染, 否则那一行少一个按钮的宽度,
-                       角色 chip 就比别的行往右串, 看着没对齐 (蘑菇 2026-08-18 反馈)。 -->
-                  <button @click.stop="openCtxMenu($event, m)"
-                    class="shrink-0 -mr-1 p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover/member:opacity-100 touch-actions transition-opacity"
-                    :class="{ 'invisible pointer-events-none': !buildMemberActions(m).length }"
-                    title="成员操作">
-                    <PhDotsThreeVertical size="1rem" weight="bold" />
-                  </button>
+                  <!-- "更多"按钮弹成员操作菜单 (桌面仍可右键)。
+                       外层容器平时 w-0 **完全不占地**, 所以右边不留空白、各行角色 chip 天然贴边对齐;
+                       鼠标移到"有可操作项"的行时容器展开, flex 把 chip 平滑挤左, 按钮滑入。
+                       (蘑菇 2026-08-18: 一开始用 invisible 占位, 虽然对齐了但"右边空一溜很怪",
+                        改成悬停才腾位置。别用 v-if —— 那样 hover 时宽度突变没有过渡。)
+                       触屏没有 hover, 所有行一律展开: 有操作的显示按钮, 没操作的按钮 invisible 占位,
+                       这样触屏下各行同样是对齐的。 -->
+                  <div class="shrink-0 w-0 overflow-hidden transition-[width] duration-150 [@media(hover:none)]:w-6"
+                    :class="{ 'group-hover/member:w-6': buildMemberActions(m).length }">
+                    <button @click.stop="openCtxMenu($event, m)"
+                      class="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                      :class="{ 'invisible pointer-events-none': !buildMemberActions(m).length }"
+                      title="成员操作">
+                      <PhDotsThreeVertical size="1rem" weight="bold" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>
