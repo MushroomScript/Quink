@@ -807,9 +807,13 @@ async function saveAnnouncement() {
                   }">
                     {{ m.role === 'owner' ? '创建者' : m.role === 'admin' ? '管理员' : '成员' }}
                   </span>
-                  <!-- 移动端/触屏: "更多"按钮弹操作菜单 (桌面仍可右键). 仅对该成员有可用操作时才显示 -->
-                  <button v-if="buildMemberActions(m).length" @click.stop="openCtxMenu($event, m)"
+                  <!-- 移动端/触屏: "更多"按钮弹操作菜单 (桌面仍可右键)。
+                       没有可用操作的成员(创建者看自己)也要**占住这块宽度** —— 用 invisible
+                       (visibility:hidden, 占位但不可见) 而不是 v-if 不渲染, 否则那一行少一个按钮的宽度,
+                       角色 chip 就比别的行往右串, 看着没对齐 (蘑菇 2026-08-18 反馈)。 -->
+                  <button @click.stop="openCtxMenu($event, m)"
                     class="shrink-0 -mr-1 p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover/member:opacity-100 touch-actions transition-opacity"
+                    :class="{ 'invisible pointer-events-none': !buildMemberActions(m).length }"
                     title="成员操作">
                     <PhDotsThreeVertical size="1rem" weight="bold" />
                   </button>
@@ -846,9 +850,13 @@ async function saveAnnouncement() {
                   }">
                     {{ m.role === 'owner' ? '创建者' : m.role === 'admin' ? '管理员' : '成员' }}
                   </span>
-                  <!-- 移动端/触屏: "更多"按钮弹操作菜单 (桌面仍可右键). 仅对该成员有可用操作时才显示 -->
-                  <button v-if="buildMemberActions(m).length" @click.stop="openCtxMenu($event, m)"
+                  <!-- 移动端/触屏: "更多"按钮弹操作菜单 (桌面仍可右键)。
+                       没有可用操作的成员(创建者看自己)也要**占住这块宽度** —— 用 invisible
+                       (visibility:hidden, 占位但不可见) 而不是 v-if 不渲染, 否则那一行少一个按钮的宽度,
+                       角色 chip 就比别的行往右串, 看着没对齐 (蘑菇 2026-08-18 反馈)。 -->
+                  <button @click.stop="openCtxMenu($event, m)"
                     class="shrink-0 -mr-1 p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover/member:opacity-100 touch-actions transition-opacity"
+                    :class="{ 'invisible pointer-events-none': !buildMemberActions(m).length }"
                     title="成员操作">
                     <PhDotsThreeVertical size="1rem" weight="bold" />
                   </button>
