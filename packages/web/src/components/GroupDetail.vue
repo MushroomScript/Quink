@@ -817,7 +817,7 @@ async function saveAnnouncement() {
                   <div class="shrink-0 w-0 overflow-hidden transition-[width] duration-150 [@media(hover:none)]:w-6"
                     :class="{ 'group-hover/member:w-6': buildMemberActions(m).length }">
                     <button @click.stop="openCtxMenu($event, m)"
-                      class="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                      class="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100"
                       :class="{ 'invisible pointer-events-none': !buildMemberActions(m).length }"
                       title="成员操作">
                       <PhDotsThreeVertical size="1rem" weight="bold" />
@@ -866,7 +866,7 @@ async function saveAnnouncement() {
                   <div class="shrink-0 w-0 overflow-hidden transition-[width] duration-150 [@media(hover:none)]:w-6"
                     :class="{ 'group-hover/member:w-6': buildMemberActions(m).length }">
                     <button @click.stop="openCtxMenu($event, m)"
-                      class="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                      class="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100"
                       :class="{ 'invisible pointer-events-none': !buildMemberActions(m).length }"
                       title="成员操作">
                       <PhDotsThreeVertical size="1rem" weight="bold" />
